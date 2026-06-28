@@ -1,0 +1,8 @@
+{
+    "key.steves_army.toggle_squad": "Toggle Squad Mode",
+    "key.steves_army.debug": "Debug Soldiers",
+    "key.categories.steves_army": "Steve's Army",
+    "entity.steves_army.soldier": "Soldier",
+    "item.steves_army.recruit_item": "Recruit Item",
+    "item.steves_army.soldier_spawn_egg": "Soldier Spawn Egg"
+}
