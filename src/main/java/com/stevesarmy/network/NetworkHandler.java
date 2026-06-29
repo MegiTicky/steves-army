@@ -31,6 +31,18 @@ public class NetworkHandler {
             OpenSoldierInventoryMessage::encode,
             OpenSoldierInventoryMessage::decode,
             OpenSoldierInventoryMessage::handle);
+        INSTANCE.registerMessage(id++, PingMessage.class,
+            PingMessage::encode,
+            PingMessage::new,
+            PingMessage::handle);
+        INSTANCE.registerMessage(id++, PingBroadcastMessage.class,
+            PingBroadcastMessage::encode,
+            PingBroadcastMessage::new,
+            PingBroadcastMessage::handle);
+        INSTANCE.registerMessage(id++, PotentialTargetsDebugMessage.class,
+            PotentialTargetsDebugMessage::encode,
+            PotentialTargetsDebugMessage::new,
+            PotentialTargetsDebugMessage::handle);
     }
 
     public static void sendTo(ServerPlayer player, Object message) {

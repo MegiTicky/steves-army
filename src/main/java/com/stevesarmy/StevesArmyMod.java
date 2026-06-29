@@ -1,12 +1,14 @@
 package com.stevesarmy;
 
 import com.mojang.logging.LogUtils;
+import com.stevesarmy.command.CombatDebugCommand;
 import com.stevesarmy.combat.GunIntegration;
 import com.stevesarmy.network.NetworkHandler;
 import com.stevesarmy.registry.ModEntities;
 import com.stevesarmy.registry.ModItems;
 import com.stevesarmy.registry.ModMenuTypes;
 import net.minecraftforge.common.MinecraftForge;
+import net.minecraftforge.event.RegisterCommandsEvent;
 import net.minecraftforge.eventbus.api.IEventBus;
 import net.minecraftforge.fml.common.Mod;
 import net.minecraftforge.fml.event.lifecycle.FMLCommonSetupEvent;
@@ -28,11 +30,17 @@ public class StevesArmyMod {
         modEventBus.addListener(this::commonSetup);
 
         MinecraftForge.EVENT_BUS.register(this);
+        MinecraftForge.EVENT_BUS.addListener(this::registerCommands);
     }
 
     private void commonSetup(final FMLCommonSetupEvent event) {
         NetworkHandler.register();
         GunIntegration.init();
         LOGGER.info("Steve's Army mod initialized - Enlisted-style squad system ready!");
+    }
+    
+    private void registerCommands(final RegisterCommandsEvent event) {
+        CombatDebugCommand.register(event.getDispatcher());
+        LOGGER.info("Registered combat debug command: /stevesarmy_debug");
     }
 }

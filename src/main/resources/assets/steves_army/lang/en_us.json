@@ -1,8 +1,15 @@
 {
     "key.steves_army.toggle_squad": "Toggle Squad Mode",
     "key.steves_army.debug": "Debug Soldiers",
+    "key.steves_army.ping_wheel": "Ping Wheel (Hold)",
     "key.categories.steves_army": "Steve's Army",
     "entity.steves_army.soldier": "Soldier",
     "item.steves_army.recruit_item": "Recruit Item",
-    "item.steves_army.soldier_spawn_egg": "Soldier Spawn Egg"
+    "item.steves_army.soldier_spawn_egg": "Soldier Spawn Egg",
+    "ping.steves_army.location": "Location",
+    "ping.steves_army.enemy": "Enemy",
+    "ping.steves_army.go_to": "Go To",
+    "ping.steves_army.cover": "Cover",
+    "ping.steves_army.follow": "Follow",
+    "ping.steves_army.hold": "Hold"
 }

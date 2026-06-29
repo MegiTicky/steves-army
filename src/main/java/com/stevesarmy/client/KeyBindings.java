@@ -1,9 +1,6 @@
 package com.stevesarmy.client;
 
 import com.mojang.blaze3d.platform.InputConstants;
-import com.stevesarmy.network.DebugMessage;
-import com.stevesarmy.network.NetworkHandler;
-import com.stevesarmy.network.ToggleSquadModeMessage;
 import net.minecraft.client.KeyMapping;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.client.event.RegisterKeyMappingsEvent;
@@ -30,9 +27,22 @@ public class KeyBindings {
         "key.categories.steves_army"
     );
     
+    public static final KeyMapping PING_WHEEL = new KeyMapping(
+        "key.steves_army.ping_wheel",
+        KeyConflictContext.IN_GAME,
+        InputConstants.Type.MOUSE,
+        GLFW.GLFW_MOUSE_BUTTON_MIDDLE,
+        "key.categories.steves_army"
+    );
+    
     @SubscribeEvent
     public static void registerKeyMappings(RegisterKeyMappingsEvent event) {
         event.register(TOGGLE_SQUAD_MODE);
         event.register(DEBUG);
+        event.register(PING_WHEEL);
+    }
+    
+    public static boolean isPingWheelKeyDown() {
+        return PING_WHEEL.isDown();
     }
 }

@@ -4,6 +4,7 @@ import com.stevesarmy.StevesArmyMod;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.item.ItemStack;
+import net.minecraftforge.common.capabilities.ForgeCapabilities;
 
 import java.lang.reflect.Method;
 import java.util.Optional;
@@ -188,11 +189,61 @@ public class GunIntegration {
         public void reload(LivingEntity entity) {
             if (!hasGun(entity)) return;
             try {
-                StevesArmyMod.LOGGER.info("[TaCZ] reload() called for {}", entity.getMainHandItem().getItem());
+                String gunId = getGunId(entity);
+                String ammoId = getAmmoId(entity);
+                boolean useInvAmmo = useInventoryAmmo(entity);
+                int currentAmmo = getCurrentAmmo(entity);
+                int magSize = getMagazineSize(entity);
+                
+                StevesArmyMod.LOGGER.info("[TaCZ] reload() called for gun={} ammoId={} useInvAmmo={} currentAmmo={}/{}", 
+                    gunId, ammoId, useInvAmmo, currentAmmo, magSize);
                 
                 Class<?> gunOperatorClass = Class.forName("com.tacz.guns.api.entity.IGunOperator");
                 Method fromLivingEntity = gunOperatorClass.getMethod("fromLivingEntity", LivingEntity.class);
                 Object gunOperator = fromLivingEntity.invoke(null, entity);
+                
+                Method needCheckAmmoMethod = gunOperatorClass.getMethod("needCheckAmmo");
+                boolean needCheckAmmo = (boolean) needCheckAmmoMethod.invoke(gunOperator);
+                StevesArmyMod.LOGGER.info("[TaCZ] needCheckAmmo={}", needCheckAmmo);
+                
+                long drawCoolDown = isDrawing(entity) ? 1 : 0;
+                long shootCoolDown = getShootCoolDown(entity);
+                boolean bolting = isBolting(entity);
+                boolean reloading = isReloading(entity);
+                StevesArmyMod.LOGGER.info("[TaCZ] State checks: drawCoolDown={} shootCoolDown={} isBolting={} isReloading={}", 
+                    drawCoolDown, shootCoolDown, bolting, reloading);
+                
+                if (needCheckAmmo) {
+                    StevesArmyMod.LOGGER.info("[TaCZ] Checking inventory for ammo items...");
+                    ItemStack gunStack = entity.getMainHandItem();
+                    try {
+                        Class<?> iAmmoClass = Class.forName("com.tacz.guns.api.item.IAmmo");
+                        Method getIAmmoOrNullMethod = iAmmoClass.getMethod("getIAmmoOrNull", ItemStack.class);
+                        Method getAmmoIdMethod = iAmmoClass.getMethod("getAmmoId", ItemStack.class);
+                        Method isAmmoOfGunMethod = iAmmoClass.getMethod("isAmmoOfGun", ItemStack.class, ItemStack.class);
+                        
+                        entity.getCapability(ForgeCapabilities.ITEM_HANDLER).ifPresent(cap -> {
+                            StevesArmyMod.LOGGER.info("[TaCZ] Inventory capability found with {} slots", cap.getSlots());
+                            for (int i = 0; i < cap.getSlots(); i++) {
+                                ItemStack slotStack = cap.getStackInSlot(i);
+                                if (!slotStack.isEmpty()) {
+                                    try {
+                                        Object iAmmo = getIAmmoOrNullMethod.invoke(null, slotStack);
+                                        if (iAmmo != null) {
+                                            Object itemAmmoId = getAmmoIdMethod.invoke(iAmmo, slotStack);
+                                            boolean matches = (boolean) isAmmoOfGunMethod.invoke(iAmmo, gunStack, slotStack);
+                                            StevesArmyMod.LOGGER.info("[TaCZ] Slot {}: ammoId={} isAmmoOfGun={}", i, itemAmmoId, matches);
+                                        }
+                                    } catch (Exception ex) {
+                                        StevesArmyMod.LOGGER.warn("[TaCZ] Error checking slot {}: {}", i, ex.getMessage());
+                                    }
+                                }
+                            }
+                        });
+                    } catch (Exception capEx) {
+                        StevesArmyMod.LOGGER.warn("[TaCZ] Failed to check inventory capability: {}", capEx.getMessage());
+                    }
+                }
                 
                 Method getReloadState = gunOperatorClass.getMethod("getSynReloadState");
                 Object reloadStateBefore = getReloadState.invoke(gunOperator);
@@ -203,6 +254,9 @@ public class GunIntegration {
                 
                 Object reloadStateAfter = getReloadState.invoke(gunOperator);
                 StevesArmyMod.LOGGER.info("[TaCZ] Reload state after: {}", reloadStateAfter.toString());
+                
+                boolean isReloadingAfter = isReloading(entity);
+                StevesArmyMod.LOGGER.info("[TaCZ] isReloading after call: {}", isReloadingAfter);
             } catch (Exception e) {
                 StevesArmyMod.LOGGER.warn("[TaCZ] Reload failed: " + e.getMessage());
                 e.printStackTrace();
@@ -345,6 +399,10 @@ public class GunIntegration {
         @Override
         public void draw(LivingEntity entity) {
             if (!hasGun(entity)) return;
+            if (isReloading(entity)) {
+                StevesArmyMod.LOGGER.info("[TaCZ] draw() skipped - entity is reloading");
+                return;
+            }
             try {
                 Class<?> gunOperatorClass = Class.forName("com.tacz.guns.api.entity.IGunOperator");
                 Method fromLivingEntity = gunOperatorClass.getMethod("fromLivingEntity", LivingEntity.class);

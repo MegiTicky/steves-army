@@ -5,17 +5,17 @@ import net.minecraft.world.entity.LivingEntity;
 import java.util.*;
 
 public class ThreatTracker {
+    
     private final Map<UUID, ThreatInfo> knownThreats = new HashMap<>();
     private static final long THREAT_MEMORY_TICKS = 600;
-    private static final long UPDATE_INTERVAL = 20;
-
+    
     public void update(LivingEntity soldier) {
         long currentTime = soldier.level().getGameTime();
         knownThreats.entrySet().removeIf(entry -> 
             currentTime - entry.getValue().lastSeenTime > THREAT_MEMORY_TICKS
         );
     }
-
+    
     public void reportThreat(LivingEntity threat, BlockPos lastKnownPos, double accuracy) {
         UUID threatId = threat.getUUID();
         long currentTime = threat.level().getGameTime();
@@ -28,61 +28,58 @@ public class ThreatTracker {
             info.update(lastKnownPos, accuracy, currentTime);
         }
     }
-
-    public void reportThreatDirect(LivingEntity threat, LivingEntity reporter) {
-        BlockPos estimatedPos = TargetAcquisition.getEstimatedPosition(threat, 1.0);
-        reportThreat(threat, estimatedPos, 1.0);
+    
+    public void reportThreatDirect(LivingEntity threat) {
+        BlockPos pos = threat.blockPosition();
+        reportThreat(threat, pos, 1.0);
     }
-
-    public Optional<ThreatInfo> getHighestPriorityThreat(LivingEntity soldier, List<LivingEntity> visibleEnemies) {
-        ThreatInfo best = null;
-        double bestScore = Double.NEGATIVE_INFINITY;
-        
-        for (LivingEntity enemy : visibleEnemies) {
-            ThreatInfo info = knownThreats.get(enemy.getUUID());
-            if (info != null) {
-                double score = calculateThreatScore(soldier, enemy, info);
-                if (score > bestScore) {
-                    bestScore = score;
-                    best = info;
-                }
-            }
+    
+    public void reportThreatAtPosition(BlockPos position) {
+        UUID dummyId = UUID.randomUUID();
+        long currentTime = System.currentTimeMillis();
+        ThreatInfo info = new ThreatInfo(dummyId, position, 0.5, currentTime);
+        knownThreats.put(dummyId, info);
+    }
+    
+    public Optional<ThreatInfo> getHighestPriorityThreat(LivingEntity soldier, List<LivingEntity> detectedEnemies) {
+        if (detectedEnemies.isEmpty()) {
+            return Optional.empty();
         }
         
-        if (best == null && !visibleEnemies.isEmpty()) {
-            LivingEntity closest = visibleEnemies.stream()
-                .min(Comparator.comparingDouble(e -> e.distanceToSqr(soldier)))
-                .orElse(null);
-            if (closest != null) {
-                return Optional.of(new ThreatInfo(closest.getUUID(), closest.blockPosition(), 1.0, soldier.level().getGameTime()));
-            }
+        LivingEntity closest = detectedEnemies.stream()
+            .min(Comparator.comparingDouble(e -> e.distanceToSqr(soldier)))
+            .orElse(null);
+        
+        if (closest != null) {
+            reportThreatDirect(closest);
+            return Optional.of(knownThreats.get(closest.getUUID()));
         }
         
-        return Optional.ofNullable(best);
+        return Optional.empty();
     }
-
-    private double calculateThreatScore(LivingEntity soldier, LivingEntity enemy, ThreatInfo info) {
-        double distance = soldier.distanceToSqr(enemy);
-        double distanceScore = -distance / 100.0;
-        double accuracyScore = info.accuracy * 10.0;
-        double recencyScore = 0;
-        
-        long timeSinceSeen = soldier.level().getGameTime() - info.lastSeenTime;
-        if (timeSinceSeen < 100) {
-            recencyScore = 10.0 - (timeSinceSeen / 10.0);
-        }
-        
-        return distanceScore + accuracyScore + recencyScore;
-    }
-
+    
     public void clear() {
         knownThreats.clear();
     }
-
+    
     public void removeThreat(UUID threatId) {
         knownThreats.remove(threatId);
     }
-
+    
+    public boolean hasThreat(UUID threatId) {
+        return knownThreats.containsKey(threatId);
+    }
+    
+    public Optional<ThreatInfo> getThreat(UUID threatId) {
+        return Optional.ofNullable(knownThreats.get(threatId));
+    }
+    
+    public Optional<BlockPos> getLastKnownPosition() {
+        return knownThreats.values().stream()
+            .max(Comparator.comparingLong(info -> info.lastSeenTime))
+            .map(info -> info.lastKnownPosition);
+    }
+    
     public static class ThreatInfo {
         public final UUID threatId;
         public BlockPos lastKnownPosition;

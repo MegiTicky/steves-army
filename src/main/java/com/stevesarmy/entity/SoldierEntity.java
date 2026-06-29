@@ -1,9 +1,12 @@
 package com.stevesarmy.entity;
 
+import com.stevesarmy.StevesArmyMod;
+import com.stevesarmy.combat.CombatDebugData;
 import com.stevesarmy.combat.GunIntegration;
 import com.stevesarmy.entity.ai.SoldierCombatGoal;
 import com.stevesarmy.entity.ai.SoldierFollowOwnerGoal;
 import com.stevesarmy.entity.ai.SoldierHoldPositionGoal;
+import com.stevesarmy.entity.ai.SoldierMoveToPingGoal;
 import com.stevesarmy.inventory.SoldierInventory;
 import com.stevesarmy.inventory.SoldierInventoryHandler;
 import com.stevesarmy.network.NetworkHandler;
@@ -51,6 +54,19 @@ public class SoldierEntity extends PathfinderMob implements Container {
         SynchedEntityData.defineId(SoldierEntity.class, EntityDataSerializers.INT);
     private static final EntityDataAccessor<BlockPos> HOLD_POSITION = 
         SynchedEntityData.defineId(SoldierEntity.class, EntityDataSerializers.BLOCK_POS);
+    
+    private static final EntityDataAccessor<Float> DEBUG_DETECTION_POINTS =
+        SynchedEntityData.defineId(SoldierEntity.class, EntityDataSerializers.FLOAT);
+    private static final EntityDataAccessor<Boolean> DEBUG_IS_DETECTED =
+        SynchedEntityData.defineId(SoldierEntity.class, EntityDataSerializers.BOOLEAN);
+    private static final EntityDataAccessor<Float> DEBUG_DISTANCE =
+        SynchedEntityData.defineId(SoldierEntity.class, EntityDataSerializers.FLOAT);
+    private static final EntityDataAccessor<Boolean> DEBUG_HAS_LOS =
+        SynchedEntityData.defineId(SoldierEntity.class, EntityDataSerializers.BOOLEAN);
+    private static final EntityDataAccessor<Boolean> DEBUG_IN_FOCUSED =
+        SynchedEntityData.defineId(SoldierEntity.class, EntityDataSerializers.BOOLEAN);
+    private static final EntityDataAccessor<Optional<UUID>> DEBUG_TARGET_UUID =
+        SynchedEntityData.defineId(SoldierEntity.class, EntityDataSerializers.OPTIONAL_UUID);
 
     @Nullable
     private UUID squadId;
@@ -59,6 +75,20 @@ public class SoldierEntity extends PathfinderMob implements Container {
     private final SoldierInventory inventory;
     private final SoldierInventoryHandler inventoryHandler;
     private final LazyOptional<IItemHandler> itemHandlerCap;
+    
+    private SoldierCombatGoal combatGoal;
+    
+    private BlockPos pingMoveTarget = null;
+    private long pingMoveTimestamp = 0;
+    private static final long PING_MOVE_MEMORY_MS = 15000;
+    
+    private BlockPos pingThreatPos = null;
+    private long pingThreatTimestamp = 0;
+    private static final long PING_THREAT_MEMORY_MS = 20000;
+    
+    private BlockPos forcedTargetPos = null;
+    private long forcedTargetTimestamp = 0;
+    private static final long FORCED_TARGET_MEMORY_MS = 10000;
 
     public SoldierEntity(EntityType<? extends SoldierEntity> type, Level level) {
         super(type, level);
@@ -68,6 +98,10 @@ public class SoldierEntity extends PathfinderMob implements Container {
         this.itemHandlerCap = LazyOptional.of(() -> inventoryHandler);
         this.inventory.setSlot0ChangedCallback(stack -> {
             if (!this.level().isClientSide) {
+                if (GunIntegration.isTaczLoaded() && GunIntegration.isReloading(this)) {
+                    StevesArmyMod.LOGGER.info("[Soldier] Blocked gun swap during reload (callback)");
+                    return;
+                }
                 setItemSlot(EquipmentSlot.MAINHAND, stack.copy());
                 if (GunIntegration.isTaczLoaded() && !stack.isEmpty()) {
                     GunIntegration.initialData(this);
@@ -84,12 +118,20 @@ public class SoldierEntity extends PathfinderMob implements Container {
         this.entityData.define(FOLLOW_STATE, 1);
         this.entityData.define(SQUAD_MODE, SquadMode.FOLLOW.ordinal());
         this.entityData.define(HOLD_POSITION, BlockPos.ZERO);
+        this.entityData.define(DEBUG_DETECTION_POINTS, 0f);
+        this.entityData.define(DEBUG_IS_DETECTED, false);
+        this.entityData.define(DEBUG_DISTANCE, 0f);
+        this.entityData.define(DEBUG_HAS_LOS, false);
+        this.entityData.define(DEBUG_IN_FOCUSED, false);
+        this.entityData.define(DEBUG_TARGET_UUID, Optional.empty());
     }
 
     @Override
     protected void registerGoals() {
+        this.combatGoal = new SoldierCombatGoal(this);
+        this.goalSelector.addGoal(0, new SoldierMoveToPingGoal(this));
         this.goalSelector.addGoal(0, new FloatGoal(this));
-        this.goalSelector.addGoal(1, new SoldierCombatGoal(this));
+        this.goalSelector.addGoal(1, combatGoal);
         this.goalSelector.addGoal(2, new SoldierFollowOwnerGoal(this));
         this.goalSelector.addGoal(2, new SoldierHoldPositionGoal(this));
         this.goalSelector.addGoal(3, new WaterAvoidingRandomStrollGoal(this, 0.8D));
@@ -234,6 +276,16 @@ public class SoldierEntity extends PathfinderMob implements Container {
     }
 
     @Override
+    public boolean requiresCustomPersistence() {
+        return true;
+    }
+
+    @Override
+    public boolean removeWhenFarAway(double distanceToClosestPlayer) {
+        return false;
+    }
+
+    @Override
     public boolean canAttack(LivingEntity target) {
         if (target instanceof SoldierEntity soldier && soldier.getOwnerUUID().equals(this.getOwnerUUID())) {
             return false;
@@ -285,6 +337,10 @@ public class SoldierEntity extends PathfinderMob implements Container {
 
     @Override
     public void setItem(int slot, ItemStack stack) {
+        if (slot == 0 && GunIntegration.isTaczLoaded() && GunIntegration.isReloading(this)) {
+            StevesArmyMod.LOGGER.info("[Soldier] Blocked gun swap during reload (setItem)");
+            return;
+        }
         inventory.setItem(slot, stack);
         if (slot == 0) {
             setItemSlot(EquipmentSlot.MAINHAND, stack.copy());
@@ -329,5 +385,128 @@ public class SoldierEntity extends PathfinderMob implements Container {
     public void invalidateCaps() {
         super.invalidateCaps();
         itemHandlerCap.invalidate();
+    }
+    
+    public void receivePing(com.stevesarmy.ping.PingType type, net.minecraft.world.phys.Vec3 position) {
+        com.stevesarmy.StevesArmyMod.LOGGER.info("Soldier received ping: type={} pos={}", type, position);
+        
+        switch (type) {
+            case ENEMY -> {
+                pingThreatPos = BlockPos.containing(position);
+                pingThreatTimestamp = System.currentTimeMillis();
+                forcedTargetPos = BlockPos.containing(position);
+                forcedTargetTimestamp = System.currentTimeMillis();
+                com.stevesarmy.StevesArmyMod.LOGGER.info("Set forced target position: {}", forcedTargetPos);
+            }
+            case GO_TO, COVER -> {
+                pingMoveTarget = BlockPos.containing(position);
+                pingMoveTimestamp = System.currentTimeMillis();
+                com.stevesarmy.StevesArmyMod.LOGGER.info("Set move target: {}", pingMoveTarget);
+            }
+            case LOCATION -> {
+            }
+            case FOLLOW -> {
+                setSquadMode(com.stevesarmy.squad.SquadMode.FOLLOW);
+                clearPingMoveTarget();
+                clearPingThreatPos();
+                clearForcedTarget();
+                com.stevesarmy.StevesArmyMod.LOGGER.info("Switched to FOLLOW mode, cleared all threat data");
+            }
+            case HOLD -> {
+                setSquadMode(com.stevesarmy.squad.SquadMode.HOLD);
+                setHoldPosition(blockPosition());
+                clearPingMoveTarget();
+                clearPingThreatPos();
+                clearForcedTarget();
+                com.stevesarmy.StevesArmyMod.LOGGER.info("Switched to HOLD mode, cleared all threat data");
+            }
+        }
+    }
+    
+    public BlockPos getPingMoveTarget() {
+        return pingMoveTarget;
+    }
+    
+    public boolean hasValidPingMoveTarget() {
+        return pingMoveTarget != null && 
+               System.currentTimeMillis() - pingMoveTimestamp < PING_MOVE_MEMORY_MS;
+    }
+    
+    public void clearPingMoveTarget() {
+        pingMoveTarget = null;
+        pingMoveTimestamp = 0;
+    }
+    
+    public BlockPos getPingThreatPos() {
+        return pingThreatPos;
+    }
+    
+    public boolean hasValidPingThreatPos() {
+        return pingThreatPos != null && 
+               System.currentTimeMillis() - pingThreatTimestamp < PING_THREAT_MEMORY_MS;
+    }
+    
+    public void clearPingThreatPos() {
+        pingThreatPos = null;
+        pingThreatTimestamp = 0;
+    }
+    
+    public BlockPos getForcedTargetPos() {
+        return forcedTargetPos;
+    }
+    
+    public boolean hasValidForcedTarget() {
+        return forcedTargetPos != null && 
+               System.currentTimeMillis() - forcedTargetTimestamp < FORCED_TARGET_MEMORY_MS;
+    }
+    
+    public void setForcedTargetPos(BlockPos pos) {
+        this.forcedTargetPos = pos;
+        this.forcedTargetTimestamp = System.currentTimeMillis();
+    }
+    
+    public void clearForcedTarget() {
+        this.forcedTargetPos = null;
+        this.forcedTargetTimestamp = 0;
+    }
+    
+    public SoldierCombatGoal getCombatGoal() {
+        return combatGoal;
+    }
+    
+    public void updateDebugData(float detectionPoints, boolean isDetected, float distance, boolean hasLOS, boolean inFocused) {
+        this.entityData.set(DEBUG_DETECTION_POINTS, detectionPoints);
+        this.entityData.set(DEBUG_IS_DETECTED, isDetected);
+        this.entityData.set(DEBUG_DISTANCE, distance);
+        this.entityData.set(DEBUG_HAS_LOS, hasLOS);
+        this.entityData.set(DEBUG_IN_FOCUSED, inFocused);
+    }
+    
+    public float getDebugDetectionPoints() {
+        return this.entityData.get(DEBUG_DETECTION_POINTS);
+    }
+    
+    public boolean getDebugIsDetected() {
+        return this.entityData.get(DEBUG_IS_DETECTED);
+    }
+    
+    public float getDebugDistance() {
+        return this.entityData.get(DEBUG_DISTANCE);
+    }
+    
+    public boolean getDebugHasLOS() {
+        return this.entityData.get(DEBUG_HAS_LOS);
+    }
+    
+    public boolean getDebugInFocused() {
+        return this.entityData.get(DEBUG_IN_FOCUSED);
+    }
+    
+    public void setDebugTargetUUID(UUID targetUUID) {
+        this.entityData.set(DEBUG_TARGET_UUID, Optional.ofNullable(targetUUID));
+    }
+    
+    public Optional<UUID> getDebugTargetUUID() {
+        return this.entityData.get(DEBUG_TARGET_UUID);
     }
 }
