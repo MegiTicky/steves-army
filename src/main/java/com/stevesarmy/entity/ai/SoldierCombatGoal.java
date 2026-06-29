@@ -116,6 +116,9 @@ public class SoldierCombatGoal extends Goal {
             if (GunIntegration.isReloading(soldier)) {
                 return true;
             }
+            if (GunIntegration.getCurrentAmmo(soldier) == 0) {
+                return true;
+            }
         }
         
         return false;
@@ -129,7 +132,6 @@ public class SoldierCombatGoal extends Goal {
             resetTracking(target);
         }
         wasAiming = false;
-        gunInitialized = false;
     }
 
     @Override
