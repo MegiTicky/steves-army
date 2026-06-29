@@ -315,7 +315,8 @@ public class SoldierCombatGoal extends Goal {
             }
         }
         
-        float maxDeviation = AimAccuracyManager.calculateMaxDeviation(currentAccuracy);
+        double distance = soldier.distanceTo(target);
+        float maxDeviation = AimAccuracyManager.calculateMaxDeviation(currentAccuracy, distance);
         float shotDeviationYaw = (soldier.getRandom().nextFloat() - 0.5f) * maxDeviation;
         float shotDeviationPitch = (soldier.getRandom().nextFloat() - 0.5f) * maxDeviation;
         

@@ -47,8 +47,10 @@ public class AimAccuracyManager {
         return trackingProgress * accuracy;
     }
     
-    public static float calculateMaxDeviation(float accuracy) {
-        return (1.0f - accuracy) * 2.0f;
+    public static float calculateMaxDeviation(float accuracy, double distance) {
+        float baseDeviation = (1.0f - accuracy) * 5.0f;
+        double distanceFactor = Math.max(1.0, distance / 10.0);
+        return (float) (baseDeviation * distanceFactor);
     }
     
     private static float calculateDistanceTrackingFactor(double distance, double effectiveRange) {
