@@ -1,5 +1,6 @@
 package com.stevesarmy.entity.ai;
 
+import com.stevesarmy.StevesArmyConfig;
 import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.combat.AimAccuracyManager;
 import com.stevesarmy.combat.DetectionSystem;
@@ -49,11 +50,11 @@ public class SoldierCombatGoal extends Goal {
     private ExposureCalculator.AimPointResult currentAimPoint = null;
     
     private static final float ADS_THRESHOLD = 0.8f;
-    private static final float SHOT_THRESHOLD = 0.5f;
     private static final int PATH_BLOCKED_SWITCH_TICKS = 40;
     private int pathBlockedCounter = 0;
     private int debugSyncTickCounter = 0;
     private static final int DEBUG_SYNC_INTERVAL = 5;
+    private int targetReevaluateCounter = 0;
 
     public SoldierCombatGoal(SoldierEntity soldier) {
         this.soldier = soldier;
@@ -294,8 +295,32 @@ public class SoldierCombatGoal extends Goal {
         updateTrackingProgress();
         
         float shotThreshold = AimAccuracyManager.calculateShotThreshold(trackingProgress, currentAccuracy);
-        if (shotThreshold < SHOT_THRESHOLD) {
-            return;
+        float configShotThreshold = StevesArmyConfig.getShotThreshold();
+        
+        if (shotThreshold < configShotThreshold) {
+            targetReevaluateCounter++;
+            if (targetReevaluateCounter >= StevesArmyConfig.getTargetReevaluateInterval()) {
+                targetReevaluateCounter = 0;
+                
+                Optional<LivingEntity> betterTarget = findBetterTarget(currentAccuracy);
+                if (betterTarget.isPresent()) {
+                    this.target = betterTarget.get();
+                    soldier.setTarget(target);
+                    threatTracker.reportThreatDirect(target);
+                    detectionSystem.forceDetect(target);
+                    resetTracking(target);
+                    StevesArmyMod.LOGGER.info("Switched to better target: {} (higher hit probability)", 
+                        target.getName().getString());
+                    return;
+                }
+            }
+            
+            if (trackingProgress >= 0.8f) {
+                StevesArmyMod.LOGGER.debug("Suppressive fire at {} (accuracy: {}, threshold: {})", 
+                    target.getName().getString(), currentAccuracy, shotThreshold);
+            } else {
+                return;
+            }
         }
         
         GunIntegration.ShootResult result = GunIntegration.shootWithDeviation(
@@ -320,6 +345,40 @@ public class SoldierCombatGoal extends Goal {
                 }
             }
             default -> {}
+        }
+    }
+    
+    private Optional<LivingEntity> findBetterTarget(float currentAccuracy) {
+        List<LivingEntity> potentialTargets = getPotentialTargets();
+        
+        List<LivingEntity> detectedTargets = potentialTargets.stream()
+            .filter(detectionSystem::isTargetDetected)
+            .filter(e -> TargetAcquisition.hasLineOfSight(soldier, e))
+            .filter(e -> !e.getUUID().equals(target.getUUID()))
+            .collect(Collectors.toList());
+        
+        if (detectedTargets.isEmpty()) {
+            return Optional.empty();
+        }
+        
+        float improvementThreshold = StevesArmyConfig.getTargetSwitchImprovement();
+        
+        Optional<LivingEntity> betterTarget = detectedTargets.stream()
+            .map(e -> new TargetScore(e, AimAccuracyManager.calculateHitProbability(soldier, e)))
+            .filter(ts -> ts.hitProbability > currentAccuracy + improvementThreshold)
+            .max(Comparator.comparingDouble(ts -> ts.hitProbability))
+            .map(ts -> ts.target);
+        
+        return betterTarget;
+    }
+    
+    private static class TargetScore {
+        final LivingEntity target;
+        final float hitProbability;
+        
+        TargetScore(LivingEntity target, float hitProbability) {
+            this.target = target;
+            this.hitProbability = hitProbability;
         }
     }
     
@@ -475,8 +534,19 @@ public class SoldierCombatGoal extends Goal {
             return false;
         }
         
-        detectedTargets.sort(Comparator.comparingDouble(e -> e.distanceToSqr(soldier)));
+        Optional<LivingEntity> bestTarget = detectedTargets.stream()
+            .map(e -> new TargetScore(e, AimAccuracyManager.calculateHitProbability(soldier, e)))
+            .max(Comparator.comparingDouble(ts -> ts.hitProbability))
+            .map(ts -> ts.target);
         
+        if (bestTarget.isPresent()) {
+            this.target = bestTarget.get();
+            soldier.setTarget(target);
+            threatTracker.reportThreatDirect(target);
+            return true;
+        }
+        
+        detectedTargets.sort(Comparator.comparingDouble(e -> e.distanceToSqr(soldier)));
         this.target = detectedTargets.get(0);
         soldier.setTarget(target);
         threatTracker.reportThreatDirect(target);

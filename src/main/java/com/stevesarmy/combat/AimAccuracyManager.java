@@ -1,12 +1,16 @@
 package com.stevesarmy.combat;
 
+import com.stevesarmy.StevesArmyConfig;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.LivingEntity;
 
 public class AimAccuracyManager {
     
     private static final float BASE_TRACKING_TIME_MS = 500.0f;
-    private static final float BASE_ACCURACY = 0.7f;
+    
+    public static float getBaseAccuracy() {
+        return StevesArmyConfig.getBaseAccuracy();
+    }
     
     public static float getTrackingSpeed(LivingEntity soldier, LivingEntity target) {
         double distance = soldier.distanceTo(target);
@@ -32,7 +36,11 @@ public class AimAccuracyManager {
         float movementAccuracy = calculateMovementAccuracy(target);
         float exposureAccuracy = calculateExposureAccuracy(soldier, target);
         
-        return Mth.clamp(BASE_ACCURACY * distanceAccuracy * movementAccuracy * exposureAccuracy, 0.1f, 1.0f);
+        return Mth.clamp(getBaseAccuracy() * distanceAccuracy * movementAccuracy * exposureAccuracy, 0.1f, 1.0f);
+    }
+    
+    public static float calculateHitProbability(LivingEntity soldier, LivingEntity target) {
+        return calculateAccuracy(soldier, target);
     }
     
     public static float calculateShotThreshold(float trackingProgress, float accuracy) {

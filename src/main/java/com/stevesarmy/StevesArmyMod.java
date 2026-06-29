@@ -10,7 +10,9 @@ import com.stevesarmy.registry.ModMenuTypes;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.event.RegisterCommandsEvent;
 import net.minecraftforge.eventbus.api.IEventBus;
+import net.minecraftforge.fml.ModLoadingContext;
 import net.minecraftforge.fml.common.Mod;
+import net.minecraftforge.fml.config.ModConfig;
 import net.minecraftforge.fml.event.lifecycle.FMLCommonSetupEvent;
 import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
 import org.slf4j.Logger;
@@ -26,6 +28,8 @@ public class StevesArmyMod {
         ModEntities.register(modEventBus);
         ModItems.register(modEventBus);
         ModMenuTypes.register(modEventBus);
+
+        ModLoadingContext.get().registerConfig(ModConfig.Type.SERVER, StevesArmyConfig.SPEC);
 
         modEventBus.addListener(this::commonSetup);
 
