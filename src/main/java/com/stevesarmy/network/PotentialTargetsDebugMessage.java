@@ -27,6 +27,10 @@ public class PotentialTargetsDebugMessage {
     private final double lockedExposureFactor;
     private final double lockedMovementFactor;
     private final double lockedBrightnessFactor;
+    private final float lockedTrackingProgress;
+    private final float lockedAccuracy;
+    private final float lockedShotThreshold;
+    private final float lockedAdsProgress;
     private final List<PotentialTargetEntry> potentialTargets;
     
     public PotentialTargetsDebugMessage(UUID soldierUUID, UUID lockedTargetUUID, 
@@ -36,6 +40,8 @@ public class PotentialTargetsDebugMessage {
                                         boolean lockedInPeripheral, boolean lockedIsDetected,
                                         double lockedDistanceFactor, double lockedExposureFactor,
                                         double lockedMovementFactor, double lockedBrightnessFactor,
+                                        float lockedTrackingProgress, float lockedAccuracy,
+                                        float lockedShotThreshold, float lockedAdsProgress,
                                         List<PotentialTargetEntry> potentialTargets) {
         this.soldierUUID = soldierUUID;
         this.lockedTargetUUID = lockedTargetUUID;
@@ -51,6 +57,10 @@ public class PotentialTargetsDebugMessage {
         this.lockedExposureFactor = lockedExposureFactor;
         this.lockedMovementFactor = lockedMovementFactor;
         this.lockedBrightnessFactor = lockedBrightnessFactor;
+        this.lockedTrackingProgress = lockedTrackingProgress;
+        this.lockedAccuracy = lockedAccuracy;
+        this.lockedShotThreshold = lockedShotThreshold;
+        this.lockedAdsProgress = lockedAdsProgress;
         this.potentialTargets = potentialTargets;
     }
     
@@ -69,6 +79,10 @@ public class PotentialTargetsDebugMessage {
         this.lockedExposureFactor = hasLockedTarget ? buf.readDouble() : 0;
         this.lockedMovementFactor = hasLockedTarget ? buf.readDouble() : 0;
         this.lockedBrightnessFactor = hasLockedTarget ? buf.readDouble() : 0;
+        this.lockedTrackingProgress = hasLockedTarget ? buf.readFloat() : 0;
+        this.lockedAccuracy = hasLockedTarget ? buf.readFloat() : 0;
+        this.lockedShotThreshold = hasLockedTarget ? buf.readFloat() : 0;
+        this.lockedAdsProgress = hasLockedTarget ? buf.readFloat() : 0;
         
         this.soldierPos = new Vec3(buf.readDouble(), buf.readDouble(), buf.readDouble());
         int count = buf.readInt();
@@ -108,6 +122,10 @@ public class PotentialTargetsDebugMessage {
             buf.writeDouble(msg.lockedExposureFactor);
             buf.writeDouble(msg.lockedMovementFactor);
             buf.writeDouble(msg.lockedBrightnessFactor);
+            buf.writeFloat(msg.lockedTrackingProgress);
+            buf.writeFloat(msg.lockedAccuracy);
+            buf.writeFloat(msg.lockedShotThreshold);
+            buf.writeFloat(msg.lockedAdsProgress);
         }
         buf.writeDouble(msg.soldierPos.x);
         buf.writeDouble(msg.soldierPos.y);
@@ -153,6 +171,10 @@ public class PotentialTargetsDebugMessage {
     public double getLockedExposureFactor() { return lockedExposureFactor; }
     public double getLockedMovementFactor() { return lockedMovementFactor; }
     public double getLockedBrightnessFactor() { return lockedBrightnessFactor; }
+    public float getLockedTrackingProgress() { return lockedTrackingProgress; }
+    public float getLockedAccuracy() { return lockedAccuracy; }
+    public float getLockedShotThreshold() { return lockedShotThreshold; }
+    public float getLockedAdsProgress() { return lockedAdsProgress; }
     public List<PotentialTargetEntry> getPotentialTargets() { return potentialTargets; }
     
     public static class PotentialTargetEntry {

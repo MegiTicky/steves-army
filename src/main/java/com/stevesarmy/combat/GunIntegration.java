@@ -30,6 +30,7 @@ public class GunIntegration {
     public static boolean isTaczLoaded() { return taczLoaded; }
     public static boolean hasGun(LivingEntity entity) { return gunHandler.hasGun(entity); }
     public static ShootResult shoot(LivingEntity shooter, LivingEntity target) { return gunHandler.shoot(shooter, target); }
+    public static ShootResult shootWithDeviation(LivingEntity shooter, LivingEntity target, float pitchDeviation, float yawDeviation) { return gunHandler.shootWithDeviation(shooter, target, pitchDeviation, yawDeviation); }
     public static void reload(LivingEntity entity) { gunHandler.reload(entity); }
     public static void bolt(LivingEntity entity) { gunHandler.bolt(entity); }
     public static void aim(LivingEntity entity, boolean isAiming) { gunHandler.aim(entity, isAiming); }
@@ -58,6 +59,7 @@ public class GunIntegration {
     public interface GunHandler {
         boolean hasGun(LivingEntity entity);
         ShootResult shoot(LivingEntity shooter, LivingEntity target);
+        ShootResult shootWithDeviation(LivingEntity shooter, LivingEntity target, float pitchDeviation, float yawDeviation);
         void reload(LivingEntity entity);
         void bolt(LivingEntity entity);
         void aim(LivingEntity entity, boolean isAiming);
@@ -82,6 +84,7 @@ public class GunIntegration {
     private static class FallbackGunHandler implements GunHandler {
         @Override public boolean hasGun(LivingEntity entity) { return false; }
         @Override public ShootResult shoot(LivingEntity shooter, LivingEntity target) { return ShootResult.NOT_GUN; }
+        @Override public ShootResult shootWithDeviation(LivingEntity shooter, LivingEntity target, float pitchDeviation, float yawDeviation) { return ShootResult.NOT_GUN; }
         @Override public void reload(LivingEntity entity) {}
         @Override public void bolt(LivingEntity entity) {}
         @Override public void aim(LivingEntity entity, boolean isAiming) {}
@@ -167,6 +170,64 @@ public class GunIntegration {
                 return mapShootResult(resultName);
             } catch (Exception e) {
                 StevesArmyMod.LOGGER.warn("[TaCZ] Shoot failed: " + e.getMessage());
+                e.printStackTrace();
+                return ShootResult.UNKNOWN;
+            }
+        }
+
+        @Override
+        public ShootResult shootWithDeviation(LivingEntity shooter, LivingEntity target, float pitchDeviation, float yawDeviation) {
+            if (!hasGun(shooter)) {
+                StevesArmyMod.LOGGER.info("[TaCZ] shootWithDeviation() - No gun");
+                return ShootResult.NOT_GUN;
+            }
+            if (target == null || !target.isAlive()) {
+                StevesArmyMod.LOGGER.info("[TaCZ] shootWithDeviation() - No target");
+                return ShootResult.NO_TARGET;
+            }
+
+            try {
+                ItemStack gunStack = shooter.getMainHandItem();
+                Class<?> gunOperatorClass = Class.forName("com.tacz.guns.api.entity.IGunOperator");
+                Method fromLivingEntity = gunOperatorClass.getMethod("fromLivingEntity", LivingEntity.class);
+                Object gunOperator = fromLivingEntity.invoke(null, shooter);
+
+                double dx = target.getX() - shooter.getX();
+                double dy = target.getEyeY() - shooter.getEyeY();
+                double dz = target.getZ() - shooter.getZ();
+                double horizontalDist = Math.sqrt(dx * dx + dz * dz);
+                float basePitch = (float) -Math.toDegrees(Math.atan2(dy, horizontalDist));
+                float baseYaw = (float) Math.toDegrees(Math.atan2(dz, dx)) - 90.0F;
+                
+                float pitch = basePitch + pitchDeviation;
+                float yaw = baseYaw + yawDeviation;
+
+                long cooldown = getShootCoolDown(shooter);
+                int ammo = getCurrentAmmo(shooter);
+                boolean barrelAmmo = hasAmmoInBarrel(shooter);
+                String gunId = getGunId(shooter);
+                String ammoId = getAmmoId(shooter);
+                boolean useInvAmmo = useInventoryAmmo(shooter);
+                
+                StevesArmyMod.LOGGER.info("[TaCZ] Pre-shoot with deviation: gun={}, pitchDev={:.2f}°, yawDev={:.2f}°, ammo={}, barrel={}", 
+                    gunId, pitchDeviation, yawDeviation, ammo, barrelAmmo);
+
+                Method shootMethod = gunOperatorClass.getMethod("shoot", java.util.function.Supplier.class, java.util.function.Supplier.class);
+                Object result = shootMethod.invoke(gunOperator, 
+                    (java.util.function.Supplier<Float>) () -> pitch, 
+                    (java.util.function.Supplier<Float>) () -> yaw);
+                
+                String resultName = result.toString();
+                
+                ammo = getCurrentAmmo(shooter);
+                barrelAmmo = hasAmmoInBarrel(shooter);
+                cooldown = getShootCoolDown(shooter);
+                StevesArmyMod.LOGGER.info("[TaCZ] Post-shoot with deviation: result={}, cooldown={}ms, ammo={}, barrel={}", 
+                    resultName, cooldown, ammo, barrelAmmo);
+                
+                return mapShootResult(resultName);
+            } catch (Exception e) {
+                StevesArmyMod.LOGGER.warn("[TaCZ] Shoot with deviation failed: " + e.getMessage());
                 e.printStackTrace();
                 return ShootResult.UNKNOWN;
             }

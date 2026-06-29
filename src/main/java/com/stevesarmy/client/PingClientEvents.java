@@ -48,6 +48,10 @@ public class PingClientEvents {
         public double lockedExposureFactor;
         public double lockedMovementFactor;
         public double lockedBrightnessFactor;
+        public float lockedTrackingProgress;
+        public float lockedAccuracy;
+        public float lockedShotThreshold;
+        public float lockedAdsProgress;
         public List<PotentialTargetsDebugMessage.PotentialTargetEntry> potentialTargets;
         
         public SoldierDebugData(UUID soldierUUID) {
@@ -74,6 +78,10 @@ public class PingClientEvents {
             data.lockedExposureFactor = msg.getLockedExposureFactor();
             data.lockedMovementFactor = msg.getLockedMovementFactor();
             data.lockedBrightnessFactor = msg.getLockedBrightnessFactor();
+            data.lockedTrackingProgress = msg.getLockedTrackingProgress();
+            data.lockedAccuracy = msg.getLockedAccuracy();
+            data.lockedShotThreshold = msg.getLockedShotThreshold();
+            data.lockedAdsProgress = msg.getLockedAdsProgress();
             data.potentialTargets = msg.getPotentialTargets();
         }
     }
@@ -131,7 +139,11 @@ public class PingClientEvents {
                     inFocused ? DetectionSystem.BASE_FOCUSED_RATE : DetectionSystem.BASE_PERIPHERAL_RATE,
                     soldierData.lockedIsDetected,
                     soldierData.lockedDistance,
-                    true
+                    true,
+                    soldierData.lockedTrackingProgress,
+                    soldierData.lockedAccuracy,
+                    soldierData.lockedShotThreshold,
+                    soldierData.lockedAdsProgress
                 );
                 CombatDebugRenderer.addDebugData(lockedData);
             }
@@ -158,7 +170,11 @@ public class PingClientEvents {
                         entry.inFocused ? DetectionSystem.BASE_FOCUSED_RATE : DetectionSystem.BASE_PERIPHERAL_RATE,
                         entry.detectionPoints >= DetectionSystem.DETECTION_THRESHOLD,
                         entry.distance,
-                        false
+                        false,
+                        0,
+                        0,
+                        0,
+                        0
                     );
                     CombatDebugRenderer.addDebugData(potentialData);
                     count++;

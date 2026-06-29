@@ -28,11 +28,18 @@ public class CombatDebugData {
     public final double distance;
     public final boolean isLockedTarget;
     
+    public final float trackingProgress;
+    public final float currentAccuracy;
+    public final float shotThreshold;
+    public final float adsProgress;
+    
     public CombatDebugData(UUID soldierId, UUID targetId, Vec3 soldierPos, Vec3 targetPos,
                           double detectionPoints, double detectionThreshold,
                           boolean hasLOS, boolean inFocusedArc, boolean inPeripheralArc,
                           double distanceFactor, double exposureFactor, double movementFactor,
-                          double brightnessFactor, double baseRate, boolean isDetected, double distance, boolean isLockedTarget) {
+                          double brightnessFactor, double baseRate, boolean isDetected, 
+                          double distance, boolean isLockedTarget,
+                          float trackingProgress, float currentAccuracy, float shotThreshold, float adsProgress) {
         this.soldierId = soldierId;
         this.targetId = targetId;
         this.soldierPos = soldierPos;
@@ -50,6 +57,10 @@ public class CombatDebugData {
         this.isDetected = isDetected;
         this.distance = distance;
         this.isLockedTarget = isLockedTarget;
+        this.trackingProgress = trackingProgress;
+        this.currentAccuracy = currentAccuracy;
+        this.shotThreshold = shotThreshold;
+        this.adsProgress = adsProgress;
     }
     
     public void encode(FriendlyByteBuf buf) {
@@ -74,6 +85,10 @@ public class CombatDebugData {
         buf.writeBoolean(isDetected);
         buf.writeDouble(distance);
         buf.writeBoolean(isLockedTarget);
+        buf.writeFloat(trackingProgress);
+        buf.writeFloat(currentAccuracy);
+        buf.writeFloat(shotThreshold);
+        buf.writeFloat(adsProgress);
     }
     
     public static CombatDebugData decode(FriendlyByteBuf buf) {
@@ -94,10 +109,15 @@ public class CombatDebugData {
         boolean isDetected = buf.readBoolean();
         double distance = buf.readDouble();
         boolean isLockedTarget = buf.readBoolean();
+        float trackingProgress = buf.readFloat();
+        float currentAccuracy = buf.readFloat();
+        float shotThreshold = buf.readFloat();
+        float adsProgress = buf.readFloat();
         
         return new CombatDebugData(soldierId, targetId, soldierPos, targetPos,
             detectionPoints, detectionThreshold, hasLOS, inFocusedArc, inPeripheralArc,
             distanceFactor, exposureFactor, movementFactor, brightnessFactor, baseRate,
-            isDetected, distance, isLockedTarget);
+            isDetected, distance, isLockedTarget,
+            trackingProgress, currentAccuracy, shotThreshold, adsProgress);
     }
 }

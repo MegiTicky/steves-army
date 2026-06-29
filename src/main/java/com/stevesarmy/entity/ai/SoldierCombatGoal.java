@@ -1,6 +1,7 @@
 package com.stevesarmy.entity.ai;
 
 import com.stevesarmy.StevesArmyMod;
+import com.stevesarmy.combat.AimAccuracyManager;
 import com.stevesarmy.combat.DetectionSystem;
 import com.stevesarmy.combat.GunIntegration;
 import com.stevesarmy.combat.TargetAcquisition;
@@ -38,7 +39,15 @@ public class SoldierCombatGoal extends Goal {
     private boolean wasAiming = false;
     private boolean wasReloading = false;
     
-    private static final float AIM_PROGRESS_THRESHOLD = 0.8f;
+    private UUID trackedTargetUUID = null;
+    private long trackingStartTime = 0;
+    private float trackingProgress = 0.0f;
+    private float currentAccuracy = 0.0f;
+    private float shotDeviationYaw = 0.0f;
+    private float shotDeviationPitch = 0.0f;
+    
+    private static final float ADS_THRESHOLD = 0.8f;
+    private static final float SHOT_THRESHOLD = 0.5f;
     private int debugSyncTickCounter = 0;
     private static final int DEBUG_SYNC_INTERVAL = 5;
 
@@ -93,6 +102,7 @@ public class SoldierCombatGoal extends Goal {
         if (target != null) {
             soldier.setTarget(target);
             threatTracker.reportThreatDirect(target);
+            resetTracking(target);
         }
         wasAiming = false;
         gunInitialized = false;
@@ -106,6 +116,30 @@ public class SoldierCombatGoal extends Goal {
         soldier.setTarget(null);
         this.target = null;
         this.wasAiming = false;
+        resetTracking(null);
+    }
+    
+    private void resetTracking(LivingEntity newTarget) {
+        if (newTarget == null) {
+            trackedTargetUUID = null;
+            trackingStartTime = 0;
+            trackingProgress = 0.0f;
+            currentAccuracy = 0.0f;
+            shotDeviationYaw = 0.0f;
+            shotDeviationPitch = 0.0f;
+            return;
+        }
+        
+        if (trackedTargetUUID == null || !trackedTargetUUID.equals(newTarget.getUUID())) {
+            trackedTargetUUID = newTarget.getUUID();
+            trackingStartTime = System.currentTimeMillis();
+            trackingProgress = 0.0f;
+            currentAccuracy = AimAccuracyManager.calculateAccuracy(soldier, newTarget);
+            
+            float maxDeviation = AimAccuracyManager.calculateMaxDeviation(currentAccuracy);
+            shotDeviationYaw = (soldier.getRandom().nextFloat() - 0.5f) * maxDeviation;
+            shotDeviationPitch = (soldier.getRandom().nextFloat() - 0.5f) * maxDeviation;
+        }
     }
 
     @Override
@@ -173,6 +207,7 @@ public class SoldierCombatGoal extends Goal {
         
         if (canSee) {
             threatTracker.reportThreatDirect(target);
+            resetTracking(target);
         }
         
         soldier.getLookControl().setLookAt(target, 30.0F, 30.0F);
@@ -206,12 +241,21 @@ public class SoldierCombatGoal extends Goal {
         GunIntegration.aim(soldier, true);
         wasAiming = true;
         
-        float aimProgress = GunIntegration.getAimProgress(soldier);
-        if (aimProgress < AIM_PROGRESS_THRESHOLD) {
+        float adsProgress = GunIntegration.getAimProgress(soldier);
+        if (adsProgress < ADS_THRESHOLD) {
             return;
         }
         
-        GunIntegration.ShootResult result = GunIntegration.shoot(soldier, target);
+        updateTrackingProgress();
+        
+        float shotThreshold = AimAccuracyManager.calculateShotThreshold(trackingProgress, currentAccuracy);
+        if (shotThreshold < SHOT_THRESHOLD) {
+            return;
+        }
+        
+        GunIntegration.ShootResult result = GunIntegration.shootWithDeviation(
+            soldier, target, shotDeviationPitch, shotDeviationYaw
+        );
         
         switch (result) {
             case SUCCESS -> {}
@@ -222,6 +266,17 @@ public class SoldierCombatGoal extends Goal {
             case NOT_DRAWN -> GunIntegration.draw(soldier);
             default -> {}
         }
+    }
+    
+    private void updateTrackingProgress() {
+        if (target == null || trackingStartTime == 0) {
+            return;
+        }
+        
+        float trackingTimeMs = AimAccuracyManager.getTrackingTimeMs(soldier, target);
+        long elapsedMs = System.currentTimeMillis() - trackingStartTime;
+        
+        trackingProgress = Math.min(1.0f, elapsedMs / trackingTimeMs);
     }
 
     private void tickScanning(List<LivingEntity> potentialTargets) {
@@ -432,12 +487,18 @@ public class SoldierCombatGoal extends Goal {
                 detectionSystem.getDetectionState(target.getUUID()).lastMovementFactor : 0;
             double lockedBrightnessFactor = target != null && detectionSystem.getDetectionState(target.getUUID()) != null ?
                 detectionSystem.getDetectionState(target.getUUID()).lastBrightnessFactor : 0;
+            float lockedTrackingProgress = target != null ? trackingProgress : 0;
+            float lockedAccuracy = target != null ? currentAccuracy : 0;
+            float lockedShotThreshold = target != null ? 
+                AimAccuracyManager.calculateShotThreshold(trackingProgress, currentAccuracy) : 0;
+            float lockedAdsProgress = target != null ? GunIntegration.getAimProgress(soldier) : 0;
             
             PotentialTargetsDebugMessage msg = new PotentialTargetsDebugMessage(
                 soldier.getUUID(), lockedTargetUUID, soldier.position(), lockedTargetPos,
                 lockedDetectionPoints, lockedDistance, lockedHasLOS, lockedInFocused,
                 lockedInPeripheral, lockedIsDetected,
                 lockedDistanceFactor, lockedExposureFactor, lockedMovementFactor, lockedBrightnessFactor,
+                lockedTrackingProgress, lockedAccuracy, lockedShotThreshold, lockedAdsProgress,
                 entries
             );
             
