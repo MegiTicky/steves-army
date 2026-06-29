@@ -16,10 +16,10 @@ public class StevesArmyConfig {
         BUILDER.push("combat");
         
         BASE_ACCURACY = BUILDER
-            .comment("Base accuracy for soldiers (0.1 to 1.0). Default 0.35 (35%).",
-                     "This is the base hit chance at effective range for a stationary, exposed target.",
+            .comment("Base accuracy for soldiers (0.1 to 1.0). Default 0.5 (50%).",
+                     "This is the base hit chance at optimal range for a stationary, exposed target.",
                      "Actual accuracy is modified by distance, target movement, and exposure.")
-            .defineInRange("baseAccuracy", 0.35, 0.1, 1.0);
+            .defineInRange("baseAccuracy", 0.5, 0.1, 1.0);
         
         SHOT_THRESHOLD = BUILDER
             .comment("Minimum shot threshold to fire (0.0 to 1.0). Default 0.5 (50%).",

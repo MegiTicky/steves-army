@@ -101,8 +101,15 @@ public class AimAccuracyManager {
     }
     
     private static float calculateDistanceAccuracy(double distance, double effectiveRange) {
+        double optimalDistance = effectiveRange * 0.5;
+        
+        if (distance <= optimalDistance) {
+            float ratio = (float) (distance / optimalDistance);
+            return Mth.lerp(ratio, 1.2f, 1.0f);
+        }
         if (distance <= effectiveRange) {
-            return 1.0f;
+            float ratio = (float) ((distance - optimalDistance) / (effectiveRange - optimalDistance));
+            return Mth.lerp(ratio, 1.0f, 0.7f);
         }
         return (float) Math.max(0.3, effectiveRange / distance);
     }
@@ -127,6 +134,6 @@ public class AimAccuracyManager {
     
     private static float calculateExposureAccuracy(LivingEntity soldier, LivingEntity target) {
         float exposure = (float) ExposureCalculator.getExposureFactor(soldier, target);
-        return 0.7f + 0.3f * exposure;
+        return 0.2f + 0.8f * exposure;
     }
 }
