@@ -81,7 +81,17 @@ public class SoldierCombatGoal extends Goal {
             }
         }
         
-        return hasPotentialTargets();
+        if (hasPotentialTargets()) {
+            return true;
+        }
+        
+        if (GunIntegration.isTaczLoaded() && GunIntegration.hasGun(soldier)) {
+            if (GunIntegration.getCurrentAmmo(soldier) == 0 && !GunIntegration.isReloading(soldier)) {
+                return true;
+            }
+        }
+        
+        return false;
     }
 
     @Override
@@ -98,7 +108,17 @@ public class SoldierCombatGoal extends Goal {
             }
         }
         
-        return hasPotentialTargets();
+        if (hasPotentialTargets()) {
+            return true;
+        }
+        
+        if (GunIntegration.isTaczLoaded() && GunIntegration.hasGun(soldier)) {
+            if (GunIntegration.isReloading(soldier)) {
+                return true;
+            }
+        }
+        
+        return false;
     }
 
     @Override
@@ -193,7 +213,7 @@ public class SoldierCombatGoal extends Goal {
         }
         
         if (!gunInitialized) {
-            if (!GunIntegration.isReloading(soldier)) {
+            if (!GunIntegration.isReloading(soldier) && !GunIntegration.isBolting(soldier)) {
                 GunIntegration.initialData(soldier);
                 GunIntegration.draw(soldier);
             }
@@ -201,7 +221,11 @@ public class SoldierCombatGoal extends Goal {
             lastGunStack = currentGun.copy();
         }
         
-        if (GunIntegration.getCurrentAmmo(soldier) == 0 && !GunIntegration.isReloading(soldier)) {
+        boolean isBolting = GunIntegration.isBolting(soldier);
+        boolean isReloading = GunIntegration.isReloading(soldier);
+        boolean isDrawing = GunIntegration.isDrawing(soldier);
+        
+        if (GunIntegration.getCurrentAmmo(soldier) == 0 && !isReloading && !isBolting && !isDrawing) {
             GunIntegration.reload(soldier);
         }
     }
