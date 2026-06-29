@@ -4,6 +4,7 @@ import com.stevesarmy.StevesArmyMod;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.common.capabilities.ForgeCapabilities;
 
 import java.lang.reflect.Method;
@@ -192,9 +193,11 @@ public class GunIntegration {
                 Method fromLivingEntity = gunOperatorClass.getMethod("fromLivingEntity", LivingEntity.class);
                 Object gunOperator = fromLivingEntity.invoke(null, shooter);
 
-                double dx = target.getX() - shooter.getX();
-                double dy = target.getEyeY() - shooter.getEyeY();
-                double dz = target.getZ() - shooter.getZ();
+                Vec3 aimPoint = ExposureCalculator.getBestAimPoint(shooter, target);
+                
+                double dx = aimPoint.x - shooter.getX();
+                double dy = aimPoint.y - shooter.getEyeY();
+                double dz = aimPoint.z - shooter.getZ();
                 double horizontalDist = Math.sqrt(dx * dx + dz * dz);
                 float basePitch = (float) -Math.toDegrees(Math.atan2(dy, horizontalDist));
                 float baseYaw = (float) Math.toDegrees(Math.atan2(dz, dx)) - 90.0F;
