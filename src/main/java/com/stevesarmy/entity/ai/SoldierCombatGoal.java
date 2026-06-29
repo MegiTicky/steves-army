@@ -3,6 +3,7 @@ package com.stevesarmy.entity.ai;
 import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.combat.AimAccuracyManager;
 import com.stevesarmy.combat.DetectionSystem;
+import com.stevesarmy.combat.ExposureCalculator;
 import com.stevesarmy.combat.GunIntegration;
 import com.stevesarmy.combat.TargetAcquisition;
 import com.stevesarmy.combat.ThreatTracker;
@@ -45,9 +46,12 @@ public class SoldierCombatGoal extends Goal {
     private float currentAccuracy = 0.0f;
     private float shotDeviationYaw = 0.0f;
     private float shotDeviationPitch = 0.0f;
+    private ExposureCalculator.AimPointResult currentAimPoint = null;
     
     private static final float ADS_THRESHOLD = 0.8f;
     private static final float SHOT_THRESHOLD = 0.5f;
+    private static final int PATH_BLOCKED_SWITCH_TICKS = 40;
+    private int pathBlockedCounter = 0;
     private int debugSyncTickCounter = 0;
     private static final int DEBUG_SYNC_INTERVAL = 5;
 
@@ -238,6 +242,21 @@ public class SoldierCombatGoal extends Goal {
             return;
         }
         
+        currentAimPoint = ExposureCalculator.getBestAimPoint(soldier, target);
+        
+        if (!currentAimPoint.canShoot()) {
+            pathBlockedCounter++;
+            if (pathBlockedCounter >= PATH_BLOCKED_SWITCH_TICKS) {
+                StevesArmyMod.LOGGER.info("Path blocked for {} ticks, switching target", pathBlockedCounter);
+                pathBlockedCounter = 0;
+                if (findNewTarget()) {
+                    resetTracking(target);
+                }
+            }
+            return;
+        }
+        pathBlockedCounter = 0;
+        
         GunIntegration.aim(soldier, true);
         wasAiming = true;
         
@@ -254,7 +273,7 @@ public class SoldierCombatGoal extends Goal {
         }
         
         GunIntegration.ShootResult result = GunIntegration.shootWithDeviation(
-            soldier, target, shotDeviationPitch, shotDeviationYaw
+            soldier, currentAimPoint, shotDeviationPitch, shotDeviationYaw
         );
         
         switch (result) {
@@ -264,6 +283,16 @@ public class SoldierCombatGoal extends Goal {
             case COOLDOWN -> {}
             case IS_BOLTING, IS_RELOADING, IS_DRAWING -> {}
             case NOT_DRAWN -> GunIntegration.draw(soldier);
+            case PATH_BLOCKED -> {
+                pathBlockedCounter++;
+                if (pathBlockedCounter >= PATH_BLOCKED_SWITCH_TICKS) {
+                    StevesArmyMod.LOGGER.info("PATH_BLOCKED result, switching target");
+                    pathBlockedCounter = 0;
+                    if (findNewTarget()) {
+                        resetTracking(target);
+                    }
+                }
+            }
             default -> {}
         }
     }
@@ -492,6 +521,10 @@ public class SoldierCombatGoal extends Goal {
             float lockedShotThreshold = target != null ? 
                 AimAccuracyManager.calculateShotThreshold(trackingProgress, currentAccuracy) : 0;
             float lockedAdsProgress = target != null ? GunIntegration.getAimProgress(soldier) : 0;
+            String lockedAimPointType = target != null && currentAimPoint != null ? 
+                currentAimPoint.type.displayName : "";
+            boolean lockedBulletPathClear = target != null && currentAimPoint != null ? 
+                currentAimPoint.bulletPathClear : false;
             
             PotentialTargetsDebugMessage msg = new PotentialTargetsDebugMessage(
                 soldier.getUUID(), lockedTargetUUID, soldier.position(), lockedTargetPos,
@@ -499,6 +532,7 @@ public class SoldierCombatGoal extends Goal {
                 lockedInPeripheral, lockedIsDetected,
                 lockedDistanceFactor, lockedExposureFactor, lockedMovementFactor, lockedBrightnessFactor,
                 lockedTrackingProgress, lockedAccuracy, lockedShotThreshold, lockedAdsProgress,
+                lockedAimPointType, lockedBulletPathClear,
                 entries
             );
             

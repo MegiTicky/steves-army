@@ -333,6 +333,14 @@ public class CombatDebugRenderer {
                 y -= 10;
                 String shotText = String.format("SHOT:%d%%", (int)(data.shotThreshold * 100));
                 mc.font.drawInBatch(shotText, -mc.font.width(shotText) / 2f, y, 0xAAFFAA, false, matrix4f, bufferSource, net.minecraft.client.gui.Font.DisplayMode.NORMAL, 0, 15728880);
+                y -= 10;
+                String aimText = String.format("AIM:%s", data.aimPointType);
+                int aimColor = data.bulletPathClear ? 0x00FF00 : 0xFF0000;
+                mc.font.drawInBatch(aimText, -mc.font.width(aimText) / 2f, y, aimColor, false, matrix4f, bufferSource, net.minecraft.client.gui.Font.DisplayMode.NORMAL, 0, 15728880);
+                y -= 10;
+                String pathText = data.bulletPathClear ? "PATH:OK" : "PATH:BLOCKED";
+                int pathColor = data.bulletPathClear ? 0x00FF00 : 0xFF0000;
+                mc.font.drawInBatch(pathText, -mc.font.width(pathText) / 2f, y, pathColor, false, matrix4f, bufferSource, net.minecraft.client.gui.Font.DisplayMode.NORMAL, 0, 15728880);
             }
         }
         

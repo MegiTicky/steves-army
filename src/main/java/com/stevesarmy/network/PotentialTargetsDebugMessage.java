@@ -31,6 +31,8 @@ public class PotentialTargetsDebugMessage {
     private final float lockedAccuracy;
     private final float lockedShotThreshold;
     private final float lockedAdsProgress;
+    private final String lockedAimPointType;
+    private final boolean lockedBulletPathClear;
     private final List<PotentialTargetEntry> potentialTargets;
     
     public PotentialTargetsDebugMessage(UUID soldierUUID, UUID lockedTargetUUID, 
@@ -42,6 +44,7 @@ public class PotentialTargetsDebugMessage {
                                         double lockedMovementFactor, double lockedBrightnessFactor,
                                         float lockedTrackingProgress, float lockedAccuracy,
                                         float lockedShotThreshold, float lockedAdsProgress,
+                                        String lockedAimPointType, boolean lockedBulletPathClear,
                                         List<PotentialTargetEntry> potentialTargets) {
         this.soldierUUID = soldierUUID;
         this.lockedTargetUUID = lockedTargetUUID;
@@ -61,6 +64,8 @@ public class PotentialTargetsDebugMessage {
         this.lockedAccuracy = lockedAccuracy;
         this.lockedShotThreshold = lockedShotThreshold;
         this.lockedAdsProgress = lockedAdsProgress;
+        this.lockedAimPointType = lockedAimPointType;
+        this.lockedBulletPathClear = lockedBulletPathClear;
         this.potentialTargets = potentialTargets;
     }
     
@@ -83,6 +88,8 @@ public class PotentialTargetsDebugMessage {
         this.lockedAccuracy = hasLockedTarget ? buf.readFloat() : 0;
         this.lockedShotThreshold = hasLockedTarget ? buf.readFloat() : 0;
         this.lockedAdsProgress = hasLockedTarget ? buf.readFloat() : 0;
+        this.lockedAimPointType = hasLockedTarget ? buf.readUtf() : "";
+        this.lockedBulletPathClear = hasLockedTarget ? buf.readBoolean() : false;
         
         this.soldierPos = new Vec3(buf.readDouble(), buf.readDouble(), buf.readDouble());
         int count = buf.readInt();
@@ -126,6 +133,8 @@ public class PotentialTargetsDebugMessage {
             buf.writeFloat(msg.lockedAccuracy);
             buf.writeFloat(msg.lockedShotThreshold);
             buf.writeFloat(msg.lockedAdsProgress);
+            buf.writeUtf(msg.lockedAimPointType);
+            buf.writeBoolean(msg.lockedBulletPathClear);
         }
         buf.writeDouble(msg.soldierPos.x);
         buf.writeDouble(msg.soldierPos.y);
@@ -175,6 +184,8 @@ public class PotentialTargetsDebugMessage {
     public float getLockedAccuracy() { return lockedAccuracy; }
     public float getLockedShotThreshold() { return lockedShotThreshold; }
     public float getLockedAdsProgress() { return lockedAdsProgress; }
+    public String getLockedAimPointType() { return lockedAimPointType; }
+    public boolean getLockedBulletPathClear() { return lockedBulletPathClear; }
     public List<PotentialTargetEntry> getPotentialTargets() { return potentialTargets; }
     
     public static class PotentialTargetEntry {

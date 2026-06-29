@@ -52,6 +52,8 @@ public class PingClientEvents {
         public float lockedAccuracy;
         public float lockedShotThreshold;
         public float lockedAdsProgress;
+        public String lockedAimPointType;
+        public boolean lockedBulletPathClear;
         public List<PotentialTargetsDebugMessage.PotentialTargetEntry> potentialTargets;
         
         public SoldierDebugData(UUID soldierUUID) {
@@ -82,6 +84,8 @@ public class PingClientEvents {
             data.lockedAccuracy = msg.getLockedAccuracy();
             data.lockedShotThreshold = msg.getLockedShotThreshold();
             data.lockedAdsProgress = msg.getLockedAdsProgress();
+            data.lockedAimPointType = msg.getLockedAimPointType();
+            data.lockedBulletPathClear = msg.getLockedBulletPathClear();
             data.potentialTargets = msg.getPotentialTargets();
         }
     }
@@ -143,7 +147,9 @@ public class PingClientEvents {
                     soldierData.lockedTrackingProgress,
                     soldierData.lockedAccuracy,
                     soldierData.lockedShotThreshold,
-                    soldierData.lockedAdsProgress
+                    soldierData.lockedAdsProgress,
+                    soldierData.lockedAimPointType,
+                    soldierData.lockedBulletPathClear
                 );
                 CombatDebugRenderer.addDebugData(lockedData);
             }
@@ -174,7 +180,9 @@ public class PingClientEvents {
                         0,
                         0,
                         0,
-                        0
+                        0,
+                        "",
+                        false
                     );
                     CombatDebugRenderer.addDebugData(potentialData);
                     count++;

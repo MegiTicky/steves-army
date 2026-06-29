@@ -32,6 +32,8 @@ public class CombatDebugData {
     public final float currentAccuracy;
     public final float shotThreshold;
     public final float adsProgress;
+    public final String aimPointType;
+    public final boolean bulletPathClear;
     
     public CombatDebugData(UUID soldierId, UUID targetId, Vec3 soldierPos, Vec3 targetPos,
                           double detectionPoints, double detectionThreshold,
@@ -39,7 +41,8 @@ public class CombatDebugData {
                           double distanceFactor, double exposureFactor, double movementFactor,
                           double brightnessFactor, double baseRate, boolean isDetected, 
                           double distance, boolean isLockedTarget,
-                          float trackingProgress, float currentAccuracy, float shotThreshold, float adsProgress) {
+                          float trackingProgress, float currentAccuracy, float shotThreshold, 
+                          float adsProgress, String aimPointType, boolean bulletPathClear) {
         this.soldierId = soldierId;
         this.targetId = targetId;
         this.soldierPos = soldierPos;
@@ -61,6 +64,8 @@ public class CombatDebugData {
         this.currentAccuracy = currentAccuracy;
         this.shotThreshold = shotThreshold;
         this.adsProgress = adsProgress;
+        this.aimPointType = aimPointType;
+        this.bulletPathClear = bulletPathClear;
     }
     
     public void encode(FriendlyByteBuf buf) {
@@ -89,6 +94,8 @@ public class CombatDebugData {
         buf.writeFloat(currentAccuracy);
         buf.writeFloat(shotThreshold);
         buf.writeFloat(adsProgress);
+        buf.writeUtf(aimPointType);
+        buf.writeBoolean(bulletPathClear);
     }
     
     public static CombatDebugData decode(FriendlyByteBuf buf) {
@@ -113,11 +120,13 @@ public class CombatDebugData {
         float currentAccuracy = buf.readFloat();
         float shotThreshold = buf.readFloat();
         float adsProgress = buf.readFloat();
+        String aimPointType = buf.readUtf();
+        boolean bulletPathClear = buf.readBoolean();
         
         return new CombatDebugData(soldierId, targetId, soldierPos, targetPos,
             detectionPoints, detectionThreshold, hasLOS, inFocusedArc, inPeripheralArc,
             distanceFactor, exposureFactor, movementFactor, brightnessFactor, baseRate,
             isDetected, distance, isLockedTarget,
-            trackingProgress, currentAccuracy, shotThreshold, adsProgress);
+            trackingProgress, currentAccuracy, shotThreshold, adsProgress, aimPointType, bulletPathClear);
     }
 }

@@ -12,6 +12,43 @@ import java.util.List;
 
 public class ExposureCalculator {
     
+    public enum AimPointType {
+        HEAD(10, "HEAD"),
+        NECK(9, "NECK"),
+        CENTER_MASS(8, "CENTER"),
+        UPPER_TORSO(7, "UPPER"),
+        LOWER_TORSO(6, "LOWER"),
+        HIP(5, "HIP"),
+        FEET(3, "FEET"),
+        FALLBACK(0, "FALLBACK");
+        
+        public final int priority;
+        public final String displayName;
+        
+        AimPointType(int priority, String displayName) {
+            this.priority = priority;
+            this.displayName = displayName;
+        }
+    }
+    
+    public static class AimPointResult {
+        public final Vec3 position;
+        public final AimPointType type;
+        public final boolean bulletPathClear;
+        public final boolean pointVisible;
+        
+        public AimPointResult(Vec3 position, AimPointType type, boolean bulletPathClear, boolean pointVisible) {
+            this.position = position;
+            this.type = type;
+            this.bulletPathClear = bulletPathClear;
+            this.pointVisible = pointVisible;
+        }
+        
+        public boolean canShoot() {
+            return pointVisible && bulletPathClear;
+        }
+    }
+    
     public static int calculateExposure(LivingEntity observer, LivingEntity target) {
         if (observer.level() != target.level()) return 0;
         
@@ -35,8 +72,10 @@ public class ExposureCalculator {
         return Math.sqrt(visiblePoints / 8.0);
     }
     
-    public static Vec3 getBestAimPoint(LivingEntity observer, LivingEntity target) {
-        if (observer.level() != target.level()) return target.getEyePosition();
+    public static AimPointResult getBestAimPoint(LivingEntity observer, LivingEntity target) {
+        if (observer.level() != target.level()) {
+            return new AimPointResult(target.getEyePosition(), AimPointType.FALLBACK, false, false);
+        }
         
         Level level = observer.level();
         Vec3 observerEye = observer.getEyePosition();
@@ -51,12 +90,20 @@ public class ExposureCalculator {
         }
         
         if (visiblePoints.isEmpty()) {
-            return target.getEyePosition();
+            return new AimPointResult(target.getEyePosition(), AimPointType.FALLBACK, false, false);
         }
         
-        visiblePoints.sort(Comparator.comparingInt(p -> -p.priority));
+        visiblePoints.sort(Comparator.comparingInt(p -> -p.type.priority));
         
-        return visiblePoints.get(0).position;
+        for (TargetPoint point : visiblePoints) {
+            boolean bulletCanReach = canBulletReach(level, observerEye, point.position, observer);
+            if (bulletCanReach) {
+                return new AimPointResult(point.position, point.type, true, true);
+            }
+        }
+        
+        TargetPoint bestVisible = visiblePoints.get(0);
+        return new AimPointResult(bestVisible.position, bestVisible.type, false, true);
     }
     
     private static TargetPoint[] getTargetPointsWithPriority(LivingEntity target) {
@@ -64,28 +111,32 @@ public class ExposureCalculator {
         float height = target.getBbHeight();
         float width = target.getBbWidth();
         
-        double headY = basePos.y + height * 0.9;
-        double neckY = basePos.y + height * 0.8;
-        double upperTorsoY = basePos.y + height * 0.65;
-        double midTorsoY = basePos.y + height * 0.5;
-        double lowerTorsoY = basePos.y + height * 0.35;
-        double hipY = basePos.y + height * 0.2;
-        double feetY = basePos.y + height * 0.1;
+        double headY = basePos.y + height * 0.92;
+        double neckY = basePos.y + height * 0.82;
+        double midTorsoY = basePos.y + height * 0.55;
+        double upperTorsoY = basePos.y + height * 0.70;
+        double lowerTorsoY = basePos.y + height * 0.40;
+        double hipY = basePos.y + height * 0.25;
+        double feetY = basePos.y + height * 0.10;
         
         double halfWidth = width * 0.35;
-        double centerWidth = width * 0.0;
+        double quarterWidth = width * 0.15;
         
         return new TargetPoint[] {
-            new TargetPoint(new Vec3(basePos.x, headY, basePos.z), 10),
-            new TargetPoint(new Vec3(basePos.x, neckY, basePos.z), 9),
-            new TargetPoint(new Vec3(basePos.x - halfWidth, upperTorsoY, basePos.z), 7),
-            new TargetPoint(new Vec3(basePos.x + halfWidth, upperTorsoY, basePos.z), 7),
-            new TargetPoint(new Vec3(basePos.x, midTorsoY, basePos.z), 8),
-            new TargetPoint(new Vec3(basePos.x - halfWidth, lowerTorsoY, basePos.z), 6),
-            new TargetPoint(new Vec3(basePos.x + halfWidth, lowerTorsoY, basePos.z), 6),
-            new TargetPoint(new Vec3(basePos.x, hipY, basePos.z), 5),
-            new TargetPoint(new Vec3(basePos.x - halfWidth, feetY, basePos.z), 3),
-            new TargetPoint(new Vec3(basePos.x + halfWidth, feetY, basePos.z), 3),
+            new TargetPoint(new Vec3(basePos.x, headY, basePos.z), AimPointType.HEAD),
+            new TargetPoint(new Vec3(basePos.x, neckY, basePos.z), AimPointType.NECK),
+            new TargetPoint(new Vec3(basePos.x, midTorsoY, basePos.z), AimPointType.CENTER_MASS),
+            new TargetPoint(new Vec3(basePos.x, upperTorsoY, basePos.z), AimPointType.CENTER_MASS),
+            new TargetPoint(new Vec3(basePos.x, lowerTorsoY, basePos.z), AimPointType.CENTER_MASS),
+            new TargetPoint(new Vec3(basePos.x, hipY, basePos.z), AimPointType.HIP),
+            new TargetPoint(new Vec3(basePos.x - quarterWidth, headY, basePos.z), AimPointType.HEAD),
+            new TargetPoint(new Vec3(basePos.x + quarterWidth, headY, basePos.z), AimPointType.HEAD),
+            new TargetPoint(new Vec3(basePos.x - halfWidth, upperTorsoY, basePos.z), AimPointType.UPPER_TORSO),
+            new TargetPoint(new Vec3(basePos.x + halfWidth, upperTorsoY, basePos.z), AimPointType.UPPER_TORSO),
+            new TargetPoint(new Vec3(basePos.x - halfWidth, lowerTorsoY, basePos.z), AimPointType.LOWER_TORSO),
+            new TargetPoint(new Vec3(basePos.x + halfWidth, lowerTorsoY, basePos.z), AimPointType.LOWER_TORSO),
+            new TargetPoint(new Vec3(basePos.x - halfWidth, feetY, basePos.z), AimPointType.FEET),
+            new TargetPoint(new Vec3(basePos.x + halfWidth, feetY, basePos.z), AimPointType.FEET),
         };
     }
     
@@ -126,13 +177,26 @@ public class ExposureCalculator {
         return result.getType() == HitResult.Type.MISS;
     }
     
+    private static boolean canBulletReach(Level level, Vec3 from, Vec3 to, LivingEntity shooter) {
+        ClipContext context = new ClipContext(
+            from,
+            to,
+            ClipContext.Block.COLLIDER,
+            ClipContext.Fluid.NONE,
+            shooter
+        );
+        
+        HitResult result = level.clip(context);
+        return result.getType() == HitResult.Type.MISS;
+    }
+    
     private static class TargetPoint {
         final Vec3 position;
-        final int priority;
+        final AimPointType type;
         
-        TargetPoint(Vec3 position, int priority) {
+        TargetPoint(Vec3 position, AimPointType type) {
             this.position = position;
-            this.priority = priority;
+            this.type = type;
         }
     }
 }
