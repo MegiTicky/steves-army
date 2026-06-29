@@ -45,8 +45,6 @@ public class SoldierCombatGoal extends Goal {
     private long trackingStartTime = 0;
     private float trackingProgress = 0.0f;
     private float currentAccuracy = 0.0f;
-    private float shotDeviationYaw = 0.0f;
-    private float shotDeviationPitch = 0.0f;
     private ExposureCalculator.AimPointResult currentAimPoint = null;
     
     private static final float ADS_THRESHOLD = 0.8f;
@@ -152,8 +150,6 @@ public class SoldierCombatGoal extends Goal {
             trackingStartTime = 0;
             trackingProgress = 0.0f;
             currentAccuracy = 0.0f;
-            shotDeviationYaw = 0.0f;
-            shotDeviationPitch = 0.0f;
             return;
         }
         
@@ -162,10 +158,6 @@ public class SoldierCombatGoal extends Goal {
             trackingStartTime = System.currentTimeMillis();
             trackingProgress = 0.0f;
             currentAccuracy = AimAccuracyManager.calculateAccuracy(soldier, newTarget);
-            
-            float maxDeviation = AimAccuracyManager.calculateMaxDeviation(currentAccuracy);
-            shotDeviationYaw = (soldier.getRandom().nextFloat() - 0.5f) * maxDeviation;
-            shotDeviationPitch = (soldier.getRandom().nextFloat() - 0.5f) * maxDeviation;
         }
     }
 
@@ -322,6 +314,10 @@ public class SoldierCombatGoal extends Goal {
                 return;
             }
         }
+        
+        float maxDeviation = AimAccuracyManager.calculateMaxDeviation(currentAccuracy);
+        float shotDeviationYaw = (soldier.getRandom().nextFloat() - 0.5f) * maxDeviation;
+        float shotDeviationPitch = (soldier.getRandom().nextFloat() - 0.5f) * maxDeviation;
         
         GunIntegration.ShootResult result = GunIntegration.shootWithDeviation(
             soldier, currentAimPoint, shotDeviationPitch, shotDeviationYaw
