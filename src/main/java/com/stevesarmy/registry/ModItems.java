@@ -4,6 +4,7 @@ import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.item.RecruitItem;
 import com.stevesarmy.item.SoldierSpawnEggItem;
+import com.stevesarmy.item.TargetSpawnEggItem;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.item.Item;
 import net.minecraftforge.eventbus.api.IEventBus;
@@ -23,6 +24,11 @@ public class ModItems {
     public static final RegistryObject<Item> SOLDIER_SPAWN_EGG = ITEMS.register(
         "soldier_spawn_egg",
         () -> new SoldierSpawnEggItem(ModEntities.SOLDIER, 0x4A7C59, 0x2F4F2F, new Item.Properties())
+    );
+
+    public static final RegistryObject<Item> TARGET_SPAWN_EGG = ITEMS.register(
+        "target_spawn_egg",
+        () -> new TargetSpawnEggItem(new Item.Properties())
     );
 
     public static void register(IEventBus eventBus) {

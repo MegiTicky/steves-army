@@ -28,7 +28,7 @@ public class ExposureCalculator {
     
     public static double getExposureFactor(LivingEntity observer, LivingEntity target) {
         int visiblePoints = calculateExposure(observer, target);
-        return visiblePoints / 5.0;
+        return Math.sqrt(visiblePoints / 8.0);
     }
     
     private static Vec3[] getTargetPoints(LivingEntity target) {
@@ -37,17 +37,21 @@ public class ExposureCalculator {
         float width = target.getBbWidth();
         
         double headY = basePos.y + height * 0.85;
-        double torsoY = basePos.y + height * 0.5;
+        double upperTorsoY = basePos.y + height * 0.65;
+        double lowerTorsoY = basePos.y + height * 0.35;
         double feetY = basePos.y + height * 0.1;
         
-        double halfWidth = width * 0.3;
+        double halfWidth = width * 0.45;
         
         return new Vec3[] {
-            new Vec3(basePos.x, headY, basePos.z),
-            new Vec3(basePos.x, torsoY, basePos.z),
-            new Vec3(basePos.x - halfWidth, torsoY, basePos.z),
-            new Vec3(basePos.x + halfWidth, torsoY, basePos.z),
-            new Vec3(basePos.x, feetY, basePos.z)
+            new Vec3(basePos.x - halfWidth, headY, basePos.z),
+            new Vec3(basePos.x + halfWidth, headY, basePos.z),
+            new Vec3(basePos.x - halfWidth, upperTorsoY, basePos.z),
+            new Vec3(basePos.x + halfWidth, upperTorsoY, basePos.z),
+            new Vec3(basePos.x - halfWidth, lowerTorsoY, basePos.z),
+            new Vec3(basePos.x + halfWidth, lowerTorsoY, basePos.z),
+            new Vec3(basePos.x - halfWidth, feetY, basePos.z),
+            new Vec3(basePos.x + halfWidth, feetY, basePos.z)
         };
     }
     

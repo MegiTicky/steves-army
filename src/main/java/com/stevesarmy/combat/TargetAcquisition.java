@@ -1,6 +1,8 @@
 package com.stevesarmy.combat;
 
+import com.stevesarmy.StevesArmyMod;
 import net.minecraft.core.BlockPos;
+import net.minecraft.util.Mth;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.Level;
@@ -19,22 +21,46 @@ public class TargetAcquisition {
     }
     
     public static boolean isInFocusedArc(LivingEntity observer, LivingEntity target) {
-        return isInArc(observer, target, DetectionSystem.FOCUSED_ARC_DEGREES);
+        return isInArc(observer, target, DetectionSystem.FOCUSED_ARC_DEGREES, "FOCUSED");
     }
     
     public static boolean isInPeripheralArc(LivingEntity observer, LivingEntity target) {
-        return isInArc(observer, target, DetectionSystem.PERIPHERAL_ARC_DEGREES);
+        return isInArc(observer, target, DetectionSystem.PERIPHERAL_ARC_DEGREES, "PERIPHERAL");
     }
     
-    private static boolean isInArc(LivingEntity observer, LivingEntity target, double arcDegrees) {
-        Vec3 observerLook = observer.getLookAngle();
+    private static boolean isInArc(LivingEntity observer, LivingEntity target, double arcDegrees, String arcName) {
+        float headYaw = observer.getYHeadRot();
+        float yawRad = (float) Math.toRadians(-headYaw);
+        Vec3 observerLook = new Vec3(Mth.sin(yawRad), 0, Mth.cos(yawRad));
+        
         Vec3 toTarget = target.position().subtract(observer.position()).normalize();
         
         double dot = observerLook.dot(toTarget);
         double angleRadians = Math.acos(Math.max(-1.0, Math.min(1.0, dot)));
         double angleDegrees = Math.toDegrees(angleRadians);
         
-        return angleDegrees <= arcDegrees / 2.0;
+        float bodyYaw = observer.getYRot();
+        float pitch = observer.getXRot();
+        
+        double threshold = arcDegrees / 2.0;
+        boolean result = angleDegrees <= threshold;
+        
+        StevesArmyMod.LOGGER.info("[ArcCheck] {} arc: angle={}°, threshold={}°, result={}, headYaw={}°, bodyYaw={}°, pitch={}°, lookVec=({}, {}, {}), toTarget=({}, {}, {})",
+            arcName, 
+            String.format("%.1f", angleDegrees),
+            String.format("%.1f", threshold),
+            result,
+            String.format("%.1f", headYaw),
+            String.format("%.1f", bodyYaw),
+            String.format("%.1f", pitch),
+            String.format("%.2f", observerLook.x),
+            String.format("%.2f", observerLook.y),
+            String.format("%.2f", observerLook.z),
+            String.format("%.2f", toTarget.x),
+            String.format("%.2f", toTarget.y),
+            String.format("%.2f", toTarget.z));
+        
+        return result;
     }
     
     public static boolean hasLineOfSight(LivingEntity observer, LivingEntity target) {

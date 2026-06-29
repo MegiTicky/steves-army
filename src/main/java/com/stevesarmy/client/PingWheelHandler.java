@@ -142,9 +142,11 @@ public class PingWheelHandler {
         LocalPlayer player = mc.player;
         if (player == null) return;
         
+        int renderDistanceChunks = mc.options.renderDistance().get();
+        double maxDistance = renderDistanceChunks * 16.0;
+        
         Vec3 eyePos = player.getEyePosition(1.0f);
         Vec3 lookVec = player.getViewVector(1.0f);
-        double maxDistance = 64.0;
         Vec3 endPos = eyePos.add(lookVec.scale(maxDistance));
         
         BlockHitResult hitResult = player.level().clip(new ClipContext(
@@ -159,7 +161,7 @@ public class PingWheelHandler {
         if (hitResult.getType() != HitResult.Type.MISS) {
             pingPos = hitResult.getLocation();
         } else {
-            pingPos = eyePos.add(lookVec.scale(32.0));
+            pingPos = eyePos.add(lookVec.scale(maxDistance));
         }
         
         int dimension = player.level().dimension().location().hashCode();

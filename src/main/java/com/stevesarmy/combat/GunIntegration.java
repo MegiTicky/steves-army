@@ -374,7 +374,26 @@ public class GunIntegration {
         }
 
         @Override
-        public double getEffectiveRange(LivingEntity entity) { return DEFAULT_GUN_RANGE; }
+        public double getEffectiveRange(LivingEntity entity) {
+            try {
+                Class<?> gunOperatorClass = Class.forName("com.tacz.guns.api.entity.IGunOperator");
+                Method fromLivingEntity = gunOperatorClass.getMethod("fromLivingEntity", LivingEntity.class);
+                Object gunOperator = fromLivingEntity.invoke(null, entity);
+                
+                Method getCacheProperty = gunOperatorClass.getMethod("getCacheProperty");
+                Object cacheProperty = getCacheProperty.invoke(gunOperator);
+                
+                Method getCache = cacheProperty.getClass().getMethod("getCache", String.class);
+                Float effectiveRange = (Float) getCache.invoke(cacheProperty, "effective_range");
+                
+                if (effectiveRange != null && effectiveRange > 0) {
+                    return effectiveRange.doubleValue();
+                }
+            } catch (Exception e) {
+                StevesArmyMod.LOGGER.debug("[TaCZ] Failed to get effective range: {}", e.getMessage());
+            }
+            return DEFAULT_GUN_RANGE;
+        }
 
         @Override
         public Optional<ItemStack> getGunStack(LivingEntity entity) {

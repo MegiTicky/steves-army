@@ -7,6 +7,7 @@ import com.stevesarmy.entity.ai.SoldierCombatGoal;
 import com.stevesarmy.entity.ai.SoldierFollowOwnerGoal;
 import com.stevesarmy.entity.ai.SoldierHoldPositionGoal;
 import com.stevesarmy.entity.ai.SoldierMoveToPingGoal;
+import com.stevesarmy.entity.ai.SoldierStrollGoal;
 import com.stevesarmy.inventory.SoldierInventory;
 import com.stevesarmy.inventory.SoldierInventoryHandler;
 import com.stevesarmy.network.NetworkHandler;
@@ -129,14 +130,15 @@ public class SoldierEntity extends PathfinderMob implements Container {
     @Override
     protected void registerGoals() {
         this.combatGoal = new SoldierCombatGoal(this);
-        this.goalSelector.addGoal(0, new SoldierMoveToPingGoal(this));
+        
         this.goalSelector.addGoal(0, new FloatGoal(this));
-        this.goalSelector.addGoal(1, combatGoal);
+        this.goalSelector.addGoal(1, new SoldierMoveToPingGoal(this));
         this.goalSelector.addGoal(2, new SoldierFollowOwnerGoal(this));
         this.goalSelector.addGoal(2, new SoldierHoldPositionGoal(this));
-        this.goalSelector.addGoal(3, new WaterAvoidingRandomStrollGoal(this, 0.8D));
-        this.goalSelector.addGoal(4, new LookAtPlayerGoal(this, Player.class, 8.0F));
-        this.goalSelector.addGoal(5, new RandomLookAroundGoal(this));
+        this.goalSelector.addGoal(3, combatGoal);
+        this.goalSelector.addGoal(4, new SoldierStrollGoal(this, 0.8D));
+        this.goalSelector.addGoal(5, new LookAtPlayerGoal(this, Player.class, 8.0F));
+        this.goalSelector.addGoal(6, new RandomLookAroundGoal(this));
     }
 
     @Override

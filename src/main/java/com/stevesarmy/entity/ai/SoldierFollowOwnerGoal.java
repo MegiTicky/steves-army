@@ -30,10 +30,10 @@ public class SoldierFollowOwnerGoal extends Goal {
         this.soldier = soldier;
         this.level = soldier.level();
         this.speedModifier = 1.2D;
-        this.startDistance = 10.0F;
-        this.stopDistance = 3.0F;
-        this.followDistance = 8.0F;
-        this.setFlags(EnumSet.of(Goal.Flag.MOVE, Goal.Flag.LOOK));
+        this.startDistance = 15.0F;
+        this.stopDistance = 10.0F;
+        this.followDistance = 12.0F;
+        this.setFlags(EnumSet.of(Goal.Flag.MOVE));
     }
 
     @Override
@@ -87,8 +87,6 @@ public class SoldierFollowOwnerGoal extends Goal {
 
     @Override
     public void tick() {
-        soldier.getLookControl().setLookAt(owner, 10.0F, soldier.getMaxHeadXRot());
-        
         if (--timeToRecalcPath <= 0) {
             timeToRecalcPath = adjustTicks(10);
             if (!soldier.isLeashed() && !soldier.isPassenger()) {

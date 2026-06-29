@@ -27,13 +27,6 @@ public class SoldierMoveToPingGoal extends Goal {
         if (!soldier.isAlive()) return false;
         if (!soldier.hasValidPingMoveTarget()) return false;
         
-        if (soldier.getSquadMode() == SquadMode.HOLD) {
-            BlockPos holdPos = soldier.getHoldPosition();
-            if (holdPos != null && !holdPos.equals(BlockPos.ZERO)) {
-                return false;
-            }
-        }
-        
         this.targetPos = soldier.getPingMoveTarget();
         return targetPos != null;
     }
@@ -42,10 +35,6 @@ public class SoldierMoveToPingGoal extends Goal {
     public boolean canContinueToUse() {
         if (!soldier.isAlive()) return false;
         if (!soldier.hasValidPingMoveTarget()) return false;
-        
-        if (soldier.getSquadMode() == SquadMode.HOLD) {
-            return false;
-        }
         
         return soldier.distanceToSqr(targetPos.getX(), targetPos.getY(), targetPos.getZ()) > (closeDistance * closeDistance);
     }

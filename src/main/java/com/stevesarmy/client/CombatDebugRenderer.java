@@ -23,14 +23,13 @@ public class CombatDebugRenderer {
     public static final int DEBUG_MODE_OFF = 0;
     public static final int DEBUG_MODE_MINIMAL = 1;
     public static final int DEBUG_MODE_VERBOSE = 2;
-    public static final int DEBUG_MODE_ARCS = 3;
     
     private static int currentDebugMode = DEBUG_MODE_OFF;
     private static int maxUntargetedToRender = 3;
     private static final List<CombatDebugData> debugDataList = new ArrayList<>();
     
     public static void setDebugMode(int mode) {
-        currentDebugMode = mode;
+        currentDebugMode = Math.min(mode, DEBUG_MODE_VERBOSE);
     }
     
     public static int getDebugMode() {
@@ -38,15 +37,14 @@ public class CombatDebugRenderer {
     }
     
     public static void cycleDebugMode() {
-        currentDebugMode = (currentDebugMode + 1) % 4;
+        currentDebugMode = (currentDebugMode + 1) % 3;
     }
     
     public static String getDebugModeName() {
         switch (currentDebugMode) {
             case DEBUG_MODE_OFF: return "OFF";
             case DEBUG_MODE_MINIMAL: return "MINIMAL";
-            case DEBUG_MODE_VERBOSE: return "VERBOSE";
-            case DEBUG_MODE_ARCS: return "ARCS";
+            case DEBUG_MODE_VERBOSE: return "VERBOSE+ARCS";
             default: return "UNKNOWN";
         }
     }
@@ -90,9 +88,6 @@ public class CombatDebugRenderer {
         buffer.begin(VertexFormat.Mode.DEBUG_LINES, DefaultVertexFormat.POSITION_COLOR);
         
         for (CombatDebugData data : debugDataList) {
-            double distanceToCamera = mc.player.distanceToSqr(data.soldierPos);
-            if (distanceToCamera > 64 * 64) continue;
-            
             renderLines(buffer, poseStack, cameraPos, data, mc, partialTick);
         }
         
@@ -101,12 +96,7 @@ public class CombatDebugRenderer {
         MultiBufferSource.BufferSource bufferSource = mc.renderBuffers().bufferSource();
         
         for (CombatDebugData data : debugDataList) {
-            double distanceToCamera = mc.player.distanceToSqr(data.soldierPos);
-            if (distanceToCamera > 64 * 64) continue;
-            
-            if (currentDebugMode == DEBUG_MODE_MINIMAL || currentDebugMode == DEBUG_MODE_VERBOSE) {
-                renderText(poseStack, cameraPos, data, mc, bufferSource);
-            }
+            renderText(poseStack, cameraPos, data, mc, bufferSource);
         }
         
         bufferSource.endBatch();
@@ -165,7 +155,7 @@ public class CombatDebugRenderer {
             }
         }
         
-        if (currentDebugMode == DEBUG_MODE_ARCS) {
+        if (currentDebugMode == DEBUG_MODE_VERBOSE) {
             renderArcLines(buffer, poseStack, cameraPos, data, mc, partialTick);
         }
     }
@@ -184,7 +174,11 @@ public class CombatDebugRenderer {
         
         float yawDegrees = 0.0f;
         if (soldierEntity != null) {
-            yawDegrees = soldierEntity.getViewYRot(partialTick);
+            if (soldierEntity instanceof net.minecraft.world.entity.LivingEntity living) {
+                yawDegrees = living.getYHeadRot();
+            } else {
+                yawDegrees = soldierEntity.getViewYRot(1.0f);
+            }
         }
         
         float yawRad = (float) Math.toRadians(yawDegrees);

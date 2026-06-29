@@ -21,8 +21,6 @@ public class CombatDebugCommand {
                     .executes(ctx -> setMode(ctx, CombatDebugRenderer.DEBUG_MODE_MINIMAL)))
                 .then(Commands.literal("verbose")
                     .executes(ctx -> setMode(ctx, CombatDebugRenderer.DEBUG_MODE_VERBOSE)))
-                .then(Commands.literal("arcs")
-                    .executes(ctx -> setMode(ctx, CombatDebugRenderer.DEBUG_MODE_ARCS)))
             )
             .then(Commands.literal("untargeted")
                 .executes(CombatDebugCommand::showUntargeted)

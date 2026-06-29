@@ -86,7 +86,13 @@ public class DetectionSystem {
             return 0;
         }
         
-        double distanceFactor = 1.0 - Math.pow(distance / maxRange, 2);
+        double distanceFactor;
+        if (distance <= 16.0) {
+            distanceFactor = 1.0 + (16.0 - distance) / 16.0;
+        } else {
+            distanceFactor = 1.0 - Math.pow((distance - 16.0) / (maxRange - 16.0), 2);
+        }
+        distanceFactor = Math.max(0, distanceFactor);
         double exposureFactor = ExposureCalculator.getExposureFactor(soldier, target);
         double movementFactor = getMovementFactor(target);
         double brightnessFactor = getBrightnessFactor(target);
@@ -115,11 +121,13 @@ public class DetectionSystem {
     }
     
     private double getMovementFactor(LivingEntity target) {
+        double speedSqr = target.getDeltaMovement().horizontalDistanceSqr();
+        
         if (target.isSprinting()) {
             return 1.5;
         } else if (target.isCrouching() || target.isShiftKeyDown()) {
             return 0.3;
-        } else if (target.getDeltaMovement().lengthSqr() > 0.01) {
+        } else if (speedSqr > 0.002) {
             return 1.0;
         } else {
             return 0.7;
@@ -128,7 +136,7 @@ public class DetectionSystem {
     
     private double getBrightnessFactor(LivingEntity target) {
         int lightLevel = target.level().getMaxLocalRawBrightness(target.blockPosition());
-        return lightLevel / 15.0;
+        return 0.3 + 0.7 * Math.sqrt(lightLevel / 15.0);
     }
     
     public boolean isTargetDetected(LivingEntity target) {
@@ -163,6 +171,13 @@ public class DetectionSystem {
     
     public void clear() {
         detectionStates.clear();
+    }
+    
+    public void forceDetect(LivingEntity target) {
+        DetectionState state = detectionStates.computeIfAbsent(target.getUUID(), id -> new DetectionState());
+        state.accumulatedPoints = DETECTION_THRESHOLD;
+        state.wasInLOSLastCheck = true;
+        state.ticksSinceLastSeen = 0;
     }
     
     public DetectionState getDetectionState(UUID targetId) {
@@ -220,11 +235,13 @@ public class DetectionSystem {
     }
     
     public static double computeMovementFactor(LivingEntity target) {
+        double speedSqr = target.getDeltaMovement().horizontalDistanceSqr();
+        
         if (target.isSprinting()) {
             return 1.5;
         } else if (target.isCrouching() || target.isShiftKeyDown()) {
             return 0.3;
-        } else if (target.getDeltaMovement().lengthSqr() > 0.01) {
+        } else if (speedSqr > 0.002) {
             return 1.0;
         } else {
             return 0.7;
@@ -233,6 +250,6 @@ public class DetectionSystem {
     
     public static double computeBrightnessFactor(LivingEntity target) {
         int lightLevel = target.level().getMaxLocalRawBrightness(target.blockPosition());
-        return lightLevel / 15.0;
+        return 0.3 + 0.7 * Math.sqrt(lightLevel / 15.0);
     }
 }

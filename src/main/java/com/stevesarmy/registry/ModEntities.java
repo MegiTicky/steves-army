@@ -2,6 +2,7 @@ package com.stevesarmy.registry;
 
 import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.entity.SoldierEntity;
+import com.stevesarmy.entity.TargetEntity;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.MobCategory;
 import net.minecraft.world.entity.ai.attributes.AttributeSupplier;
@@ -29,6 +30,15 @@ public class ModEntities {
             .build(StevesArmyMod.MODID + ":soldier")
     );
 
+    public static final RegistryObject<EntityType<TargetEntity>> TARGET = ENTITIES.register(
+        "target",
+        () -> EntityType.Builder.of(TargetEntity::new, MobCategory.MISC)
+            .sized(0.5F, 1.975F)
+            .clientTrackingRange(10)
+            .updateInterval(3)
+            .build(StevesArmyMod.MODID + ":target")
+    );
+
     @SubscribeEvent
     public static void registerAttributes(EntityAttributeCreationEvent event) {
         event.put(SOLDIER.get(), Monster.createMonsterAttributes()
@@ -38,6 +48,8 @@ public class ModEntities {
             .add(Attributes.ATTACK_DAMAGE, 3.0D)
             .add(Attributes.FOLLOW_RANGE, 32.0D)
             .build());
+        
+        event.put(TARGET.get(), TargetEntity.createAttributes().build());
     }
 
     public static void register(IEventBus eventBus) {
