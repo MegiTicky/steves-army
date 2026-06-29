@@ -32,6 +32,7 @@ public class GunIntegration {
     public static boolean hasGun(LivingEntity entity) { return gunHandler.hasGun(entity); }
     public static ShootResult shoot(LivingEntity shooter, LivingEntity target) { return gunHandler.shoot(shooter, target); }
     public static ShootResult shootWithDeviation(LivingEntity shooter, ExposureCalculator.AimPointResult aimPoint, float pitchDeviation, float yawDeviation) { return gunHandler.shootWithDeviation(shooter, aimPoint, pitchDeviation, yawDeviation); }
+    public static ShootResult shootAtPosition(LivingEntity shooter, Vec3 targetPosition) { return gunHandler.shootAtPosition(shooter, targetPosition); }
     public static void reload(LivingEntity entity) { gunHandler.reload(entity); }
     public static void bolt(LivingEntity entity) { gunHandler.bolt(entity); }
     public static void aim(LivingEntity entity, boolean isAiming) { gunHandler.aim(entity, isAiming); }
@@ -62,6 +63,7 @@ public class GunIntegration {
         boolean hasGun(LivingEntity entity);
         ShootResult shoot(LivingEntity shooter, LivingEntity target);
         ShootResult shootWithDeviation(LivingEntity shooter, ExposureCalculator.AimPointResult aimPoint, float pitchDeviation, float yawDeviation);
+        ShootResult shootAtPosition(LivingEntity shooter, Vec3 targetPosition);
         void reload(LivingEntity entity);
         void bolt(LivingEntity entity);
         void aim(LivingEntity entity, boolean isAiming);
@@ -87,6 +89,7 @@ public class GunIntegration {
         @Override public boolean hasGun(LivingEntity entity) { return false; }
         @Override public ShootResult shoot(LivingEntity shooter, LivingEntity target) { return ShootResult.NOT_GUN; }
         @Override public ShootResult shootWithDeviation(LivingEntity shooter, ExposureCalculator.AimPointResult aimPoint, float pitchDeviation, float yawDeviation) { return ShootResult.NOT_GUN; }
+        @Override public ShootResult shootAtPosition(LivingEntity shooter, Vec3 targetPosition) { return ShootResult.NOT_GUN; }
         @Override public void reload(LivingEntity entity) {}
         @Override public void bolt(LivingEntity entity) {}
         @Override public void aim(LivingEntity entity, boolean isAiming) {}
@@ -231,6 +234,36 @@ public class GunIntegration {
             } catch (Exception e) {
                 StevesArmyMod.LOGGER.warn("[TaCZ] Shoot with deviation failed: " + e.getMessage());
                 e.printStackTrace();
+                return ShootResult.UNKNOWN;
+            }
+        }
+
+        @Override
+        public ShootResult shootAtPosition(LivingEntity shooter, Vec3 targetPosition) {
+            if (!hasGun(shooter)) {
+                return ShootResult.NOT_GUN;
+            }
+
+            try {
+                Class<?> gunOperatorClass = Class.forName("com.tacz.guns.api.entity.IGunOperator");
+                Method fromLivingEntity = gunOperatorClass.getMethod("fromLivingEntity", LivingEntity.class);
+                Object gunOperator = fromLivingEntity.invoke(null, shooter);
+
+                double dx = targetPosition.x - shooter.getX();
+                double dy = targetPosition.y - shooter.getEyeY();
+                double dz = targetPosition.z - shooter.getZ();
+                double horizontalDist = Math.sqrt(dx * dx + dz * dz);
+                float pitch = (float) -Math.toDegrees(Math.atan2(dy, horizontalDist));
+                float yaw = (float) Math.toDegrees(Math.atan2(dz, dx)) - 90.0F;
+
+                Method shootMethod = gunOperatorClass.getMethod("shoot", java.util.function.Supplier.class, java.util.function.Supplier.class);
+                Object result = shootMethod.invoke(gunOperator, 
+                    (java.util.function.Supplier<Float>) () -> pitch, 
+                    (java.util.function.Supplier<Float>) () -> yaw);
+                
+                return mapShootResult(result.toString());
+            } catch (Exception e) {
+                StevesArmyMod.LOGGER.warn("[TaCZ] shootAtPosition failed: " + e.getMessage());
                 return ShootResult.UNKNOWN;
             }
         }

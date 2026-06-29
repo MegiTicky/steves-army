@@ -315,14 +315,14 @@ public class SoldierCombatGoal extends Goal {
             }
         }
         
-        double distance = soldier.distanceTo(target);
-        float maxDeviation = AimAccuracyManager.calculateMaxDeviation(currentAccuracy, distance);
-        float shotDeviationYaw = (soldier.getRandom().nextFloat() - 0.5f) * maxDeviation;
-        float shotDeviationPitch = (soldier.getRandom().nextFloat() - 0.5f) * maxDeviation;
+        GunIntegration.ShootResult result;
         
-        GunIntegration.ShootResult result = GunIntegration.shootWithDeviation(
-            soldier, currentAimPoint, shotDeviationPitch, shotDeviationYaw
-        );
+        if (AimAccuracyManager.rollHit(currentAccuracy, soldier.level())) {
+            result = GunIntegration.shootWithDeviation(soldier, currentAimPoint, 0.0f, 0.0f);
+        } else {
+            Vec3 missPosition = AimAccuracyManager.calculateMissPosition(target, soldier.level());
+            result = GunIntegration.shootAtPosition(soldier, missPosition);
+        }
         
         switch (result) {
             case SUCCESS -> {}

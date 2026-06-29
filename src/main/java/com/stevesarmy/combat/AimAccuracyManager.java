@@ -3,6 +3,8 @@ package com.stevesarmy.combat;
 import com.stevesarmy.StevesArmyConfig;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.phys.Vec3;
 
 public class AimAccuracyManager {
     
@@ -47,10 +49,21 @@ public class AimAccuracyManager {
         return trackingProgress * accuracy;
     }
     
-    public static float calculateMaxDeviation(float accuracy, double distance) {
-        float baseDeviation = (1.0f - accuracy) * 5.0f;
-        double distanceFactor = Math.max(1.0, distance / 10.0);
-        return (float) (baseDeviation * distanceFactor);
+    public static boolean rollHit(float accuracy, net.minecraft.world.level.Level level) {
+        float roll = level.getRandom().nextFloat();
+        return roll <= accuracy;
+    }
+    
+    public static Vec3 calculateMissPosition(LivingEntity target, net.minecraft.world.level.Level level) {
+        float missOffsetDistance = 2.0f + level.getRandom().nextFloat() * 3.0f;
+        float missAngleRadians = level.getRandom().nextFloat() * (float) (2 * Math.PI);
+        float verticalOffset = level.getRandom().nextFloat() * 2.0f;
+        
+        return target.position().add(
+            Math.cos(missAngleRadians) * missOffsetDistance,
+            verticalOffset,
+            Math.sin(missAngleRadians) * missOffsetDistance
+        );
     }
     
     private static float calculateDistanceTrackingFactor(double distance, double effectiveRange) {
