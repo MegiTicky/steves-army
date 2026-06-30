@@ -8,6 +8,7 @@ import com.stevesarmy.combat.ExposureCalculator;
 import com.stevesarmy.combat.GunIntegration;
 import com.stevesarmy.combat.TargetAcquisition;
 import com.stevesarmy.combat.ThreatTracker;
+import com.stevesarmy.combat.cover.CoverBehaviorManager;
 import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.entity.TargetEntity;
 import com.stevesarmy.network.NetworkHandler;
@@ -241,6 +242,29 @@ public class SoldierCombatGoal extends Goal {
     }
 
     private void tickGunCombat() {
+        CoverBehaviorManager coverManager = soldier.getCoverBehaviorManager();
+        
+        if (coverManager.isInCover()) {
+            if (coverManager.isPinned()) {
+                GunIntegration.aim(soldier, false);
+                GunIntegration.crawl(soldier, true);
+                return;
+            }
+            
+            if (!coverManager.getSuppressionTracker().canPeek()) {
+                GunIntegration.aim(soldier, false);
+                return;
+            }
+            
+            long timeSincePeek = System.currentTimeMillis() - coverManager.getLastPeekTime();
+            if (timeSincePeek < 2000) {
+                GunIntegration.aim(soldier, false);
+                return;
+            }
+            
+            GunIntegration.crawl(soldier, false);
+        }
+        
         boolean isDrawing = GunIntegration.isDrawing(soldier);
         boolean isBolting = GunIntegration.isBolting(soldier);
         boolean isReloading = GunIntegration.isReloading(soldier);
@@ -322,6 +346,12 @@ public class SoldierCombatGoal extends Goal {
         } else {
             Vec3 missPosition = AimAccuracyManager.calculateMissPosition(target, soldier.level());
             result = GunIntegration.shootAtPosition(soldier, missPosition);
+        }
+        
+        if (result == GunIntegration.ShootResult.SUCCESS) {
+            if (coverManager.isInCover()) {
+                coverManager.onPeekShot();
+            }
         }
         
         switch (result) {

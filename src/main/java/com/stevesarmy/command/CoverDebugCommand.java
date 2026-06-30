@@ -11,7 +11,7 @@ import com.stevesarmy.combat.cover.CoverReservationManager;
 import com.stevesarmy.combat.cover.ThreatDirectionCalculator;
 import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.entity.TargetEntity;
-import com.stevesarmy.entity.ai.SeekCoverGoal;
+import com.stevesarmy.entity.ai.CoverTacticalGoal;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.commands.arguments.EntityArgument;
@@ -549,8 +549,8 @@ public class CoverDebugCommand {
     }
     
     private static int toggleLogging(CommandContext<CommandSourceStack> context) {
-        boolean enabled = !SeekCoverGoal.isDebugLoggingEnabled();
-        SeekCoverGoal.setDebugLogging(enabled);
+        boolean enabled = !CoverTacticalGoal.isDebugLoggingEnabled();
+        CoverTacticalGoal.setDebugLogging(enabled);
         context.getSource().sendSuccess(() -> Component.literal(
             "Cover behavior logging: " + (enabled ? "ON" : "OFF") +
             "\nUse /stevesarmy_cover log on|off to set explicitly"
@@ -559,7 +559,7 @@ public class CoverDebugCommand {
     }
     
     private static int enableLogging(CommandContext<CommandSourceStack> context) {
-        SeekCoverGoal.setDebugLogging(true);
+        CoverTacticalGoal.setDebugLogging(true);
         context.getSource().sendSuccess(() -> Component.literal(
             "Cover behavior logging: ON\n" +
             "Logs will show cover selection, switching, and hysteresis decisions"
@@ -568,7 +568,7 @@ public class CoverDebugCommand {
     }
     
     private static int disableLogging(CommandContext<CommandSourceStack> context) {
-        SeekCoverGoal.setDebugLogging(false);
+        CoverTacticalGoal.setDebugLogging(false);
         context.getSource().sendSuccess(() -> Component.literal("Cover behavior logging: OFF"), true);
         return 1;
     }

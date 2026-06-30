@@ -9,7 +9,7 @@ import com.stevesarmy.entity.ai.SoldierFollowOwnerGoal;
 import com.stevesarmy.entity.ai.SoldierHoldPositionGoal;
 import com.stevesarmy.entity.ai.SoldierMoveToPingGoal;
 import com.stevesarmy.entity.ai.SoldierStrollGoal;
-import com.stevesarmy.entity.ai.SeekCoverGoal;
+import com.stevesarmy.entity.ai.CoverTacticalGoal;
 import com.stevesarmy.inventory.SoldierInventory;
 import com.stevesarmy.inventory.SoldierInventoryHandler;
 import com.stevesarmy.network.NetworkHandler;
@@ -138,7 +138,7 @@ public class SoldierEntity extends PathfinderMob implements Container {
         
         this.goalSelector.addGoal(0, new FloatGoal(this));
         this.goalSelector.addGoal(1, new SoldierMoveToPingGoal(this));
-        this.goalSelector.addGoal(2, new SeekCoverGoal(this));
+        this.goalSelector.addGoal(2, new CoverTacticalGoal(this));
         this.goalSelector.addGoal(3, new SoldierFollowOwnerGoal(this));
         this.goalSelector.addGoal(3, new SoldierHoldPositionGoal(this));
         this.goalSelector.addGoal(4, combatGoal);
@@ -378,10 +378,6 @@ public class SoldierEntity extends PathfinderMob implements Container {
     @Override
     public void tick() {
         super.tick();
-        
-        if (!this.level().isClientSide && coverBehaviorManager != null) {
-            coverBehaviorManager.tick(this);
-        }
     }
     
     @Override
