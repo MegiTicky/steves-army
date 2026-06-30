@@ -52,6 +52,8 @@ public class GunIntegration {
     public static boolean useInventoryAmmo(LivingEntity entity) { return gunHandler.useInventoryAmmo(entity); }
     public static String getGunId(LivingEntity entity) { return gunHandler.getGunId(entity); }
     public static String getAmmoId(LivingEntity entity) { return gunHandler.getAmmoId(entity); }
+    public static void crawl(LivingEntity entity, boolean isCrawl) { gunHandler.crawl(entity, isCrawl); }
+    public static boolean isCrawling(LivingEntity entity) { return gunHandler.isCrawling(entity); }
 
     public enum ShootResult {
         SUCCESS, NO_AMMO, COOLDOWN, NOT_GUN, NO_TARGET, OUT_OF_RANGE,
@@ -83,6 +85,8 @@ public class GunIntegration {
         boolean useInventoryAmmo(LivingEntity entity);
         String getGunId(LivingEntity entity);
         String getAmmoId(LivingEntity entity);
+        void crawl(LivingEntity entity, boolean isCrawl);
+        boolean isCrawling(LivingEntity entity);
     }
 
     private static class FallbackGunHandler implements GunHandler {
@@ -109,6 +113,8 @@ public class GunIntegration {
         @Override public boolean useInventoryAmmo(LivingEntity entity) { return false; }
         @Override public String getGunId(LivingEntity entity) { return ""; }
         @Override public String getAmmoId(LivingEntity entity) { return ""; }
+        @Override public void crawl(LivingEntity entity, boolean isCrawl) {}
+        @Override public boolean isCrawling(LivingEntity entity) { return false; }
     }
 
     private static class ReflectionGunHandler implements GunHandler {
@@ -689,6 +695,29 @@ public class GunIntegration {
             } catch (Exception e) {
             }
             return "";
+        }
+        
+        @Override
+        public void crawl(LivingEntity entity, boolean isCrawl) {
+            try {
+                Class<?> gunOperatorClass = Class.forName("com.tacz.guns.api.entity.IGunOperator");
+                Method fromLivingEntity = gunOperatorClass.getMethod("fromLivingEntity", LivingEntity.class);
+                Object gunOperator = fromLivingEntity.invoke(null, entity);
+                
+                Method crawlMethod = gunOperatorClass.getMethod("crawl", boolean.class);
+                crawlMethod.invoke(gunOperator, isCrawl);
+                
+                if (isCrawl) {
+                    entity.setPose(net.minecraft.world.entity.Pose.SWIMMING);
+                }
+            } catch (Exception e) {
+                StevesArmyMod.LOGGER.debug("[TaCZ] Failed to set crawl state: " + e.getMessage());
+            }
+        }
+        
+        @Override
+        public boolean isCrawling(LivingEntity entity) {
+            return !entity.isSwimming() && entity.getPose() == net.minecraft.world.entity.Pose.SWIMMING;
         }
     }
 }

@@ -210,6 +210,7 @@ public class PingClientEvents {
         
         if (event.getStage() == RenderLevelStageEvent.Stage.AFTER_TRANSLUCENT_BLOCKS) {
             CombatDebugRenderer.render(event.getPoseStack(), event.getCamera(), event.getPartialTick());
+            CoverDebugRenderer.render(event.getPoseStack(), event.getCamera());
         }
     }
     

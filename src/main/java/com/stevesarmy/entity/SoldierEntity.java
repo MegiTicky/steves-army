@@ -3,11 +3,13 @@ package com.stevesarmy.entity;
 import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.combat.CombatDebugData;
 import com.stevesarmy.combat.GunIntegration;
+import com.stevesarmy.combat.cover.CoverBehaviorManager;
 import com.stevesarmy.entity.ai.SoldierCombatGoal;
 import com.stevesarmy.entity.ai.SoldierFollowOwnerGoal;
 import com.stevesarmy.entity.ai.SoldierHoldPositionGoal;
 import com.stevesarmy.entity.ai.SoldierMoveToPingGoal;
 import com.stevesarmy.entity.ai.SoldierStrollGoal;
+import com.stevesarmy.entity.ai.SeekCoverGoal;
 import com.stevesarmy.inventory.SoldierInventory;
 import com.stevesarmy.inventory.SoldierInventoryHandler;
 import com.stevesarmy.network.NetworkHandler;
@@ -36,6 +38,7 @@ import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.LevelAccessor;
+import net.minecraft.world.damagesource.DamageSource;
 import net.minecraftforge.common.capabilities.Capability;
 import net.minecraftforge.common.capabilities.ForgeCapabilities;
 import net.minecraftforge.common.util.LazyOptional;
@@ -78,6 +81,7 @@ public class SoldierEntity extends PathfinderMob implements Container {
     private final LazyOptional<IItemHandler> itemHandlerCap;
     
     private SoldierCombatGoal combatGoal;
+    private CoverBehaviorManager coverBehaviorManager;
     
     private BlockPos pingMoveTarget = null;
     private long pingMoveTimestamp = 0;
@@ -97,6 +101,7 @@ public class SoldierEntity extends PathfinderMob implements Container {
         this.inventory = new SoldierInventory();
         this.inventoryHandler = new SoldierInventoryHandler(inventory);
         this.itemHandlerCap = LazyOptional.of(() -> inventoryHandler);
+        this.coverBehaviorManager = new CoverBehaviorManager();
         this.inventory.setSlot0ChangedCallback(stack -> {
             if (!this.level().isClientSide) {
                 if (GunIntegration.isTaczLoaded() && GunIntegration.isReloading(this)) {
@@ -133,12 +138,13 @@ public class SoldierEntity extends PathfinderMob implements Container {
         
         this.goalSelector.addGoal(0, new FloatGoal(this));
         this.goalSelector.addGoal(1, new SoldierMoveToPingGoal(this));
-        this.goalSelector.addGoal(2, new SoldierFollowOwnerGoal(this));
-        this.goalSelector.addGoal(2, new SoldierHoldPositionGoal(this));
-        this.goalSelector.addGoal(3, combatGoal);
-        this.goalSelector.addGoal(4, new SoldierStrollGoal(this, 0.8D));
-        this.goalSelector.addGoal(5, new LookAtPlayerGoal(this, Player.class, 8.0F));
-        this.goalSelector.addGoal(6, new RandomLookAroundGoal(this));
+        this.goalSelector.addGoal(2, new SeekCoverGoal(this));
+        this.goalSelector.addGoal(3, new SoldierFollowOwnerGoal(this));
+        this.goalSelector.addGoal(3, new SoldierHoldPositionGoal(this));
+        this.goalSelector.addGoal(4, combatGoal);
+        this.goalSelector.addGoal(5, new SoldierStrollGoal(this, 0.8D));
+        this.goalSelector.addGoal(6, new LookAtPlayerGoal(this, Player.class, 8.0F));
+        this.goalSelector.addGoal(7, new RandomLookAroundGoal(this));
     }
 
     @Override
@@ -372,6 +378,25 @@ public class SoldierEntity extends PathfinderMob implements Container {
     @Override
     public void tick() {
         super.tick();
+        
+        if (!this.level().isClientSide && coverBehaviorManager != null) {
+            coverBehaviorManager.tick(this);
+        }
+    }
+    
+    @Override
+    public boolean hurt(DamageSource source, float amount) {
+        boolean result = super.hurt(source, amount);
+        
+        if (result && !this.level().isClientSide && coverBehaviorManager != null) {
+            coverBehaviorManager.onTakeDamage();
+            
+            if (source.getEntity() instanceof LivingEntity attacker) {
+                coverBehaviorManager.onIncomingFire(attacker);
+            }
+        }
+        
+        return result;
     }
 
     @Nonnull
@@ -474,6 +499,10 @@ public class SoldierEntity extends PathfinderMob implements Container {
     
     public SoldierCombatGoal getCombatGoal() {
         return combatGoal;
+    }
+    
+    public CoverBehaviorManager getCoverBehaviorManager() {
+        return coverBehaviorManager;
     }
     
     public void updateDebugData(float detectionPoints, boolean isDetected, float distance, boolean hasLOS, boolean inFocused) {
