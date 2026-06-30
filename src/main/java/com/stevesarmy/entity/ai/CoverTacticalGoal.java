@@ -21,7 +21,6 @@ import java.util.Optional;
 public class CoverTacticalGoal extends Goal {
     private final SoldierEntity soldier;
     private final PathNavigation navigation;
-    private final CoverBehaviorManager coverManager;
     
     private int cooldown = 0;
     private int stuckTicks = 0;
@@ -63,8 +62,11 @@ public class CoverTacticalGoal extends Goal {
     public CoverTacticalGoal(SoldierEntity soldier) {
         this.soldier = soldier;
         this.navigation = soldier.getNavigation();
-        this.coverManager = soldier.getCoverBehaviorManager();
         this.setFlags(EnumSet.of(Flag.MOVE, Flag.LOOK));
+    }
+    
+    private CoverBehaviorManager getCoverManager() {
+        return soldier.getCoverBehaviorManager();
     }
     
     @Override
@@ -78,9 +80,9 @@ public class CoverTacticalGoal extends Goal {
             return false;
         }
         
-        coverManager.tickSuppression(coverManager.isInCover());
+        getCoverManager().tickSuppression(getCoverManager().isInCover());
         
-        CoverBehaviorManager.CoverState state = coverManager.getState();
+        CoverBehaviorManager.CoverState state = getCoverManager().getState();
         
         switch (state) {
             case NO_COVER:
@@ -102,7 +104,7 @@ public class CoverTacticalGoal extends Goal {
     public boolean canContinueToUse() {
         if (!soldier.isAlive()) return false;
         
-        CoverBehaviorManager.CoverState state = coverManager.getState();
+        CoverBehaviorManager.CoverState state = getCoverManager().getState();
         
         return state == CoverBehaviorManager.CoverState.SEEKING_COVER ||
                state == CoverBehaviorManager.CoverState.IN_COVER ||
@@ -115,17 +117,17 @@ public class CoverTacticalGoal extends Goal {
         stuckTicks = 0;
         reevaluateCounter = 0;
         
-        CoverBehaviorManager.CoverState state = coverManager.getState();
+        CoverBehaviorManager.CoverState state = getCoverManager().getState();
         
         if (state == CoverBehaviorManager.CoverState.NO_COVER) {
-            coverManager.setState(CoverBehaviorManager.CoverState.SEEKING_COVER);
+            getCoverManager().setState(CoverBehaviorManager.CoverState.SEEKING_COVER);
             findAndMoveToCover();
         } else if (state == CoverBehaviorManager.CoverState.SEEKING_COVER || 
                    state == CoverBehaviorManager.CoverState.REPOSITIONING) {
-            if (coverManager.getTargetCover() == null) {
+            if (getCoverManager().getTargetCover() == null) {
                 findAndMoveToCover();
             } else {
-                moveToCover(coverManager.getTargetCover());
+                moveToCover(getCoverManager().getTargetCover());
             }
         }
         
@@ -134,11 +136,11 @@ public class CoverTacticalGoal extends Goal {
     
     @Override
     public void stop() {
-        CoverBehaviorManager.CoverState state = coverManager.getState();
+        CoverBehaviorManager.CoverState state = getCoverManager().getState();
         
         if (state == CoverBehaviorManager.CoverState.SEEKING_COVER ||
             state == CoverBehaviorManager.CoverState.REPOSITIONING) {
-            coverManager.clearTargetCover();
+            getCoverManager().clearTargetCover();
         }
         
         cooldown = COOLDOWN_TICKS;
@@ -147,8 +149,8 @@ public class CoverTacticalGoal extends Goal {
     
     @Override
     public void tick() {
-        CoverBehaviorManager.CoverState state = coverManager.getState();
-        coverManager.tickSuppression(coverManager.isInCover());
+        CoverBehaviorManager.CoverState state = getCoverManager().getState();
+        getCoverManager().tickSuppression(getCoverManager().isInCover());
         
         switch (state) {
             case SEEKING_COVER:
@@ -169,7 +171,7 @@ public class CoverTacticalGoal extends Goal {
     }
     
     private void tickSeekingCover() {
-        CoverPoint targetCover = coverManager.getTargetCover();
+        CoverPoint targetCover = getCoverManager().getTargetCover();
         
         if (targetCover == null) {
             findAndMoveToCover();
@@ -189,7 +191,7 @@ public class CoverTacticalGoal extends Goal {
                 if (debugLoggingEnabled) {
                     StevesArmyMod.LOGGER.info("[CoverTacticalGoal] Soldier {} stuck, re-seeking", soldier.getId());
                 }
-                coverManager.clearTargetCover();
+                getCoverManager().clearTargetCover();
                 stuckTicks = 0;
                 findAndMoveToCover();
             }
@@ -197,29 +199,29 @@ public class CoverTacticalGoal extends Goal {
             stuckTicks = 0;
         }
         
-        if (coverManager.getTimeSeeking() > MAX_SEEKING_TIME_MS) {
+        if (getCoverManager().getTimeSeeking() > MAX_SEEKING_TIME_MS) {
             if (debugLoggingEnabled) {
                 StevesArmyMod.LOGGER.info("[CoverTacticalGoal] Soldier {} seeking timeout", soldier.getId());
             }
-            coverManager.clearTargetCover();
-            coverManager.setState(CoverBehaviorManager.CoverState.NO_COVER);
+            getCoverManager().clearTargetCover();
+            getCoverManager().setState(CoverBehaviorManager.CoverState.NO_COVER);
         }
     }
     
     private void tickRepositioning() {
-        CoverPoint targetCover = coverManager.getTargetCover();
+        CoverPoint targetCover = getCoverManager().getTargetCover();
         
         if (targetCover == null) {
-            coverManager.setState(CoverBehaviorManager.CoverState.IN_COVER);
+            getCoverManager().setState(CoverBehaviorManager.CoverState.IN_COVER);
             return;
         }
         
         double distance = soldier.position().distanceTo(targetCover.getPosition().getCenter());
         
         if (distance < COVER_REACHED_DISTANCE) {
-            coverManager.setCurrentCover(targetCover);
-            coverManager.clearTargetCover();
-            coverManager.setState(CoverBehaviorManager.CoverState.IN_COVER);
+            getCoverManager().setCurrentCover(targetCover);
+            getCoverManager().clearTargetCover();
+            getCoverManager().setState(CoverBehaviorManager.CoverState.IN_COVER);
             
             if (debugLoggingEnabled) {
                 StevesArmyMod.LOGGER.info("[CoverTacticalGoal] Soldier {} repositioned to {}", 
@@ -231,8 +233,8 @@ public class CoverTacticalGoal extends Goal {
         if (navigation.isDone()) {
             stuckTicks++;
             if (stuckTicks > MAX_STUCK_TICKS) {
-                coverManager.clearTargetCover();
-                coverManager.setState(CoverBehaviorManager.CoverState.IN_COVER);
+                getCoverManager().clearTargetCover();
+                getCoverManager().setState(CoverBehaviorManager.CoverState.IN_COVER);
                 stuckTicks = 0;
             }
         } else {
@@ -250,13 +252,13 @@ public class CoverTacticalGoal extends Goal {
             evaluateCoverState();
         }
         
-        if (coverManager.isSuppressed()) {
-            coverManager.setState(CoverBehaviorManager.CoverState.SUPPRESSED_IN_COVER);
+        if (getCoverManager().isSuppressed()) {
+            getCoverManager().setState(CoverBehaviorManager.CoverState.SUPPRESSED_IN_COVER);
             return;
         }
         
         if (shouldExitCoverForFollow()) {
-            coverManager.clearCover();
+            getCoverManager().clearCover();
             return;
         }
         
@@ -268,12 +270,12 @@ public class CoverTacticalGoal extends Goal {
     private void tickSuppressedInCover() {
         setFlags(EnumSet.of(Flag.LOOK));
         
-        if (!coverManager.isPinned() && coverManager.getSuppressionTracker().canPeek()) {
-            coverManager.setState(CoverBehaviorManager.CoverState.IN_COVER);
+        if (!getCoverManager().isPinned() && getCoverManager().getSuppressionTracker().canPeek()) {
+            getCoverManager().setState(CoverBehaviorManager.CoverState.IN_COVER);
         }
         
-        if (shouldExitCoverForFollow() && !coverManager.isSuppressed()) {
-            coverManager.clearCover();
+        if (shouldExitCoverForFollow() && !getCoverManager().isSuppressed()) {
+            getCoverManager().clearCover();
         }
     }
     
@@ -283,12 +285,12 @@ public class CoverTacticalGoal extends Goal {
         }
         
         if (soldier.getSquadMode() == SquadMode.FOLLOW) {
-            if (!coverManager.isSuppressed() && soldier.getHealth() / soldier.getMaxHealth() >= LOW_HEALTH_THRESHOLD) {
+            if (!getCoverManager().isSuppressed() && soldier.getHealth() / soldier.getMaxHealth() >= LOW_HEALTH_THRESHOLD) {
                 return false;
             }
         }
         
-        if (coverManager.isSuppressed()) {
+        if (getCoverManager().isSuppressed()) {
             return true;
         }
         
@@ -301,7 +303,7 @@ public class CoverTacticalGoal extends Goal {
     }
     
     private boolean shouldContinueInCover() {
-        if (coverManager.getTimeInCover() < MIN_COVER_DWELL_TIME_MS) {
+        if (getCoverManager().getTimeInCover() < MIN_COVER_DWELL_TIME_MS) {
             return true;
         }
         
@@ -309,7 +311,7 @@ public class CoverTacticalGoal extends Goal {
             return shouldSeekCover();
         }
         
-        if (coverManager.isSuppressed()) {
+        if (getCoverManager().isSuppressed()) {
             return true;
         }
         
@@ -317,7 +319,7 @@ public class CoverTacticalGoal extends Goal {
     }
     
     private boolean isCoverStillValid() {
-        CoverPoint currentCover = coverManager.getCurrentCover();
+        CoverPoint currentCover = getCoverManager().getCurrentCover();
         if (currentCover == null) {
             return false;
         }
@@ -330,7 +332,7 @@ public class CoverTacticalGoal extends Goal {
             return false;
         }
         
-        if (distance > maxDistance && coverManager.getTimeInCover() >= MIN_COVER_DWELL_TIME_MS) {
+        if (distance > maxDistance && getCoverManager().getTimeInCover() >= MIN_COVER_DWELL_TIME_MS) {
             return false;
         }
         
@@ -338,9 +340,9 @@ public class CoverTacticalGoal extends Goal {
     }
     
     private void evaluateCoverState() {
-        CoverPoint currentCover = coverManager.getCurrentCover();
+        CoverPoint currentCover = getCoverManager().getCurrentCover();
         if (currentCover == null) {
-            coverManager.setState(CoverBehaviorManager.CoverState.SEEKING_COVER);
+            getCoverManager().setState(CoverBehaviorManager.CoverState.SEEKING_COVER);
             return;
         }
         
@@ -356,7 +358,7 @@ public class CoverTacticalGoal extends Goal {
         Optional<CoverPoint> betterCover = findBetterCover();
         if (betterCover.isPresent()) {
             CoverPoint newCover = betterCover.get();
-            float currentScore = currentCover.getQuality() * (1.0f - coverManager.getCoverQualityPenalty());
+            float currentScore = currentCover.getQuality() * (1.0f - getCoverManager().getCoverQualityPenalty());
             float newScore = newCover.getQuality();
             
             if (newScore > currentScore * (1.0f + HYSTERESIS_THRESHOLD)) {
@@ -371,19 +373,19 @@ public class CoverTacticalGoal extends Goal {
     
     private void startRepositioning() {
         findAndMoveToCover();
-        if (coverManager.getTargetCover() != null) {
-            coverManager.setState(CoverBehaviorManager.CoverState.REPOSITIONING);
+        if (getCoverManager().getTargetCover() != null) {
+            getCoverManager().setState(CoverBehaviorManager.CoverState.REPOSITIONING);
         } else {
-            coverManager.setState(CoverBehaviorManager.CoverState.SEEKING_COVER);
+            getCoverManager().setState(CoverBehaviorManager.CoverState.SEEKING_COVER);
         }
     }
     
     private void startRepositioning(CoverPoint newCover) {
-        coverManager.clearTargetCover();
+        getCoverManager().clearTargetCover();
         
         if (CoverReservationManager.reserve(newCover.getPosition(), soldier)) {
-            coverManager.setTargetCover(newCover);
-            coverManager.setState(CoverBehaviorManager.CoverState.REPOSITIONING);
+            getCoverManager().setTargetCover(newCover);
+            getCoverManager().setState(CoverBehaviorManager.CoverState.REPOSITIONING);
             moveToCover(newCover);
         }
     }
@@ -393,7 +395,7 @@ public class CoverTacticalGoal extends Goal {
             return false;
         }
         
-        if (coverManager.isSuppressed()) {
+        if (getCoverManager().isSuppressed()) {
             return false;
         }
         
@@ -402,7 +404,7 @@ public class CoverTacticalGoal extends Goal {
             return false;
         }
         
-        if (coverManager.getTimeInCover() < MIN_COVER_DWELL_TIME_MS) {
+        if (getCoverManager().getTimeInCover() < MIN_COVER_DWELL_TIME_MS) {
             return false;
         }
         
@@ -426,15 +428,15 @@ public class CoverTacticalGoal extends Goal {
     }
     
     private boolean canPeekAndShoot() {
-        if (coverManager.isPinned()) {
+        if (getCoverManager().isPinned()) {
             return false;
         }
         
-        if (!coverManager.getSuppressionTracker().canPeek()) {
+        if (!getCoverManager().getSuppressionTracker().canPeek()) {
             return false;
         }
         
-        long timeSincePeek = System.currentTimeMillis() - coverManager.getLastPeekTime();
+        long timeSincePeek = System.currentTimeMillis() - getCoverManager().getLastPeekTime();
         return timeSincePeek > MIN_PEEK_INTERVAL_MS;
     }
     
@@ -443,7 +445,7 @@ public class CoverTacticalGoal extends Goal {
         CoverFinder finder = new CoverFinder(level);
         
         List<LivingEntity> threats = getThreats();
-        ThreatDirectionCalculator.ThreatAnalysis analysis = coverManager.analyzeThreats(soldier, threats);
+        ThreatDirectionCalculator.ThreatAnalysis analysis = getCoverManager().analyzeThreats(soldier, threats);
         
         int searchRadius = SEARCH_RADIUS;
         BlockPos searchCenter = soldier.blockPosition();
@@ -454,7 +456,7 @@ public class CoverTacticalGoal extends Goal {
                 searchCenter = owner.blockPosition();
                 searchRadius = (int) FOLLOW_COVER_SEARCH_RADIUS;
                 
-                if (coverManager.isSuppressed()) {
+                if (getCoverManager().isSuppressed()) {
                     searchRadius = SEARCH_RADIUS;
                     searchCenter = soldier.blockPosition();
                 }
@@ -479,7 +481,7 @@ public class CoverTacticalGoal extends Goal {
         if (bestCover.isPresent()) {
             CoverPoint cover = bestCover.get();
             
-            CoverPoint lastCover = coverManager.getLastCover();
+            CoverPoint lastCover = getCoverManager().getLastCover();
             if (lastCover != null) {
                 if (cover.getPosition().equals(lastCover.getPosition())) {
                     if (debugLoggingEnabled) {
@@ -490,10 +492,10 @@ public class CoverTacticalGoal extends Goal {
                 }
             }
             
-            coverManager.clearCoverQualityPenalty();
+            getCoverManager().clearCoverQualityPenalty();
             
             if (CoverReservationManager.reserve(cover.getPosition(), soldier)) {
-                coverManager.setTargetCover(cover);
+                getCoverManager().setTargetCover(cover);
                 moveToCover(cover);
                 
                 if (debugLoggingEnabled) {
@@ -514,7 +516,7 @@ public class CoverTacticalGoal extends Goal {
         CoverFinder finder = new CoverFinder(level);
         
         List<LivingEntity> threats = getThreats();
-        ThreatDirectionCalculator.ThreatAnalysis analysis = coverManager.analyzeThreats(soldier, threats);
+        ThreatDirectionCalculator.ThreatAnalysis analysis = getCoverManager().analyzeThreats(soldier, threats);
         
         Optional<CoverPoint> bestCover = finder.findBestCover(
             soldier,
@@ -536,13 +538,13 @@ public class CoverTacticalGoal extends Goal {
     }
     
     private void onCoverReached(CoverPoint cover) {
-        coverManager.setCurrentCover(cover);
-        coverManager.clearTargetCover();
+        getCoverManager().setCurrentCover(cover);
+        getCoverManager().clearTargetCover();
         
-        if (coverManager.isPinned()) {
-            coverManager.setState(CoverBehaviorManager.CoverState.SUPPRESSED_IN_COVER);
+        if (getCoverManager().isPinned()) {
+            getCoverManager().setState(CoverBehaviorManager.CoverState.SUPPRESSED_IN_COVER);
         } else {
-            coverManager.setState(CoverBehaviorManager.CoverState.IN_COVER);
+            getCoverManager().setState(CoverBehaviorManager.CoverState.IN_COVER);
         }
         
         if (debugLoggingEnabled) {
