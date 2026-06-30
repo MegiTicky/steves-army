@@ -90,7 +90,6 @@ public class CoverTacticalGoal extends Goal {
             case SEEKING_COVER:
                 return true;
             case IN_COVER:
-                return shouldContinueInCover();
             case SUPPRESSED_IN_COVER:
                 return true;
             case REPOSITIONING:
@@ -106,10 +105,7 @@ public class CoverTacticalGoal extends Goal {
         
         CoverBehaviorManager.CoverState state = getCoverManager().getState();
         
-        return state == CoverBehaviorManager.CoverState.SEEKING_COVER ||
-               state == CoverBehaviorManager.CoverState.IN_COVER ||
-               state == CoverBehaviorManager.CoverState.SUPPRESSED_IN_COVER ||
-               state == CoverBehaviorManager.CoverState.REPOSITIONING;
+        return state != CoverBehaviorManager.CoverState.NO_COVER;
     }
     
     @Override
@@ -122,6 +118,7 @@ public class CoverTacticalGoal extends Goal {
         if (state == CoverBehaviorManager.CoverState.NO_COVER) {
             getCoverManager().setState(CoverBehaviorManager.CoverState.SEEKING_COVER);
             findAndMoveToCover();
+            setFlags(EnumSet.of(Flag.MOVE, Flag.LOOK));
         } else if (state == CoverBehaviorManager.CoverState.SEEKING_COVER || 
                    state == CoverBehaviorManager.CoverState.REPOSITIONING) {
             if (getCoverManager().getTargetCover() == null) {
@@ -129,9 +126,11 @@ public class CoverTacticalGoal extends Goal {
             } else {
                 moveToCover(getCoverManager().getTargetCover());
             }
+            setFlags(EnumSet.of(Flag.MOVE, Flag.LOOK));
+        } else if (state == CoverBehaviorManager.CoverState.IN_COVER ||
+                   state == CoverBehaviorManager.CoverState.SUPPRESSED_IN_COVER) {
+            setFlags(EnumSet.noneOf(Flag.class));
         }
-        
-        setFlags(EnumSet.of(Flag.MOVE, Flag.LOOK));
     }
     
     @Override
@@ -154,15 +153,19 @@ public class CoverTacticalGoal extends Goal {
         
         switch (state) {
             case SEEKING_COVER:
+                setFlags(EnumSet.of(Flag.MOVE, Flag.LOOK));
                 tickSeekingCover();
                 break;
             case REPOSITIONING:
+                setFlags(EnumSet.of(Flag.MOVE, Flag.LOOK));
                 tickRepositioning();
                 break;
             case IN_COVER:
+                setFlags(EnumSet.noneOf(Flag.class));
                 tickInCover();
                 break;
             case SUPPRESSED_IN_COVER:
+                setFlags(EnumSet.noneOf(Flag.class));
                 tickSuppressedInCover();
                 break;
             case NO_COVER:
@@ -210,8 +213,23 @@ public class CoverTacticalGoal extends Goal {
     
     private void tickRepositioning() {
         CoverPoint targetCover = getCoverManager().getTargetCover();
+        CoverPoint currentCover = getCoverManager().getCurrentCover();
         
         if (targetCover == null) {
+            if (currentCover != null) {
+                getCoverManager().setState(CoverBehaviorManager.CoverState.IN_COVER);
+            } else {
+                getCoverManager().setState(CoverBehaviorManager.CoverState.SEEKING_COVER);
+            }
+            return;
+        }
+        
+        if (currentCover != null && targetCover.getPosition().equals(currentCover.getPosition())) {
+            if (debugLoggingEnabled) {
+                StevesArmyMod.LOGGER.info("[CoverTacticalGoal] Soldier {} target same as current, canceling reposition", 
+                    soldier.getId());
+            }
+            getCoverManager().clearTargetCover();
             getCoverManager().setState(CoverBehaviorManager.CoverState.IN_COVER);
             return;
         }
@@ -219,13 +237,16 @@ public class CoverTacticalGoal extends Goal {
         double distance = soldier.position().distanceTo(targetCover.getPosition().getCenter());
         
         if (distance < COVER_REACHED_DISTANCE) {
+            if (currentCover != null) {
+                getCoverManager().setLastCover(currentCover);
+            }
             getCoverManager().setCurrentCover(targetCover);
             getCoverManager().clearTargetCover();
             getCoverManager().setState(CoverBehaviorManager.CoverState.IN_COVER);
             
             if (debugLoggingEnabled) {
-                StevesArmyMod.LOGGER.info("[CoverTacticalGoal] Soldier {} repositioned to {}", 
-                    soldier.getId(), targetCover.getPosition());
+                StevesArmyMod.LOGGER.info("[CoverTacticalGoal] Soldier {} repositioned to {} (score={})", 
+                    soldier.getId(), targetCover.getPosition(), String.format("%.2f", targetCover.getQuality()));
             }
             return;
         }
@@ -234,7 +255,11 @@ public class CoverTacticalGoal extends Goal {
             stuckTicks++;
             if (stuckTicks > MAX_STUCK_TICKS) {
                 getCoverManager().clearTargetCover();
-                getCoverManager().setState(CoverBehaviorManager.CoverState.IN_COVER);
+                if (currentCover != null) {
+                    getCoverManager().setState(CoverBehaviorManager.CoverState.IN_COVER);
+                } else {
+                    getCoverManager().setState(CoverBehaviorManager.CoverState.SEEKING_COVER);
+                }
                 stuckTicks = 0;
             }
         } else {
@@ -243,15 +268,6 @@ public class CoverTacticalGoal extends Goal {
     }
     
     private void tickInCover() {
-        setFlags(EnumSet.of(Flag.LOOK));
-        
-        reevaluateCounter++;
-        
-        if (reevaluateCounter >= REEVALUATE_INTERVAL_TICKS) {
-            reevaluateCounter = 0;
-            evaluateCoverState();
-        }
-        
         if (getCoverManager().isSuppressed()) {
             getCoverManager().setState(CoverBehaviorManager.CoverState.SUPPRESSED_IN_COVER);
             return;
@@ -262,14 +278,15 @@ public class CoverTacticalGoal extends Goal {
             return;
         }
         
-        if (canPeekAndShoot()) {
-            setFlags(EnumSet.of(Flag.MOVE, Flag.LOOK));
+        reevaluateCounter++;
+        
+        if (reevaluateCounter >= REEVALUATE_INTERVAL_TICKS) {
+            reevaluateCounter = 0;
+            evaluateCoverState();
         }
     }
     
     private void tickSuppressedInCover() {
-        setFlags(EnumSet.of(Flag.LOOK));
-        
         if (!getCoverManager().isPinned() && getCoverManager().getSuppressionTracker().canPeek()) {
             getCoverManager().setState(CoverBehaviorManager.CoverState.IN_COVER);
         }
@@ -302,22 +319,6 @@ public class CoverTacticalGoal extends Goal {
         return soldier.getTarget() != null && soldier.getTarget().isAlive();
     }
     
-    private boolean shouldContinueInCover() {
-        if (getCoverManager().getTimeInCover() < MIN_COVER_DWELL_TIME_MS) {
-            return true;
-        }
-        
-        if (!isCoverStillValid()) {
-            return shouldSeekCover();
-        }
-        
-        if (getCoverManager().isSuppressed()) {
-            return true;
-        }
-        
-        return true;
-    }
-    
     private boolean isCoverStillValid() {
         CoverPoint currentCover = getCoverManager().getCurrentCover();
         if (currentCover == null) {
@@ -326,13 +327,21 @@ public class CoverTacticalGoal extends Goal {
         
         double distance = soldier.position().distanceTo(currentCover.getPosition().getCenter());
         
-        double maxDistance = soldier.getTarget() != null ? COMBAT_COVER_VALID_DISTANCE : COVER_VALID_DISTANCE;
-        
         if (distance > COVER_ABANDON_DISTANCE) {
+            if (debugLoggingEnabled) {
+                StevesArmyMod.LOGGER.info("[CoverTacticalGoal] Soldier {} cover abandoned (distance={})", 
+                    soldier.getId(), String.format("%.1f", distance));
+            }
             return false;
         }
         
+        double maxDistance = soldier.getTarget() != null ? COMBAT_COVER_VALID_DISTANCE : COVER_VALID_DISTANCE;
+        
         if (distance > maxDistance && getCoverManager().getTimeInCover() >= MIN_COVER_DWELL_TIME_MS) {
+            if (debugLoggingEnabled) {
+                StevesArmyMod.LOGGER.info("[CoverTacticalGoal] Soldier {} too far from cover (distance={}, max={})", 
+                    soldier.getId(), String.format("%.1f", distance), String.format("%.1f", maxDistance));
+            }
             return false;
         }
         
@@ -343,6 +352,7 @@ public class CoverTacticalGoal extends Goal {
         CoverPoint currentCover = getCoverManager().getCurrentCover();
         if (currentCover == null) {
             getCoverManager().setState(CoverBehaviorManager.CoverState.SEEKING_COVER);
+            setFlags(EnumSet.of(Flag.MOVE, Flag.LOOK));
             return;
         }
         
@@ -355,16 +365,26 @@ public class CoverTacticalGoal extends Goal {
             return;
         }
         
+        if (getCoverManager().getTimeInCover() < MIN_COVER_DWELL_TIME_MS) {
+            return;
+        }
+        
         Optional<CoverPoint> betterCover = findBetterCover();
         if (betterCover.isPresent()) {
             CoverPoint newCover = betterCover.get();
+            
+            if (newCover.getPosition().equals(currentCover.getPosition())) {
+                return;
+            }
+            
             float currentScore = currentCover.getQuality() * (1.0f - getCoverManager().getCoverQualityPenalty());
             float newScore = newCover.getQuality();
             
             if (newScore > currentScore * (1.0f + HYSTERESIS_THRESHOLD)) {
                 if (debugLoggingEnabled) {
-                    StevesArmyMod.LOGGER.info("[CoverTacticalGoal] Soldier {} found better cover: {} (score {:.2f}) > current (score {:.2f})", 
-                        soldier.getId(), newCover.getPosition(), newScore, currentScore);
+                    StevesArmyMod.LOGGER.info("[CoverTacticalGoal] Soldier {} found better cover: {} (score={}) > current {} (score={})", 
+                        soldier.getId(), newCover.getPosition(), String.format("%.2f", newScore), 
+                        currentCover.getPosition(), String.format("%.2f", currentScore));
                 }
                 startRepositioning(newCover);
             }
@@ -375,17 +395,33 @@ public class CoverTacticalGoal extends Goal {
         findAndMoveToCover();
         if (getCoverManager().getTargetCover() != null) {
             getCoverManager().setState(CoverBehaviorManager.CoverState.REPOSITIONING);
+            setFlags(EnumSet.of(Flag.MOVE, Flag.LOOK));
         } else {
             getCoverManager().setState(CoverBehaviorManager.CoverState.SEEKING_COVER);
+            setFlags(EnumSet.of(Flag.MOVE, Flag.LOOK));
         }
     }
     
     private void startRepositioning(CoverPoint newCover) {
+        CoverPoint currentCover = getCoverManager().getCurrentCover();
+        
+        if (currentCover != null && newCover.getPosition().equals(currentCover.getPosition())) {
+            if (debugLoggingEnabled) {
+                StevesArmyMod.LOGGER.info("[CoverTacticalGoal] Soldier {} rejecting reposition to same cover", 
+                    soldier.getId());
+            }
+            return;
+        }
+        
         getCoverManager().clearTargetCover();
         
         if (CoverReservationManager.reserve(newCover.getPosition(), soldier)) {
+            if (currentCover != null) {
+                getCoverManager().setLastCover(currentCover);
+            }
             getCoverManager().setTargetCover(newCover);
             getCoverManager().setState(CoverBehaviorManager.CoverState.REPOSITIONING);
+            setFlags(EnumSet.of(Flag.MOVE, Flag.LOOK));
             moveToCover(newCover);
         }
     }
@@ -413,8 +449,8 @@ public class CoverTacticalGoal extends Goal {
             double distanceToOwner = soldier.distanceTo(owner);
             if (distanceToOwner > FOLLOW_REGROUP_DISTANCE) {
                 if (debugLoggingEnabled) {
-                    StevesArmyMod.LOGGER.info("[CoverTacticalGoal] Soldier {} exiting cover to follow owner (distance {:.1f})", 
-                        soldier.getId(), distanceToOwner);
+                    StevesArmyMod.LOGGER.info("[CoverTacticalGoal] Soldier {} exiting cover to follow owner (distance={})", 
+                        soldier.getId(), String.format("%.1f", distanceToOwner));
                 }
                 return true;
             }
@@ -425,19 +461,6 @@ public class CoverTacticalGoal extends Goal {
         }
         
         return false;
-    }
-    
-    private boolean canPeekAndShoot() {
-        if (getCoverManager().isPinned()) {
-            return false;
-        }
-        
-        if (!getCoverManager().getSuppressionTracker().canPeek()) {
-            return false;
-        }
-        
-        long timeSincePeek = System.currentTimeMillis() - getCoverManager().getLastPeekTime();
-        return timeSincePeek > MIN_PEEK_INTERVAL_MS;
     }
     
     private void findAndMoveToCover() {
@@ -482,14 +505,21 @@ public class CoverTacticalGoal extends Goal {
             CoverPoint cover = bestCover.get();
             
             CoverPoint lastCover = getCoverManager().getLastCover();
-            if (lastCover != null) {
-                if (cover.getPosition().equals(lastCover.getPosition())) {
-                    if (debugLoggingEnabled) {
-                        StevesArmyMod.LOGGER.info("[CoverTacticalGoal] Soldier {} avoiding recent cover {}", 
-                            soldier.getId(), lastCover.getPosition());
-                    }
-                    return;
+            if (lastCover != null && cover.getPosition().equals(lastCover.getPosition())) {
+                if (debugLoggingEnabled) {
+                    StevesArmyMod.LOGGER.info("[CoverTacticalGoal] Soldier {} avoiding recent cover {}", 
+                        soldier.getId(), lastCover.getPosition());
                 }
+                return;
+            }
+            
+            CoverPoint currentCover = getCoverManager().getCurrentCover();
+            if (currentCover != null && cover.getPosition().equals(currentCover.getPosition())) {
+                if (debugLoggingEnabled) {
+                    StevesArmyMod.LOGGER.info("[CoverTacticalGoal] Soldier {} already at best cover {}", 
+                        soldier.getId(), currentCover.getPosition());
+                }
+                return;
             }
             
             getCoverManager().clearCoverQualityPenalty();
@@ -499,8 +529,8 @@ public class CoverTacticalGoal extends Goal {
                 moveToCover(cover);
                 
                 if (debugLoggingEnabled) {
-                    StevesArmyMod.LOGGER.info("[CoverTacticalGoal] Soldier {} navigating to {} (type={}, score={:.2f})", 
-                        soldier.getId(), cover.getPosition(), cover.getType(), cover.getQuality());
+                    StevesArmyMod.LOGGER.info("[CoverTacticalGoal] Soldier {} navigating to {} (type={}, score={})", 
+                        soldier.getId(), cover.getPosition(), cover.getType(), String.format("%.2f", cover.getQuality()));
                 }
             } else if (debugLoggingEnabled) {
                 StevesArmyMod.LOGGER.info("[CoverTacticalGoal] Soldier {} failed to reserve {}", 
@@ -538,6 +568,11 @@ public class CoverTacticalGoal extends Goal {
     }
     
     private void onCoverReached(CoverPoint cover) {
+        CoverPoint previousCover = getCoverManager().getCurrentCover();
+        if (previousCover != null) {
+            getCoverManager().setLastCover(previousCover);
+        }
+        
         getCoverManager().setCurrentCover(cover);
         getCoverManager().clearTargetCover();
         
@@ -547,9 +582,11 @@ public class CoverTacticalGoal extends Goal {
             getCoverManager().setState(CoverBehaviorManager.CoverState.IN_COVER);
         }
         
+        setFlags(EnumSet.noneOf(Flag.class));
+        
         if (debugLoggingEnabled) {
-            StevesArmyMod.LOGGER.info("[CoverTacticalGoal] Soldier {} reached cover at {} (type={}, score={:.2f})", 
-                soldier.getId(), cover.getPosition(), cover.getType(), cover.getQuality());
+            StevesArmyMod.LOGGER.info("[CoverTacticalGoal] Soldier {} reached cover at {} (type={}, score={})", 
+                soldier.getId(), cover.getPosition(), cover.getType(), String.format("%.2f", cover.getQuality()));
         }
     }
     
