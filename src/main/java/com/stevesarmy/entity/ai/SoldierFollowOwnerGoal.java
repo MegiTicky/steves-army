@@ -1,5 +1,6 @@
 package com.stevesarmy.entity.ai;
 
+import com.stevesarmy.combat.cover.CoverBehaviorManager;
 import com.stevesarmy.entity.SoldierEntity;
 
 import com.stevesarmy.squad.SquadMode;
@@ -42,6 +43,17 @@ public class SoldierFollowOwnerGoal extends Goal {
             return false;
         }
         
+        CoverBehaviorManager coverManager = soldier.getCoverBehaviorManager();
+        CoverBehaviorManager.CoverState coverState = coverManager.getState();
+        if (coverState == CoverBehaviorManager.CoverState.SEEKING_COVER ||
+            coverState == CoverBehaviorManager.CoverState.REPOSITIONING) {
+            return false;
+        }
+        
+        if (coverManager.isSuppressed()) {
+            return false;
+        }
+        
         LivingEntity owner = soldier.getOwner();
         if (owner == null) {
             return false;
@@ -62,6 +74,18 @@ public class SoldierFollowOwnerGoal extends Goal {
         if (soldier.getSquadMode() != SquadMode.FOLLOW) {
             return false;
         }
+        
+        CoverBehaviorManager coverManager = soldier.getCoverBehaviorManager();
+        CoverBehaviorManager.CoverState coverState = coverManager.getState();
+        if (coverState == CoverBehaviorManager.CoverState.SEEKING_COVER ||
+            coverState == CoverBehaviorManager.CoverState.REPOSITIONING) {
+            return false;
+        }
+        
+        if (coverManager.isSuppressed()) {
+            return false;
+        }
+        
         if (owner == null || !owner.isAlive()) {
             return false;
         }

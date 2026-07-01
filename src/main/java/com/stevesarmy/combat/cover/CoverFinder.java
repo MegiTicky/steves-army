@@ -17,10 +17,14 @@ public class CoverFinder {
     private static final int MAX_COVER_POINTS = 50;
     private static final int MAX_HEIGHT_CHECK = 3;
     
-    private static final double PRIMARY_PROTECTION_WEIGHT = 0.40;
-    private static final double FLANKING_PROTECTION_WEIGHT = 0.30;
-    private static final double DISTANCE_WEIGHT = 0.15;
-    private static final double FIRING_QUALITY_WEIGHT = 0.15;
+    private static final double PRIMARY_PROTECTION_WEIGHT = 0.30;
+    private static final double FLANKING_PROTECTION_WEIGHT = 0.20;
+    private static final double DISTANCE_WEIGHT = 0.10;
+    private static final double FIRING_QUALITY_WEIGHT = 0.25;
+    private static final double PEEK_ANGLE_WEIGHT = 0.15;
+    
+    private static final float HALF_COVER_FIGHTABILITY_BONUS = 0.25f;
+    private static final float FULL_COVER_FIGHTABILITY_BONUS = 0.15f;
     
     private final Level level;
     
@@ -69,6 +73,17 @@ public class CoverFinder {
             .max(Comparator.comparingDouble(cp -> calculateScore(cp, center, threat)));
     }
     
+    public Optional<CoverPoint> findBestCover(BlockPos center, int radius, LivingEntity threat, Vec3 threatDirection) {
+        List<CoverPoint> coverPoints = findCoverPoints(center, radius, threat);
+        
+        if (coverPoints.isEmpty()) {
+            return Optional.empty();
+        }
+        
+        return coverPoints.stream()
+            .max(Comparator.comparingDouble(cp -> calculateThreatAwareScore(cp, center, threat, threatDirection)));
+    }
+    
     public Optional<CoverPoint> findBestCover(LivingEntity soldier, Vec3 threatDirection, List<LivingEntity> allThreats) {
         return findBestCover(soldier, threatDirection, allThreats, DEFAULT_SEARCH_RADIUS);
     }
@@ -111,12 +126,21 @@ public class CoverFinder {
         
         float distanceScore = calculateDistanceScore(coverPoint, soldier);
         
-        float firingScore = coverPoint.canShootFrom() ? 1.0f : 0.5f;
+        float firingQuality = calculateFiringQuality(coverPoint, threatDirection);
+        
+        float peekAngleScore = calculatePeekAngleScore(coverPoint, threatDirection);
+        
+        float fightability = 0.0f;
+        if (coverPoint.canShootFrom()) {
+            fightability = coverPoint.getType() == CoverType.HALF ? 
+                HALF_COVER_FIGHTABILITY_BONUS : FULL_COVER_FIGHTABILITY_BONUS;
+        }
         
         return (float)(primaryProtection * PRIMARY_PROTECTION_WEIGHT +
                        flankingProtection * FLANKING_PROTECTION_WEIGHT +
                        distanceScore * DISTANCE_WEIGHT +
-                       firingScore * FIRING_QUALITY_WEIGHT);
+                       firingQuality * FIRING_QUALITY_WEIGHT +
+                       peekAngleScore * PEEK_ANGLE_WEIGHT) + fightability;
     }
     
     private float calculatePrimaryProtection(CoverPoint coverPoint, Vec3 threatDirection) {
@@ -173,6 +197,93 @@ public class CoverFinder {
         return (float) (1.0 - Math.min(distance / maxDistance, 1.0));
     }
     
+    private float calculateFiringQuality(CoverPoint coverPoint, Vec3 threatDirection) {
+        if (threatDirection == null || threatDirection.lengthSqr() < 0.001) {
+            return 0.5f;
+        }
+        
+        Set<Direction> protectedDirs = coverPoint.getProtectedDirections();
+        if (protectedDirs == null || protectedDirs.isEmpty()) {
+            return 0.0f;
+        }
+        
+        Direction threatDir = getDirectionFromVector(threatDirection);
+        Direction threatOpposite = threatDir.getOpposite();
+        
+        if (protectedDirs.contains(threatOpposite)) {
+            return 1.0f;
+        }
+        
+        int adjacentProtected = 0;
+        for (Direction dir : Direction.Plane.HORIZONTAL) {
+            if (protectedDirs.contains(dir) && isAdjacentDirection(dir, threatOpposite)) {
+                adjacentProtected++;
+            }
+        }
+        
+        return 0.5f + (adjacentProtected * 0.25f);
+    }
+    
+    private boolean isAdjacentDirection(Direction dir1, Direction dir2) {
+        return (dir1 == Direction.NORTH && (dir2 == Direction.EAST || dir2 == Direction.WEST)) ||
+               (dir1 == Direction.SOUTH && (dir2 == Direction.EAST || dir2 == Direction.WEST)) ||
+               (dir1 == Direction.EAST && (dir2 == Direction.NORTH || dir2 == Direction.SOUTH)) ||
+               (dir1 == Direction.WEST && (dir2 == Direction.NORTH || dir2 == Direction.SOUTH));
+    }
+    
+    private float calculatePeekAngleScore(CoverPoint coverPoint, Vec3 threatDirection) {
+        if (threatDirection == null || threatDirection.lengthSqr() < 0.001) {
+            return 0.0f;
+        }
+        
+        Set<Direction> protectedDirs = coverPoint.getProtectedDirections();
+        if (protectedDirs == null || protectedDirs.isEmpty()) {
+            return 0.0f;
+        }
+        
+        BlockPos coverPos = coverPoint.getPosition();
+        float bestPeekScore = 0.0f;
+        
+        for (Direction peekDir : Direction.Plane.HORIZONTAL) {
+            if (protectedDirs.contains(peekDir)) continue;
+            
+            BlockPos peekPos = coverPos.relative(peekDir);
+            if (!isValidPeekPosition(peekPos)) continue;
+            
+            Vec3 peekCenter = peekPos.getCenter();
+            Vec3 toThreat = threatDirection.normalize();
+            Vec3 fromPeekToCover = new Vec3(
+                coverPos.getX() + 0.5 - peekCenter.x,
+                0,
+                coverPos.getZ() + 0.5 - peekCenter.z
+            ).normalize();
+            
+            double dot = toThreat.dot(fromPeekToCover);
+            dot = Math.max(-1.0, Math.min(1.0, dot));
+            double angleBetween = Math.toDegrees(Math.acos(dot));
+            
+            if (angleBetween >= 45 && angleBetween <= 135) {
+                float score = 1.0f - (float)Math.abs(angleBetween - 90) / 90;
+                bestPeekScore = Math.max(bestPeekScore, score);
+            }
+        }
+        
+        return bestPeekScore;
+    }
+    
+    private boolean isValidPeekPosition(BlockPos pos) {
+        if (!level.isLoaded(pos)) return false;
+        
+        BlockState groundState = level.getBlockState(pos.below());
+        if (!groundState.isSolid()) return false;
+        
+        BlockState standingState = level.getBlockState(pos);
+        BlockState headState = level.getBlockState(pos.above());
+        
+        return (standingState.isAir() || standingState.getCollisionShape(level, pos).isEmpty()) &&
+               (headState.isAir() || headState.getCollisionShape(level, pos.above()).isEmpty());
+    }
+    
     private Direction getDirectionFromVector(Vec3 vec) {
         if (vec == null) return Direction.NORTH;
         
@@ -192,6 +303,18 @@ public class CoverFinder {
         double shootBonus = coverPoint.canShootFrom() ? 2.0 : 0.0;
         
         return qualityScore + shootBonus - distancePenalty;
+    }
+    
+    private double calculateThreatAwareScore(CoverPoint coverPoint, BlockPos soldierPos, LivingEntity threat, Vec3 threatDirection) {
+        if (threatDirection == null || threatDirection.lengthSqr() < 0.001) {
+            return calculateScore(coverPoint, soldierPos, threat);
+        }
+        
+        double baseScore = calculateScore(coverPoint, soldierPos, threat);
+        
+        double protectionScore = calculatePrimaryProtection(coverPoint, threatDirection);
+        
+        return baseScore + protectionScore * 10.0;
     }
     
     public CoverPoint evaluatePosition(BlockPos pos, LivingEntity threat) {

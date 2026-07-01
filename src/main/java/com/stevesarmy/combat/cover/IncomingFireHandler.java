@@ -3,8 +3,9 @@ package com.stevesarmy.combat.cover;
 import com.stevesarmy.entity.SoldierEntity;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.projectile.Projectile;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
-import net.minecraftforge.event.entity.EntityEvent;
 import net.minecraftforge.event.entity.ProjectileImpactEvent;
 import net.minecraftforge.event.entity.living.LivingHurtEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
@@ -46,17 +47,28 @@ public class IncomingFireHandler {
             recentProjectilePaths.put(projectile.getUUID(), projectilePath);
         }
         
-        checkNearMissForSoldiers(projectilePos, projectileMotion);
+        checkNearMissForSoldiers(projectile, projectilePos, projectileMotion);
     }
     
-    private static void checkNearMissForSoldiers(Vec3 projectilePos, Vec3 projectileMotion) {
+    private static void checkNearMissForSoldiers(Projectile projectile, Vec3 projectilePos, Vec3 projectileMotion) {
         if (projectileMotion.lengthSqr() < 0.01) return;
         
-        Vec3 projectileDir = projectileMotion.normalize();
-        Vec3 futurePath = projectilePos.add(projectileDir.scale(NEAR_MISS_THRESHOLD * 2));
+        Level level = projectile.level();
+        if (level.isClientSide) return;
         
-        // This would need to iterate over nearby soldiers in the level
-        // For now, we'll handle this via the hurt event and soldier tick
+        Vec3 bulletPath = projectilePos.add(projectileMotion.normalize().scale(10));
+        
+        for (SoldierEntity soldier : level.getEntitiesOfClass(
+                SoldierEntity.class,
+                AABB.ofSize(projectilePos, 16, 16, 16))) {
+            double dist = soldier.position().distanceTo(bulletPath);
+            if (dist < NEAR_MISS_THRESHOLD) {
+                CoverBehaviorManager coverManager = soldier.getCoverBehaviorManager();
+                if (coverManager != null) {
+                    coverManager.onNearMiss(bulletPath, soldier);
+                }
+            }
+        }
     }
     
     public static void checkNearMiss(SoldierEntity soldier, Vec3 bulletPosition) {

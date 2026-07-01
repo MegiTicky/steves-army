@@ -2,7 +2,6 @@ package com.stevesarmy.entity.ai;
 
 import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.entity.SoldierEntity;
-import com.stevesarmy.squad.SquadMode;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.entity.ai.goal.Goal;
 
@@ -48,12 +47,6 @@ public class SoldierMoveToPingGoal extends Goal {
     @Override
     public void stop() {
         soldier.getNavigation().stop();
-        
-        if (targetPos != null) {
-            soldier.setSquadMode(SquadMode.HOLD);
-            soldier.setHoldPosition(targetPos);
-            StevesArmyMod.LOGGER.info("Soldier arrived at ping location, switching to HOLD mode at {}", targetPos);
-        }
         
         soldier.clearPingMoveTarget();
         targetPos = null;

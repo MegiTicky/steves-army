@@ -709,6 +709,8 @@ public class GunIntegration {
                 
                 if (isCrawl) {
                     entity.setPose(net.minecraft.world.entity.Pose.SWIMMING);
+                } else if (entity.getPose() == net.minecraft.world.entity.Pose.SWIMMING) {
+                    entity.setPose(net.minecraft.world.entity.Pose.STANDING);
                 }
             } catch (Exception e) {
                 StevesArmyMod.LOGGER.debug("[TaCZ] Failed to set crawl state: " + e.getMessage());
@@ -717,7 +719,7 @@ public class GunIntegration {
         
         @Override
         public boolean isCrawling(LivingEntity entity) {
-            return !entity.isSwimming() && entity.getPose() == net.minecraft.world.entity.Pose.SWIMMING;
+            return entity.getPose() == net.minecraft.world.entity.Pose.SWIMMING && !entity.isInWater();
         }
     }
 }

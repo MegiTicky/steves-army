@@ -3,7 +3,7 @@ package com.stevesarmy.ping;
 public enum PingType {
     ENEMY(0xFFFF5555, "enemy"),
     GO_TO(0xFF55FF55, "go_to"),
-    COVER(0xFFFFFF55, "cover"),
+    THREAT_DIRECTION(0xFFFF8800, "threat_direction"),
     LOCATION(0xFF5555FF, "location"),
     FOLLOW(0xFF55FFFF, "follow"),
     HOLD(0xFFFFAA00, "hold");

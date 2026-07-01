@@ -1,6 +1,7 @@
 package com.stevesarmy.network;
 
 import com.stevesarmy.ping.PingType;
+import net.minecraft.core.BlockPos;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
@@ -54,8 +55,6 @@ public class PingMessage {
             PingType type = msg.getType();
             int dimension = msg.getDimension();
             
-            com.stevesarmy.StevesArmyMod.LOGGER.info("PingMessage received: type={}, pos={}, dimension={}", type, position, dimension);
-            
             if (type != PingType.FOLLOW && type != PingType.HOLD) {
                 int teamColor = 0xFFFFFFFF;
                 if (sender.getTeam() != null) {
@@ -93,11 +92,8 @@ public class PingMessage {
                 s -> s.isOwnedBy(sender)
             );
             
-            com.stevesarmy.StevesArmyMod.LOGGER.info("Found {} soldiers owned by player within 100 blocks", soldiers.size());
-            
             for (com.stevesarmy.entity.SoldierEntity soldier : soldiers) {
                 soldier.receivePing(type, position);
-                com.stevesarmy.StevesArmyMod.LOGGER.info("Sent ping to soldier at {}", soldier.blockPosition());
             }
         });
         ctx.get().setPacketHandled(true);

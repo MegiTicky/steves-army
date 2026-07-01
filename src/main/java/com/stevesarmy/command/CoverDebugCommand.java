@@ -3,12 +3,12 @@ package com.stevesarmy.command;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
+import com.stevesarmy.combat.ThreatAwareness;
 import com.stevesarmy.combat.cover.CoverFinder;
 import com.stevesarmy.combat.cover.CoverPoint;
 import com.stevesarmy.combat.cover.CoverDebugManager;
 import com.stevesarmy.combat.cover.CoverBehaviorManager;
 import com.stevesarmy.combat.cover.CoverReservationManager;
-import com.stevesarmy.combat.cover.ThreatDirectionCalculator;
 import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.entity.TargetEntity;
 import com.stevesarmy.entity.ai.CoverTacticalGoal;
@@ -84,6 +84,12 @@ public class CoverDebugCommand {
             .then(Commands.literal("soldiers")
                 .executes(CoverDebugCommand::toggleSoldierVisualization)
             )
+            .then(Commands.literal("peek")
+                .executes(CoverDebugCommand::forcePeek)
+            )
+            .then(Commands.literal("reposition")
+                .executes(CoverDebugCommand::forceReposition)
+            )
         );
     }
     
@@ -103,8 +109,10 @@ public class CoverDebugCommand {
             "  /stevesarmy_cover threats - Show threat direction analysis\n" +
             "  /stevesarmy_cover reservations - Show cover reservations\n" +
             "  /stevesarmy_cover log [on|off] - Toggle cover behavior logging\n" +
-            "  /stevesarmy_cover soldiers - Toggle soldier cover visualization (state, cover, threats)"
-        ), false);
+            "  /stevesarmy_cover soldiers - Toggle soldier cover visualization (state, cover, threats)\n" +
+            "  /stevesarmy_cover peek - Force nearest soldier to peek from cover\n" +
+            "  /stevesarmy_cover reposition - Force nearest soldier to abandon cover and find new one"
+            ), false);
         return 1;
     }
     
@@ -501,23 +509,18 @@ public class CoverDebugCommand {
         source.sendSuccess(() -> Component.literal("Threats found: " + threats.size()), false);
         
         for (SoldierEntity soldier : nearbySoldiers) {
-            CoverBehaviorManager manager = soldier.getCoverBehaviorManager();
-            if (manager != null) {
-                ThreatDirectionCalculator.ThreatAnalysis analysis = 
-                    manager.analyzeThreats(soldier, threats);
-                
-                Vec3 threatDir = analysis.primaryDirection;
-                String dirStr = String.format("%.2f, %.2f, %.2f", 
-                    threatDir.x, threatDir.y, threatDir.z);
-                
-                source.sendSuccess(() -> Component.literal(
-                    "Soldier: " + soldier.getUUID().toString().substring(0, 8) + "..." +
-                    " | Threat dir: " + dirStr +
-                    " | Flanked: " + analysis.isFlanked +
-                    " | Count: " + analysis.threatCount +
-                    " | Closest: " + String.format("%.1f", analysis.closestThreatDistance) + "m"
-                ), false);
-            }
+            ThreatAwareness soldierThreats = soldier.getThreatAwareness();
+            Vec3 threatDir = soldierThreats.getPrimaryDirection(soldier.position());
+            String dirStr = String.format("%.2f, %.2f, %.2f", 
+                threatDir.x, threatDir.y, threatDir.z);
+            
+            source.sendSuccess(() -> Component.literal(
+                "Soldier: " + soldier.getUUID().toString().substring(0, 8) + "..." +
+                " | Threat dir: " + dirStr +
+                " | Flanked: " + soldierThreats.isBeingFlanked(soldier.position()) +
+                " | Count: " + soldierThreats.getActiveThreatCount() +
+                " | Level: " + String.format("%.2f", soldierThreats.getThreatLevel())
+            ), false);
         }
         
         return 1;
@@ -580,8 +583,107 @@ public class CoverDebugCommand {
         
         context.getSource().sendSuccess(() -> Component.literal(
             "Soldier cover visualization: " + (enabled ? "ON" : "OFF") + "\n" +
-            "Shows: Cover state (color X), current cover (line), threat direction (red arrow), target (orange line)\n" +
-            "Colors: GREEN=IN_COVER, YELLOW=SEEKING, RED=SUPPRESSED, GRAY=NO_COVER"
+            "Lines:\n" +
+            "  GREEN = current cover\n" +
+            "  YELLOW = target cover (seeking)\n" +
+            "  GRAY = last cover (abandoned)\n" +
+            "  RED = threat direction\n" +
+            "  ORANGE = target enemy\n" +
+            "Labels:\n" +
+            "  State, Cover info, Suppression %, Squad mode"
+        ), true);
+        return 1;
+    }
+    
+    private static int forcePeek(CommandContext<CommandSourceStack> context) {
+        Player player = context.getSource().getPlayer();
+        if (player == null) {
+            context.getSource().sendFailure(Component.literal("Player only command"));
+            return 0;
+        }
+        
+        SoldierEntity nearestSoldier = null;
+        double nearestDist = Double.MAX_VALUE;
+        
+        for (SoldierEntity soldier : player.level().getEntitiesOfClass(
+                SoldierEntity.class, player.getBoundingBox().inflate(32))) {
+            double dist = soldier.distanceToSqr(player);
+            if (dist < nearestDist && soldier.getCoverBehaviorManager().isInCover()) {
+                nearestDist = dist;
+                nearestSoldier = soldier;
+            }
+        }
+        
+        if (nearestSoldier == null) {
+            context.getSource().sendFailure(Component.literal("No soldier in cover within 32 blocks"));
+            return 0;
+        }
+        
+        CoverBehaviorManager manager = nearestSoldier.getCoverBehaviorManager();
+        CoverPoint cover = manager.getCurrentCover();
+        
+        if (cover == null) {
+            context.getSource().sendFailure(Component.literal("Soldier has no current cover"));
+            return 0;
+        }
+        
+        manager.resetPeekState();
+        manager.setNonPeekableCover(false);
+        
+        CoverTacticalGoal.setDebugLogging(true);
+        
+        final SoldierEntity targetSoldier = nearestSoldier;
+        final CoverPoint targetCover = cover;
+        
+        context.getSource().sendSuccess(() -> Component.literal(
+            "Forcing peek for soldier " + targetSoldier.getId() + 
+            " at " + targetCover.getPosition() + " (" + targetCover.getType() + ")"
+        ), true);
+        return 1;
+    }
+    
+    private static int forceReposition(CommandContext<CommandSourceStack> context) {
+        Player player = context.getSource().getPlayer();
+        if (player == null) {
+            context.getSource().sendFailure(Component.literal("Player only command"));
+            return 0;
+        }
+        
+        SoldierEntity nearestSoldier = null;
+        double nearestDist = Double.MAX_VALUE;
+        
+        for (SoldierEntity soldier : player.level().getEntitiesOfClass(
+                SoldierEntity.class, player.getBoundingBox().inflate(32))) {
+            double dist = soldier.distanceToSqr(player);
+            if (dist < nearestDist) {
+                nearestDist = dist;
+                nearestSoldier = soldier;
+            }
+        }
+        
+        if (nearestSoldier == null) {
+            context.getSource().sendFailure(Component.literal("No soldier within 32 blocks"));
+            return 0;
+        }
+        
+        CoverBehaviorManager manager = nearestSoldier.getCoverBehaviorManager();
+        
+        CoverPoint oldCover = manager.getCurrentCover();
+        if (oldCover != null) {
+            CoverReservationManager.release(oldCover.getPosition(), nearestSoldier);
+        }
+        manager.clearCover();
+        manager.setNonPeekableCover(false);
+        manager.resetPeekState();
+        
+        CoverTacticalGoal.setDebugLogging(true);
+        
+        final SoldierEntity targetSoldier = nearestSoldier;
+        final String oldPos = (oldCover != null ? oldCover.getPosition().toString() : "no cover");
+        
+        context.getSource().sendSuccess(() -> Component.literal(
+            "Forced reposition for soldier " + targetSoldier.getId() + 
+            " (was at " + oldPos + ")"
         ), true);
         return 1;
     }

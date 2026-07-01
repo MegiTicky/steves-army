@@ -10,6 +10,7 @@ import com.stevesarmy.combat.cover.CoverDebugManager;
 import com.stevesarmy.combat.cover.CoverPoint;
 import com.stevesarmy.combat.cover.CoverType;
 import com.stevesarmy.combat.cover.CoverBehaviorManager;
+import com.stevesarmy.combat.cover.CoverBehaviorManager.PeekState;
 import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.entity.TargetEntity;
 import net.minecraft.client.Camera;
@@ -434,9 +435,17 @@ public class CoverDebugRenderer {
         for (SoldierEntity soldier : level.getEntitiesOfClass(SoldierEntity.class, 
                 Minecraft.getInstance().player.getBoundingBox().inflate(50))) {
             
-            CoverBehaviorManager coverManager = soldier.getCoverBehaviorManager();
-            CoverBehaviorManager.CoverState state = coverManager.getState();
-            CoverPoint currentCover = coverManager.getCurrentCover();
+            int stateOrdinal = soldier.getSyncedCoverState();
+            CoverBehaviorManager.CoverState state = CoverBehaviorManager.CoverState.values()[stateOrdinal];
+            
+            BlockPos currentPos = soldier.getSyncedCoverCurrentPos();
+            BlockPos targetPos = soldier.getSyncedCoverTargetPos();
+            BlockPos lastPos = soldier.getSyncedCoverLastPos();
+            
+            int currentTypeOrdinal = soldier.getSyncedCoverCurrentType();
+            float currentQuality = soldier.getSyncedCoverCurrentQuality();
+            int targetTypeOrdinal = soldier.getSyncedCoverTargetType();
+            float targetQuality = soldier.getSyncedCoverTargetQuality();
             
             Vec3 soldierPos = soldier.position();
             double soldierRelX = soldierPos.x - cameraPos.x;
@@ -455,44 +464,147 @@ public class CoverDebugRenderer {
             buffer.vertex(matrix, (float)(soldierRelX + indicatorSize), (float)soldierRelY, (float)(soldierRelZ - indicatorSize)).color(r, g, b, a).endVertex();
             buffer.vertex(matrix, (float)(soldierRelX - indicatorSize), (float)soldierRelY, (float)(soldierRelZ + indicatorSize)).color(r, g, b, a).endVertex();
             
-            if (currentCover != null && (state == CoverBehaviorManager.CoverState.IN_COVER || 
-                                         state == CoverBehaviorManager.CoverState.SUPPRESSED_IN_COVER ||
-                                         state == CoverBehaviorManager.CoverState.SEEKING_COVER)) {
-                BlockPos coverPos = currentCover.getPosition();
-                double coverRelX = coverPos.getX() - cameraPos.x + 0.5;
-                double coverRelY = coverPos.getY() - cameraPos.y + 0.5;
-                double coverRelZ = coverPos.getZ() - cameraPos.z + 0.5;
+            if (!targetPos.equals(BlockPos.ZERO)) {
+                renderCoverBlockBox(buffer, matrix, targetPos, cameraPos, 255, 255, 0, 150);
                 
-                int coverColor = (state == CoverBehaviorManager.CoverState.SEEKING_COVER) ? 0xFFFF00 : 0x00FF00;
-                int cr = (coverColor >> 16) & 0xFF;
-                int cg = (coverColor >> 8) & 0xFF;
-                int cb = coverColor & 0xFF;
+                double coverRelX = targetPos.getX() - cameraPos.x + 0.5;
+                double coverRelY = targetPos.getY() - cameraPos.y + 0.5;
+                double coverRelZ = targetPos.getZ() - cameraPos.z + 0.5;
                 
-                buffer.vertex(matrix, (float)soldierRelX, (float)(soldierRelY - 0.5), (float)soldierRelZ).color(cr, cg, cb, a).endVertex();
-                buffer.vertex(matrix, (float)coverRelX, (float)coverRelY, (float)coverRelZ).color(cr, cg, cb, a).endVertex();
+                buffer.vertex(matrix, (float)soldierRelX, (float)(soldierRelY - 0.5), (float)soldierRelZ).color(255, 255, 0, a).endVertex();
+                buffer.vertex(matrix, (float)coverRelX, (float)coverRelY, (float)coverRelZ).color(255, 255, 0, a).endVertex();
             }
             
-            Vec3 threatDirection = coverManager.getLastPrimaryThreatDirection();
-            if (threatDirection != null) {
-                double arrowLength = 2.0;
-                double endX = soldierRelX + threatDirection.x * arrowLength;
-                double endZ = soldierRelZ + threatDirection.z * arrowLength;
+            if (!currentPos.equals(BlockPos.ZERO)) {
+                renderCoverBlockBox(buffer, matrix, currentPos, cameraPos, 0, 255, 0, 150);
                 
-                buffer.vertex(matrix, (float)soldierRelX, (float)(soldierRelY - 0.5), (float)soldierRelZ).color(255, 0, 0, a).endVertex();
-                buffer.vertex(matrix, (float)endX, (float)(soldierRelY - 0.5), (float)endZ).color(255, 0, 0, a).endVertex();
+                double coverRelX = currentPos.getX() - cameraPos.x + 0.5;
+                double coverRelY = currentPos.getY() - cameraPos.y + 0.5;
+                double coverRelZ = currentPos.getZ() - cameraPos.z + 0.5;
+                
+                buffer.vertex(matrix, (float)soldierRelX, (float)(soldierRelY - 0.6), (float)soldierRelZ).color(0, 255, 0, a).endVertex();
+                buffer.vertex(matrix, (float)coverRelX, (float)coverRelY, (float)coverRelZ).color(0, 255, 0, a).endVertex();
             }
+            
+            if (!lastPos.equals(BlockPos.ZERO)) {
+                renderCoverBlockBox(buffer, matrix, lastPos, cameraPos, 128, 128, 128, 100);
+                
+                double coverRelX = lastPos.getX() - cameraPos.x + 0.5;
+                double coverRelY = lastPos.getY() - cameraPos.y + 0.5;
+                double coverRelZ = lastPos.getZ() - cameraPos.z + 0.5;
+                
+                buffer.vertex(matrix, (float)soldierRelX, (float)(soldierRelY - 0.7), (float)soldierRelZ).color(128, 128, 128, a).endVertex();
+                buffer.vertex(matrix, (float)coverRelX, (float)coverRelY, (float)coverRelZ).color(128, 128, 128, a).endVertex();
+            }
+            
+            BlockPos peekPos = soldier.getSyncedPeekPosition();
+            int peekStateOrdinal = soldier.getSyncedPeekState();
+            PeekState peekState = PeekState.values()[peekStateOrdinal];
+            
+            if (!peekPos.equals(BlockPos.ZERO) && peekState != PeekState.HIDING) {
+                int peekColor = getPeekStateColor(peekState);
+                int pr = (peekColor >> 16) & 0xFF;
+                int pg = (peekColor >> 8) & 0xFF;
+                int pb = peekColor & 0xFF;
+                
+                renderCoverBlockBox(buffer, matrix, peekPos, cameraPos, pr, pg, pb, 200);
+                
+                double peekRelX = peekPos.getX() - cameraPos.x + 0.5;
+                double peekRelY = peekPos.getY() - cameraPos.y + 0.5;
+                double peekRelZ = peekPos.getZ() - cameraPos.z + 0.5;
+                
+                buffer.vertex(matrix, (float)soldierRelX, (float)(soldierRelY - 0.8), (float)soldierRelZ).color(pr, pg, pb, a).endVertex();
+                buffer.vertex(matrix, (float)peekRelX, (float)peekRelY, (float)peekRelZ).color(pr, pg, pb, a).endVertex();
+            }
+            
+            CoverBehaviorManager coverManager = soldier.getCoverBehaviorManager();
             
             LivingEntity target = soldier.getTarget();
             if (target != null) {
-                Vec3 targetPos = target.position();
-                double targetRelX = targetPos.x - cameraPos.x;
-                double targetRelY = targetPos.y - cameraPos.y + 1.0;
-                double targetRelZ = targetPos.z - cameraPos.z;
+                Vec3 targetPosEntity = target.position();
+                double targetRelX = targetPosEntity.x - cameraPos.x;
+                double targetRelY = targetPosEntity.y - cameraPos.y + 1.0;
+                double targetRelZ = targetPosEntity.z - cameraPos.z;
                 
                 buffer.vertex(matrix, (float)soldierRelX, (float)(soldierRelY - 0.3), (float)soldierRelZ).color(255, 100, 0, a).endVertex();
                 buffer.vertex(matrix, (float)targetRelX, (float)(targetRelY - 0.3), (float)targetRelZ).color(255, 100, 0, a).endVertex();
             }
         }
+    }
+    
+    private static void renderCoverBlockBox(BufferBuilder buffer, Matrix4f matrix, BlockPos pos, Vec3 cameraPos, 
+                                             int r, int g, int b, int a) {
+        double x1 = pos.getX() - cameraPos.x;
+        double y1 = pos.getY() - cameraPos.y;
+        double z1 = pos.getZ() - cameraPos.z;
+        double x2 = x1 + 1.0;
+        double y2 = y1 + 1.0;
+        double z2 = z1 + 1.0;
+        
+        buffer.vertex(matrix, (float)x1, (float)y1, (float)z1).color(r, g, b, a).endVertex();
+        buffer.vertex(matrix, (float)x2, (float)y1, (float)z1).color(r, g, b, a).endVertex();
+        buffer.vertex(matrix, (float)x2, (float)y1, (float)z1).color(r, g, b, a).endVertex();
+        buffer.vertex(matrix, (float)x2, (float)y1, (float)z2).color(r, g, b, a).endVertex();
+        buffer.vertex(matrix, (float)x2, (float)y1, (float)z2).color(r, g, b, a).endVertex();
+        buffer.vertex(matrix, (float)x1, (float)y1, (float)z2).color(r, g, b, a).endVertex();
+        buffer.vertex(matrix, (float)x1, (float)y1, (float)z2).color(r, g, b, a).endVertex();
+        buffer.vertex(matrix, (float)x1, (float)y1, (float)z1).color(r, g, b, a).endVertex();
+        
+        buffer.vertex(matrix, (float)x1, (float)y2, (float)z1).color(r, g, b, a).endVertex();
+        buffer.vertex(matrix, (float)x2, (float)y2, (float)z1).color(r, g, b, a).endVertex();
+        buffer.vertex(matrix, (float)x2, (float)y2, (float)z1).color(r, g, b, a).endVertex();
+        buffer.vertex(matrix, (float)x2, (float)y2, (float)z2).color(r, g, b, a).endVertex();
+        buffer.vertex(matrix, (float)x2, (float)y2, (float)z2).color(r, g, b, a).endVertex();
+        buffer.vertex(matrix, (float)x1, (float)y2, (float)z2).color(r, g, b, a).endVertex();
+        buffer.vertex(matrix, (float)x1, (float)y2, (float)z2).color(r, g, b, a).endVertex();
+        buffer.vertex(matrix, (float)x1, (float)y2, (float)z1).color(r, g, b, a).endVertex();
+        
+        buffer.vertex(matrix, (float)x1, (float)y1, (float)z1).color(r, g, b, a).endVertex();
+        buffer.vertex(matrix, (float)x1, (float)y2, (float)z1).color(r, g, b, a).endVertex();
+        buffer.vertex(matrix, (float)x2, (float)y1, (float)z1).color(r, g, b, a).endVertex();
+        buffer.vertex(matrix, (float)x2, (float)y2, (float)z1).color(r, g, b, a).endVertex();
+        buffer.vertex(matrix, (float)x2, (float)y1, (float)z2).color(r, g, b, a).endVertex();
+        buffer.vertex(matrix, (float)x2, (float)y2, (float)z2).color(r, g, b, a).endVertex();
+        buffer.vertex(matrix, (float)x1, (float)y1, (float)z2).color(r, g, b, a).endVertex();
+        buffer.vertex(matrix, (float)x1, (float)y2, (float)z2).color(r, g, b, a).endVertex();
+    }
+    
+    private static void renderThreatPositionBox(BufferBuilder buffer, Matrix4f matrix, BlockPos pos, Vec3 cameraPos) {
+        double x1 = pos.getX() - cameraPos.x;
+        double y1 = pos.getY() - cameraPos.y;
+        double z1 = pos.getZ() - cameraPos.z;
+        double x2 = x1 + 1.0;
+        double y2 = y1 + 1.0;
+        double z2 = z1 + 1.0;
+        
+        int r = 255, g = 128, b = 0, a = 200;
+        
+        buffer.vertex(matrix, (float)x1, (float)y1, (float)z1).color(r, g, b, a).endVertex();
+        buffer.vertex(matrix, (float)x2, (float)y1, (float)z1).color(r, g, b, a).endVertex();
+        buffer.vertex(matrix, (float)x2, (float)y1, (float)z1).color(r, g, b, a).endVertex();
+        buffer.vertex(matrix, (float)x2, (float)y1, (float)z2).color(r, g, b, a).endVertex();
+        buffer.vertex(matrix, (float)x2, (float)y1, (float)z2).color(r, g, b, a).endVertex();
+        buffer.vertex(matrix, (float)x1, (float)y1, (float)z2).color(r, g, b, a).endVertex();
+        buffer.vertex(matrix, (float)x1, (float)y1, (float)z2).color(r, g, b, a).endVertex();
+        buffer.vertex(matrix, (float)x1, (float)y1, (float)z1).color(r, g, b, a).endVertex();
+        
+        buffer.vertex(matrix, (float)x1, (float)y2, (float)z1).color(r, g, b, a).endVertex();
+        buffer.vertex(matrix, (float)x2, (float)y2, (float)z1).color(r, g, b, a).endVertex();
+        buffer.vertex(matrix, (float)x2, (float)y2, (float)z1).color(r, g, b, a).endVertex();
+        buffer.vertex(matrix, (float)x2, (float)y2, (float)z2).color(r, g, b, a).endVertex();
+        buffer.vertex(matrix, (float)x2, (float)y2, (float)z2).color(r, g, b, a).endVertex();
+        buffer.vertex(matrix, (float)x1, (float)y2, (float)z2).color(r, g, b, a).endVertex();
+        buffer.vertex(matrix, (float)x1, (float)y2, (float)z2).color(r, g, b, a).endVertex();
+        buffer.vertex(matrix, (float)x1, (float)y2, (float)z1).color(r, g, b, a).endVertex();
+        
+        buffer.vertex(matrix, (float)x1, (float)y1, (float)z1).color(r, g, b, a).endVertex();
+        buffer.vertex(matrix, (float)x1, (float)y2, (float)z1).color(r, g, b, a).endVertex();
+        buffer.vertex(matrix, (float)x2, (float)y1, (float)z1).color(r, g, b, a).endVertex();
+        buffer.vertex(matrix, (float)x2, (float)y2, (float)z1).color(r, g, b, a).endVertex();
+        buffer.vertex(matrix, (float)x2, (float)y1, (float)z2).color(r, g, b, a).endVertex();
+        buffer.vertex(matrix, (float)x2, (float)y2, (float)z2).color(r, g, b, a).endVertex();
+        buffer.vertex(matrix, (float)x1, (float)y1, (float)z2).color(r, g, b, a).endVertex();
+        buffer.vertex(matrix, (float)x1, (float)y2, (float)z2).color(r, g, b, a).endVertex();
     }
     
     private static void renderSoldierCoverLabels(PoseStack poseStack, Vec3 cameraPos, Level level, 
@@ -504,9 +616,20 @@ public class CoverDebugRenderer {
         for (SoldierEntity soldier : level.getEntitiesOfClass(SoldierEntity.class, 
                 Minecraft.getInstance().player.getBoundingBox().inflate(50))) {
             
-            CoverBehaviorManager coverManager = soldier.getCoverBehaviorManager();
-            CoverBehaviorManager.CoverState state = coverManager.getState();
-            CoverPoint currentCover = coverManager.getCurrentCover();
+            int stateOrdinal = soldier.getSyncedCoverState();
+            CoverBehaviorManager.CoverState state = CoverBehaviorManager.CoverState.values()[stateOrdinal];
+            
+            int peekStateOrdinal = soldier.getSyncedPeekState();
+            PeekState peekState = PeekState.values()[peekStateOrdinal];
+            
+            BlockPos currentPos = soldier.getSyncedCoverCurrentPos();
+            BlockPos targetPos = soldier.getSyncedCoverTargetPos();
+            BlockPos peekPos = soldier.getSyncedPeekPosition();
+            float currentQuality = soldier.getSyncedCoverCurrentQuality();
+            int currentTypeOrdinal = soldier.getSyncedCoverCurrentType();
+            float targetQuality = soldier.getSyncedCoverTargetQuality();
+            int targetTypeOrdinal = soldier.getSyncedCoverTargetType();
+            float suppressionLevel = soldier.getSyncedSuppressionLevel();
             
             Vec3 soldierPos = soldier.position();
             double x = soldierPos.x - cameraPos.x + 0.5;
@@ -518,19 +641,45 @@ public class CoverDebugRenderer {
             poseStack.mulPose(mc.gameRenderer.getMainCamera().rotation());
             poseStack.scale(-0.025f, -0.025f, 0.025f);
             
+            int lineOffset = 0;
+            
             String stateLabel = state.name();
             int stateColor = getStateColor(state);
-            font.drawInBatch(stateLabel, -font.width(stateLabel) / 2.0f, 0, stateColor | 0xFF000000, false,
+            font.drawInBatch(stateLabel, -font.width(stateLabel) / 2.0f, lineOffset, stateColor | 0xFF000000, false,
                              poseStack.last().pose(), bufferSource, net.minecraft.client.gui.Font.DisplayMode.NORMAL, 0, 15728880);
+            lineOffset += 10;
             
-            if (currentCover != null) {
-                String coverLabel = String.format("Cover: %.0f%%", currentCover.getQuality() * 100);
-                font.drawInBatch(coverLabel, -font.width(coverLabel) / 2.0f, 10, 0xFFFFFFFF, false,
+            int peekStateColor = getPeekStateColor(peekState);
+            String peekLabel = "Peek: " + peekState.name();
+            font.drawInBatch(peekLabel, -font.width(peekLabel) / 2.0f, lineOffset, peekStateColor | 0xFF000000, false,
+                             poseStack.last().pose(), bufferSource, net.minecraft.client.gui.Font.DisplayMode.NORMAL, 0, 15728880);
+            lineOffset += 10;
+            
+            if (!currentPos.equals(BlockPos.ZERO)) {
+                CoverType currentType = CoverType.values()[currentTypeOrdinal];
+                String coverLabel = String.format("Current: %.0f%% %s", currentQuality * 100, currentType.name());
+                font.drawInBatch(coverLabel, -font.width(coverLabel) / 2.0f, lineOffset, 0xFF00FF00, false,
                                  poseStack.last().pose(), bufferSource, net.minecraft.client.gui.Font.DisplayMode.NORMAL, 0, 15728880);
+                lineOffset += 10;
             }
             
+            if (!targetPos.equals(BlockPos.ZERO)) {
+                CoverType targetType = CoverType.values()[targetTypeOrdinal];
+                String targetLabel = String.format("Target: %.0f%% %s", targetQuality * 100, targetType.name());
+                font.drawInBatch(targetLabel, -font.width(targetLabel) / 2.0f, lineOffset, 0xFFFFFF00, false,
+                                 poseStack.last().pose(), bufferSource, net.minecraft.client.gui.Font.DisplayMode.NORMAL, 0, 15728880);
+                lineOffset += 10;
+            }
+            
+            String suppLabel = String.format("Supp: %.0f%%", suppressionLevel * 100);
+            int suppColor = suppressionLevel > 0.7f ? 0xFFFF0000 : 
+                            suppressionLevel > 0.5f ? 0xFFFF8800 : 0xFF888888;
+            font.drawInBatch(suppLabel, -font.width(suppLabel) / 2.0f, lineOffset, suppColor, false,
+                             poseStack.last().pose(), bufferSource, net.minecraft.client.gui.Font.DisplayMode.NORMAL, 0, 15728880);
+            lineOffset += 10;
+            
             String modeLabel = soldier.getSquadMode().name();
-            font.drawInBatch(modeLabel, -font.width(modeLabel) / 2.0f, 20, 0xFFAAAAAA, false,
+            font.drawInBatch(modeLabel, -font.width(modeLabel) / 2.0f, lineOffset, 0xFFAAAAAA, false,
                              poseStack.last().pose(), bufferSource, net.minecraft.client.gui.Font.DisplayMode.NORMAL, 0, 15728880);
             
             poseStack.popPose();
@@ -543,6 +692,15 @@ public class CoverDebugRenderer {
             case SUPPRESSED_IN_COVER: return 0xFF0000;
             case SEEKING_COVER: return 0xFFFF00;
             case NO_COVER: return 0x404040;
+            default: return 0x808080;
+        }
+    }
+    
+    private static int getPeekStateColor(PeekState peekState) {
+        switch (peekState) {
+            case HIDING: return 0x808080;
+            case EXPOSED: return 0x00FF00;
+            case DUCKING_BACK: return 0xFF8800;
             default: return 0x808080;
         }
     }

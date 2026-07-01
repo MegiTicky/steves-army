@@ -2,7 +2,9 @@ package com.stevesarmy.entity;
 
 import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.combat.CombatDebugData;
+import com.stevesarmy.combat.DetectionSystem;
 import com.stevesarmy.combat.GunIntegration;
+import com.stevesarmy.combat.ThreatAwareness;
 import com.stevesarmy.combat.cover.CoverBehaviorManager;
 import com.stevesarmy.entity.ai.SoldierCombatGoal;
 import com.stevesarmy.entity.ai.SoldierFollowOwnerGoal;
@@ -71,6 +73,29 @@ public class SoldierEntity extends PathfinderMob implements Container {
         SynchedEntityData.defineId(SoldierEntity.class, EntityDataSerializers.BOOLEAN);
     private static final EntityDataAccessor<Optional<UUID>> DEBUG_TARGET_UUID =
         SynchedEntityData.defineId(SoldierEntity.class, EntityDataSerializers.OPTIONAL_UUID);
+    
+    private static final EntityDataAccessor<Integer> COVER_STATE =
+        SynchedEntityData.defineId(SoldierEntity.class, EntityDataSerializers.INT);
+    private static final EntityDataAccessor<BlockPos> COVER_CURRENT_POS =
+        SynchedEntityData.defineId(SoldierEntity.class, EntityDataSerializers.BLOCK_POS);
+    private static final EntityDataAccessor<Integer> COVER_CURRENT_TYPE =
+        SynchedEntityData.defineId(SoldierEntity.class, EntityDataSerializers.INT);
+    private static final EntityDataAccessor<Float> COVER_CURRENT_QUALITY =
+        SynchedEntityData.defineId(SoldierEntity.class, EntityDataSerializers.FLOAT);
+    private static final EntityDataAccessor<BlockPos> COVER_TARGET_POS =
+        SynchedEntityData.defineId(SoldierEntity.class, EntityDataSerializers.BLOCK_POS);
+    private static final EntityDataAccessor<Integer> COVER_TARGET_TYPE =
+        SynchedEntityData.defineId(SoldierEntity.class, EntityDataSerializers.INT);
+    private static final EntityDataAccessor<Float> COVER_TARGET_QUALITY =
+        SynchedEntityData.defineId(SoldierEntity.class, EntityDataSerializers.FLOAT);
+    private static final EntityDataAccessor<BlockPos> COVER_LAST_POS =
+        SynchedEntityData.defineId(SoldierEntity.class, EntityDataSerializers.BLOCK_POS);
+    private static final EntityDataAccessor<Float> SUPPRESSION_LEVEL =
+        SynchedEntityData.defineId(SoldierEntity.class, EntityDataSerializers.FLOAT);
+    private static final EntityDataAccessor<Integer> PEEK_STATE =
+        SynchedEntityData.defineId(SoldierEntity.class, EntityDataSerializers.INT);
+    private static final EntityDataAccessor<BlockPos> PEEK_POSITION =
+        SynchedEntityData.defineId(SoldierEntity.class, EntityDataSerializers.BLOCK_POS);
 
     @Nullable
     private UUID squadId;
@@ -82,6 +107,7 @@ public class SoldierEntity extends PathfinderMob implements Container {
     
     private SoldierCombatGoal combatGoal;
     private CoverBehaviorManager coverBehaviorManager;
+    private final ThreatAwareness threatAwareness;
     
     private BlockPos pingMoveTarget = null;
     private long pingMoveTimestamp = 0;
@@ -101,7 +127,8 @@ public class SoldierEntity extends PathfinderMob implements Container {
         this.inventory = new SoldierInventory();
         this.inventoryHandler = new SoldierInventoryHandler(inventory);
         this.itemHandlerCap = LazyOptional.of(() -> inventoryHandler);
-        this.coverBehaviorManager = new CoverBehaviorManager();
+        this.coverBehaviorManager = new CoverBehaviorManager(this);
+        this.threatAwareness = new ThreatAwareness();
         this.inventory.setSlot0ChangedCallback(stack -> {
             if (!this.level().isClientSide) {
                 if (GunIntegration.isTaczLoaded() && GunIntegration.isReloading(this)) {
@@ -130,6 +157,18 @@ public class SoldierEntity extends PathfinderMob implements Container {
         this.entityData.define(DEBUG_HAS_LOS, false);
         this.entityData.define(DEBUG_IN_FOCUSED, false);
         this.entityData.define(DEBUG_TARGET_UUID, Optional.empty());
+        
+        this.entityData.define(COVER_STATE, 0);
+        this.entityData.define(COVER_CURRENT_POS, BlockPos.ZERO);
+        this.entityData.define(COVER_CURRENT_TYPE, 0);
+        this.entityData.define(COVER_CURRENT_QUALITY, 0f);
+        this.entityData.define(COVER_TARGET_POS, BlockPos.ZERO);
+        this.entityData.define(COVER_TARGET_TYPE, 0);
+        this.entityData.define(COVER_TARGET_QUALITY, 0f);
+        this.entityData.define(COVER_LAST_POS, BlockPos.ZERO);
+        this.entityData.define(SUPPRESSION_LEVEL, 0f);
+        this.entityData.define(PEEK_STATE, 0);
+        this.entityData.define(PEEK_POSITION, BlockPos.ZERO);
     }
 
     @Override
@@ -194,7 +233,8 @@ public class SoldierEntity extends PathfinderMob implements Container {
                 return InteractionResult.sidedSuccess(this.level().isClientSide);
             }
             if (!this.level().isClientSide) {
-                cycleSquadMode();
+                // Right-click behavior reserved for future use
+                // HOLD/FOLLOW modes are now set via ping wheel exclusively
             }
             return InteractionResult.sidedSuccess(this.level().isClientSide);
         }
@@ -256,10 +296,7 @@ public class SoldierEntity extends PathfinderMob implements Container {
         }
     }
 
-    public void cycleSquadMode() {
-        SquadMode current = getSquadMode();
-        setSquadMode(current == SquadMode.FOLLOW ? SquadMode.HOLD : SquadMode.FOLLOW);
-    }
+    
 
     public BlockPos getHoldPosition() {
         return this.entityData.get(HOLD_POSITION);
@@ -378,6 +415,20 @@ public class SoldierEntity extends PathfinderMob implements Container {
     @Override
     public void tick() {
         super.tick();
+        
+        if (!this.level().isClientSide) {
+            threatAwareness.tick();
+        }
+    }
+    
+    @Override
+    public EntityDimensions getDimensions(Pose pose) {
+        if (coverBehaviorManager != null 
+            && coverBehaviorManager.isInCover() 
+            && coverBehaviorManager.getPeekState() == CoverBehaviorManager.PeekState.HIDING) {
+            return EntityDimensions.scalable(0.6F, 0.8F);
+        }
+        return super.getDimensions(pose);
     }
     
     @Override
@@ -415,16 +466,26 @@ public class SoldierEntity extends PathfinderMob implements Container {
         
         switch (type) {
             case ENEMY -> {
-                pingThreatPos = BlockPos.containing(position);
+                BlockPos pos = BlockPos.containing(position);
+                pingThreatPos = pos;
                 pingThreatTimestamp = System.currentTimeMillis();
-                forcedTargetPos = BlockPos.containing(position);
+                forcedTargetPos = pos;
                 forcedTargetTimestamp = System.currentTimeMillis();
+                threatAwareness.onEnemyPing(pos);
                 com.stevesarmy.StevesArmyMod.LOGGER.info("Set forced target position: {}", forcedTargetPos);
             }
-            case GO_TO, COVER -> {
+            case GO_TO -> {
                 pingMoveTarget = BlockPos.containing(position);
                 pingMoveTimestamp = System.currentTimeMillis();
-                com.stevesarmy.StevesArmyMod.LOGGER.info("Set move target: {}", pingMoveTarget);
+                coverBehaviorManager.clearCover();
+                StevesArmyMod.LOGGER.info("Set move target: {}", pingMoveTarget);
+            }
+            case THREAT_DIRECTION -> {
+                BlockPos pos = BlockPos.containing(position);
+                threatAwareness.onPingDirection(pos);
+                pingThreatPos = pos;
+                pingThreatTimestamp = System.currentTimeMillis();
+                com.stevesarmy.StevesArmyMod.LOGGER.info("Set threat direction position: {}", pingThreatPos);
             }
             case LOCATION -> {
             }
@@ -433,15 +494,18 @@ public class SoldierEntity extends PathfinderMob implements Container {
                 clearPingMoveTarget();
                 clearPingThreatPos();
                 clearForcedTarget();
+                threatAwareness.clear();
                 com.stevesarmy.StevesArmyMod.LOGGER.info("Switched to FOLLOW mode, cleared all threat data");
             }
-            case HOLD -> {
+case HOLD -> {
                 setSquadMode(com.stevesarmy.squad.SquadMode.HOLD);
                 setHoldPosition(blockPosition());
+                coverBehaviorManager.clearCover();
                 clearPingMoveTarget();
                 clearPingThreatPos();
                 clearForcedTarget();
-                com.stevesarmy.StevesArmyMod.LOGGER.info("Switched to HOLD mode, cleared all threat data");
+                threatAwareness.clear();
+                StevesArmyMod.LOGGER.info("Switched to HOLD mode, cleared all threat data");
             }
         }
     }
@@ -535,5 +599,85 @@ public class SoldierEntity extends PathfinderMob implements Container {
     
     public Optional<UUID> getDebugTargetUUID() {
         return this.entityData.get(DEBUG_TARGET_UUID);
+    }
+    
+    public void syncCoverState(int stateOrdinal) {
+        this.entityData.set(COVER_STATE, stateOrdinal);
+    }
+    
+    public int getSyncedCoverState() {
+        return this.entityData.get(COVER_STATE);
+    }
+    
+    public void syncCoverCurrent(BlockPos pos, int typeOrdinal, float quality) {
+        this.entityData.set(COVER_CURRENT_POS, pos);
+        this.entityData.set(COVER_CURRENT_TYPE, typeOrdinal);
+        this.entityData.set(COVER_CURRENT_QUALITY, quality);
+    }
+    
+    public BlockPos getSyncedCoverCurrentPos() {
+        return this.entityData.get(COVER_CURRENT_POS);
+    }
+    
+    public int getSyncedCoverCurrentType() {
+        return this.entityData.get(COVER_CURRENT_TYPE);
+    }
+    
+    public float getSyncedCoverCurrentQuality() {
+        return this.entityData.get(COVER_CURRENT_QUALITY);
+    }
+    
+    public void syncCoverTarget(BlockPos pos, int typeOrdinal, float quality) {
+        this.entityData.set(COVER_TARGET_POS, pos);
+        this.entityData.set(COVER_TARGET_TYPE, typeOrdinal);
+        this.entityData.set(COVER_TARGET_QUALITY, quality);
+    }
+    
+    public BlockPos getSyncedCoverTargetPos() {
+        return this.entityData.get(COVER_TARGET_POS);
+    }
+    
+    public int getSyncedCoverTargetType() {
+        return this.entityData.get(COVER_TARGET_TYPE);
+    }
+    
+    public float getSyncedCoverTargetQuality() {
+        return this.entityData.get(COVER_TARGET_QUALITY);
+    }
+    
+    public void syncCoverLast(BlockPos pos) {
+        this.entityData.set(COVER_LAST_POS, pos);
+    }
+    
+    public BlockPos getSyncedCoverLastPos() {
+        return this.entityData.get(COVER_LAST_POS);
+    }
+    
+    public void syncSuppressionLevel(float level) {
+        this.entityData.set(SUPPRESSION_LEVEL, level);
+    }
+    
+    public float getSyncedSuppressionLevel() {
+        return this.entityData.get(SUPPRESSION_LEVEL);
+    }
+    
+    public void syncPeekState(int peekStateOrdinal) {
+        this.entityData.set(PEEK_STATE, peekStateOrdinal);
+    }
+    
+    public int getSyncedPeekState() {
+        return this.entityData.get(PEEK_STATE);
+    }
+    
+    public void syncPeekPosition(BlockPos pos) {
+        this.entityData.set(PEEK_POSITION, pos);
+    }
+    
+    public BlockPos getSyncedPeekPosition() {
+        return this.entityData.get(PEEK_POSITION);
+    }
+    
+    public ThreatAwareness getThreatAwareness() {
+        return threatAwareness;
     }
 }

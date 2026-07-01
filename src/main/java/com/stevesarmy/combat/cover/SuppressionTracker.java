@@ -1,5 +1,6 @@
 package com.stevesarmy.combat.cover;
 
+import com.stevesarmy.StevesArmyMod;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.phys.Vec3;
 
@@ -24,20 +25,33 @@ public class SuppressionTracker {
             suppressionLevel = Math.min(MAX_SUPPRESSION, suppressionLevel + add);
             lastSuppressionTime = System.currentTimeMillis();
             nearMissCount++;
+            if (debugLog()) {
+                StevesArmyMod.LOGGER.info("[Suppression] Soldier {} near miss: +{:.2f} sup -> {:.2f} (total nearMisses={})", 
+                    soldier.getId(), add, suppressionLevel, nearMissCount);
+            }
         }
     }
     
     public void onIncomingFire(LivingEntity shooter) {
         suppressionLevel = Math.min(MAX_SUPPRESSION, suppressionLevel + DIRECT_FIRE_SUPPRESSION);
         lastSuppressionTime = System.currentTimeMillis();
+        if (debugLog()) {
+            StevesArmyMod.LOGGER.info("[Suppression] incoming fire from {}: +{:.2f} sup -> {:.2f}", 
+                shooter.getName().getString(), DIRECT_FIRE_SUPPRESSION, suppressionLevel);
+        }
     }
     
     public void onTakeDamage() {
         suppressionLevel = Math.min(MAX_SUPPRESSION, suppressionLevel + 0.4f);
         lastSuppressionTime = System.currentTimeMillis();
+        if (debugLog()) {
+            StevesArmyMod.LOGGER.info("[Suppression] took damage: +0.40 sup -> {:.2f}", 
+                suppressionLevel);
+        }
     }
     
     public void tick(boolean inCover) {
+        float oldLevel = suppressionLevel;
         float decayMultiplier = inCover ? 2.0f : 1.0f;
         float decayAmount = DECAY_RATE * decayMultiplier * 0.05f;
         suppressionLevel = Math.max(0.0f, suppressionLevel - decayAmount);
@@ -45,9 +59,17 @@ public class SuppressionTracker {
         if (suppressionLevel < 0.1f) {
             nearMissCount = 0;
         }
+        
+        if (debugLog() && oldLevel > 0.01f) {
+            StevesArmyMod.LOGGER.info("[Suppression] Soldier tick: inCover={}, decay={:.4f}, sup {:.2f} -> {:.2f}, suppressed={}, pinned={}",
+                inCover, decayAmount, oldLevel, suppressionLevel, isSuppressed(), isPinned());
+        }
     }
     
     public void reset() {
+        if (debugLog() && suppressionLevel > 0.01f) {
+            StevesArmyMod.LOGGER.info("[Suppression] Soldier reset: {:.2f} -> 0.0", suppressionLevel);
+        }
         suppressionLevel = 0.0f;
         lastSuppressionTime = 0;
         nearMissCount = 0;
@@ -74,7 +96,12 @@ public class SuppressionTracker {
             return false;
         }
         long timeSinceLastSuppression = System.currentTimeMillis() - lastSuppressionTime;
-        return timeSinceLastSuppression > MIN_PEEK_TIME_MS;
+        boolean canPeek = timeSinceLastSuppression > MIN_PEEK_TIME_MS;
+        if (debugLog() && suppressionLevel > 0.01f) {
+            StevesArmyMod.LOGGER.info("[Suppression] Soldier canPeek: sup={:.2f}, timeSince={}ms, threshold={}ms -> {}",
+                suppressionLevel, timeSinceLastSuppression, MIN_PEEK_TIME_MS, canPeek);
+        }
+        return canPeek;
     }
     
     public long getTimeSinceLastSuppression() {
@@ -87,5 +114,9 @@ public class SuppressionTracker {
     
     public boolean wasRecentlySuppressed() {
         return getTimeSinceLastSuppression() < 5000;
+    }
+    
+    private boolean debugLog() {
+        return com.stevesarmy.entity.ai.CoverTacticalGoal.isDebugLoggingEnabled();
     }
 }

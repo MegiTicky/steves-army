@@ -13,6 +13,7 @@ import net.minecraft.world.phys.shapes.VoxelShape;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 
 public class CoverQualityEvaluator {
     private static final double SOLDIER_STANDING_HEIGHT = 1.8;
@@ -63,7 +64,7 @@ public class CoverQualityEvaluator {
         float standingProtection = (float) standingBlocked / standingTestPoints.size();
         float crouchingProtection = (float) crouchingBlocked / crouchingTestPoints.size();
         
-        boolean canShoot = canShootAtTarget(pos, threat);
+        boolean canShoot = canShootAtTarget(coverPoint, threat);
         coverPoint.setCanShootFrom(canShoot);
         
         CoverType type = determineTypeFromRaycast(standingProtection, crouchingProtection);
@@ -165,43 +166,94 @@ public class CoverQualityEvaluator {
         return true;
     }
     
-    private boolean canShootAtTarget(BlockPos coverPos, LivingEntity threat) {
+    private boolean canShootAtTarget(CoverPoint coverPoint, LivingEntity threat) {
+        BlockPos coverPos = coverPoint.getPosition();
         Vec3 threatCenter = threat.position().add(0, threat.getBbHeight() / 2.0, 0);
         
-        Vec3[] shootOrigins = {
-            new Vec3(coverPos.getX() + 0.5, coverPos.getY() + 1.7, coverPos.getZ() + 0.5),
-            new Vec3(coverPos.getX() + 0.5, coverPos.getY() + 1.45, coverPos.getZ() + 0.5),
-            new Vec3(coverPos.getX() + 0.6, coverPos.getY() + 1.55, coverPos.getZ() + 0.5),
-            new Vec3(coverPos.getX() + 0.4, coverPos.getY() + 1.55, coverPos.getZ() + 0.5),
-        };
+        Set<Direction> protectedDirs = coverPoint.getProtectedDirections();
         
-        for (Vec3 origin : shootOrigins) {
-            ClipContext context = new ClipContext(
-                origin, threatCenter,
-                ClipContext.Block.COLLIDER,
-                ClipContext.Fluid.NONE,
-                null
+        // Check from the position the soldier will actually be placed at (offset from center)
+        if (protectedDirs != null && !protectedDirs.isEmpty()) {
+            Direction protectDir = protectedDirs.iterator().next();
+            Vec3 offsetCenter = new Vec3(
+                coverPos.getX() + 0.5 - protectDir.getStepX() * 0.5,
+                coverPos.getY(),
+                coverPos.getZ() + 0.5 - protectDir.getStepZ() * 0.5
             );
-            
-            HitResult result = level.clip(context);
-            
-            if (result.getType() != HitResult.Type.BLOCK) {
+            if (hasClearShotFromEyePosition(offsetCenter.add(0, 1.62, 0), threatCenter)) {
                 return true;
             }
+        } else {
+            if (hasClearShotFromPosition(coverPos, threatCenter, true)) {
+                return true;
+            }
+        }
+        
+        if (protectedDirs == null || protectedDirs.isEmpty()) {
+            return false;
+        }
+        
+        // For full cover, check adjacent peek positions
+        for (Direction dir : Direction.Plane.HORIZONTAL) {
+            if (protectedDirs.contains(dir)) continue;
             
+            BlockPos peekPos = coverPos.relative(dir);
+            if (isStandablePosition(peekPos)) {
+                if (hasClearShotFromPosition(peekPos, threatCenter, false)) {
+                    return true;
+                }
+            }
+        }
+        
+        return false;
+    }
+    
+    private boolean hasClearShotFromEyePosition(Vec3 eyePos, Vec3 targetCenter) {
+        ClipContext context = new ClipContext(
+            eyePos, targetCenter,
+            ClipContext.Block.COLLIDER,
+            ClipContext.Fluid.NONE,
+            null
+        );
+        
+        HitResult result = level.clip(context);
+        return result.getType() != HitResult.Type.BLOCK;
+    }
+    
+    private boolean hasClearShotFromPosition(BlockPos fromPos, Vec3 targetCenter, boolean skipOwnBlock) {
+        Vec3 eyePos = new Vec3(fromPos.getX() + 0.5, fromPos.getY() + 1.62, fromPos.getZ() + 0.5);
+        ClipContext context = new ClipContext(
+            eyePos, targetCenter,
+            ClipContext.Block.COLLIDER,
+            ClipContext.Fluid.NONE,
+            null
+        );
+        
+        HitResult result = level.clip(context);
+        
+        if (result.getType() != HitResult.Type.BLOCK) {
+            return true;
+        }
+        
+        if (skipOwnBlock) {
             BlockHitResult blockResult = (BlockHitResult) result;
             BlockPos hitPos = blockResult.getBlockPos();
-            if (hitPos.equals(coverPos) || hitPos.equals(coverPos.above())) {
-                continue;
-            }
-            
-            BlockState hitState = level.getBlockState(hitPos);
-            if (!hitState.isCollisionShapeFullBlock(level, hitPos)) {
+            if (hitPos.equals(fromPos) || hitPos.equals(fromPos.above())) {
                 return true;
             }
         }
         
         return false;
+    }
+    
+    private boolean isStandablePosition(BlockPos pos) {
+        if (!level.isLoaded(pos)) return false;
+        BlockState ground = level.getBlockState(pos.below());
+        if (!ground.isSolid()) return false;
+        BlockState standing = level.getBlockState(pos);
+        BlockState head = level.getBlockState(pos.above());
+        return (standing.isAir() || standing.getCollisionShape(level, pos).isEmpty()) &&
+               (head.isAir() || head.getCollisionShape(level, pos.above()).isEmpty());
     }
     
     private CoverType determineTypeFromRaycast(float standingProtection, float crouchingProtection) {

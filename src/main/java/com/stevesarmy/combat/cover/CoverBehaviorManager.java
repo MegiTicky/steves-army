@@ -1,8 +1,9 @@
 package com.stevesarmy.combat.cover;
 
+import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.entity.SoldierEntity;
 import net.minecraft.core.BlockPos;
-import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.core.Direction;
 import net.minecraft.world.phys.Vec3;
 
 public class CoverBehaviorManager {
@@ -15,6 +16,18 @@ public class CoverBehaviorManager {
         REPOSITIONING
     }
     
+    public enum PeekState {
+        HIDING,
+        EXPOSED,
+        DUCKING_BACK
+    }
+    
+    private static final long EXPOSURE_TIME_MS = 1500;
+    private static final long MIN_EXPOSURE_TIME_MS = 800;
+    private static final long DUCK_COOLDOWN_MS = 1000;
+    private static final long SUPPRESSED_HIDE_EXTRA_MS = 2000;
+    
+    private SoldierEntity soldier;
     private CoverState state = CoverState.NO_COVER;
     private CoverPoint currentCover = null;
     private CoverPoint targetCover = null;
@@ -23,16 +36,69 @@ public class CoverBehaviorManager {
     private long seekingStartTime = 0;
     private long lastPeekTime = 0;
     private final SuppressionTracker suppressionTracker;
-    private final ThreatDirectionCalculator threatCalculator;
     
-    private int lastThreatCount = 0;
-    private Vec3 lastPrimaryThreatDirection = null;
+    private PeekState peekState = PeekState.HIDING;
+    private BlockPos peekPosition = null;
+    private long peekStartTime = 0;
+    private long lastPeekEndTime = 0;
+    private boolean nonPeekableCover = false;
+    
     private float lastCoverQuality = 0.0f;
     private float coverQualityPenalty = 0.0f;
     
-    public CoverBehaviorManager() {
+    public CoverBehaviorManager(SoldierEntity soldier) {
+        this.soldier = soldier;
         this.suppressionTracker = new SuppressionTracker();
-        this.threatCalculator = new ThreatDirectionCalculator();
+    }
+    
+    private void syncState() {
+        if (soldier != null && !soldier.level().isClientSide) {
+            soldier.syncCoverState(state.ordinal());
+        }
+    }
+    
+    private void syncCurrentCover() {
+        if (soldier != null && !soldier.level().isClientSide) {
+            if (currentCover != null) {
+                soldier.syncCoverCurrent(
+                    currentCover.getPosition(),
+                    currentCover.getType().ordinal(),
+                    currentCover.getQuality()
+                );
+            } else {
+                soldier.syncCoverCurrent(BlockPos.ZERO, 0, 0f);
+            }
+        }
+    }
+    
+    private void syncTargetCover() {
+        if (soldier != null && !soldier.level().isClientSide) {
+            if (targetCover != null) {
+                soldier.syncCoverTarget(
+                    targetCover.getPosition(),
+                    targetCover.getType().ordinal(),
+                    targetCover.getQuality()
+                );
+            } else {
+                soldier.syncCoverTarget(BlockPos.ZERO, 0, 0f);
+            }
+        }
+    }
+    
+    private void syncLastCover() {
+        if (soldier != null && !soldier.level().isClientSide) {
+            if (lastCover != null) {
+                soldier.syncCoverLast(lastCover.getPosition());
+            } else {
+                soldier.syncCoverLast(BlockPos.ZERO);
+            }
+        }
+    }
+    
+    private void syncSuppression() {
+        if (soldier != null && !soldier.level().isClientSide) {
+            soldier.syncSuppressionLevel(suppressionTracker.getSuppressionLevel());
+        }
     }
     
     public CoverState getState() {
@@ -40,7 +106,13 @@ public class CoverBehaviorManager {
     }
     
     public void setState(CoverState state) {
+        CoverState oldState = this.state;
         this.state = state;
+        syncState();
+        
+        if (debugLog()) {
+            StevesArmyMod.LOGGER.info("[CoverBehaviorManager] Soldier {} state: {} -> {}", soldier.getId(), oldState, state);
+        }
         
         if (state == CoverState.SEEKING_COVER || state == CoverState.REPOSITIONING) {
             this.seekingStartTime = System.currentTimeMillis();
@@ -64,7 +136,15 @@ public class CoverBehaviorManager {
     }
     
     public void setCurrentCover(CoverPoint cover) {
+        CoverPoint oldCover = this.currentCover;
         this.currentCover = cover;
+        syncCurrentCover();
+        if (debugLog()) {
+            StevesArmyMod.LOGGER.info("[CoverBehaviorManager] Soldier {} currentCover: {} -> {}", 
+                soldier.getId(), 
+                oldCover != null ? oldCover.getPosition() + " type=" + oldCover.getType() : "null",
+                cover != null ? cover.getPosition() + " type=" + cover.getType() + " score=" + String.format("%.2f", cover.getQuality()) : "null");
+        }
         if (cover != null) {
             this.coverEntryTime = System.currentTimeMillis();
             this.lastCoverQuality = cover.getQuality();
@@ -76,7 +156,15 @@ public class CoverBehaviorManager {
     }
     
     public void setTargetCover(CoverPoint cover) {
+        CoverPoint oldTarget = this.targetCover;
         this.targetCover = cover;
+        syncTargetCover();
+        if (debugLog()) {
+            StevesArmyMod.LOGGER.info("[CoverBehaviorManager] Soldier {} targetCover: {} -> {}", 
+                soldier.getId(),
+                oldTarget != null ? oldTarget.getPosition().toString() : "null",
+                cover != null ? cover.getPosition().toString() : "null");
+        }
     }
     
     public CoverPoint getLastCover() {
@@ -85,31 +173,44 @@ public class CoverBehaviorManager {
     
     public void setLastCover(CoverPoint cover) {
         this.lastCover = cover;
+        syncLastCover();
     }
     
     public void clearCover() {
+        if (debugLog()) {
+            StevesArmyMod.LOGGER.info("[CoverBehaviorManager] Soldier {} clearCover: current={}, state={}->NO_COVER", 
+                soldier.getId(),
+                currentCover != null ? currentCover.getPosition().toString() : "null",
+                state);
+        }
         if (currentCover != null) {
             CoverReservationManager.release(currentCover.getPosition(), null);
             this.lastCover = currentCover;
+            syncLastCover();
         }
         this.currentCover = null;
+        syncCurrentCover();
         this.coverEntryTime = 0;
         this.state = CoverState.NO_COVER;
+        syncState();
+        soldier.refreshDimensions();
     }
     
     public void clearTargetCover() {
+        if (debugLog()) {
+            StevesArmyMod.LOGGER.info("[CoverBehaviorManager] Soldier {} clearTargetCover: target={}", 
+                soldier.getId(),
+                targetCover != null ? targetCover.getPosition().toString() : "null");
+        }
         if (targetCover != null) {
             CoverReservationManager.release(targetCover.getPosition(), null);
         }
         this.targetCover = null;
+        syncTargetCover();
     }
     
     public SuppressionTracker getSuppressionTracker() {
         return suppressionTracker;
-    }
-    
-    public ThreatDirectionCalculator getThreatCalculator() {
-        return threatCalculator;
     }
     
     public boolean isInCover() {
@@ -158,47 +259,11 @@ public class CoverBehaviorManager {
         coverQualityPenalty = 0.0f;
     }
     
-    public int getLastThreatCount() {
-        return lastThreatCount;
-    }
-    
-    public Vec3 getLastPrimaryThreatDirection() {
-        return lastPrimaryThreatDirection;
-    }
-    
-    public ThreatDirectionCalculator.ThreatAnalysis analyzeThreats(SoldierEntity soldier, java.util.List<LivingEntity> threats) {
-        ThreatDirectionCalculator.ThreatAnalysis analysis = threatCalculator.analyzeThreats(soldier, threats);
-        updateThreatTracking(threats, analysis);
-        return analysis;
-    }
-    
-    private void updateThreatTracking(java.util.List<LivingEntity> threats, ThreatDirectionCalculator.ThreatAnalysis analysis) {
-        int currentThreatCount = threats.size();
-        Vec3 currentPrimaryDirection = analysis.primaryDirection;
-        
-        boolean threatCountChanged = (currentThreatCount != lastThreatCount);
-        
-        boolean directionChanged = false;
-        if (currentPrimaryDirection != null && lastPrimaryThreatDirection != null) {
-            double angle = Math.toDegrees(Math.acos(currentPrimaryDirection.dot(lastPrimaryThreatDirection)));
-            directionChanged = (angle > 60.0);
-        } else if ((currentPrimaryDirection == null) != (lastPrimaryThreatDirection == null)) {
-            directionChanged = true;
-        }
-        
-        if (threatCountChanged || directionChanged) {
-            coverQualityPenalty = 0.2f;
-        }
-        
-        lastThreatCount = currentThreatCount;
-        lastPrimaryThreatDirection = currentPrimaryDirection;
-    }
-    
-    public void onNearMiss(Vec3 bulletPath, LivingEntity soldier) {
+    public void onNearMiss(net.minecraft.world.phys.Vec3 bulletPath, net.minecraft.world.entity.LivingEntity soldier) {
         suppressionTracker.onNearMiss(bulletPath, soldier);
     }
     
-    public void onIncomingFire(LivingEntity shooter) {
+    public void onIncomingFire(net.minecraft.world.entity.LivingEntity shooter) {
         suppressionTracker.onIncomingFire(shooter);
     }
     
@@ -208,5 +273,97 @@ public class CoverBehaviorManager {
     
     public void tickSuppression(boolean inCover) {
         suppressionTracker.tick(inCover);
+        syncSuppression();
+    }
+    
+    private boolean debugLog() {
+        return soldier != null && com.stevesarmy.entity.ai.CoverTacticalGoal.isDebugLoggingEnabled();
+    }
+    
+    private void syncPeekState() {
+        if (soldier != null && !soldier.level().isClientSide) {
+            soldier.syncPeekState(peekState.ordinal());
+        }
+    }
+    
+    private void syncPeekPosition() {
+        if (soldier != null && !soldier.level().isClientSide) {
+            soldier.syncPeekPosition(peekPosition != null ? peekPosition : BlockPos.ZERO);
+        }
+    }
+    
+    public PeekState getPeekState() {
+        return peekState;
+    }
+    
+    public void setPeekState(PeekState state) {
+        this.peekState = state;
+        this.peekStartTime = System.currentTimeMillis();
+        syncPeekState();
+    }
+    
+    public BlockPos getPeekPosition() {
+        return peekPosition;
+    }
+    
+    public void setPeekPosition(BlockPos pos) {
+        this.peekPosition = pos;
+        syncPeekPosition();
+    }
+    
+    public long getPeekStartTime() {
+        return peekStartTime;
+    }
+    
+    public long getLastPeekEndTime() {
+        return lastPeekEndTime;
+    }
+    
+    public void setLastPeekEndTime(long time) {
+        this.lastPeekEndTime = time;
+    }
+    
+    public long getTimeSinceLastPeek() {
+        if (lastPeekEndTime == 0) return Long.MAX_VALUE;
+        return System.currentTimeMillis() - lastPeekEndTime;
+    }
+    
+    public long getTimeInCurrentPeekState() {
+        if (peekStartTime == 0) return 0;
+        return System.currentTimeMillis() - peekStartTime;
+    }
+    
+    public void resetPeekState() {
+        this.peekState = PeekState.HIDING;
+        this.peekStartTime = 0;
+        syncPeekState();
+    }
+    
+    public boolean isNonPeekableCover() {
+        return nonPeekableCover;
+    }
+    
+    public void setNonPeekableCover(boolean nonPeekable) {
+        this.nonPeekableCover = nonPeekable;
+    }
+    
+    public static long getExposureTimeMs() {
+        return EXPOSURE_TIME_MS;
+    }
+    
+    public static long getMinExposureTimeMs() {
+        return MIN_EXPOSURE_TIME_MS;
+    }
+    
+    public static long getDuckCooldownMs() {
+        return DUCK_COOLDOWN_MS;
+    }
+    
+    public static long getSuppressedHideExtraMs() {
+        return SUPPRESSED_HIDE_EXTRA_MS;
+    }
+    
+    public boolean hasCurrentCover() {
+        return currentCover != null;
     }
 }

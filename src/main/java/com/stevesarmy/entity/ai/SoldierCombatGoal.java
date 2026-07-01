@@ -7,14 +7,17 @@ import com.stevesarmy.combat.DetectionSystem;
 import com.stevesarmy.combat.ExposureCalculator;
 import com.stevesarmy.combat.GunIntegration;
 import com.stevesarmy.combat.TargetAcquisition;
+import com.stevesarmy.combat.ThreatAwareness;
 import com.stevesarmy.combat.ThreatTracker;
 import com.stevesarmy.combat.cover.CoverBehaviorManager;
+import com.stevesarmy.combat.cover.CoverPoint;
 import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.entity.TargetEntity;
 import com.stevesarmy.network.NetworkHandler;
 import com.stevesarmy.network.PotentialTargetsDebugMessage;
 import com.stevesarmy.squad.SquadMode;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.ai.goal.Goal;
@@ -28,6 +31,7 @@ import java.util.Comparator;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -54,6 +58,21 @@ public class SoldierCombatGoal extends Goal {
     private int debugSyncTickCounter = 0;
     private static final int DEBUG_SYNC_INTERVAL = 5;
     private int targetReevaluateCounter = 0;
+    
+    private static final int PEEK_CYCLE_LOG_INTERVAL = 100;
+    private int peekCycleLogCounter = 0;
+    
+    private CoverBehaviorManager.PeekState lastPeekState = CoverBehaviorManager.PeekState.HIDING;
+
+    private static boolean combatDebugLogging = false;
+    
+    public static void setDebugLoggingEnabled(boolean enabled) {
+        combatDebugLogging = enabled;
+    }
+
+    private static boolean isDebugLogging() {
+        return combatDebugLogging || CoverTacticalGoal.isDebugLoggingEnabled();
+    }
 
     public SoldierCombatGoal(SoldierEntity soldier) {
         this.soldier = soldier;
@@ -66,7 +85,7 @@ public class SoldierCombatGoal extends Goal {
     public boolean canUse() {
         if (!soldier.isAlive()) return false;
         
-        if (soldier.hasValidPingMoveTarget()) {
+        if (soldier.hasValidPingMoveTarget() && soldier.getTarget() == null) {
             return false;
         }
         
@@ -85,6 +104,10 @@ public class SoldierCombatGoal extends Goal {
             return true;
         }
         
+        if (soldier.getCoverBehaviorManager().isInCover()) {
+            return true;
+        }
+        
         if (GunIntegration.isTaczLoaded() && GunIntegration.hasGun(soldier)) {
             if (GunIntegration.getCurrentAmmo(soldier) == 0 && !GunIntegration.isReloading(soldier)) {
                 return true;
@@ -98,7 +121,7 @@ public class SoldierCombatGoal extends Goal {
     public boolean canContinueToUse() {
         if (!soldier.isAlive()) return false;
         
-        if (soldier.hasValidPingMoveTarget()) {
+        if (soldier.hasValidPingMoveTarget() && soldier.getTarget() == null) {
             return false;
         }
         
@@ -109,6 +132,10 @@ public class SoldierCombatGoal extends Goal {
         }
         
         if (hasPotentialTargets()) {
+            return true;
+        }
+        
+        if (soldier.getCoverBehaviorManager().isInCover()) {
             return true;
         }
         
@@ -176,14 +203,48 @@ public class SoldierCombatGoal extends Goal {
         List<LivingEntity> potentialTargets = getPotentialTargets();
         detectionSystem.tick(soldier, potentialTargets);
         
+        // Feed detected entities into ThreatAwareness
+        ThreatAwareness threats = soldier.getThreatAwareness();
+        for (LivingEntity potential : potentialTargets) {
+            if (detectionSystem.isTargetDetected(potential)) {
+                threats.onEntityDetected(potential);
+            }
+        }
+        
+        // Feed ping threat positions into ThreatAwareness if no entity found
+        if (soldier.hasValidPingThreatPos() && !threats.hasActiveThreat()) {
+            BlockPos threatPos = soldier.getPingThreatPos();
+            if (threatPos != null) {
+                // Already handled in receivePing via onEnemyPing/onPingDirection
+            }
+        }
+        
         boolean hasGun = GunIntegration.isTaczLoaded() && GunIntegration.hasGun(soldier);
         
         if (hasGun) {
             handleGunInitialization();
         }
         
-        if (target == null || !target.isAlive() || !TargetAcquisition.hasLineOfSight(soldier, target)) {
-            findNewTarget();
+        boolean inCover = soldier.getCoverBehaviorManager().isInCover();
+        
+        if (target == null || !target.isAlive()) {
+            if (inCover && target == null) {
+                if (++targetReevaluateCounter >= StevesArmyConfig.getTargetReevaluateInterval()) {
+                    targetReevaluateCounter = 0;
+                    findNewTarget();
+                }
+            } else {
+                findNewTarget();
+            }
+        } else if (!TargetAcquisition.hasLineOfSight(soldier, target)) {
+            if (inCover) {
+                if (++targetReevaluateCounter >= StevesArmyConfig.getTargetReevaluateInterval()) {
+                    targetReevaluateCounter = 0;
+                    findNewTarget();
+                }
+            } else {
+                findNewTarget();
+            }
         }
         
         if (target != null && target.isAlive()) {
@@ -191,6 +252,15 @@ public class SoldierCombatGoal extends Goal {
             updateDebugSync();
         } else {
             tickScanning(potentialTargets);
+            CoverBehaviorManager coverManager = soldier.getCoverBehaviorManager();
+            if (++debugSyncTickCounter % PEEK_CYCLE_LOG_INTERVAL == 0) {
+                StevesArmyMod.LOGGER.info("[CombatGoal] Soldier {} tick: target=null, inCover={}, peekState={}, coverState={}",
+                    soldier.getId(), inCover, coverManager.getPeekState(), coverManager.getState());
+            }
+            if (inCover) {
+                tickCoverPeekCycle(coverManager);
+            }
+            updateDebugSync();
         }
         
         debugSyncTickCounter++;
@@ -234,36 +304,24 @@ public class SoldierCombatGoal extends Goal {
             resetTracking(target);
         }
         
+        CoverBehaviorManager coverManager = soldier.getCoverBehaviorManager();
+        if (coverManager.isInCover()) {
+            tickCoverPeekCycle(coverManager);
+        }
+        
         soldier.getLookControl().setLookAt(target, 30.0F, 30.0F);
         
-        if (hasGun && canSee) {
-            tickGunCombat();
+        if (hasGun) {
+            boolean shouldShoot = canSee || 
+                (coverManager.isInCover() && coverManager.getPeekState() == CoverBehaviorManager.PeekState.EXPOSED);
+            if (shouldShoot) {
+                tickGunCombat();
+            }
         }
     }
 
     private void tickGunCombat() {
         CoverBehaviorManager coverManager = soldier.getCoverBehaviorManager();
-        
-        if (coverManager.isInCover()) {
-            if (coverManager.isPinned()) {
-                GunIntegration.aim(soldier, false);
-                GunIntegration.crawl(soldier, true);
-                return;
-            }
-            
-            if (!coverManager.getSuppressionTracker().canPeek()) {
-                GunIntegration.aim(soldier, false);
-                return;
-            }
-            
-            long timeSincePeek = System.currentTimeMillis() - coverManager.getLastPeekTime();
-            if (timeSincePeek < 2000) {
-                GunIntegration.aim(soldier, false);
-                return;
-            }
-            
-            GunIntegration.crawl(soldier, false);
-        }
         
         boolean isDrawing = GunIntegration.isDrawing(soldier);
         boolean isBolting = GunIntegration.isBolting(soldier);
@@ -282,6 +340,11 @@ public class SoldierCombatGoal extends Goal {
         }
         
         if (isDrawing || isBolting) {
+            return;
+        }
+        
+        if (coverManager.isInCover() && coverManager.getPeekState() != CoverBehaviorManager.PeekState.EXPOSED) {
+            GunIntegration.aim(soldier, false);
             return;
         }
         
@@ -375,6 +438,51 @@ public class SoldierCombatGoal extends Goal {
         }
     }
     
+    private void tickCoverPeekCycle(CoverBehaviorManager coverManager) {
+        CoverBehaviorManager.PeekState peekState = coverManager.getPeekState();
+        
+        if (++peekCycleLogCounter >= PEEK_CYCLE_LOG_INTERVAL) {
+            peekCycleLogCounter = 0;
+            StevesArmyMod.LOGGER.info("[PeekCycle] Soldier {} tick: peekState={}, target={}, inCover={}, hasThreat={}",
+                soldier.getId(), peekState,
+                (target != null ? target.getName().getString() : "null"),
+                coverManager.isInCover(), soldier.getThreatAwareness().hasActiveThreat());
+        }
+        
+        if (isDebugLogging()) {
+            StevesArmyMod.LOGGER.info("[PeekCycle] Soldier {} tick: peekState={}, target={}, isPinned={}, canPeek={}",
+                soldier.getId(), peekState,
+                (target != null ? target.getName().getString() : "null"),
+                coverManager.isPinned(), coverManager.getSuppressionTracker().canPeek());
+        }
+        
+        if (peekState == CoverBehaviorManager.PeekState.EXPOSED) {
+            lookTowardThreat();
+            
+            if (target != null && target.isAlive()) {
+                soldier.setTarget(target);
+            }
+        }
+        
+        lastPeekState = peekState;
+    }
+    
+    private void lookTowardThreat() {
+        if (target != null && target.isAlive()) {
+            soldier.getLookControl().setLookAt(target, 30.0F, 30.0F);
+        } else {
+            BlockPos threatPos = soldier.getThreatAwareness().getPrimaryThreatPosition();
+            if (threatPos != null) {
+                soldier.getLookControl().setLookAt(
+                    threatPos.getX() + 0.5,
+                    soldier.getEyeY(),
+                    threatPos.getZ() + 0.5,
+                    30.0F, 30.0F
+                );
+            }
+        }
+    }
+    
     private Optional<LivingEntity> findBetterTarget(float currentAccuracy) {
         List<LivingEntity> potentialTargets = getPotentialTargets();
         
@@ -438,7 +546,7 @@ public class SoldierCombatGoal extends Goal {
         if (soldier.hasValidForcedTarget()) {
             BlockPos forcedPos = soldier.getForcedTargetPos();
             soldier.getLookControl().setLookAt(
-                forcedPos.getX() + 0.5, forcedPos.getY() + 1.0, forcedPos.getZ() + 0.5, 
+                forcedPos.getX() + 0.5, forcedPos.getY() + 0.5, forcedPos.getZ() + 0.5, 
                 30.0F, 30.0F
             );
             return;
@@ -447,7 +555,7 @@ public class SoldierCombatGoal extends Goal {
         if (soldier.hasValidPingThreatPos()) {
             BlockPos threatPos = soldier.getPingThreatPos();
             soldier.getLookControl().setLookAt(
-                threatPos.getX() + 0.5, threatPos.getY() + 1.0, threatPos.getZ() + 0.5,
+                threatPos.getX() + 0.5, threatPos.getY() + 0.5, threatPos.getZ() + 0.5,
                 30.0F, 30.0F
             );
             return;
@@ -456,7 +564,7 @@ public class SoldierCombatGoal extends Goal {
         Optional<BlockPos> lastKnownPos = threatTracker.getLastKnownPosition();
         if (lastKnownPos.isPresent()) {
             BlockPos pos = lastKnownPos.get();
-            soldier.getLookControl().setLookAt(pos.getX() + 0.5, pos.getY() + 1.0, pos.getZ() + 0.5, 30.0F, 30.0F);
+            soldier.getLookControl().setLookAt(pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5, 30.0F, 30.0F);
             return;
         }
         
@@ -509,6 +617,12 @@ public class SoldierCombatGoal extends Goal {
 
     private boolean findNewTarget() {
         List<LivingEntity> potentialTargets = getPotentialTargets();
+        ThreatAwareness threats = soldier.getThreatAwareness();
+        
+        if (isDebugLogging()) {
+            StevesArmyMod.LOGGER.info("[CombatGoal] findNewTarget: {} potential targets, inCover={}", 
+                potentialTargets.size(), soldier.getCoverBehaviorManager().isInCover());
+        }
         
         if (soldier.hasValidForcedTarget()) {
             BlockPos forcedPos = soldier.getForcedTargetPos();
@@ -522,11 +636,14 @@ public class SoldierCombatGoal extends Goal {
             if (forcedEntity.isPresent()) {
                 this.target = forcedEntity.get();
                 soldier.setTarget(target);
+                threats.onEntityDetected(target);
                 threatTracker.reportThreatDirect(target);
                 detectionSystem.forceDetect(target);
                 soldier.clearForcedTarget();
                 soldier.clearPingThreatPos();
-                StevesArmyMod.LOGGER.info("Switched to forced target: {}", target.getName().getString());
+                if (isDebugLogging()) {
+                    StevesArmyMod.LOGGER.info("[CombatGoal] Acquired forced target: {}", target.getName().getString());
+                }
                 return true;
             }
         }
@@ -543,41 +660,116 @@ public class SoldierCombatGoal extends Goal {
             if (pingTarget.isPresent()) {
                 this.target = pingTarget.get();
                 soldier.setTarget(target);
+                threats.onEntityDetected(target);
                 threatTracker.reportThreatDirect(target);
                 detectionSystem.forceDetect(target);
                 soldier.clearPingThreatPos();
-                StevesArmyMod.LOGGER.info("Found ping-designated target: {}", target.getName().getString());
+                if (isDebugLogging()) {
+                    StevesArmyMod.LOGGER.info("[CombatGoal] Acquired ping target: {}", target.getName().getString());
+                }
                 return true;
             }
         }
         
-        List<LivingEntity> detectedTargets = potentialTargets.stream()
-            .filter(detectionSystem::isTargetDetected)
+        boolean inCover = soldier.getCoverBehaviorManager().isInCover();
+        
+        List<LivingEntity> losTargets = potentialTargets.stream()
             .filter(e -> TargetAcquisition.hasLineOfSight(soldier, e))
             .collect(Collectors.toList());
         
-        if (detectedTargets.isEmpty()) {
-            this.target = null;
-            return false;
-        }
-        
-        Optional<LivingEntity> bestTarget = detectedTargets.stream()
-            .map(e -> new TargetScore(e, AimAccuracyManager.calculateHitProbability(soldier, e)))
-            .max(Comparator.comparingDouble(ts -> ts.hitProbability))
-            .map(ts -> ts.target);
-        
-        if (bestTarget.isPresent()) {
-            this.target = bestTarget.get();
+        if (!losTargets.isEmpty()) {
+            Optional<LivingEntity> best = losTargets.stream()
+                .map(e -> new TargetScore(e, AimAccuracyManager.calculateHitProbability(soldier, e)))
+                .max(Comparator.comparingDouble(ts -> ts.hitProbability))
+                .map(ts -> ts.target);
+            
+            if (best.isPresent()) {
+                this.target = best.get();
+                soldier.setTarget(target);
+                threats.onEntityDetected(target);
+                threatTracker.reportThreatDirect(target);
+                detectionSystem.forceDetect(target);
+                if (isDebugLogging()) {
+                    StevesArmyMod.LOGGER.info("[CombatGoal] Acquired LOS target: {}", target.getName().getString());
+                }
+                return true;
+            }
+            
+            this.target = losTargets.get(0);
             soldier.setTarget(target);
+            threats.onEntityDetected(target);
             threatTracker.reportThreatDirect(target);
+            if (isDebugLogging()) {
+                StevesArmyMod.LOGGER.info("[CombatGoal] Acquired nearest LOS target: {}", target.getName().getString());
+            }
             return true;
         }
         
-        detectedTargets.sort(Comparator.comparingDouble(e -> e.distanceToSqr(soldier)));
-        this.target = detectedTargets.get(0);
-        soldier.setTarget(target);
-        threatTracker.reportThreatDirect(target);
-        return true;
+        if (!potentialTargets.isEmpty()) {
+            Vec3 primaryDir = threats.getPrimaryDirection(soldier.position());
+            if (primaryDir != null && primaryDir.lengthSqr() > 0.001) {
+                Optional<LivingEntity> threatDirTarget = potentialTargets.stream()
+                    .min(Comparator.comparingDouble(e -> {
+                        Vec3 toTarget = e.position().subtract(soldier.position()).normalize();
+                        return toTarget.distanceToSqr(primaryDir);
+                    }));
+                
+                if (threatDirTarget.isPresent()) {
+                    this.target = threatDirTarget.get();
+                    soldier.setTarget(target);
+                    threats.onEntityDetected(target);
+                    threatTracker.reportThreatDirect(target);
+                    if (isDebugLogging()) {
+                        StevesArmyMod.LOGGER.info("[CombatGoal] Acquired threat-direction target (cover fallback): {}", 
+                            target.getName().getString());
+                    }
+                    return true;
+                }
+            }
+            
+            Optional<BlockPos> lastKnown = threatTracker.getLastKnownPosition();
+            if (lastKnown.isPresent()) {
+                BlockPos lk = lastKnown.get();
+                Optional<LivingEntity> nearLastKnown = potentialTargets.stream()
+                    .filter(e -> e.distanceToSqr(lk.getX(), lk.getY(), lk.getZ()) < 400.0)
+                    .min(Comparator.comparingDouble(e -> e.distanceToSqr(lk.getX(), lk.getY(), lk.getZ())));
+                
+                if (nearLastKnown.isPresent()) {
+                    this.target = nearLastKnown.get();
+                    soldier.setTarget(target);
+                    threats.onEntityDetected(target);
+                    threatTracker.reportThreatDirect(target);
+                    if (isDebugLogging()) {
+                        StevesArmyMod.LOGGER.info("[CombatGoal] Acquired target near last known position (cover fallback): {}", 
+                            target.getName().getString());
+                    }
+                    return true;
+                }
+            }
+            
+            Optional<LivingEntity> closest = potentialTargets.stream()
+                .min(Comparator.comparingDouble(e -> e.distanceToSqr(soldier)));
+            
+            if (closest.isPresent()) {
+                this.target = closest.get();
+                soldier.setTarget(target);
+                threats.onEntityDetected(target);
+                threatTracker.reportThreatDirect(target);
+                if (isDebugLogging()) {
+                    StevesArmyMod.LOGGER.info("[CombatGoal] Acquired closest target (cover fallback): {}", 
+                        target.getName().getString());
+                }
+                return true;
+            }
+        }
+        
+        if (isDebugLogging()) {
+            StevesArmyMod.LOGGER.info("[CombatGoal] findNewTarget: no target found ({} potential, {} LOS, inCover={})",
+                potentialTargets.size(), losTargets.size(), inCover);
+        }
+        
+        this.target = null;
+        return false;
     }
     
     public LivingEntity getCurrentTarget() {
@@ -589,19 +781,31 @@ public class SoldierCombatGoal extends Goal {
     }
     
     private void updateDebugSync() {
-        if (target == null || !target.isAlive()) {
-            soldier.setDebugTargetUUID(null);
+        if (target != null && target.isAlive()) {
+            if (!soldier.level().isClientSide) {
+                double distance = soldier.distanceTo(target);
+                boolean hasLOS = TargetAcquisition.hasLineOfSight(soldier, target);
+                boolean inFocused = TargetAcquisition.isInFocusedArc(soldier, target);
+                double detectionProgress = detectionSystem.getDetectionProgress(target);
+                boolean isDetected = detectionSystem.isTargetDetected(target);
+                
+                soldier.updateDebugData((float)detectionProgress, isDetected, (float)distance, hasLOS, inFocused);
+                soldier.setDebugTargetUUID(target.getUUID());
+            }
             return;
         }
+        
         if (!soldier.level().isClientSide) {
-            double distance = soldier.distanceTo(target);
-            boolean hasLOS = TargetAcquisition.hasLineOfSight(soldier, target);
-            boolean inFocused = TargetAcquisition.isInFocusedArc(soldier, target);
-            double detectionProgress = detectionSystem.getDetectionProgress(target);
-            boolean isDetected = detectionSystem.isTargetDetected(target);
-            
-            soldier.updateDebugData((float)detectionProgress, isDetected, (float)distance, hasLOS, inFocused);
-            soldier.setDebugTargetUUID(target.getUUID());
+            ThreatAwareness threats = soldier.getThreatAwareness();
+            if (threats.hasActiveThreat()) {
+                Vec3 threatPos = threats.getWeightedAveragePosition();
+                if (threatPos.lengthSqr() > 0.001) {
+                    soldier.updateDebugData(0, false, (float)soldier.position().distanceTo(threatPos), false, false);
+                    soldier.setDebugTargetUUID(soldier.getUUID());
+                }
+            } else {
+                soldier.setDebugTargetUUID(null);
+            }
         }
     }
     
@@ -623,6 +827,18 @@ public class SoldierCombatGoal extends Goal {
             
             UUID lockedTargetUUID = target != null ? target.getUUID() : null;
             Vec3 lockedTargetPos = target != null ? target.position() : Vec3.ZERO;
+            
+            if (target == null) {
+                ThreatAwareness threats = soldier.getThreatAwareness();
+                if (threats.hasActiveThreat()) {
+                    Vec3 threatPos = threats.getWeightedAveragePosition();
+                    if (threatPos.lengthSqr() > 0.001) {
+                        lockedTargetUUID = soldier.getUUID();
+                        lockedTargetPos = threatPos;
+                    }
+                }
+            }
+            
             double lockedDetectionPoints = target != null ? 
                 (detectionSystem.getDetectionState(target.getUUID()) != null ? 
                     detectionSystem.getDetectionState(target.getUUID()).accumulatedPoints : 0) : 0;
