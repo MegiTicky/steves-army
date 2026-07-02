@@ -2,8 +2,12 @@ package com.stevesarmy.combat.cover;
 
 import com.stevesarmy.entity.SoldierEntity;
 import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.phys.Vec3;
 import java.util.List;
+import java.util.Map;
 import java.util.Collections;
+import java.util.HashMap;
 
 public class CoverDebugManager {
     private static List<CoverPoint> coverPoints = Collections.emptyList();
@@ -13,6 +17,8 @@ public class CoverDebugManager {
     private static boolean showRays = false;
     private static boolean showSolidBlocks = false;
     private static boolean showSoldierCover = false;
+    private static boolean showPeekCandidates = false;
+    private static final Map<Integer, PeekCandidateDebugData> soldierPeekCandidates = new HashMap<>();
     
     public static void setCoverPoints(List<CoverPoint> points) {
         coverPoints = points != null ? points : Collections.emptyList();
@@ -70,6 +76,26 @@ public class CoverDebugManager {
         return showSoldierCover;
     }
     
+    public static void setShowPeekCandidates(boolean enabled) {
+        showPeekCandidates = enabled;
+    }
+    
+    public static boolean isShowPeekCandidates() {
+        return showPeekCandidates;
+    }
+    
+    public static void setSoldierPeekCandidates(int soldierId, PeekCandidateDebugData data) {
+        soldierPeekCandidates.put(soldierId, data);
+    }
+    
+    public static PeekCandidateDebugData getSoldierPeekCandidates(int soldierId) {
+        return soldierPeekCandidates.get(soldierId);
+    }
+    
+    public static void clearPeekCandidates() {
+        soldierPeekCandidates.clear();
+    }
+    
     public static void clear() {
         coverPoints = Collections.emptyList();
         bestCoverPoint = null;
@@ -78,5 +104,37 @@ public class CoverDebugManager {
         showRays = false;
         showSolidBlocks = false;
         showSoldierCover = false;
+        showPeekCandidates = false;
+        soldierPeekCandidates.clear();
+    }
+    
+    public static class PeekCandidateDebugData {
+        public static final int REASON_PROTECTED_DIR = 1;
+        public static final int REASON_INVALID_POS = 2;
+        public static final int REASON_NO_LOS = 3;
+        public static final int REASON_BAD_ANGLE = 4;
+        public static final int REASON_CHOSEN = 5;
+        public static final int REASON_ACCEPTED = 6;
+        
+        public final BlockPos coverPos;
+        public final List<BlockPos> candidatePositions;
+        public final List<Integer> rejectionReasons;
+        public final List<Double> angleScores;
+        public final List<Boolean> losResults;
+        public final BlockPos chosenPosition;
+        public final Vec3 targetEyePosition;
+        
+        public PeekCandidateDebugData(BlockPos coverPos, List<BlockPos> candidatePositions,
+                                       List<Integer> rejectionReasons, List<Double> angleScores,
+                                       List<Boolean> losResults, BlockPos chosenPosition,
+                                       Vec3 targetEyePosition) {
+            this.coverPos = coverPos;
+            this.candidatePositions = candidatePositions;
+            this.rejectionReasons = rejectionReasons;
+            this.angleScores = angleScores;
+            this.losResults = losResults;
+            this.chosenPosition = chosenPosition;
+            this.targetEyePosition = targetEyePosition;
+        }
     }
 }

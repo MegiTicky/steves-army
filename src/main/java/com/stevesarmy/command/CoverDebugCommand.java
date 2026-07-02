@@ -2,7 +2,11 @@ package com.stevesarmy.command;
 
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.context.CommandContext;
+import com.mojang.brigadier.arguments.FloatArgumentType;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
+import com.mojang.brigadier.arguments.StringArgumentType;
+import com.stevesarmy.client.model.PoseConfig;
+import com.stevesarmy.combat.GunIntegration;
 import com.stevesarmy.combat.ThreatAwareness;
 import com.stevesarmy.combat.cover.CoverFinder;
 import com.stevesarmy.combat.cover.CoverPoint;
@@ -17,11 +21,13 @@ import net.minecraft.commands.Commands;
 import net.minecraft.commands.arguments.EntityArgument;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.Pose;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.phys.Vec3;
 import java.util.List;
 import java.util.ArrayList;
+import java.util.function.BiConsumer;
 
 public class CoverDebugCommand {
     
@@ -84,8 +90,33 @@ public class CoverDebugCommand {
             .then(Commands.literal("soldiers")
                 .executes(CoverDebugCommand::toggleSoldierVisualization)
             )
+            .then(Commands.literal("peekcandidates")
+                .executes(CoverDebugCommand::togglePeekCandidates)
+            )
             .then(Commands.literal("peek")
                 .executes(CoverDebugCommand::forcePeek)
+            )
+            .then(Commands.literal("pose")
+                .executes(CoverDebugCommand::poseStatus)
+                .then(Commands.literal("crawl")
+                    .executes(CoverDebugCommand::forceCrawl))
+                .then(Commands.literal("stand")
+                    .executes(CoverDebugCommand::forceStand))
+                .then(Commands.literal("status")
+                    .executes(CoverDebugCommand::poseStatus))
+                .then(Commands.literal("noai")
+                    .executes(CoverDebugCommand::toggleNoAi))
+                .then(Commands.literal("angles")
+                    .executes(CoverDebugCommand::showPoseAngles))
+                .then(Commands.literal("deg")
+                    .executes(CoverDebugCommand::showPoseDegrees))
+                .then(Commands.literal("set")
+                    .then(Commands.argument("part", StringArgumentType.word())
+                        .then(Commands.argument("axis", StringArgumentType.word())
+                            .then(Commands.argument("value", FloatArgumentType.floatArg())
+                                .executes(CoverDebugCommand::setPoseAngle)))))
+                .then(Commands.literal("reset")
+                    .executes(CoverDebugCommand::resetPoseAngles))
             )
             .then(Commands.literal("reposition")
                 .executes(CoverDebugCommand::forceReposition)
@@ -110,7 +141,9 @@ public class CoverDebugCommand {
             "  /stevesarmy_cover reservations - Show cover reservations\n" +
             "  /stevesarmy_cover log [on|off] - Toggle cover behavior logging\n" +
             "  /stevesarmy_cover soldiers - Toggle soldier cover visualization (state, cover, threats)\n" +
+            "  /stevesarmy_cover peekcandidates - Toggle peek candidate visualization\n" +
             "  /stevesarmy_cover peek - Force nearest soldier to peek from cover\n" +
+            "  /stevesarmy_cover pose [crawl|stand|status|noai] - Force crawl/stand, show pose, toggle AI\n" +
             "  /stevesarmy_cover reposition - Force nearest soldier to abandon cover and find new one"
             ), false);
         return 1;
@@ -595,6 +628,24 @@ public class CoverDebugCommand {
         return 1;
     }
     
+    private static int togglePeekCandidates(CommandContext<CommandSourceStack> context) {
+        boolean enabled = !CoverDebugManager.isShowPeekCandidates();
+        CoverDebugManager.setShowPeekCandidates(enabled);
+        CoverDebugManager.setVisualizationEnabled(true);
+        
+        context.getSource().sendSuccess(() -> Component.literal(
+            "Peek candidate visualization: " + (enabled ? "ON" : "OFF") + "\n" +
+            "Shows each candidate block considered for full-cover peeking:\n" +
+            "  GREEN = accepted (passed all checks)\n" +
+            "  CYAN = chosen best candidate\n" +
+            "  YELLOW = bad angle (not 45-135deg from threat)\n" +
+            "  RED = no LOS to target\n" +
+            "  GRAY = invalid position (blocked or no ground)\n" +
+            "  DARK_RED = protected direction (stepping into cover)"
+        ), true);
+        return 1;
+    }
+    
     private static int forcePeek(CommandContext<CommandSourceStack> context) {
         Player player = context.getSource().getPlayer();
         if (player == null) {
@@ -638,6 +689,124 @@ public class CoverDebugCommand {
         context.getSource().sendSuccess(() -> Component.literal(
             "Forcing peek for soldier " + targetSoldier.getId() + 
             " at " + targetCover.getPosition() + " (" + targetCover.getType() + ")"
+        ), true);
+        return 1;
+    }
+    
+    private static SoldierEntity getNearestSoldier(Player player, double maxDist) {
+        SoldierEntity nearest = null;
+        double nearestDist = Double.MAX_VALUE;
+        for (SoldierEntity soldier : player.level().getEntitiesOfClass(
+                SoldierEntity.class, player.getBoundingBox().inflate(maxDist))) {
+            double dist = soldier.distanceToSqr(player);
+            if (dist < nearestDist) {
+                nearestDist = dist;
+                nearest = soldier;
+            }
+        }
+        return nearest;
+    }
+    
+    private static int forceCrawl(CommandContext<CommandSourceStack> context) {
+        Player player = context.getSource().getPlayer();
+        if (player == null) {
+            context.getSource().sendFailure(Component.literal("Player only command"));
+            return 0;
+        }
+        
+        SoldierEntity soldier = getNearestSoldier(player, 32);
+        if (soldier == null) {
+            context.getSource().sendFailure(Component.literal("No soldier within 32 blocks"));
+            return 0;
+        }
+        
+        GunIntegration.crawl(soldier, true);
+        
+        final SoldierEntity target = soldier;
+        context.getSource().sendSuccess(() -> Component.literal(
+            "Forced crawl for soldier " + target.getId() +
+            " | Pose: " + target.getPose() +
+            " | isCrawling: " + GunIntegration.isCrawling(target)
+        ), true);
+        return 1;
+    }
+    
+    private static int forceStand(CommandContext<CommandSourceStack> context) {
+        Player player = context.getSource().getPlayer();
+        if (player == null) {
+            context.getSource().sendFailure(Component.literal("Player only command"));
+            return 0;
+        }
+        
+        SoldierEntity soldier = getNearestSoldier(player, 32);
+        if (soldier == null) {
+            context.getSource().sendFailure(Component.literal("No soldier within 32 blocks"));
+            return 0;
+        }
+        
+        GunIntegration.crawl(soldier, false);
+        
+        final SoldierEntity target = soldier;
+        context.getSource().sendSuccess(() -> Component.literal(
+            "Forced stand for soldier " + target.getId() +
+            " | Pose: " + target.getPose() +
+            " | isCrawling: " + GunIntegration.isCrawling(target)
+        ), true);
+        return 1;
+    }
+    
+    private static int poseStatus(CommandContext<CommandSourceStack> context) {
+        Player player = context.getSource().getPlayer();
+        if (player == null) {
+            context.getSource().sendFailure(Component.literal("Player only command"));
+            return 0;
+        }
+        
+        context.getSource().sendSuccess(() -> Component.literal("=== SOLDIER POSE STATUS ==="), false);
+        
+        for (SoldierEntity soldier : player.level().getEntitiesOfClass(
+                SoldierEntity.class, player.getBoundingBox().inflate(32))) {
+            CoverBehaviorManager manager = soldier.getCoverBehaviorManager();
+            CoverPoint cover = manager != null ? manager.getCurrentCover() : null;
+            String coverType = cover != null ? cover.getType().name() : "NONE";
+            String state = manager != null ? manager.getState().name() : "N/A";
+            
+            final SoldierEntity s = soldier;
+            context.getSource().sendSuccess(() -> Component.literal(
+                "Soldier " + s.getId() +
+                " | Pose: " + s.getPose() +
+                " | isCrawling: " + GunIntegration.isCrawling(s) +
+                " | CrawlFlag: " + s.isCrawling() +
+                " | isInWater: " + s.isInWater() +
+                " | NoAI: " + s.isNoAi() +
+                " | Cover: " + coverType +
+                " | State: " + state
+            ), false);
+        }
+        
+        return 1;
+    }
+    
+    private static int toggleNoAi(CommandContext<CommandSourceStack> context) {
+        Player player = context.getSource().getPlayer();
+        if (player == null) {
+            context.getSource().sendFailure(Component.literal("Player only command"));
+            return 0;
+        }
+        
+        SoldierEntity soldier = getNearestSoldier(player, 32);
+        if (soldier == null) {
+            context.getSource().sendFailure(Component.literal("No soldier within 32 blocks"));
+            return 0;
+        }
+        
+        boolean newState = !soldier.isNoAi();
+        soldier.setNoAi(newState);
+        
+        final SoldierEntity target = soldier;
+        context.getSource().sendSuccess(() -> Component.literal(
+            "Soldier " + target.getId() + " NoAI: " + target.isNoAi() +
+            " | Pose: " + target.getPose()
         ), true);
         return 1;
     }
@@ -687,4 +856,141 @@ public class CoverDebugCommand {
         ), true);
         return 1;
     }
-}
+
+    // Prone pose design helpers — prints target angles for Blockbench tuning
+    private static final String[][] POSE_PARTS = {
+        {"rightArm.xRot", "3.1416"},
+        {"rightArm.yRot", "0.0"},
+        {"rightArm.zRot", "0.0"},
+        {"leftArm.xRot", "2.9"},
+        {"leftArm.yRot", "-0.06"},
+        {"leftArm.zRot", "-0.72"},
+        {"head.xRot", "-1.35"},
+        {"rightLeg.xRot", "-0.34"},
+        {"rightLeg.yRot", "1.13"},
+        {"rightLeg.zRot", "-0.76"},
+        {"leftLeg.xRot", "-0.19"},
+        {"leftLeg.yRot", "-0.07"},
+        {"leftLeg.zRot", "0.0"},
+        {"body.xRot", "-0.14"},
+        {"body.yRot", "0.28"},
+        {"body.zRot", "-0.04"},
+    };
+
+    private static int showPoseAngles(CommandContext<CommandSourceStack> context) {
+        context.getSource().sendSuccess(() -> Component.literal(
+            "=== LIVE PRONE POSE ANGLES (radians) ===" +
+            "\nUse /stevesarmy_cover pose set <part> <axis> <value> to adjust" +
+            "\n" + PoseConfig.getAngleReport() +
+            "\n---" +
+            "\nParts: rightArm, leftArm, head, body, rightLeg, leftLeg" +
+            "\nAxes: xRot, yRot, zRot (also: xPos, yPos, zPos for arm positions)" +
+            "\nAlso: hClampMin, hClampMax for head rotation limits"
+        ), false);
+        return 1;
+    }
+
+    private static int showPoseDegrees(CommandContext<CommandSourceStack> context) {
+        context.getSource().sendSuccess(() -> Component.literal(
+            "=== PRONE POSE IN DEGREES (Blockbench format) ===" +
+            "\n" + PoseConfig.getDegreesReport()
+        ), false);
+        return 1;
+    }
+
+    private static int setPoseAngle(CommandContext<CommandSourceStack> context) {
+        String part = StringArgumentType.getString(context, "part");
+        String axis = StringArgumentType.getString(context, "axis");
+        float value = FloatArgumentType.getFloat(context, "value");
+        
+        String fieldName = partToFieldPrefix(part) + "_" + axisToFieldSuffix(axis);
+        if (fieldName == null) {
+            context.getSource().sendFailure(Component.literal(
+                "Unknown part '" + part + "' or axis '" + axis + "'"));
+            return 0;
+        }
+        
+        boolean found = setField(fieldName, value);
+        if (!found) {
+            context.getSource().sendFailure(Component.literal(
+                "Unknown field '" + fieldName + "'"));
+            return 0;
+        }
+        
+        context.getSource().sendSuccess(() -> Component.literal(
+            "Set " + part + "." + axis + " = " + String.format("%.4f", value) +
+            " (" + String.format("%.1f", value * 180.0F / (float)Math.PI) + "°)"
+        ), false);
+        return 1;
+    }
+
+    private static int resetPoseAngles(CommandContext<CommandSourceStack> context) {
+        PoseConfig.RA_X = -3.14F; PoseConfig.RA_Y = 0.1F; PoseConfig.RA_Z = 0.1F;
+        PoseConfig.LA_X = -3.14F; PoseConfig.LA_Y = 0.2F; PoseConfig.LA_Z = -0.5F;
+        PoseConfig.H_X = -3.0F; PoseConfig.B_X = -0.1F; PoseConfig.B_Y = 0.0F; PoseConfig.B_Z = 0.0F;
+        PoseConfig.RL_X = 0.0F; PoseConfig.RL_Y = 0.0F; PoseConfig.RL_Z = 0.3F; PoseConfig.RL_POS_Z = -1.5F;
+        PoseConfig.LL_X = 0.0F; PoseConfig.LL_Y = 0.0F; PoseConfig.LL_Z = -0.3F; PoseConfig.LL_POS_Z = -1.5F;
+        PoseConfig.RA_POS_X = 0.8F; PoseConfig.RA_POS_Y = 0.0F; PoseConfig.RA_POS_Z = -2.0F;
+        PoseConfig.LA_POS_X = -2.0F; PoseConfig.LA_POS_Y = -2.0F; PoseConfig.LA_POS_Z = -2.0F;
+        PoseConfig.H_CLAMP_MIN = -1.5F; PoseConfig.H_CLAMP_MAX = 0.3F;
+        context.getSource().sendSuccess(() -> Component.literal("Pose angles reset to defaults"), false);
+        return 1;
+    }
+
+    private static String partToFieldPrefix(String part) {
+        return switch (part.toLowerCase()) {
+            case "rightarm" -> "RA";
+            case "leftarm" -> "LA";
+            case "head" -> "H";
+            case "body" -> "B";
+            case "rightleg" -> "RL";
+            case "leftleg" -> "LL";
+            default -> null;
+        };
+    }
+
+    private static String axisToFieldSuffix(String axis) {
+        return switch (axis.toLowerCase()) {
+            case "xrot" -> "X";
+            case "yrot" -> "Y";
+            case "zrot" -> "Z";
+            case "xpos" -> "POS_X";
+            case "ypos" -> "POS_Y";
+            case "zpos" -> "POS_Z";
+            case "hclampmin" -> "CLAMP_MIN";
+            case "hclampmax" -> "CLAMP_MAX";
+            default -> null;
+        };
+    }
+
+    private static boolean setField(String name, float value) {
+        switch (name) {
+            case "RA_X": PoseConfig.RA_X = value; return true;
+            case "RA_Y": PoseConfig.RA_Y = value; return true;
+            case "RA_Z": PoseConfig.RA_Z = value; return true;
+            case "LA_X": PoseConfig.LA_X = value; return true;
+            case "LA_Y": PoseConfig.LA_Y = value; return true;
+            case "LA_Z": PoseConfig.LA_Z = value; return true;
+            case "H_X": PoseConfig.H_X = value; return true;
+            case "B_X": PoseConfig.B_X = value; return true;
+            case "B_Y": PoseConfig.B_Y = value; return true;
+            case "B_Z": PoseConfig.B_Z = value; return true;
+            case "RL_X": PoseConfig.RL_X = value; return true;
+            case "RL_Y": PoseConfig.RL_Y = value; return true;
+            case "RL_Z": PoseConfig.RL_Z = value; return true;
+            case "LL_X": PoseConfig.LL_X = value; return true;
+            case "LL_Y": PoseConfig.LL_Y = value; return true;
+            case "LL_Z": PoseConfig.LL_Z = value; return true;
+            case "RA_POS_X": PoseConfig.RA_POS_X = value; return true;
+            case "RA_POS_Y": PoseConfig.RA_POS_Y = value; return true;
+            case "RA_POS_Z": PoseConfig.RA_POS_Z = value; return true;
+            case "LA_POS_X": PoseConfig.LA_POS_X = value; return true;
+            case "LA_POS_Y": PoseConfig.LA_POS_Y = value; return true;
+            case "LA_POS_Z": PoseConfig.LA_POS_Z = value; return true;
+            case "H_CLAMP_MIN": PoseConfig.H_CLAMP_MIN = value; return true;
+            case "H_CLAMP_MAX": PoseConfig.H_CLAMP_MAX = value; return true;
+            default: return false;
+        }
+    }
+    
+    }

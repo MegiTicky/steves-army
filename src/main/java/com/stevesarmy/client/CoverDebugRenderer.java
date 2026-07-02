@@ -104,6 +104,28 @@ public class CoverDebugRenderer {
             soldierBufferSource.endBatch();
         }
         
+        if (CoverDebugManager.isShowPeekCandidates()) {
+            // Draw candidate boxes (first batch)
+            buffer.begin(VertexFormat.Mode.DEBUG_LINES, DefaultVertexFormat.POSITION_COLOR);
+            renderPeekCandidateVisualization(buffer, poseStack, cameraPos, mc.level);
+            tesselator.end();
+            
+            // Draw LOS rays (second batch with explicit shader)
+            RenderSystem.setShader(GameRenderer::getPositionColorShader);
+            buffer.begin(VertexFormat.Mode.DEBUG_LINES, DefaultVertexFormat.POSITION_COLOR);
+            renderPeekCandidateRays(buffer, poseStack, cameraPos, mc.level);
+            tesselator.end();
+            
+            // Draw cover block outline AFTER candidates so it's on top
+            buffer.begin(VertexFormat.Mode.DEBUG_LINES, DefaultVertexFormat.POSITION_COLOR);
+            renderPeekCoverBlockOverlay(buffer, poseStack, cameraPos, mc.level);
+            tesselator.end();
+            
+            MultiBufferSource.BufferSource peekBufferSource = mc.renderBuffers().bufferSource();
+            renderPeekCandidateLabels(poseStack, cameraPos, mc.level, mc, peekBufferSource);
+            peekBufferSource.endBatch();
+        }
+        
         MultiBufferSource.BufferSource bufferSource = mc.renderBuffers().bufferSource();
         for (CoverPoint cp : coverPoints) {
             renderQualityLabel(poseStack, cameraPos, cp, mc, bufferSource);
@@ -655,6 +677,13 @@ public class CoverDebugRenderer {
                              poseStack.last().pose(), bufferSource, net.minecraft.client.gui.Font.DisplayMode.NORMAL, 0, 15728880);
             lineOffset += 10;
             
+            String poseLabel = "Pose: " + soldier.getPose().name() + " Flag:" + soldier.isCrawling();
+            boolean isCrawling = soldier.isCrawling();
+            int poseColor = isCrawling ? 0xFF00FF00 : 0xFF888888;
+            font.drawInBatch(poseLabel, -font.width(poseLabel) / 2.0f, lineOffset, poseColor, false,
+                             poseStack.last().pose(), bufferSource, net.minecraft.client.gui.Font.DisplayMode.NORMAL, 0, 15728880);
+            lineOffset += 10;
+            
             if (!currentPos.equals(BlockPos.ZERO)) {
                 CoverType currentType = CoverType.values()[currentTypeOrdinal];
                 String coverLabel = String.format("Current: %.0f%% %s", currentQuality * 100, currentType.name());
@@ -702,6 +731,180 @@ public class CoverDebugRenderer {
             case EXPOSED: return 0x00FF00;
             case DUCKING_BACK: return 0xFF8800;
             default: return 0x808080;
+        }
+    }
+    
+    private static void renderPeekCandidateVisualization(BufferBuilder buffer, PoseStack poseStack, Vec3 cameraPos, Level level) {
+        Matrix4f matrix = poseStack.last().pose();
+        
+        for (SoldierEntity soldier : level.getEntitiesOfClass(SoldierEntity.class,
+                Minecraft.getInstance().player.getBoundingBox().inflate(50))) {
+            
+            CoverDebugManager.PeekCandidateDebugData data = CoverDebugManager.getSoldierPeekCandidates(soldier.getId());
+            if (data == null) continue;
+            
+            List<BlockPos> candidates = data.candidatePositions;
+            List<Integer> reasons = data.rejectionReasons;
+            
+            for (int i = 0; i < candidates.size(); i++) {
+                BlockPos pos = candidates.get(i);
+                int reason = reasons.get(i);
+                
+                int r, g, b, a;
+                boolean isChosen = data.chosenPosition != null && pos.equals(data.chosenPosition);
+                
+                switch (reason) {
+                    case CoverDebugManager.PeekCandidateDebugData.REASON_PROTECTED_DIR:
+                        r = 128; g = 0; b = 0; a = 180;
+                        break;
+                    case CoverDebugManager.PeekCandidateDebugData.REASON_INVALID_POS:
+                        r = 100; g = 100; b = 100; a = 180;
+                        break;
+                    case CoverDebugManager.PeekCandidateDebugData.REASON_NO_LOS:
+                        r = 255; g = 0; b = 0; a = 200;
+                        break;
+                    case CoverDebugManager.PeekCandidateDebugData.REASON_BAD_ANGLE:
+                        r = 255; g = 255; b = 0; a = 200;
+                        break;
+                    case CoverDebugManager.PeekCandidateDebugData.REASON_ACCEPTED:
+                        r = 0; g = 255; b = 0; a = 200;
+                        break;
+                    default:
+                        r = 150; g = 150; b = 150; a = 100;
+                }
+                
+                renderCoverBlockBox(buffer, matrix, pos, cameraPos, r, g, b, a);
+                
+                if (isChosen) {
+                    renderCoverBlockBox(buffer, matrix, pos, cameraPos, 0, 255, 255, 255);
+                    renderCoverBlockBox(buffer, matrix, pos.offset(0, 1, 0), cameraPos, 0, 255, 255, 100);
+                }
+            }
+        }
+    }
+    
+    private static void renderPeekCandidateRays(BufferBuilder buffer, PoseStack poseStack, Vec3 cameraPos, Level level) {
+        Matrix4f matrix = poseStack.last().pose();
+        
+        for (SoldierEntity soldier : level.getEntitiesOfClass(SoldierEntity.class,
+                Minecraft.getInstance().player.getBoundingBox().inflate(50))) {
+            
+            CoverDebugManager.PeekCandidateDebugData data = CoverDebugManager.getSoldierPeekCandidates(soldier.getId());
+            if (data == null) continue;
+            
+            List<BlockPos> candidates = data.candidatePositions;
+            List<Boolean> losResults = data.losResults;
+            Vec3 targetEye = data.targetEyePosition;
+            if (targetEye == null) continue;
+            
+            for (int i = 0; i < candidates.size(); i++) {
+                if (i >= losResults.size()) continue;
+                BlockPos pos = candidates.get(i);
+                
+                Vec3 eyePos = new Vec3(pos.getX() + 0.5, pos.getY() + 1.62, pos.getZ() + 0.5);
+                double fromX = eyePos.x - cameraPos.x;
+                double fromY = eyePos.y - cameraPos.y;
+                double fromZ = eyePos.z - cameraPos.z;
+                double toX = targetEye.x - cameraPos.x;
+                double toY = targetEye.y - cameraPos.y;
+                double toZ = targetEye.z - cameraPos.z;
+                
+                boolean hasLos = losResults.get(i);
+                int lr = hasLos ? 0 : 255;
+                int lg = hasLos ? 255 : 0;
+                int lb = 0;
+                int la = 180;
+                
+                buffer.vertex(matrix, (float)fromX, (float)fromY, (float)fromZ).color(lr, lg, lb, la).endVertex();
+                buffer.vertex(matrix, (float)toX, (float)toY, (float)toZ).color(lr, lg, lb, la).endVertex();
+            }
+        }
+    }
+    
+    private static void renderPeekCoverBlockOverlay(BufferBuilder buffer, PoseStack poseStack, Vec3 cameraPos, Level level) {
+        Matrix4f matrix = poseStack.last().pose();
+        
+        for (SoldierEntity soldier : level.getEntitiesOfClass(SoldierEntity.class,
+                Minecraft.getInstance().player.getBoundingBox().inflate(50))) {
+            
+            CoverDebugManager.PeekCandidateDebugData data = CoverDebugManager.getSoldierPeekCandidates(soldier.getId());
+            if (data == null) continue;
+            
+            // Green outline at the actual cover position, drawn on top of everything
+            renderCoverBlockBox(buffer, matrix, data.coverPos, cameraPos, 0, 255, 0, 255);
+        }
+    }
+    
+    private static void renderPeekCandidateLabels(PoseStack poseStack, Vec3 cameraPos, Level level,
+                                                    Minecraft mc, MultiBufferSource bufferSource) {
+        if (mc.font == null) return;
+        
+        net.minecraft.client.gui.Font font = mc.font;
+        
+        for (SoldierEntity soldier : level.getEntitiesOfClass(SoldierEntity.class,
+                Minecraft.getInstance().player.getBoundingBox().inflate(50))) {
+            
+            CoverDebugManager.PeekCandidateDebugData data = CoverDebugManager.getSoldierPeekCandidates(soldier.getId());
+            if (data == null) continue;
+            
+            List<BlockPos> candidates = data.candidatePositions;
+            List<Integer> reasons = data.rejectionReasons;
+            List<Double> scores = data.angleScores;
+            List<Boolean> losResults = data.losResults;
+            
+            for (int i = 0; i < candidates.size(); i++) {
+                BlockPos pos = candidates.get(i);
+                int reason = reasons.get(i);
+                
+                Vec3 soldierPos = soldier.position();
+                double distToSoldier = Math.sqrt(pos.distToCenterSqr(soldierPos.x, soldierPos.y, soldierPos.z));
+                if (distToSoldier > 8) continue;
+                
+                double x = pos.getX() - cameraPos.x + 0.5;
+                double y = pos.getY() - cameraPos.y + 1.3;
+                double z = pos.getZ() - cameraPos.z + 0.5;
+                
+                poseStack.pushPose();
+                poseStack.translate(x, y, z);
+                poseStack.mulPose(mc.gameRenderer.getMainCamera().rotation());
+                poseStack.scale(-0.025f, -0.025f, 0.025f);
+                
+                String label;
+                int color;
+                
+                switch (reason) {
+                    case CoverDebugManager.PeekCandidateDebugData.REASON_PROTECTED_DIR:
+                        label = "PROTECTED";
+                        color = 0x80_00_00;
+                        break;
+                    case CoverDebugManager.PeekCandidateDebugData.REASON_INVALID_POS:
+                        label = "BLOCKED";
+                        color = 0x88_88_88;
+                        break;
+                    case CoverDebugManager.PeekCandidateDebugData.REASON_NO_LOS:
+                        label = "NO_LOS";
+                        color = 0xFF_00_00;
+                        break;
+                    case CoverDebugManager.PeekCandidateDebugData.REASON_BAD_ANGLE:
+                        label = "BAD_ANGLE";
+                        color = 0xFF_FF_00;
+                        break;
+                    case CoverDebugManager.PeekCandidateDebugData.REASON_ACCEPTED:
+                        double score = i < scores.size() ? scores.get(i) : 0;
+                        boolean isChosen = data.chosenPosition != null && pos.equals(data.chosenPosition);
+                        label = isChosen ? "CHOSEN" : String.format("SCORE:%.2f", score);
+                        color = isChosen ? 0x00_FF_FF : 0x00_FF_00;
+                        break;
+                    default:
+                        label = "?";
+                        color = 0x88_88_88;
+                }
+                
+                font.drawInBatch(label, -font.width(label) / 2.0f, 0, color | 0xFF000000, false,
+                        poseStack.last().pose(), bufferSource, net.minecraft.client.gui.Font.DisplayMode.NORMAL, 0, 15728880);
+                
+                poseStack.popPose();
+            }
         }
     }
 }

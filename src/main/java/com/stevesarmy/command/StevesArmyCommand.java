@@ -32,6 +32,7 @@ public class StevesArmyCommand {
     private static int enableAllDebug(CommandContext<CommandSourceStack> context) {
         CombatDebugRenderer.setDebugMode(CombatDebugRenderer.DEBUG_MODE_MINIMAL);
         CoverDebugManager.setShowSoldierCover(true);
+        CoverDebugManager.setShowPeekCandidates(true);
         CoverDebugManager.setVisualizationEnabled(true);
         CoverTacticalGoal.setDebugLogging(true);
         
@@ -39,6 +40,7 @@ public class StevesArmyCommand {
             "=== Steve's Army Debug: ALL ON ===\n" +
             "  Combat debug overlay: MINIMAL (red lines in world)\n" +
             "  Soldier cover visualization: ON (colored lines)\n" +
+            "  Peek candidate visualization: ON (color-coded boxes)\n" +
             "  Cover behavior logging: ON (console logs)\n" +
             "Use /stevesarmy_debug mode verbose for arc visualization\n" +
             "Use /stevesarmy_cover log off to disable console logs"

@@ -1,6 +1,7 @@
 package com.stevesarmy.combat;
 
 import com.stevesarmy.StevesArmyMod;
+import com.stevesarmy.entity.SoldierEntity;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.item.ItemStack;
@@ -707,10 +708,14 @@ public class GunIntegration {
                 Method crawlMethod = gunOperatorClass.getMethod("crawl", boolean.class);
                 crawlMethod.invoke(gunOperator, isCrawl);
                 
-                if (isCrawl) {
-                    entity.setPose(net.minecraft.world.entity.Pose.SWIMMING);
-                } else if (entity.getPose() == net.minecraft.world.entity.Pose.SWIMMING) {
-                    entity.setPose(net.minecraft.world.entity.Pose.STANDING);
+                if (entity instanceof SoldierEntity soldier) {
+                    soldier.setCrawling(isCrawl);
+                } else {
+                    if (isCrawl) {
+                        entity.setPose(net.minecraft.world.entity.Pose.SWIMMING);
+                    } else if (entity.getPose() == net.minecraft.world.entity.Pose.SWIMMING) {
+                        entity.setPose(net.minecraft.world.entity.Pose.STANDING);
+                    }
                 }
             } catch (Exception e) {
                 StevesArmyMod.LOGGER.debug("[TaCZ] Failed to set crawl state: " + e.getMessage());
@@ -719,6 +724,9 @@ public class GunIntegration {
         
         @Override
         public boolean isCrawling(LivingEntity entity) {
+            if (entity instanceof SoldierEntity soldier) {
+                return soldier.isCrawling();
+            }
             return entity.getPose() == net.minecraft.world.entity.Pose.SWIMMING && !entity.isInWater();
         }
     }

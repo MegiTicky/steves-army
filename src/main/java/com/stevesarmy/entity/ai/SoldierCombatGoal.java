@@ -78,7 +78,7 @@ public class SoldierCombatGoal extends Goal {
         this.soldier = soldier;
         this.threatTracker = new ThreatTracker();
         this.detectionSystem = new DetectionSystem(soldier.getUUID());
-        this.setFlags(EnumSet.of(Flag.LOOK));
+        this.setFlags(EnumSet.noneOf(Flag.class));
     }
 
     @Override
@@ -348,7 +348,7 @@ public class SoldierCombatGoal extends Goal {
             return;
         }
         
-        currentAimPoint = ExposureCalculator.getBestAimPoint(soldier, target);
+        currentAimPoint = ExposureCalculator.getBestAimPoint(soldier, target, getCoverBlockPos());
         
         if (!currentAimPoint.canShoot()) {
             pathBlockedCounter++;
@@ -456,17 +456,29 @@ public class SoldierCombatGoal extends Goal {
                 coverManager.isPinned(), coverManager.getSuppressionTracker().canPeek());
         }
         
+        if (target != null && target.isAlive()) {
+            soldier.setTarget(target);
+        }
+        
         if (peekState == CoverBehaviorManager.PeekState.EXPOSED) {
             lookTowardThreat();
-            
-            if (target != null && target.isAlive()) {
-                soldier.setTarget(target);
-            }
         }
         
         lastPeekState = peekState;
     }
     
+    @javax.annotation.Nullable
+    private BlockPos getCoverBlockPos() {
+        CoverBehaviorManager coverManager = soldier.getCoverBehaviorManager();
+        if (coverManager.isInCover()) {
+            CoverPoint cover = coverManager.getCurrentCover();
+            if (cover != null) {
+                return cover.getPosition();
+            }
+        }
+        return null;
+    }
+
     private void lookTowardThreat() {
         if (target != null && target.isAlive()) {
             soldier.getLookControl().setLookAt(target, 30.0F, 30.0F);

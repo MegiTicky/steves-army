@@ -96,6 +96,8 @@ public class SoldierEntity extends PathfinderMob implements Container {
         SynchedEntityData.defineId(SoldierEntity.class, EntityDataSerializers.INT);
     private static final EntityDataAccessor<BlockPos> PEEK_POSITION =
         SynchedEntityData.defineId(SoldierEntity.class, EntityDataSerializers.BLOCK_POS);
+    private static final EntityDataAccessor<Boolean> CRAWLING =
+        SynchedEntityData.defineId(SoldierEntity.class, EntityDataSerializers.BOOLEAN);
 
     @Nullable
     private UUID squadId;
@@ -123,6 +125,7 @@ public class SoldierEntity extends PathfinderMob implements Container {
 
     public SoldierEntity(EntityType<? extends SoldierEntity> type, Level level) {
         super(type, level);
+        this.moveControl = new com.stevesarmy.entity.ai.ExactCoverMoveControl(this);
         this.setCanPickUpLoot(true);
         this.inventory = new SoldierInventory();
         this.inventoryHandler = new SoldierInventoryHandler(inventory);
@@ -142,6 +145,11 @@ public class SoldierEntity extends PathfinderMob implements Container {
                 }
             }
         });
+    }
+
+    @Override
+    protected net.minecraft.world.entity.ai.navigation.PathNavigation createNavigation(Level level) {
+        return new com.stevesarmy.entity.ai.SoldierGroundNavigation(this, level);
     }
 
     @Override
@@ -169,6 +177,7 @@ public class SoldierEntity extends PathfinderMob implements Container {
         this.entityData.define(SUPPRESSION_LEVEL, 0f);
         this.entityData.define(PEEK_STATE, 0);
         this.entityData.define(PEEK_POSITION, BlockPos.ZERO);
+        this.entityData.define(CRAWLING, false);
     }
 
     @Override
@@ -418,14 +427,19 @@ public class SoldierEntity extends PathfinderMob implements Container {
         
         if (!this.level().isClientSide) {
             threatAwareness.tick();
+            // Re-apply pose every tick when crawling to fight vanilla pose resets, but NOT refreshDimensions
+            if (entityData.get(CRAWLING) && this.getPose() != Pose.SWIMMING) {
+                this.setPose(Pose.SWIMMING);
+            }
         }
     }
     
     @Override
     public EntityDimensions getDimensions(Pose pose) {
-        if (coverBehaviorManager != null 
-            && coverBehaviorManager.isInCover() 
-            && coverBehaviorManager.getPeekState() == CoverBehaviorManager.PeekState.HIDING) {
+        if (entityData.get(CRAWLING)
+            || (coverBehaviorManager != null 
+                && coverBehaviorManager.isInCover() 
+                && coverBehaviorManager.getPeekState() == CoverBehaviorManager.PeekState.HIDING)) {
             return EntityDimensions.scalable(0.6F, 0.8F);
         }
         return super.getDimensions(pose);
@@ -675,6 +689,21 @@ case HOLD -> {
     
     public BlockPos getSyncedPeekPosition() {
         return this.entityData.get(PEEK_POSITION);
+    }
+    
+    public void setCrawling(boolean crawling) {
+        boolean wasCrawling = entityData.get(CRAWLING);
+        if (wasCrawling == crawling) {
+            return; // No change
+        }
+        
+        this.entityData.set(CRAWLING, crawling);
+        this.setPose(crawling ? Pose.SWIMMING : Pose.STANDING);
+        this.refreshDimensions(); // Only refresh dimensions on state change
+    }
+    
+    public boolean isCrawling() {
+        return entityData.get(CRAWLING);
     }
     
     public ThreatAwareness getThreatAwareness() {
