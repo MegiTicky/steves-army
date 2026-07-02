@@ -1,6 +1,7 @@
 package com.stevesarmy.combat.cover;
 
 import com.stevesarmy.StevesArmyMod;
+import com.stevesarmy.combat.GunIntegration;
 import com.stevesarmy.entity.SoldierEntity;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -45,6 +46,7 @@ public class CoverBehaviorManager {
     
     private float lastCoverQuality = 0.0f;
     private float coverQualityPenalty = 0.0f;
+    private Vec3 entryThreatDirection = null;
     
     public CoverBehaviorManager(SoldierEntity soldier) {
         this.soldier = soldier;
@@ -148,6 +150,7 @@ public class CoverBehaviorManager {
         if (cover != null) {
             this.coverEntryTime = System.currentTimeMillis();
             this.lastCoverQuality = cover.getQuality();
+            this.entryThreatDirection = soldier.getThreatAwareness().getPrimaryDirection(soldier.position());
         }
     }
     
@@ -191,9 +194,11 @@ public class CoverBehaviorManager {
         this.currentCover = null;
         syncCurrentCover();
         this.coverEntryTime = 0;
+        this.entryThreatDirection = null;
         this.state = CoverState.NO_COVER;
         syncState();
         soldier.refreshDimensions();
+        GunIntegration.crawl(soldier, false);
     }
     
     public void clearTargetCover() {
@@ -262,11 +267,19 @@ public class CoverBehaviorManager {
     public void onNearMiss(net.minecraft.world.phys.Vec3 bulletPath, net.minecraft.world.entity.LivingEntity soldier) {
         suppressionTracker.onNearMiss(bulletPath, soldier);
     }
-    
+
+    public void onNearMiss(net.minecraft.world.phys.Vec3 bulletPath, net.minecraft.world.entity.LivingEntity soldier, float bulletSpeed) {
+        suppressionTracker.onNearMiss(bulletPath, soldier, bulletSpeed);
+    }
+
     public void onIncomingFire(net.minecraft.world.entity.LivingEntity shooter) {
         suppressionTracker.onIncomingFire(shooter);
     }
-    
+
+    public void onIncomingFire(net.minecraft.world.entity.LivingEntity shooter, float bulletSpeed) {
+        suppressionTracker.onIncomingFire(shooter, bulletSpeed);
+    }
+
     public void onTakeDamage() {
         suppressionTracker.onTakeDamage();
     }
@@ -365,5 +378,9 @@ public class CoverBehaviorManager {
     
     public boolean hasCurrentCover() {
         return currentCover != null;
+    }
+
+    public Vec3 getEntryThreatDirection() {
+        return entryThreatDirection;
     }
 }

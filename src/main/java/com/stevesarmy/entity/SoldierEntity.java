@@ -6,6 +6,7 @@ import com.stevesarmy.combat.DetectionSystem;
 import com.stevesarmy.combat.GunIntegration;
 import com.stevesarmy.combat.ThreatAwareness;
 import com.stevesarmy.combat.cover.CoverBehaviorManager;
+import com.stevesarmy.combat.cover.IncomingFireHandler;
 import com.stevesarmy.entity.ai.SoldierCombatGoal;
 import com.stevesarmy.entity.ai.SoldierFollowOwnerGoal;
 import com.stevesarmy.entity.ai.SoldierHoldPositionGoal;
@@ -426,6 +427,7 @@ public class SoldierEntity extends PathfinderMob implements Container {
         super.tick();
         
         if (!this.level().isClientSide) {
+            IncomingFireHandler.tick();
             threatAwareness.tick();
             // Re-apply pose every tick when crawling to fight vanilla pose resets, but NOT refreshDimensions
             if (entityData.get(CRAWLING) && this.getPose() != Pose.SWIMMING) {
@@ -452,7 +454,7 @@ public class SoldierEntity extends PathfinderMob implements Container {
         if (result && !this.level().isClientSide && coverBehaviorManager != null) {
             coverBehaviorManager.onTakeDamage();
             
-            if (source.getEntity() instanceof LivingEntity attacker) {
+            if (source.getEntity() instanceof LivingEntity attacker && attacker != this) {
                 coverBehaviorManager.onIncomingFire(attacker);
             }
         }

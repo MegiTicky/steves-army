@@ -9,7 +9,7 @@ import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.squad.SquadMode;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
-import net.minecraft.server.level.ServerLevel;
+import net.minecraft.util.Mth;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.ai.goal.Goal;
 import net.minecraft.world.entity.ai.navigation.PathNavigation;
@@ -59,7 +59,7 @@ public class CoverTacticalGoal extends Goal {
     private static final double FOLLOW_COVER_SEARCH_RADIUS = 15.0D;
     private static final double FOLLOW_REGROUP_DISTANCE = 10.0D;
     
-    private static final int NON_PEEKABLE_REPOSITION_TICKS = 160; // ~8 seconds
+    private static final int NON_PEEKABLE_REPOSITION_TICKS = 60; // ~3 seconds
     private int nonPeekableTicks = 0;
 
     private static final int PEEK_NO_LOS_REPOSITION_TICKS = 100; // ~5 seconds of no LOS
@@ -67,6 +67,9 @@ public class CoverTacticalGoal extends Goal {
     private static final double PEEK_POSITION_REACHED_DISTANCE = 0.3;
     private static final int PEEK_SEARCH_RADIUS = 2;
     private static final long BLACKLIST_CLEAR_INTERVAL_MS = 15000;
+
+    private static final double ENEMY_PROXIMITY_REPOSITION_DISTANCE = 4.0;
+    private static final double THREAT_ANGLE_REPOSITION_THRESHOLD = 2.09; // ~120° in radians
     private static final int EXPOSED_LOS_CHECK_INTERVAL = 10;
     private static final int PEEK_REVALIDATE_INTERVAL = 30;
 
@@ -376,6 +379,22 @@ public class CoverTacticalGoal extends Goal {
             return;
         }
 
+        // Enemy proximity reposition
+        if (currentCover != null) {
+            LivingEntity target = soldier.getTarget();
+            if (target != null && target.isAlive()) {
+                double distToTarget = soldier.distanceTo(target);
+                if (distToTarget < ENEMY_PROXIMITY_REPOSITION_DISTANCE) {
+                    if (debugLoggingEnabled) {
+                        StevesArmyMod.LOGGER.info("[CoverGoal] Soldier {} enemy too close ({:.1f} blocks), repositioning",
+                            soldier.getId(), distToTarget);
+                    }
+                    startRepositioning();
+                    return;
+                }
+            }
+        }
+
         tickPeekState();
 
         reevaluateCounter++;
@@ -511,10 +530,29 @@ public class CoverTacticalGoal extends Goal {
                     double speed = FULL_COVER_PEEK_SPEED;
                     soldier.setDeltaMovement((dx / dist) * speed, soldier.getDeltaMovement().y, (dz / dist) * speed);
                     soldier.setYya(0);
+                    soldier.setZza(0);
+                    soldier.setXxa(0);
+                    faceTarget();
                 }
             } else {
                 manager.setNonPeekableCover(true);
             }
+        }
+
+        // Non-peekable reposition timer
+        if (manager.isNonPeekableCover()) {
+            nonPeekableTicks++;
+            if (nonPeekableTicks >= NON_PEEKABLE_REPOSITION_TICKS) {
+                if (debugLoggingEnabled) {
+                    StevesArmyMod.LOGGER.info("[CoverGoal] Soldier {} non-peekable cover for {} ticks, repositioning",
+                        soldier.getId(), nonPeekableTicks);
+                }
+                nonPeekableTicks = 0;
+                manager.setNonPeekableCover(false);
+                startRepositioning();
+            }
+        } else {
+            nonPeekableTicks = 0;
         }
     }
 
@@ -557,6 +595,8 @@ public class CoverTacticalGoal extends Goal {
                 }
             }
         }
+
+        faceTarget();
     }
 
     private void tickDuckingBack() {
@@ -613,6 +653,9 @@ public class CoverTacticalGoal extends Goal {
             double speed = FULL_COVER_PEEK_SPEED;
             soldier.setDeltaMovement((dx / dist) * speed, soldier.getDeltaMovement().y, (dz / dist) * speed);
             soldier.setYya(0);
+            soldier.setZza(0);
+            soldier.setXxa(0);
+            faceTarget();
             return false;
         }
     }
@@ -622,6 +665,10 @@ public class CoverTacticalGoal extends Goal {
     }
     
     private void tickSuppressedInCover() {
+        if (getCoverManager().getPeekState() == CoverBehaviorManager.PeekState.DUCKING_BACK) {
+            tickDuckingBack();
+        }
+
         float sup = getCoverManager().getSuppressionTracker().getSuppressionLevel();
         boolean canPeek = getCoverManager().getSuppressionTracker().canPeek();
         boolean pinned = getCoverManager().isPinned();
@@ -675,39 +722,59 @@ public class CoverTacticalGoal extends Goal {
             setFlags(EnumSet.of(Flag.MOVE, Flag.LOOK));
             return;
         }
-        
+
         if (!isCoverStillValid()) {
             startRepositioning();
             return;
         }
-        
+
+        // Cover block destroyed
+        if (soldier.level().getBlockState(currentCover.getPosition()).isAir()) {
+            if (debugLoggingEnabled) {
+                StevesArmyMod.LOGGER.info("[CoverGoal] Soldier {} cover block destroyed at {}, repositioning",
+                    soldier.getId(), currentCover.getPosition());
+            }
+            startRepositioning();
+            return;
+        }
+
         if (getCoverManager().getTimeInCover() < MIN_COVER_DWELL_TIME_MS) return;
-        
+
+        // Non-peekable safety net — primary timer is in tickHiding()
         if (getCoverManager().isNonPeekableCover()) {
-            nonPeekableTicks++;
-            if (nonPeekableTicks >= NON_PEEKABLE_REPOSITION_TICKS) {
-                if (debugLoggingEnabled) {
-                    StevesArmyMod.LOGGER.info("[CoverGoal] Soldier {} non-peekable cover for {} ticks, repositioning",
-                        soldier.getId(), nonPeekableTicks);
-                }
+            if (nonPeekableTicks >= NON_PEEKABLE_REPOSITION_TICKS * 2) {
                 nonPeekableTicks = 0;
                 getCoverManager().setNonPeekableCover(false);
                 getCoverManager().clearCover();
                 return;
             }
-        } else {
-            nonPeekableTicks = 0;
         }
-        
+
+        // Threat direction change
+        Vec3 currentThreatDir = getThreats().getPrimaryDirection(soldier.position());
+        Vec3 entryThreatDir = getCoverManager().getEntryThreatDirection();
+        if (currentThreatDir != null && entryThreatDir != null && currentThreatDir.lengthSqr() > 0.01 && entryThreatDir.lengthSqr() > 0.01) {
+            double dot = currentThreatDir.dot(entryThreatDir) / (currentThreatDir.length() * entryThreatDir.length());
+            double angle = Math.acos(Mth.clamp(dot, -1.0, 1.0));
+            if (angle > THREAT_ANGLE_REPOSITION_THRESHOLD) {
+                if (debugLoggingEnabled) {
+                    StevesArmyMod.LOGGER.info("[CoverGoal] Soldier {} threat direction changed {:.1f}°, repositioning",
+                        soldier.getId(), Math.toDegrees(angle));
+                }
+                startRepositioning();
+                return;
+            }
+        }
+
         Optional<CoverPoint> betterCover = findBetterCover();
         if (betterCover.isPresent()) {
             CoverPoint newCover = betterCover.get();
-            
+
             if (newCover.getPosition().equals(currentCover.getPosition())) return;
-            
+
             float currentScore = currentCover.getQuality() * (1.0f - getCoverManager().getCoverQualityPenalty());
             float newScore = newCover.getQuality();
-            
+
             if (newScore > currentScore * (1.0f + HYSTERESIS_THRESHOLD)) {
                 startRepositioning(newCover);
             }
@@ -1131,6 +1198,18 @@ public class CoverTacticalGoal extends Goal {
                 threatPos.getZ() + 0.5,
                 30.0F, 30.0F
             );
+        }
+    }
+
+    private void faceTarget() {
+        LivingEntity target = soldier.getTarget();
+        if (target != null && target.isAlive()) {
+            double dx = target.getX() - soldier.getX();
+            double dz = target.getZ() - soldier.getZ();
+            float targetYaw = (float)(Mth.atan2(dz, dx) * Mth.RAD_TO_DEG) - 90.0F;
+            soldier.setYRot(targetYaw);
+            soldier.yBodyRot = targetYaw;
+            soldier.yHeadRot = targetYaw;
         }
     }
 }
