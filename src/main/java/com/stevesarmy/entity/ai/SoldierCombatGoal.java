@@ -588,7 +588,7 @@ public class SoldierCombatGoal extends Goal {
         }
     }
 
-    private List<LivingEntity> getPotentialTargets() {
+    public List<LivingEntity> getPotentialTargets() {
         List<LivingEntity> potentialTargets = new ArrayList<>();
         
         double maxRange = Math.max(DetectionSystem.FOCUSED_RANGE, DetectionSystem.PERIPHERAL_RANGE);
@@ -790,6 +790,11 @@ public class SoldierCombatGoal extends Goal {
     
     public DetectionSystem getDetectionSystem() {
         return detectionSystem;
+    }
+    
+    public void setTarget(LivingEntity newTarget) {
+        this.target = newTarget;
+        soldier.setTarget(newTarget);
     }
     
     private void updateDebugSync() {

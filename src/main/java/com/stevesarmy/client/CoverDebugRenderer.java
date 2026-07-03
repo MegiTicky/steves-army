@@ -629,8 +629,8 @@ public class CoverDebugRenderer {
         buffer.vertex(matrix, (float)x1, (float)y2, (float)z2).color(r, g, b, a).endVertex();
     }
     
-    private static void renderSoldierCoverLabels(PoseStack poseStack, Vec3 cameraPos, Level level, 
-                                                  Minecraft mc, MultiBufferSource bufferSource) {
+private static void renderSoldierCoverLabels(PoseStack poseStack, Vec3 cameraPos, Level level, 
+                                                   Minecraft mc, MultiBufferSource bufferSource) {
         if (mc.font == null) return;
         
         net.minecraft.client.gui.Font font = mc.font;
@@ -643,15 +643,6 @@ public class CoverDebugRenderer {
             
             int peekStateOrdinal = soldier.getSyncedPeekState();
             PeekState peekState = PeekState.values()[peekStateOrdinal];
-            
-            BlockPos currentPos = soldier.getSyncedCoverCurrentPos();
-            BlockPos targetPos = soldier.getSyncedCoverTargetPos();
-            BlockPos peekPos = soldier.getSyncedPeekPosition();
-            float currentQuality = soldier.getSyncedCoverCurrentQuality();
-            int currentTypeOrdinal = soldier.getSyncedCoverCurrentType();
-            float targetQuality = soldier.getSyncedCoverTargetQuality();
-            int targetTypeOrdinal = soldier.getSyncedCoverTargetType();
-            float suppressionLevel = soldier.getSyncedSuppressionLevel();
             
             Vec3 soldierPos = soldier.position();
             double x = soldierPos.x - cameraPos.x + 0.5;
@@ -674,36 +665,6 @@ public class CoverDebugRenderer {
             int peekStateColor = getPeekStateColor(peekState);
             String peekLabel = "Peek: " + peekState.name();
             font.drawInBatch(peekLabel, -font.width(peekLabel) / 2.0f, lineOffset, peekStateColor | 0xFF000000, false,
-                             poseStack.last().pose(), bufferSource, net.minecraft.client.gui.Font.DisplayMode.NORMAL, 0, 15728880);
-            lineOffset += 10;
-            
-            String poseLabel = "Pose: " + soldier.getPose().name() + " Flag:" + soldier.isCrawling();
-            boolean isCrawling = soldier.isCrawling();
-            int poseColor = isCrawling ? 0xFF00FF00 : 0xFF888888;
-            font.drawInBatch(poseLabel, -font.width(poseLabel) / 2.0f, lineOffset, poseColor, false,
-                             poseStack.last().pose(), bufferSource, net.minecraft.client.gui.Font.DisplayMode.NORMAL, 0, 15728880);
-            lineOffset += 10;
-            
-            if (!currentPos.equals(BlockPos.ZERO)) {
-                CoverType currentType = CoverType.values()[currentTypeOrdinal];
-                String coverLabel = String.format("Current: %.0f%% %s", currentQuality * 100, currentType.name());
-                font.drawInBatch(coverLabel, -font.width(coverLabel) / 2.0f, lineOffset, 0xFF00FF00, false,
-                                 poseStack.last().pose(), bufferSource, net.minecraft.client.gui.Font.DisplayMode.NORMAL, 0, 15728880);
-                lineOffset += 10;
-            }
-            
-            if (!targetPos.equals(BlockPos.ZERO)) {
-                CoverType targetType = CoverType.values()[targetTypeOrdinal];
-                String targetLabel = String.format("Target: %.0f%% %s", targetQuality * 100, targetType.name());
-                font.drawInBatch(targetLabel, -font.width(targetLabel) / 2.0f, lineOffset, 0xFFFFFF00, false,
-                                 poseStack.last().pose(), bufferSource, net.minecraft.client.gui.Font.DisplayMode.NORMAL, 0, 15728880);
-                lineOffset += 10;
-            }
-            
-            String suppLabel = String.format("Supp: %.0f%%", suppressionLevel * 100);
-            int suppColor = suppressionLevel > 0.7f ? 0xFFFF0000 : 
-                            suppressionLevel > 0.5f ? 0xFFFF8800 : 0xFF888888;
-            font.drawInBatch(suppLabel, -font.width(suppLabel) / 2.0f, lineOffset, suppColor, false,
                              poseStack.last().pose(), bufferSource, net.minecraft.client.gui.Font.DisplayMode.NORMAL, 0, 15728880);
             lineOffset += 10;
             

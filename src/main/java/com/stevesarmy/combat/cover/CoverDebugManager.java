@@ -20,6 +20,32 @@ public class CoverDebugManager {
     private static boolean showPeekCandidates = false;
     private static final Map<Integer, PeekCandidateDebugData> soldierPeekCandidates = new HashMap<>();
     
+    private static final java.util.Map<Integer, TopCoversDebugData> soldierTopCovers = new HashMap<>();
+    
+    public static void setSoldierTopCovers(int soldierId, TopCoversDebugData data) {
+        if (data != null) {
+            soldierTopCovers.put(soldierId, data);
+        }
+    }
+    
+    public static TopCoversDebugData getSoldierTopCovers(int soldierId) {
+        return soldierTopCovers.get(soldierId);
+    }
+    
+    public static class TopCoversDebugData {
+        public final CoverFinder.ScoredCover[] topCovers;
+        public final float currentCoverScore;
+        public final float penalty;
+        public final int peekCount;
+        
+        public TopCoversDebugData(CoverFinder.ScoredCover[] topCovers, float currentCoverScore, float penalty, int peekCount) {
+            this.topCovers = topCovers;
+            this.currentCoverScore = currentCoverScore;
+            this.penalty = penalty;
+            this.peekCount = peekCount;
+        }
+    }
+    
     public static void setCoverPoints(List<CoverPoint> points) {
         coverPoints = points != null ? points : Collections.emptyList();
     }
@@ -106,6 +132,7 @@ public class CoverDebugManager {
         showSoldierCover = false;
         showPeekCandidates = false;
         soldierPeekCandidates.clear();
+        soldierTopCovers.clear();
     }
     
     public static class PeekCandidateDebugData {

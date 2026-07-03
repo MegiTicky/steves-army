@@ -90,32 +90,51 @@ public class CoverFinder {
     
     public Optional<CoverPoint> findBestCover(LivingEntity soldier, Vec3 threatDirection, 
                                                List<LivingEntity> allThreats, int radius) {
+        List<ScoredCover> all = evaluateAndScoreAll(soldier, threatDirection, allThreats, radius);
+        return all.isEmpty() ? Optional.empty() : Optional.of(all.get(0).cover);
+    }
+
+    public List<ScoredCover> findTopCovers(LivingEntity soldier, Vec3 threatDirection,
+                                            List<LivingEntity> allThreats, int radius, int count) {
+        List<ScoredCover> all = evaluateAndScoreAll(soldier, threatDirection, allThreats, radius);
+        return all.subList(0, Math.min(count, all.size()));
+    }
+
+    private List<ScoredCover> evaluateAndScoreAll(LivingEntity soldier, Vec3 threatDirection,
+                                                   List<LivingEntity> allThreats, int radius) {
         List<CoverPoint> coverPoints = findCoverPoints(soldier.blockPosition(), radius);
-        
-        if (coverPoints.isEmpty()) {
-            return Optional.empty();
-        }
-        
+        if (coverPoints.isEmpty()) return Collections.emptyList();
+
         LivingEntity primaryThreat = allThreats != null && !allThreats.isEmpty() ? allThreats.get(0) : null;
         CoverQualityEvaluator evaluator = new CoverQualityEvaluator(level);
-        
+
         for (CoverPoint coverPoint : coverPoints) {
             if (!CoverReservationManager.isAvailable(coverPoint.getPosition())) {
                 continue;
             }
-            
             if (primaryThreat != null) {
                 evaluator.evaluateWithRaycast(coverPoint, primaryThreat);
             }
-            
             float score = calculateThreatAwareScore(coverPoint, soldier, threatDirection, allThreats);
             coverPoint.setQuality(score);
         }
-        
-        return coverPoints.stream()
+
+        List<ScoredCover> scored = coverPoints.stream()
             .filter(cp -> CoverReservationManager.isAvailable(cp.getPosition()))
             .filter(cp -> cp.getType() != CoverType.NONE)
-            .max(Comparator.comparingDouble(CoverPoint::getQuality));
+            .map(cp -> new ScoredCover(cp, cp.getQuality()))
+            .sorted(Comparator.comparingDouble((ScoredCover s) -> s.score).reversed())
+            .collect(java.util.stream.Collectors.toList());
+        return scored;
+    }
+
+    public static class ScoredCover {
+        public final CoverPoint cover;
+        public final float score;
+        public ScoredCover(CoverPoint cover, float score) {
+            this.cover = cover;
+            this.score = score;
+        }
     }
     
     private float calculateThreatAwareScore(CoverPoint coverPoint, LivingEntity soldier,

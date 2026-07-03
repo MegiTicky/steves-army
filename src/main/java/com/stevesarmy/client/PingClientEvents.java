@@ -4,6 +4,7 @@ import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.combat.CombatDebugData;
 import com.stevesarmy.combat.DetectionSystem;
 import com.stevesarmy.combat.TargetAcquisition;
+import com.stevesarmy.combat.cover.CoverDebugManager;
 import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.network.PotentialTargetsDebugMessage;
 import com.stevesarmy.ping.PingManager;
@@ -100,6 +101,11 @@ public class PingClientEvents {
         if (CombatDebugRenderer.getDebugMode() != CombatDebugRenderer.DEBUG_MODE_OFF) {
             updateCombatDebugData();
         }
+
+        CoverHudRenderer.setVisible(
+            CombatDebugRenderer.getDebugMode() == CombatDebugRenderer.DEBUG_MODE_VERBOSE ||
+            (CombatDebugRenderer.getDebugMode() != CombatDebugRenderer.DEBUG_MODE_OFF && CoverDebugManager.isShowSoldierCover())
+        );
     }
     
     private static void updateCombatDebugData() {
@@ -225,6 +231,8 @@ public class PingClientEvents {
             }
             
             PingOverlayRenderer.render(event.getGuiGraphics(), lastWorldRenderContext);
+            
+            CoverHudRenderer.render(event.getGuiGraphics());
         }
     }
     

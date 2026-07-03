@@ -48,6 +48,12 @@ public class CoverBehaviorManager {
     private float coverQualityPenalty = 0.0f;
     private Vec3 entryThreatDirection = null;
     
+    private int peekCountSameCover = 0;
+    private int savedPeekCount = 0;
+    private BlockPos savedCoverPosition = null;
+    private static final int PEEK_COUNT_PENALTY_THRESHOLD = 4;
+    private static final float MAX_COVER_PENALTY = 0.60f;
+    
     public CoverBehaviorManager(SoldierEntity soldier) {
         this.soldier = soldier;
         this.suppressionTracker = new SuppressionTracker();
@@ -151,6 +157,21 @@ public class CoverBehaviorManager {
             this.coverEntryTime = System.currentTimeMillis();
             this.lastCoverQuality = cover.getQuality();
             this.entryThreatDirection = soldier.getThreatAwareness().getPrimaryDirection(soldier.position());
+            boolean samePosition = (oldCover != null && cover.getPosition().equals(oldCover.getPosition()))
+                || (oldCover == null && savedCoverPosition != null && cover.getPosition().equals(savedCoverPosition));
+            if (samePosition) {
+                this.peekCountSameCover = Math.max(this.peekCountSameCover, this.savedPeekCount);
+                if (debugLog()) {
+                    StevesArmyMod.LOGGER.info("[CoverBehaviorManager] Soldier {} re-entered same cover, peek count restored to {}", soldier.getId(), peekCountSameCover);
+                }
+            } else {
+                this.peekCountSameCover = 0;
+                if (debugLog()) {
+                    StevesArmyMod.LOGGER.info("[CoverBehaviorManager] Soldier {} new cover, peek count reset from {} to 0", soldier.getId(), savedPeekCount);
+                }
+            }
+            this.savedPeekCount = 0;
+            this.savedCoverPosition = null;
         }
     }
     
@@ -186,15 +207,19 @@ public class CoverBehaviorManager {
                 currentCover != null ? currentCover.getPosition().toString() : "null",
                 state);
         }
+
         if (currentCover != null) {
             CoverReservationManager.release(currentCover.getPosition(), null);
             this.lastCover = currentCover;
             syncLastCover();
         }
+        this.savedCoverPosition = currentCover != null ? currentCover.getPosition() : null;
         this.currentCover = null;
         syncCurrentCover();
         this.coverEntryTime = 0;
         this.entryThreatDirection = null;
+        this.savedPeekCount = this.peekCountSameCover;
+        this.peekCountSameCover = 0;
         this.state = CoverState.NO_COVER;
         syncState();
         soldier.refreshDimensions();
@@ -252,16 +277,34 @@ public class CoverBehaviorManager {
         this.lastPeekTime = System.currentTimeMillis();
     }
     
+    public void recordPeekCycle() {
+        peekCountSameCover++;
+        if (debugLog()) {
+            StevesArmyMod.LOGGER.info("[CoverBehaviorManager] Soldier {} recordPeekCycle: count={}", soldier.getId(), peekCountSameCover);
+        }
+    }
+    
+    public int getPeekCountSameCover() {
+        return peekCountSameCover;
+    }
+    
+    public float getRecentCoverPenalty() {
+        if (peekCountSameCover < PEEK_COUNT_PENALTY_THRESHOLD) return 0.0f;
+        int extraPeeks = peekCountSameCover - PEEK_COUNT_PENALTY_THRESHOLD + 1;
+        return Math.min(MAX_COVER_PENALTY, extraPeeks * 0.15f);
+    }
+    
     public float getLastCoverQuality() {
         return lastCoverQuality;
     }
     
-    public float getCoverQualityPenalty() {
-        return coverQualityPenalty;
+public float getCoverQualityPenalty() {
+        return getRecentCoverPenalty();
     }
-    
+
     public void clearCoverQualityPenalty() {
         coverQualityPenalty = 0.0f;
+        peekCountSameCover = 0;
     }
     
     public void onNearMiss(net.minecraft.world.phys.Vec3 bulletPath, net.minecraft.world.entity.LivingEntity soldier) {
