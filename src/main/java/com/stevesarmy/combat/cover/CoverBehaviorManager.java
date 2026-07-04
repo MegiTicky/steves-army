@@ -43,6 +43,15 @@ public class CoverBehaviorManager {
     private long peekStartTime = 0;
     private long lastPeekEndTime = 0;
     private boolean nonPeekableCover = false;
+    private boolean peekSlideActive = false;
+
+    public void setPeekSlideActive(boolean active) {
+        this.peekSlideActive = active;
+    }
+
+    public boolean isPeekSlideActive() {
+        return peekSlideActive;
+    }
     
     private float lastCoverQuality = 0.0f;
     private float coverQualityPenalty = 0.0f;
@@ -398,6 +407,7 @@ public float getCoverQualityPenalty() {
     public void resetPeekState() {
         this.peekState = PeekState.HIDING;
         this.peekStartTime = 0;
+        this.peekSlideActive = false;
         syncPeekState();
     }
     

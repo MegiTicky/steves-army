@@ -127,7 +127,7 @@ public class CoverPositionController extends MoveControl {
         double dz = targetPos.z - this.mob.getZ();
         double distSq = dx * dx + dz * dz;
 
-        if (distSq < 0.25) {
+        if (distSq <= 0.09) {
             this.mob.setDeltaMovement(0, this.mob.getDeltaMovement().y, 0);
             this.mob.setPos(targetPos.x, this.mob.getY(), targetPos.z);
             intent = MovementIntent.NONE;
@@ -144,7 +144,7 @@ public class CoverPositionController extends MoveControl {
         double dz = coverCenter.z - this.mob.getZ();
         double distSq = dx * dx + dz * dz;
 
-        if (distSq < tolerance * tolerance) {
+        if (distSq <= tolerance * tolerance) {
             this.mob.setDeltaMovement(0, this.mob.getDeltaMovement().y, 0);
             intent = MovementIntent.NONE;
             return;
