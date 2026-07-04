@@ -22,6 +22,8 @@ import org.slf4j.Logger;
 public class StevesArmyMod {
     public static final String MODID = "steves_army";
     public static final Logger LOGGER = LogUtils.getLogger();
+    
+    public static boolean teleportOnlyMode = false;
 
     public StevesArmyMod(FMLJavaModLoadingContext context) {
         IEventBus modEventBus = context.getModEventBus();

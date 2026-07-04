@@ -1,5 +1,6 @@
 package com.stevesarmy.entity.ai;
 
+import com.stevesarmy.StevesArmyMod;
 import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.ai.control.MoveControl;
 import net.minecraft.world.phys.Vec3;
@@ -51,7 +52,7 @@ public class CoverPositionController extends MoveControl {
         this.tolerance = tolerance;
         this.targetSpeed = speed;
         if (!source.equals(this.debugMoveSource)) {
-            com.stevesarmy.StevesArmyMod.LOGGER.info("[MoveCtl] Soldier {} intent={} target=({:.1f},{:.1f},{:.1f}) speed={} source={} reason={}",
+            com.stevesarmy.StevesArmyMod.LOGGER.info("[MoveCtl] Soldier {} intent={} target=({}, {}, {}) speed={} source={} reason={}",
                 ((net.minecraft.world.entity.LivingEntity)this.mob).getId(),
                 intent, pos.x, pos.y, pos.z, speed, source, reason);
         }
@@ -113,6 +114,12 @@ public class CoverPositionController extends MoveControl {
 
     @Override
     public void tick() {
+        if (StevesArmyMod.teleportOnlyMode && targetPos != null && intent != MovementIntent.NONE) {
+            mob.moveTo(targetPos.x, targetPos.y, targetPos.z, mob.getYRot(), mob.getXRot());
+            intent = MovementIntent.NONE;
+            return;
+        }
+
         if (this.debugPrevIntent != this.intent) {
             this.debugIntentTicks = 0;
             this.debugPrevIntent = this.intent;
@@ -122,13 +129,6 @@ public class CoverPositionController extends MoveControl {
 
         switch (intent) {
             case NONE:
-                if (!this.mob.getNavigation().isDone()) {
-                    super.tick();
-                    this.debugLastSetVelocity = this.mob.getDeltaMovement();
-                    this.debugMoveSource = "vanilla";
-                    this.debugMoveReason = "navigation";
-                }
-                break;
             case NAVIGATING:
                 if (!this.mob.getNavigation().isDone()) {
                     super.tick();

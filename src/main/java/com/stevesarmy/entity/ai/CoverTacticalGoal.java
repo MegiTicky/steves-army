@@ -66,12 +66,15 @@ public class CoverTacticalGoal extends Goal {
     private static final int PEEK_NO_LOS_REPOSITION_TICKS = 100; // ~5 seconds of no LOS
     private static final double FULL_COVER_PEEK_SPEED = 0.15;
     private static final double PEEK_POSITION_REACHED_DISTANCE = 0.3;
+    private static final double PEEK_RESTART_DISTANCE = 0.6; // Hysteresis: require larger dist to restart slide
     private static final double POSITIONING_TOLERANCE = 0.3;
     private static final double POSITIONING_SPEED = 0.3;
     private static final int PEEK_SEARCH_RADIUS = 2;
     private static final long BLACKLIST_CLEAR_INTERVAL_MS = 15000;
-
-    private static final double ENEMY_PROXIMITY_REPOSITION_DISTANCE = 4.0;
+    
+    private static long tickCounter = 0;
+    private long lastTickId = 0;
+    private boolean slideJustFinished = false; // Hysteresis flag
     private static final double THREAT_ANGLE_REPOSITION_THRESHOLD = 2.09; // ~120° in radians
     private static final int EXPOSED_LOS_CHECK_INTERVAL = 10;
     private static final int PEEK_REVALIDATE_INTERVAL = 30;
@@ -286,7 +289,8 @@ public class CoverTacticalGoal extends Goal {
         if (distance < COVER_VALID_DISTANCE) {
             CoverPositionController moveControl = getPositionController();
             if (moveControl.getIntent() == CoverPositionController.MovementIntent.NONE) {
-                moveControl.setTarget(targetCover.getPosition().getCenter(), CoverPositionController.MovementIntent.POSITIONING, POSITIONING_TOLERANCE, POSITIONING_SPEED, "tickSeekingCover", "recenter to target cover");
+                navigation.stop();
+                moveControl.setTarget(getCoverStandingPosition(targetCover.getPosition()), CoverPositionController.MovementIntent.POSITIONING, POSITIONING_TOLERANCE, POSITIONING_SPEED, "tickSeekingCover", "recenter to target cover");
             }
         }
         
@@ -394,7 +398,7 @@ public class CoverTacticalGoal extends Goal {
                 getPositionController().clearIntent();
                 return;
             }
-            if (distance > COVER_VALID_DISTANCE && !isPeeking()) {
+            if (distance > COVER_VALID_DISTANCE && !isPeeking() && !getCoverManager().isPeekSlideActive()) {
                 if (debugLoggingEnabled) {
                     StevesArmyMod.LOGGER.info("[CoverTacticalGoal] Soldier {} got pushed from cover ({} > {}), re-seeking",
                         soldier.getId(), String.format("%.1f", distance), COVER_VALID_DISTANCE);
@@ -409,7 +413,8 @@ public class CoverTacticalGoal extends Goal {
             boolean isDuckingBack = getCoverManager().getPeekState() == CoverBehaviorManager.PeekState.DUCKING_BACK;
             boolean isPeekSlideActive = getCoverManager().isPeekSlideActive();
             if (!peeking && !isDuckingBack && !isPeekSlideActive && getPositionController().getIntent() == CoverPositionController.MovementIntent.NONE) {
-                getPositionController().setTarget(currentCover.getPosition().getCenter(), CoverPositionController.MovementIntent.POSITIONING, POSITIONING_TOLERANCE, POSITIONING_SPEED, "tickInCover", "recenter to cover");
+                navigation.stop();
+                getPositionController().setTarget(getCoverStandingPosition(currentCover.getPosition()), CoverPositionController.MovementIntent.POSITIONING, POSITIONING_TOLERANCE, POSITIONING_SPEED, "tickInCover", "recenter to cover");
             }
         }
 
@@ -429,22 +434,6 @@ public class CoverTacticalGoal extends Goal {
             getPositionController().clearIntent();
             getCoverManager().clearCover();
             return;
-        }
-
-        // Enemy proximity reposition
-        if (currentCover != null) {
-            LivingEntity target = soldier.getTarget();
-            if (target != null && target.isAlive()) {
-                double distToTarget = soldier.distanceTo(target);
-                if (distToTarget < ENEMY_PROXIMITY_REPOSITION_DISTANCE) {
-                    if (debugLoggingEnabled) {
-                        StevesArmyMod.LOGGER.info("[CoverGoal] Soldier {} enemy too close ({:.1f} blocks), repositioning",
-                            soldier.getId(), distToTarget);
-                    }
-                    startRepositioning();
-                    return;
-                }
-            }
         }
 
         tickPeekState();
@@ -584,6 +573,24 @@ public class CoverTacticalGoal extends Goal {
                 double dist = Math.sqrt(dx * dx + dz * dz);
 
                 boolean peekSlideActive = manager.isPeekSlideActive();
+                MovementIntent currentIntent = getPositionController().getIntent();
+                
+                long currentTickId = ++tickCounter;
+                
+                StevesArmyMod.LOGGER.info("[PeekTrace] tickId={} soldier={} peekSlideActive={} intent={} dist={} slideJustFinished={}",
+                    currentTickId, soldier.getId(), peekSlideActive, currentIntent, String.format("%.2f", dist), slideJustFinished);
+                lastTickId = currentTickId;
+                
+                // Check if slide finished (controller intent changed from PEEKING)
+                if (peekSlideActive && currentIntent != CoverPositionController.MovementIntent.PEEKING) {
+                    StevesArmyMod.LOGGER.info("[PeekTrace] tickId={} soldier={} slide finished, clearing peekSlideActive", currentTickId, soldier.getId());
+                    manager.setPeekSlideActive(false);
+                    peekSlideActive = false;
+                    slideJustFinished = true; // Set hysteresis flag
+                    if (debugLoggingEnabled) {
+                        StevesArmyMod.LOGGER.info("[CoverGoal] Soldier {} peek slide finished, checking LOS", soldier.getId());
+                    }
+                }
 
                 if (!peekSlideActive && dist < PEEK_POSITION_REACHED_DISTANCE) {
                     // Re-check LOS from peek position before exposing
@@ -591,6 +598,7 @@ public class CoverTacticalGoal extends Goal {
                     Vec3 targetEye = new Vec3(target.getX(), target.getEyeY(), target.getZ());
                     if (hasLineOfSight(peekEye, targetEye)) {
                         soldier.setDeltaMovement(0, soldier.getDeltaMovement().y, 0);
+                        slideJustFinished = false; // Clear flag on successful expose
                         if (debugLoggingEnabled) {
                             StevesArmyMod.LOGGER.info("[CoverGoal] Soldier {} reached full-cover peek position, exposing", soldier.getId());
                         }
@@ -602,17 +610,28 @@ public class CoverTacticalGoal extends Goal {
                         if (debugLoggingEnabled) {
                             StevesArmyMod.LOGGER.info("[CoverGoal] Soldier {} at peek position but LOS lost, staying hidden", soldier.getId());
                         }
+                        slideJustFinished = false; // Clear flag
                         manager.setPeekSlideActive(false);
                         manager.setPeekState(CoverBehaviorManager.PeekState.HIDING);
                         manager.setLastPeekEndTime(System.currentTimeMillis());
                     }
-                } else if (!peekSlideActive) {
-                    // Start sliding to peek position
+                } else if (!peekSlideActive && dist >= PEEK_RESTART_DISTANCE && !slideJustFinished) {
+                    // Only restart slide if dist is significantly larger (hysteresis) and slide didn't just finish
+                    StevesArmyMod.LOGGER.info("[PeekTrace] tickId={} soldier={} STARTING peek slide (dist {} >= {})", lastTickId, soldier.getId(), String.format("%.2f", dist), PEEK_RESTART_DISTANCE);
                     if (debugLoggingEnabled) {
                         StevesArmyMod.LOGGER.info("[CoverGoal] Soldier {} starting full-cover peek slide to {}", soldier.getId(), peekPos);
                     }
                     manager.setPeekSlideActive(true);
+                    StevesArmyMod.LOGGER.info("[PeekTrace] tickId={} soldier={} set peekSlideActive=true", lastTickId, soldier.getId());
                     getPositionController().startPeekAt(targetPos);
+                    StevesArmyMod.LOGGER.info("[PeekTrace] tickId={} soldier={} called startPeekAt, intent now={}", lastTickId, soldier.getId(), getPositionController().getIntent());
+                } else if (slideJustFinished && dist >= PEEK_POSITION_REACHED_DISTANCE && dist < PEEK_RESTART_DISTANCE) {
+                    // Slide just finished but soldier drifted slightly past threshold - wait for stabilization
+                    StevesArmyMod.LOGGER.info("[PeekTrace] tickId={} soldier={} waiting for stabilization (slideJustFinished=true, dist={})", lastTickId, soldier.getId(), String.format("%.2f", dist));
+                } else if (!peekSlideActive && dist >= PEEK_POSITION_REACHED_DISTANCE && dist < PEEK_RESTART_DISTANCE) {
+                    // In the hysteresis zone but not from a just-finished slide - this means we're drifting
+                    // Clear the flag after a bit of drift to allow restart if needed
+                    slideJustFinished = false;
                 }
                 // If peekSlideActive, controller handles the slide — wait for it to finish
             } else {
@@ -716,7 +735,7 @@ public class CoverTacticalGoal extends Goal {
             soldier.refreshDimensions();
             doCrawlIfHalfCover();
 if (cover != null) {
-                getPositionController().setTarget(cover.getPosition().getCenter(), CoverPositionController.MovementIntent.POSITIONING, POSITIONING_TOLERANCE, POSITIONING_SPEED, "tickDuckingBack", "post-return recenter");
+                getPositionController().setTarget(getCoverStandingPosition(cover.getPosition()), CoverPositionController.MovementIntent.POSITIONING, POSITIONING_TOLERANCE, POSITIONING_SPEED, "tickDuckingBack", "post-return recenter");
             }
             if (debugLoggingEnabled) {
                 StevesArmyMod.LOGGER.info("[CoverGoal] Soldier {} returned to cover, back to HIDING", soldier.getId());
@@ -740,7 +759,7 @@ if (cover != null) {
         }
 
         // Full cover: return to cover center (same target as tickInCover line 407)
-        Vec3 targetPos = cover.getPosition().getCenter();
+        Vec3 targetPos = getCoverStandingPosition(cover.getPosition());
         Vec3 currentPos = soldier.position();
         double dx = targetPos.x - currentPos.x;
         double dz = targetPos.z - currentPos.z;
@@ -771,7 +790,8 @@ if (cover != null) {
     }
     
     private boolean isPeeking() {
-        return getCoverManager().getPeekState() == CoverBehaviorManager.PeekState.EXPOSED;
+        return getCoverManager().getPeekState() == CoverBehaviorManager.PeekState.EXPOSED ||
+               getPositionController().getIntent() == CoverPositionController.MovementIntent.PEEKING;
     }
     
     private void tickSuppressedInCover() {
@@ -838,17 +858,10 @@ if (cover != null) {
             return;
         }
 
-        if (!isCoverStillValid()) {
-            startRepositioning();
-            return;
-        }
+        // Skip all checks when peeking — soldier is legitimately away from cover
+        if (isPeeking()) return;
 
-        // Cover block destroyed
-        if (soldier.level().getBlockState(currentCover.getPosition()).isAir()) {
-            if (debugLoggingEnabled) {
-                StevesArmyMod.LOGGER.info("[CoverGoal] Soldier {} cover block destroyed at {}, repositioning",
-                    soldier.getId(), currentCover.getPosition());
-            }
+        if (!isCoverStillValid()) {
             startRepositioning();
             return;
         }
@@ -1098,10 +1111,21 @@ private Optional<CoverPoint> findBetterCover() {
         return (CoverPositionController) soldier.getMoveControl();
     }
     
+    private Vec3 getCoverStandingPosition(BlockPos coverPos) {
+        return new Vec3(coverPos.getX() + 0.5, coverPos.getY(), coverPos.getZ() + 0.5);
+    }
+    
     
     
     private void moveToCover(CoverPoint cover) {
         BlockPos pos = cover.getPosition();
+        
+        if (StevesArmyMod.teleportOnlyMode) {
+            soldier.moveTo(pos.getX() + 0.5, pos.getY(), pos.getZ() + 0.5, soldier.getYRot(), soldier.getXRot());
+            onCoverReached(cover);
+            return;
+        }
+        
         SoldierGroundNavigation groundNav = (SoldierGroundNavigation) navigation;
         Path path = groundNav.createPathToBlock(pos, 0);
         if (path != null && path.canReach()) {
@@ -1117,6 +1141,7 @@ private Optional<CoverPoint> findBetterCover() {
     }
     
     private void onCoverReached(CoverPoint cover) {
+        StevesArmyMod.LOGGER.info("[PeekTrace] onCoverReached soldier={} START", soldier.getId());
         CoverPoint previousCover = getCoverManager().getCurrentCover();
         if (previousCover != null) {
             getCoverManager().setLastCover(previousCover);
@@ -1127,11 +1152,14 @@ private Optional<CoverPoint> findBetterCover() {
         
         navigation.stop();
         
+        StevesArmyMod.LOGGER.info("[PeekTrace] onCoverReached soldier={} calling resetPeekState (peekSlideActive will be false)", soldier.getId());
         getCoverManager().resetPeekState();
         getCoverManager().setNonPeekableCover(false);
         nonPeekableTicks = 0;
+        slideJustFinished = false; // Clear hysteresis flag on new cover
         
-getPositionController().setTarget(cover.getPosition().getCenter(), CoverPositionController.MovementIntent.POSITIONING, POSITIONING_TOLERANCE, POSITIONING_SPEED, "onCoverReached", "initial cover positioning");
+        StevesArmyMod.LOGGER.info("[PeekTrace] onCoverReached soldier={} calling setTarget POSITIONING", soldier.getId());
+getPositionController().setTarget(getCoverStandingPosition(cover.getPosition()), CoverPositionController.MovementIntent.POSITIONING, POSITIONING_TOLERANCE, POSITIONING_SPEED, "onCoverReached", "initial cover positioning");
         
         // Compute peek position with LOS validation for full cover
         if (cover.getType() == CoverType.FULL) {

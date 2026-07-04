@@ -119,6 +119,12 @@ public class CombatDebugCommand {
                     .executes(CombatDebugCommand::forcePeek))
                 .then(Commands.literal("reposition")
                     .executes(CombatDebugCommand::forceReposition))
+                .then(Commands.literal("teleport_mode")
+                    .executes(ctx -> toggleTeleportMode(ctx, null))
+                    .then(Commands.literal("on")
+                        .executes(ctx -> toggleTeleportMode(ctx, true)))
+                    .then(Commands.literal("off")
+                        .executes(ctx -> toggleTeleportMode(ctx, false))))
                 .then(Commands.literal("pose")
                     .executes(CombatDebugCommand::poseStatus)
                     .then(Commands.literal("crawl")
@@ -174,6 +180,7 @@ public class CombatDebugCommand {
             "  info debug <x> <y> <z> - Debug specific position\n" +
             "  control peek        - Force nearest soldier to peek\n" +
             "  control reposition  - Force nearest soldier to abandon cover\n" +
+            "  control teleport_mode [on|off] - Toggle teleport-only movement mode\n" +
             "  control pose [...]  - Soldier pose commands (crawl, stand, status, noai, angles, set, reset)\n" +
             "  status              - Show current debug toggle states"
         ), false);
@@ -706,6 +713,21 @@ public class CombatDebugCommand {
         final SoldierEntity target = nearest;
         context.getSource().sendSuccess(() -> Component.literal(
             "Forced reposition for soldier " + target.getId()
+        ), true);
+        return 1;
+    }
+
+    private static int toggleTeleportMode(CommandContext<CommandSourceStack> context, Boolean enable) {
+        boolean newState;
+        if (enable != null) {
+            newState = enable;
+        } else {
+            newState = !StevesArmyMod.teleportOnlyMode;
+        }
+        StevesArmyMod.teleportOnlyMode = newState;
+        context.getSource().sendSuccess(() -> Component.literal(
+            "Teleport-only movement mode: " + (newState ? "ON" : "OFF") +
+            "\nSoldiers will teleport instead of normal movement"
         ), true);
         return 1;
     }
