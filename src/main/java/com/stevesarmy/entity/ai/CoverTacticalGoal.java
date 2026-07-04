@@ -44,7 +44,7 @@ public class CoverTacticalGoal extends Goal {
     private static final double FOLLOW_COVER_SEARCH_RADIUS = 15.0D;
     private static final double FOLLOW_REGROUP_DISTANCE = 10.0D;
     
-    private static final double POSITIONING_TOLERANCE = 0.3;
+    private static final double POSITIONING_TOLERANCE = 0.05;
     private static final double POSITIONING_SPEED = 1.0;
     private static final long BLACKLIST_CLEAR_INTERVAL_MS = 15000;
     
