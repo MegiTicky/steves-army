@@ -67,6 +67,7 @@ public class CoverTacticalGoal extends Goal {
     private static final double FULL_COVER_PEEK_SPEED = 0.15;
     private static final double PEEK_POSITION_REACHED_DISTANCE = 0.3;
     private static final double POSITIONING_TOLERANCE = 0.3;
+    private static final double POSITIONING_SPEED = 0.3;
     private static final int PEEK_SEARCH_RADIUS = 2;
     private static final long BLACKLIST_CLEAR_INTERVAL_MS = 15000;
 
@@ -285,7 +286,7 @@ public class CoverTacticalGoal extends Goal {
         if (distance < COVER_VALID_DISTANCE) {
             CoverPositionController moveControl = getPositionController();
             if (moveControl.getIntent() == CoverPositionController.MovementIntent.NONE) {
-                moveControl.setTarget(targetCover.getPosition().getCenter(), CoverPositionController.MovementIntent.POSITIONING, POSITIONING_TOLERANCE, 0.08);
+                moveControl.setTarget(targetCover.getPosition().getCenter(), CoverPositionController.MovementIntent.POSITIONING, POSITIONING_TOLERANCE, POSITIONING_SPEED);
             }
         }
         
@@ -408,7 +409,7 @@ public class CoverTacticalGoal extends Goal {
             boolean isDuckingBack = getCoverManager().getPeekState() == CoverBehaviorManager.PeekState.DUCKING_BACK;
             boolean isPeekSlideActive = getCoverManager().isPeekSlideActive();
             if (!peeking && !isDuckingBack && !isPeekSlideActive && getPositionController().getIntent() == CoverPositionController.MovementIntent.NONE) {
-                getPositionController().setTarget(currentCover.getPosition().getCenter(), CoverPositionController.MovementIntent.POSITIONING, POSITIONING_TOLERANCE, 0.08);
+                getPositionController().setTarget(currentCover.getPosition().getCenter(), CoverPositionController.MovementIntent.POSITIONING, POSITIONING_TOLERANCE, POSITIONING_SPEED);
             }
         }
 
@@ -589,7 +590,6 @@ public class CoverTacticalGoal extends Goal {
                     Vec3 peekEye = new Vec3(targetPos.x, currentPos.y + 1.62, targetPos.z);
                     Vec3 targetEye = new Vec3(target.getX(), target.getEyeY(), target.getZ());
                     if (hasLineOfSight(peekEye, targetEye)) {
-                        soldier.setPos(targetPos.x, currentPos.y, targetPos.z);
                         soldier.setDeltaMovement(0, soldier.getDeltaMovement().y, 0);
                         if (debugLoggingEnabled) {
                             StevesArmyMod.LOGGER.info("[CoverGoal] Soldier {} reached full-cover peek position, exposing", soldier.getId());
@@ -715,7 +715,7 @@ public class CoverTacticalGoal extends Goal {
             soldier.refreshDimensions();
             doCrawlIfHalfCover();
             if (cover != null) {
-getPositionController().setTarget(cover.getPosition().getCenter(), CoverPositionController.MovementIntent.POSITIONING, POSITIONING_TOLERANCE, 0.08);
+getPositionController().setTarget(cover.getPosition().getCenter(), CoverPositionController.MovementIntent.POSITIONING, POSITIONING_TOLERANCE, POSITIONING_SPEED);
             }
             if (debugLoggingEnabled) {
                 StevesArmyMod.LOGGER.info("[CoverGoal] Soldier {} returned to cover, back to HIDING", soldier.getId());
@@ -764,7 +764,7 @@ getPositionController().setTarget(cover.getPosition().getCenter(), CoverPosition
         }
 
         // Start or continue positioning back to cover — always re-set so we're the sole authority
-        controller.setTarget(targetPos, CoverPositionController.MovementIntent.POSITIONING, POSITIONING_TOLERANCE, 0.12);
+        controller.setTarget(targetPos, CoverPositionController.MovementIntent.POSITIONING, POSITIONING_TOLERANCE, POSITIONING_SPEED);
         faceTarget();
         return false;
     }
@@ -1130,7 +1130,7 @@ private Optional<CoverPoint> findBetterCover() {
         getCoverManager().setNonPeekableCover(false);
         nonPeekableTicks = 0;
         
-        getPositionController().setTarget(cover.getPosition().getCenter(), CoverPositionController.MovementIntent.POSITIONING, POSITIONING_TOLERANCE, 0.08);
+getPositionController().setTarget(cover.getPosition().getCenter(), CoverPositionController.MovementIntent.POSITIONING, POSITIONING_TOLERANCE, POSITIONING_SPEED);
         
         // Compute peek position with LOS validation for full cover
         if (cover.getType() == CoverType.FULL) {

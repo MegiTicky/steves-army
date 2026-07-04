@@ -129,7 +129,6 @@ public class CoverPositionController extends MoveControl {
 
         if (distSq <= 0.09) {
             this.mob.setDeltaMovement(0, this.mob.getDeltaMovement().y, 0);
-            this.mob.setPos(targetPos.x, this.mob.getY(), targetPos.z);
             intent = MovementIntent.NONE;
             return;
         }
