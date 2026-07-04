@@ -243,6 +243,8 @@ public class CoverTacticalGoal extends Goal {
             case NO_COVER:
                 break;
         }
+        
+        populateCoverDebugData();
     }
     
     private void tickSeekingCover() {
@@ -530,7 +532,9 @@ public class CoverTacticalGoal extends Goal {
         }
 
         if (debugLoggingEnabled) {
-            populateCoverDebugData();
+            StevesArmyMod.LOGGER.info("[CoverGoal] Soldier {} tick: coverState={}, peekState={}, hasThreat={}, suppression={:.2f}",
+                soldier.getId(), getCoverManager().getState(), soldier.getPeekController().getState(),
+                soldier.getThreatAwareness().hasActiveThreat(), getCoverManager().getSuppressionTracker().getSuppressionLevel());
         }
 
         // Check for better cover
