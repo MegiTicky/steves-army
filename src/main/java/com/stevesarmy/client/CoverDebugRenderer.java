@@ -6,13 +6,14 @@ import com.mojang.blaze3d.vertex.DefaultVertexFormat;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.Tesselator;
 import com.mojang.blaze3d.vertex.VertexFormat;
+import com.stevesarmy.combat.cover.CoverBehaviorManager;
+import com.stevesarmy.combat.cover.CoverBehaviorManager.PeekState;
 import com.stevesarmy.combat.cover.CoverDebugManager;
 import com.stevesarmy.combat.cover.CoverPoint;
 import com.stevesarmy.combat.cover.CoverType;
-import com.stevesarmy.combat.cover.CoverBehaviorManager;
-import com.stevesarmy.combat.cover.CoverBehaviorManager.PeekState;
 import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.entity.TargetEntity;
+import com.stevesarmy.entity.ai.CoverPositionController;
 import net.minecraft.client.Camera;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.GameRenderer;
@@ -663,8 +664,24 @@ private static void renderSoldierCoverLabels(PoseStack poseStack, Vec3 cameraPos
             lineOffset += 10;
             
             int peekStateColor = getPeekStateColor(peekState);
-            String peekLabel = "Peek: " + peekState.name();
+            CoverBehaviorManager manager = soldier.getCoverBehaviorManager();
+            long peekTimeMs = manager.getTimeInCurrentPeekState();
+            long sinceLastPeekMs = manager.getTimeSinceLastPeek();
+            String peekLabel = "Peek: " + peekState.name() + "(" + peekTimeMs + "ms,last=" + sinceLastPeekMs + "ms)";
             font.drawInBatch(peekLabel, -font.width(peekLabel) / 2.0f, lineOffset, peekStateColor | 0xFF000000, false,
+                             poseStack.last().pose(), bufferSource, net.minecraft.client.gui.Font.DisplayMode.NORMAL, 0, 15728880);
+            lineOffset += 10;
+            
+            CoverPositionController ctrl = (CoverPositionController) soldier.getMoveControl();
+            CoverPositionController.MovementIntent intent = ctrl.getIntent();
+            Vec3 ctrlTarget = ctrl.getDebugTargetPos();
+            double ctrlDist = ctrlTarget != null ?
+                Math.sqrt(Math.pow(ctrlTarget.x - soldier.getX(), 2) + Math.pow(ctrlTarget.z - soldier.getZ(), 2)) : -1;
+            String intentLabel = "Intent: " + intent.name() + " ctrlDist=" + String.format("%.2f", ctrlDist);
+            int intentColor = intent == CoverPositionController.MovementIntent.PEEKING ? 0x00FF00 :
+                              intent == CoverPositionController.MovementIntent.POSITIONING ? 0xFFFF00 :
+                              intent == CoverPositionController.MovementIntent.RETURNING ? 0xFF8800 : 0xAAAAAA;
+            font.drawInBatch(intentLabel, -font.width(intentLabel) / 2.0f, lineOffset, intentColor | 0xFF000000, false,
                              poseStack.last().pose(), bufferSource, net.minecraft.client.gui.Font.DisplayMode.NORMAL, 0, 15728880);
             lineOffset += 10;
             

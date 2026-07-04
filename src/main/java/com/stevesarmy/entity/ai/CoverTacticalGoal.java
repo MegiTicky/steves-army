@@ -1,5 +1,6 @@
 package com.stevesarmy.entity.ai;
 
+import com.stevesarmy.entity.ai.CoverPositionController.MovementIntent;
 import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.combat.AimAccuracyManager;
 import com.stevesarmy.combat.GunIntegration;
@@ -80,6 +81,7 @@ public class CoverTacticalGoal extends Goal {
     private int peekRevalidateCounter = 0;
 
     private CoverFinder.ScoredCover[] cachedTopCovers = new CoverFinder.ScoredCover[0];
+    private int peekCycleLogTick = 0;
 
     private static boolean debugLoggingEnabled = false;
     
@@ -220,6 +222,26 @@ public class CoverTacticalGoal extends Goal {
                 soldier.getId(), state, getCoverManager().getPeekState(),
                 getThreats().hasActiveThreat(),
                 String.format("%.2f", getCoverManager().getSuppressionTracker().getSuppressionLevel()));
+
+            peekCycleLogTick++;
+            if (peekCycleLogTick >= 10) {
+                peekCycleLogTick = 0;
+                CoverPositionController ctrl = (CoverPositionController) soldier.getMoveControl();
+                CoverPoint cover = getCoverManager().getCurrentCover();
+                double distToCover = cover != null ? soldier.position().distanceTo(cover.getPosition().getCenter()) : -1;
+                Vec3 vel = soldier.getDeltaMovement();
+                double speed = Math.sqrt(vel.x * vel.x + vel.z * vel.z);
+                Vec3 ctrlTarget = ctrl.getDebugTargetPos();
+                double ctrlDist = ctrlTarget != null ?
+                    Math.sqrt(Math.pow(ctrlTarget.x - soldier.getX(), 2) + Math.pow(ctrlTarget.z - soldier.getZ(), 2)) : -1;
+                CoverBehaviorManager.PeekState peekState = getCoverManager().getPeekState();
+                long peekTime = getCoverManager().getTimeInCurrentPeekState();
+                long sinceLastPeek = getCoverManager().getTimeSinceLastPeek();
+                StevesArmyMod.LOGGER.info("[PeekCycle] Soldier {} state={} peek={}({}ms,sinceLast={}ms) intent={} ctrlDist={} distToCover={} speed={} nonPeekable={} peekCount={}",
+                    soldier.getId(), state, peekState, peekTime, sinceLastPeek,
+                    ctrl.getIntent(), String.format("%.2f", ctrlDist), String.format("%.2f", distToCover), String.format("%.4f", speed),
+                    getCoverManager().isNonPeekableCover(), getCoverManager().getPeekCountSameCover());
+            }
         }
         
         switch (state) {
@@ -711,25 +733,30 @@ public class CoverTacticalGoal extends Goal {
         }
 
         // Full cover: delegate return movement to CoverPositionController
-        CoverPositionController controller = getPositionController();
-        if (controller.getIntent() == CoverPositionController.MovementIntent.NONE) {
-            // Start positioning back to cover
-            BlockPos coverPos = cover.getPosition();
-            Vec3 targetPos = coverPos.getCenter();
-            Set<Direction> protectedDirs = cover.getProtectedDirections();
-            if (protectedDirs != null && !protectedDirs.isEmpty()) {
-                Direction protectDir = protectedDirs.iterator().next();
-                targetPos = targetPos.add(-protectDir.getStepX() * 0.5, 0, -protectDir.getStepZ() * 0.5);
-            }
-            controller.setTarget(targetPos, CoverPositionController.MovementIntent.POSITIONING, 0.5, 0.08);
+        BlockPos coverPos = cover.getPosition();
+        Vec3 targetPos = coverPos.getCenter();
+        Set<Direction> protectedDirs = cover.getProtectedDirections();
+        if (protectedDirs != null && !protectedDirs.isEmpty()) {
+            Direction protectDir = protectedDirs.iterator().next();
+            targetPos = targetPos.add(-protectDir.getStepX() * 0.5, 0, -protectDir.getStepZ() * 0.5);
         }
 
-        // Check if controller has finished positioning
-        if (controller.getIntent() == CoverPositionController.MovementIntent.NONE) {
-            // Positioning complete
+        Vec3 currentPos = soldier.position();
+        double dx = targetPos.x - currentPos.x;
+        double dz = targetPos.z - currentPos.z;
+        double dist = Math.sqrt(dx * dx + dz * dz);
+
+        // Already at cover position
+        if (dist < PEEK_POSITION_REACHED_DISTANCE) {
+            soldier.setDeltaMovement(0, soldier.getDeltaMovement().y, 0);
             return true;
         }
-        // Still sliding back
+
+        // Start or continue positioning back to cover
+        CoverPositionController controller = getPositionController();
+        if (controller.getIntent() != CoverPositionController.MovementIntent.POSITIONING) {
+            controller.setTarget(targetPos, CoverPositionController.MovementIntent.POSITIONING, 0.5, 0.08);
+        }
         faceTarget();
         return false;
     }

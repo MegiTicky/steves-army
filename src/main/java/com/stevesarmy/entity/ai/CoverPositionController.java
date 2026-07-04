@@ -73,14 +73,26 @@ public class CoverPositionController extends MoveControl {
         return peekOffset;
     }
 
+    public Vec3 getDebugTargetPos() {
+        return targetPos;
+    }
+
+    public double getDebugTolerance() {
+        return tolerance;
+    }
+
     @Override
     public void tick() {
         switch (intent) {
             case NONE:
-                super.tick();
+                if (!this.mob.getNavigation().isDone()) {
+                    super.tick();
+                }
                 break;
             case NAVIGATING:
-                super.tick();
+                if (!this.mob.getNavigation().isDone()) {
+                    super.tick();
+                }
                 break;
             case POSITIONING:
                 tickPositioning();

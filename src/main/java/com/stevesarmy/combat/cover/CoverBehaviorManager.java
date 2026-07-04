@@ -353,9 +353,15 @@ public float getCoverQualityPenalty() {
     }
     
     public void setPeekState(PeekState state) {
+        PeekState oldState = this.peekState;
+        long durationInPrevState = this.peekStartTime > 0 ? System.currentTimeMillis() - this.peekStartTime : 0;
         this.peekState = state;
         this.peekStartTime = System.currentTimeMillis();
         syncPeekState();
+        if (debugLog()) {
+            StevesArmyMod.LOGGER.info("[CoverBehaviorManager] Soldier {} peekState: {} -> {} (was {}ms)",
+                soldier.getId(), oldState, state, durationInPrevState);
+        }
     }
     
     public BlockPos getPeekPosition() {
