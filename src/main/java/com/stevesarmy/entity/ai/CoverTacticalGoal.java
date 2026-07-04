@@ -286,7 +286,7 @@ public class CoverTacticalGoal extends Goal {
         if (distance < COVER_VALID_DISTANCE) {
             CoverPositionController moveControl = getPositionController();
             if (moveControl.getIntent() == CoverPositionController.MovementIntent.NONE) {
-                moveControl.setTarget(targetCover.getPosition().getCenter(), CoverPositionController.MovementIntent.POSITIONING, POSITIONING_TOLERANCE, POSITIONING_SPEED);
+                moveControl.setTarget(targetCover.getPosition().getCenter(), CoverPositionController.MovementIntent.POSITIONING, POSITIONING_TOLERANCE, POSITIONING_SPEED, "tickSeekingCover", "recenter to target cover");
             }
         }
         
@@ -409,7 +409,7 @@ public class CoverTacticalGoal extends Goal {
             boolean isDuckingBack = getCoverManager().getPeekState() == CoverBehaviorManager.PeekState.DUCKING_BACK;
             boolean isPeekSlideActive = getCoverManager().isPeekSlideActive();
             if (!peeking && !isDuckingBack && !isPeekSlideActive && getPositionController().getIntent() == CoverPositionController.MovementIntent.NONE) {
-                getPositionController().setTarget(currentCover.getPosition().getCenter(), CoverPositionController.MovementIntent.POSITIONING, POSITIONING_TOLERANCE, POSITIONING_SPEED);
+                getPositionController().setTarget(currentCover.getPosition().getCenter(), CoverPositionController.MovementIntent.POSITIONING, POSITIONING_TOLERANCE, POSITIONING_SPEED, "tickInCover", "recenter to cover");
             }
         }
 
@@ -594,6 +594,7 @@ public class CoverTacticalGoal extends Goal {
                         if (debugLoggingEnabled) {
                             StevesArmyMod.LOGGER.info("[CoverGoal] Soldier {} reached full-cover peek position, exposing", soldier.getId());
                         }
+                        StevesArmyMod.LOGGER.info("[MoveCtl] Soldier {} expose at peekPos dist={}", soldier.getId(), String.format("%.2f", dist));
                         manager.setPeekSlideActive(false);
                         manager.setPeekState(CoverBehaviorManager.PeekState.EXPOSED);
                         soldier.refreshDimensions();
@@ -714,8 +715,8 @@ public class CoverTacticalGoal extends Goal {
             }
             soldier.refreshDimensions();
             doCrawlIfHalfCover();
-            if (cover != null) {
-getPositionController().setTarget(cover.getPosition().getCenter(), CoverPositionController.MovementIntent.POSITIONING, POSITIONING_TOLERANCE, POSITIONING_SPEED);
+if (cover != null) {
+                getPositionController().setTarget(cover.getPosition().getCenter(), CoverPositionController.MovementIntent.POSITIONING, POSITIONING_TOLERANCE, POSITIONING_SPEED, "tickDuckingBack", "post-return recenter");
             }
             if (debugLoggingEnabled) {
                 StevesArmyMod.LOGGER.info("[CoverGoal] Soldier {} returned to cover, back to HIDING", soldier.getId());
@@ -764,7 +765,7 @@ getPositionController().setTarget(cover.getPosition().getCenter(), CoverPosition
         }
 
         // Start or continue positioning back to cover — always re-set so we're the sole authority
-        controller.setTarget(targetPos, CoverPositionController.MovementIntent.POSITIONING, POSITIONING_TOLERANCE, POSITIONING_SPEED);
+        controller.setTarget(targetPos, CoverPositionController.MovementIntent.POSITIONING, POSITIONING_TOLERANCE, POSITIONING_SPEED, "timeToReturnToCover", "duck back to cover");
         faceTarget();
         return false;
     }
@@ -1130,7 +1131,7 @@ private Optional<CoverPoint> findBetterCover() {
         getCoverManager().setNonPeekableCover(false);
         nonPeekableTicks = 0;
         
-getPositionController().setTarget(cover.getPosition().getCenter(), CoverPositionController.MovementIntent.POSITIONING, POSITIONING_TOLERANCE, POSITIONING_SPEED);
+getPositionController().setTarget(cover.getPosition().getCenter(), CoverPositionController.MovementIntent.POSITIONING, POSITIONING_TOLERANCE, POSITIONING_SPEED, "onCoverReached", "initial cover positioning");
         
         // Compute peek position with LOS validation for full cover
         if (cover.getType() == CoverType.FULL) {

@@ -23,6 +23,13 @@ public class CoverPositionController extends MoveControl {
     private double peekOffset = 0.0;
     private double maxPeekOffset = 1.0;
 
+    // Debug tracking
+    private String debugMoveSource = "none";
+    private String debugMoveReason = "";
+    private Vec3 debugLastSetVelocity = Vec3.ZERO;
+    private int debugIntentTicks = 0;
+    private MovementIntent debugPrevIntent = MovementIntent.NONE;
+
     public CoverPositionController(Mob mob) {
         super(mob);
     }
@@ -38,6 +45,20 @@ public class CoverPositionController extends MoveControl {
         this.targetSpeed = speed;
     }
 
+    public void setTarget(Vec3 pos, MovementIntent intent, double tolerance, double speed, String source, String reason) {
+        this.targetPos = pos;
+        this.intent = intent;
+        this.tolerance = tolerance;
+        this.targetSpeed = speed;
+        if (!source.equals(this.debugMoveSource)) {
+            com.stevesarmy.StevesArmyMod.LOGGER.info("[MoveCtl] Soldier {} intent={} target=({:.1f},{:.1f},{:.1f}) speed={} source={} reason={}",
+                ((net.minecraft.world.entity.LivingEntity)this.mob).getId(),
+                intent, pos.x, pos.y, pos.z, speed, source, reason);
+        }
+        this.debugMoveSource = source;
+        this.debugMoveReason = reason;
+    }
+
     public void startPeek(Vec3 coverCenter, Vec3 peekDirection, double maxPeekOffset) {
         this.coverCenter = coverCenter;
         this.peekDirection = peekDirection;
@@ -49,6 +70,10 @@ public class CoverPositionController extends MoveControl {
     public void startPeekAt(Vec3 targetPos) {
         this.targetPos = targetPos;
         this.intent = MovementIntent.PEEKING;
+        com.stevesarmy.StevesArmyMod.LOGGER.info("[MoveCtl] Soldier {} startPeekAt {}",
+            ((net.minecraft.world.entity.LivingEntity)this.mob).getId(), targetPos);
+        this.debugMoveSource = "startPeekAt";
+        this.debugMoveReason = "peek slide";
     }
 
     public void startReturn(Vec3 coverCenter) {
@@ -81,17 +106,35 @@ public class CoverPositionController extends MoveControl {
         return tolerance;
     }
 
+    public String getDebugMoveSource() { return debugMoveSource; }
+    public String getDebugMoveReason() { return debugMoveReason; }
+    public Vec3 getDebugLastSetVelocity() { return debugLastSetVelocity; }
+    public int getDebugIntentTicks() { return debugIntentTicks; }
+
     @Override
     public void tick() {
+        if (this.debugPrevIntent != this.intent) {
+            this.debugIntentTicks = 0;
+            this.debugPrevIntent = this.intent;
+        } else {
+            this.debugIntentTicks++;
+        }
+
         switch (intent) {
             case NONE:
                 if (!this.mob.getNavigation().isDone()) {
                     super.tick();
+                    this.debugLastSetVelocity = this.mob.getDeltaMovement();
+                    this.debugMoveSource = "vanilla";
+                    this.debugMoveReason = "navigation";
                 }
                 break;
             case NAVIGATING:
                 if (!this.mob.getNavigation().isDone()) {
                     super.tick();
+                    this.debugLastSetVelocity = this.mob.getDeltaMovement();
+                    this.debugMoveSource = "vanilla";
+                    this.debugMoveReason = "navigation";
                 }
                 break;
             case POSITIONING:
@@ -113,13 +156,16 @@ public class CoverPositionController extends MoveControl {
 
         if (distSq < tolerance * tolerance) {
             this.mob.setDeltaMovement(0, this.mob.getDeltaMovement().y, 0);
+            this.debugLastSetVelocity = Vec3.ZERO;
             intent = MovementIntent.NONE;
             return;
         }
 
         double dist = Math.sqrt(distSq);
         double speed = Math.min(targetSpeed, dist * 0.8);
-        this.mob.setDeltaMovement((dx / dist) * speed, this.mob.getDeltaMovement().y, (dz / dist) * speed);
+        Vec3 vel = new Vec3((dx / dist) * speed, this.mob.getDeltaMovement().y, (dz / dist) * speed);
+        this.mob.setDeltaMovement(vel);
+        this.debugLastSetVelocity = vel;
     }
 
     private void tickPeeking() {
@@ -129,13 +175,16 @@ public class CoverPositionController extends MoveControl {
 
         if (distSq <= 0.09) {
             this.mob.setDeltaMovement(0, this.mob.getDeltaMovement().y, 0);
+            this.debugLastSetVelocity = Vec3.ZERO;
             intent = MovementIntent.NONE;
             return;
         }
 
         double dist = Math.sqrt(distSq);
         double speed = 0.15;
-        this.mob.setDeltaMovement((dx / dist) * speed, this.mob.getDeltaMovement().y, (dz / dist) * speed);
+        Vec3 vel = new Vec3((dx / dist) * speed, this.mob.getDeltaMovement().y, (dz / dist) * speed);
+        this.mob.setDeltaMovement(vel);
+        this.debugLastSetVelocity = vel;
     }
 
     private void tickReturning() {
@@ -145,12 +194,15 @@ public class CoverPositionController extends MoveControl {
 
         if (distSq <= tolerance * tolerance) {
             this.mob.setDeltaMovement(0, this.mob.getDeltaMovement().y, 0);
+            this.debugLastSetVelocity = Vec3.ZERO;
             intent = MovementIntent.NONE;
             return;
         }
 
         double dist = Math.sqrt(distSq);
         double speed = Math.min(0.2, dist * 0.6);
-        this.mob.setDeltaMovement((dx / dist) * speed, this.mob.getDeltaMovement().y, (dz / dist) * speed);
+        Vec3 vel = new Vec3((dx / dist) * speed, this.mob.getDeltaMovement().y, (dz / dist) * speed);
+        this.mob.setDeltaMovement(vel);
+        this.debugLastSetVelocity = vel;
     }
 }

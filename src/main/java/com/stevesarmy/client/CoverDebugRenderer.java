@@ -677,11 +677,21 @@ private static void renderSoldierCoverLabels(PoseStack poseStack, Vec3 cameraPos
             Vec3 ctrlTarget = ctrl.getDebugTargetPos();
             double ctrlDist = ctrlTarget != null ?
                 Math.sqrt(Math.pow(ctrlTarget.x - soldier.getX(), 2) + Math.pow(ctrlTarget.z - soldier.getZ(), 2)) : -1;
-            String intentLabel = "Intent: " + intent.name() + " ctrlDist=" + String.format("%.2f", ctrlDist);
+            Vec3 vel = soldier.getDeltaMovement();
+            double velH = Math.sqrt(vel.x * vel.x + vel.z * vel.z);
+            String intentLabel = "Intent: " + intent.name() + " t=" + ctrl.getDebugIntentTicks() + " dist=" + String.format("%.2f", ctrlDist);
+            String velLabel = "Vel: " + String.format("%.3f", velH) + " (" + String.format("%.2f", vel.x) + "," + String.format("%.2f", vel.z) + ")";
+            String srcLabel = "Src: " + ctrl.getDebugMoveSource() + " / " + ctrl.getDebugMoveReason();
             int intentColor = intent == CoverPositionController.MovementIntent.PEEKING ? 0x00FF00 :
                               intent == CoverPositionController.MovementIntent.POSITIONING ? 0xFFFF00 :
                               intent == CoverPositionController.MovementIntent.RETURNING ? 0xFF8800 : 0xAAAAAA;
             font.drawInBatch(intentLabel, -font.width(intentLabel) / 2.0f, lineOffset, intentColor | 0xFF000000, false,
+                             poseStack.last().pose(), bufferSource, net.minecraft.client.gui.Font.DisplayMode.NORMAL, 0, 15728880);
+            lineOffset += 10;
+            font.drawInBatch(velLabel, -font.width(velLabel) / 2.0f, lineOffset, 0x00FFFF | 0xFF000000, false,
+                             poseStack.last().pose(), bufferSource, net.minecraft.client.gui.Font.DisplayMode.NORMAL, 0, 15728880);
+            lineOffset += 10;
+            font.drawInBatch(srcLabel, -font.width(srcLabel) / 2.0f, lineOffset, 0xFFAA00 | 0xFF000000, false,
                              poseStack.last().pose(), bufferSource, net.minecraft.client.gui.Font.DisplayMode.NORMAL, 0, 15728880);
             lineOffset += 10;
             
