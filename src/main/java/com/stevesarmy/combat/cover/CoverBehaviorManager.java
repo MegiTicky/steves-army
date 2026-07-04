@@ -17,16 +17,8 @@ public class CoverBehaviorManager {
         REPOSITIONING
     }
     
-    public enum PeekState {
-        HIDING,
-        EXPOSED,
-        DUCKING_BACK
-    }
-    
-    private static final long EXPOSURE_TIME_MS = 1500;
-    private static final long MIN_EXPOSURE_TIME_MS = 800;
-    private static final long DUCK_COOLDOWN_MS = 1000;
-    private static final long SUPPRESSED_HIDE_EXTRA_MS = 2000;
+    private static final int PEEK_COUNT_PENALTY_THRESHOLD = 4;
+    private static final float MAX_COVER_PENALTY = 0.60f;
     
     private SoldierEntity soldier;
     private CoverState state = CoverState.NO_COVER;
@@ -38,20 +30,10 @@ public class CoverBehaviorManager {
     private long lastPeekTime = 0;
     private final SuppressionTracker suppressionTracker;
     
-    private PeekState peekState = PeekState.HIDING;
     private BlockPos peekPosition = null;
     private long peekStartTime = 0;
     private long lastPeekEndTime = 0;
     private boolean nonPeekableCover = false;
-    private boolean peekSlideActive = false;
-
-    public void setPeekSlideActive(boolean active) {
-        this.peekSlideActive = active;
-    }
-
-    public boolean isPeekSlideActive() {
-        return peekSlideActive;
-    }
     
     private float lastCoverQuality = 0.0f;
     private float coverQualityPenalty = 0.0f;
@@ -60,8 +42,6 @@ public class CoverBehaviorManager {
     private int peekCountSameCover = 0;
     private int savedPeekCount = 0;
     private BlockPos savedCoverPosition = null;
-    private static final int PEEK_COUNT_PENALTY_THRESHOLD = 4;
-    private static final float MAX_COVER_PENALTY = 0.60f;
     
     public CoverBehaviorManager(SoldierEntity soldier) {
         this.soldier = soldier;
@@ -115,6 +95,12 @@ public class CoverBehaviorManager {
     private void syncSuppression() {
         if (soldier != null && !soldier.level().isClientSide) {
             soldier.syncSuppressionLevel(suppressionTracker.getSuppressionLevel());
+        }
+    }
+    
+    private void syncPeekPosition() {
+        if (soldier != null && !soldier.level().isClientSide) {
+            soldier.syncPeekPosition(peekPosition != null ? peekPosition : BlockPos.ZERO);
         }
     }
     
@@ -307,7 +293,7 @@ public class CoverBehaviorManager {
         return lastCoverQuality;
     }
     
-public float getCoverQualityPenalty() {
+    public float getCoverQualityPenalty() {
         return getRecentCoverPenalty();
     }
 
@@ -345,33 +331,7 @@ public float getCoverQualityPenalty() {
         return soldier != null && com.stevesarmy.entity.ai.CoverTacticalGoal.isDebugLoggingEnabled();
     }
     
-    private void syncPeekState() {
-        if (soldier != null && !soldier.level().isClientSide) {
-            soldier.syncPeekState(peekState.ordinal());
-        }
-    }
-    
-    private void syncPeekPosition() {
-        if (soldier != null && !soldier.level().isClientSide) {
-            soldier.syncPeekPosition(peekPosition != null ? peekPosition : BlockPos.ZERO);
-        }
-    }
-    
-    public PeekState getPeekState() {
-        return peekState;
-    }
-    
-    public void setPeekState(PeekState state) {
-        PeekState oldState = this.peekState;
-        long durationInPrevState = this.peekStartTime > 0 ? System.currentTimeMillis() - this.peekStartTime : 0;
-        this.peekState = state;
-        this.peekStartTime = System.currentTimeMillis();
-        syncPeekState();
-        if (debugLog()) {
-            StevesArmyMod.LOGGER.info("[CoverBehaviorManager] Soldier {} peekState: {} -> {} (was {}ms)",
-                soldier.getId(), oldState, state, durationInPrevState);
-        }
-    }
+    // --- Peek position storage (used by PeekController) ---
     
     public BlockPos getPeekPosition() {
         return peekPosition;
@@ -405,10 +365,7 @@ public float getCoverQualityPenalty() {
     }
     
     public void resetPeekState() {
-        this.peekState = PeekState.HIDING;
         this.peekStartTime = 0;
-        this.peekSlideActive = false;
-        syncPeekState();
     }
     
     public boolean isNonPeekableCover() {
@@ -417,22 +374,6 @@ public float getCoverQualityPenalty() {
     
     public void setNonPeekableCover(boolean nonPeekable) {
         this.nonPeekableCover = nonPeekable;
-    }
-    
-    public static long getExposureTimeMs() {
-        return EXPOSURE_TIME_MS;
-    }
-    
-    public static long getMinExposureTimeMs() {
-        return MIN_EXPOSURE_TIME_MS;
-    }
-    
-    public static long getDuckCooldownMs() {
-        return DUCK_COOLDOWN_MS;
-    }
-    
-    public static long getSuppressedHideExtraMs() {
-        return SUPPRESSED_HIDE_EXTRA_MS;
     }
     
     public boolean hasCurrentCover() {

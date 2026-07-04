@@ -7,96 +7,61 @@ import net.minecraft.world.phys.Vec3;
 
 public class CoverPositionController extends MoveControl {
 
-    public enum MovementIntent {
+    public enum MovementResult {
         NONE,
-        NAVIGATING,
-        POSITIONING,
-        PEEKING,
-        RETURNING
+        IN_PROGRESS,
+        REACHED_TARGET,
+        FAILED
     }
 
-    private MovementIntent intent = MovementIntent.NONE;
     private Vec3 targetPos = Vec3.ZERO;
     private double tolerance = 0.5;
     private double targetSpeed = 0.3;
-    private Vec3 coverCenter = Vec3.ZERO;
-    private Vec3 peekDirection = Vec3.ZERO;
-    private double peekOffset = 0.0;
-    private double maxPeekOffset = 1.0;
+    private MovementResult lastResult = MovementResult.NONE;
+    private int stuckTicks = 0;
+    private Vec3 lastPos = Vec3.ZERO;
 
-    // Debug tracking
     private String debugMoveSource = "none";
     private String debugMoveReason = "";
     private Vec3 debugLastSetVelocity = Vec3.ZERO;
-    private int debugIntentTicks = 0;
-    private MovementIntent debugPrevIntent = MovementIntent.NONE;
 
     public CoverPositionController(Mob mob) {
         super(mob);
     }
 
-    public void setTarget(Vec3 pos, MovementIntent intent, double tolerance) {
-        setTarget(pos, intent, tolerance, 0.3);
+    public void moveTo(Vec3 pos, double tolerance, double speed) {
+        moveTo(pos, tolerance, speed, "setTarget", "");
     }
 
-    public void setTarget(Vec3 pos, MovementIntent intent, double tolerance, double speed) {
+    public void moveTo(Vec3 pos, double tolerance, double speed, String source, String reason) {
         this.targetPos = pos;
-        this.intent = intent;
         this.tolerance = tolerance;
         this.targetSpeed = speed;
-    }
+        this.lastResult = MovementResult.IN_PROGRESS;
+        this.stuckTicks = 0;
 
-    public void setTarget(Vec3 pos, MovementIntent intent, double tolerance, double speed, String source, String reason) {
-        this.targetPos = pos;
-        this.intent = intent;
-        this.tolerance = tolerance;
-        this.targetSpeed = speed;
+        this.setWantedPosition(pos.x, pos.y, pos.z, speed);
+
         if (!source.equals(this.debugMoveSource)) {
-            com.stevesarmy.StevesArmyMod.LOGGER.info("[MoveCtl] Soldier {} intent={} target=({}, {}, {}) speed={} source={} reason={}",
+            StevesArmyMod.LOGGER.info("[MoveCtl] Soldier {} target=({}, {}, {}) speed={} source={} reason={}",
                 ((net.minecraft.world.entity.LivingEntity)this.mob).getId(),
-                intent, pos.x, pos.y, pos.z, speed, source, reason);
+                pos.x, pos.y, pos.z, speed, source, reason);
         }
         this.debugMoveSource = source;
         this.debugMoveReason = reason;
     }
 
-    public void startPeek(Vec3 coverCenter, Vec3 peekDirection, double maxPeekOffset) {
-        this.coverCenter = coverCenter;
-        this.peekDirection = peekDirection;
-        this.peekOffset = 0.0;
-        this.maxPeekOffset = maxPeekOffset;
-        this.intent = MovementIntent.PEEKING;
+    public MovementResult getLastResult() {
+        return lastResult;
     }
 
-    public void startPeekAt(Vec3 targetPos) {
-        this.targetPos = targetPos;
-        this.intent = MovementIntent.PEEKING;
-        com.stevesarmy.StevesArmyMod.LOGGER.info("[MoveCtl] Soldier {} startPeekAt {}",
-            ((net.minecraft.world.entity.LivingEntity)this.mob).getId(), targetPos);
-        this.debugMoveSource = "startPeekAt";
-        this.debugMoveReason = "peek slide";
-    }
-
-    public void startReturn(Vec3 coverCenter) {
-        this.coverCenter = coverCenter;
-        this.intent = MovementIntent.RETURNING;
-    }
-
-    public void clearIntent() {
-        this.intent = MovementIntent.NONE;
+    public void clear() {
+        this.lastResult = MovementResult.NONE;
+        this.operation = MoveControl.Operation.WAIT;
+        this.mob.getNavigation().stop();
+        this.mob.setZza(0.0F);
+        this.mob.setXxa(0.0F);
         this.mob.setDeltaMovement(0, this.mob.getDeltaMovement().y, 0);
-    }
-
-    public MovementIntent getIntent() {
-        return intent;
-    }
-
-    public void setPeekDirection(Vec3 direction) {
-        this.peekDirection = direction;
-    }
-
-    public double getPeekOffset() {
-        return peekOffset;
     }
 
     public Vec3 getDebugTargetPos() {
@@ -110,99 +75,56 @@ public class CoverPositionController extends MoveControl {
     public String getDebugMoveSource() { return debugMoveSource; }
     public String getDebugMoveReason() { return debugMoveReason; }
     public Vec3 getDebugLastSetVelocity() { return debugLastSetVelocity; }
-    public int getDebugIntentTicks() { return debugIntentTicks; }
 
     @Override
     public void tick() {
-        if (StevesArmyMod.teleportOnlyMode && targetPos != null && intent != MovementIntent.NONE) {
-            mob.moveTo(targetPos.x, targetPos.y, targetPos.z, mob.getYRot(), mob.getXRot());
-            intent = MovementIntent.NONE;
+        if (lastResult != MovementResult.IN_PROGRESS) {
+            if (!this.mob.getNavigation().isDone()) {
+                super.tick();
+                this.debugLastSetVelocity = this.mob.getDeltaMovement();
+                this.debugMoveSource = "vanilla";
+                this.debugMoveReason = "navigation";
+            }
             return;
         }
 
-        if (this.debugPrevIntent != this.intent) {
-            this.debugIntentTicks = 0;
-            this.debugPrevIntent = this.intent;
-        } else {
-            this.debugIntentTicks++;
+        if (StevesArmyMod.teleportOnlyMode) {
+            mob.moveTo(targetPos.x, targetPos.y, targetPos.z, mob.getYRot(), mob.getXRot());
+            lastResult = MovementResult.REACHED_TARGET;
+            return;
         }
 
-        switch (intent) {
-            case NONE:
-            case NAVIGATING:
-                if (!this.mob.getNavigation().isDone()) {
-                    super.tick();
-                    this.debugLastSetVelocity = this.mob.getDeltaMovement();
-                    this.debugMoveSource = "vanilla";
-                    this.debugMoveReason = "navigation";
-                }
-                break;
-            case POSITIONING:
-                tickPositioning();
-                break;
-            case PEEKING:
-                tickPeeking();
-                break;
-            case RETURNING:
-                tickReturning();
-                break;
-        }
-    }
-
-    private void tickPositioning() {
         double dx = targetPos.x - this.mob.getX();
         double dz = targetPos.z - this.mob.getZ();
         double distSq = dx * dx + dz * dz;
 
         if (distSq < tolerance * tolerance) {
+            this.operation = MoveControl.Operation.WAIT;
+            this.mob.setZza(0.0F);
+            this.mob.setXxa(0.0F);
+            this.mob.setSpeed(0.0F);
             this.mob.setDeltaMovement(0, this.mob.getDeltaMovement().y, 0);
             this.debugLastSetVelocity = Vec3.ZERO;
-            intent = MovementIntent.NONE;
+            lastResult = MovementResult.REACHED_TARGET;
             return;
         }
 
-        double dist = Math.sqrt(distSq);
-        double speed = Math.min(targetSpeed, dist * 0.8);
-        Vec3 vel = new Vec3((dx / dist) * speed, this.mob.getDeltaMovement().y, (dz / dist) * speed);
-        this.mob.setDeltaMovement(vel);
-        this.debugLastSetVelocity = vel;
-    }
-
-    private void tickPeeking() {
-        double dx = targetPos.x - this.mob.getX();
-        double dz = targetPos.z - this.mob.getZ();
-        double distSq = dx * dx + dz * dz;
-
-        if (distSq <= 0.09) {
-            this.mob.setDeltaMovement(0, this.mob.getDeltaMovement().y, 0);
-            this.debugLastSetVelocity = Vec3.ZERO;
-            intent = MovementIntent.NONE;
-            return;
+        double moved = this.mob.position().distanceToSqr(lastPos);
+        lastPos = this.mob.position();
+        if (moved < 0.0001) {
+            stuckTicks++;
+            if (stuckTicks > 40) {
+                lastResult = MovementResult.FAILED;
+                return;
+            }
+        } else {
+            stuckTicks = 0;
         }
 
-        double dist = Math.sqrt(distSq);
-        double speed = 0.15;
-        Vec3 vel = new Vec3((dx / dist) * speed, this.mob.getDeltaMovement().y, (dz / dist) * speed);
-        this.mob.setDeltaMovement(vel);
-        this.debugLastSetVelocity = vel;
-    }
+        // Re-assert target position every tick so super.tick() doesn't reset to WAIT
+        this.setWantedPosition(targetPos.x, targetPos.y, targetPos.z, targetSpeed);
 
-    private void tickReturning() {
-        double dx = coverCenter.x - this.mob.getX();
-        double dz = coverCenter.z - this.mob.getZ();
-        double distSq = dx * dx + dz * dz;
-
-        if (distSq <= tolerance * tolerance) {
-            this.mob.setDeltaMovement(0, this.mob.getDeltaMovement().y, 0);
-            this.debugLastSetVelocity = Vec3.ZERO;
-            intent = MovementIntent.NONE;
-            return;
-        }
-
-        double dist = Math.sqrt(distSq);
-        double speed = Math.min(0.2, dist * 0.6);
-        Vec3 vel = new Vec3((dx / dist) * speed, this.mob.getDeltaMovement().y, (dz / dist) * speed);
-        this.mob.setDeltaMovement(vel);
-        this.debugLastSetVelocity = vel;
+        super.tick();
+        this.debugLastSetVelocity = this.mob.getDeltaMovement();
     }
 }

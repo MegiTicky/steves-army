@@ -5,6 +5,7 @@ import com.stevesarmy.combat.cover.CoverDebugManager;
 import com.stevesarmy.combat.cover.CoverFinder;
 import com.stevesarmy.combat.cover.CoverType;
 import com.stevesarmy.entity.SoldierEntity;
+import com.stevesarmy.entity.ai.PeekController;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.core.BlockPos;
@@ -57,7 +58,7 @@ public class CoverHudRenderer {
             int stateOrdinal = soldier.getSyncedCoverState();
             CoverBehaviorManager.CoverState state = CoverBehaviorManager.CoverState.values()[stateOrdinal];
             int peekOrdinal = soldier.getSyncedPeekState();
-            CoverBehaviorManager.PeekState peekState = CoverBehaviorManager.PeekState.values()[peekOrdinal];
+            PeekController.State peekState = PeekController.State.values()[peekOrdinal];
             float suppression = soldier.getSyncedSuppressionLevel();
 
             String stateLine = String.format("  %s | Peek:%s | Supp:%.0f%% | %s",

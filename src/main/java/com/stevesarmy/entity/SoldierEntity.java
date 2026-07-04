@@ -13,6 +13,7 @@ import com.stevesarmy.entity.ai.SoldierHoldPositionGoal;
 import com.stevesarmy.entity.ai.SoldierMoveToPingGoal;
 import com.stevesarmy.entity.ai.SoldierStrollGoal;
 import com.stevesarmy.entity.ai.CoverTacticalGoal;
+import com.stevesarmy.entity.ai.PeekController;
 import com.stevesarmy.inventory.SoldierInventory;
 import com.stevesarmy.inventory.SoldierInventoryHandler;
 import com.stevesarmy.network.NetworkHandler;
@@ -110,6 +111,7 @@ public class SoldierEntity extends PathfinderMob implements Container {
     
     private SoldierCombatGoal combatGoal;
     private CoverBehaviorManager coverBehaviorManager;
+    private PeekController peekController;
     private final ThreatAwareness threatAwareness;
     
     private BlockPos pingMoveTarget = null;
@@ -132,6 +134,7 @@ public class SoldierEntity extends PathfinderMob implements Container {
         this.inventoryHandler = new SoldierInventoryHandler(inventory);
         this.itemHandlerCap = LazyOptional.of(() -> inventoryHandler);
         this.coverBehaviorManager = new CoverBehaviorManager(this);
+        this.peekController = new PeekController();
         this.threatAwareness = new ThreatAwareness();
         this.inventory.setSlot0ChangedCallback(stack -> {
             if (!this.level().isClientSide) {
@@ -441,7 +444,7 @@ public class SoldierEntity extends PathfinderMob implements Container {
         if (entityData.get(CRAWLING)
             || (coverBehaviorManager != null 
                 && coverBehaviorManager.isInCover() 
-                && coverBehaviorManager.getPeekState() == CoverBehaviorManager.PeekState.HIDING)) {
+                && peekController.getState() == PeekController.State.HIDING)) {
             return EntityDimensions.scalable(0.6F, 0.8F);
         }
         return super.getDimensions(pose);
@@ -579,6 +582,10 @@ case HOLD -> {
     
     public CoverBehaviorManager getCoverBehaviorManager() {
         return coverBehaviorManager;
+    }
+    
+    public PeekController getPeekController() {
+        return peekController;
     }
     
     public void updateDebugData(float detectionPoints, boolean isDetected, float distance, boolean hasLOS, boolean inFocused) {

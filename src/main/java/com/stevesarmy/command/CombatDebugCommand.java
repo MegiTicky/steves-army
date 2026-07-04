@@ -20,6 +20,7 @@ import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.entity.TargetEntity;
 import com.stevesarmy.entity.ai.CoverPositionController;
 import com.stevesarmy.entity.ai.CoverTacticalGoal;
+import com.stevesarmy.entity.ai.PeekController;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.commands.arguments.EntityArgument;
@@ -338,13 +339,14 @@ public class CombatDebugCommand {
         source.sendSuccess(() -> Component.literal("=== COVER STATE ==="), false);
         for (SoldierEntity soldier : nearbySoldiers) {
             CoverBehaviorManager manager = soldier.getCoverBehaviorManager();
+            PeekController peekCtrl = soldier.getPeekController();
             CoverPositionController ctrl = (CoverPositionController) soldier.getMoveControl();
 
-            CoverBehaviorManager.PeekState peekState = manager.getPeekState();
-            long timeInPeekState = manager.getTimeInCurrentPeekState();
-            long timeSinceLastPeek = manager.getTimeSinceLastPeek();
+            PeekController.State peekState = peekCtrl.getState();
+            long timeInPeekState = peekCtrl.getTimeInCurrentState();
+            long timeSinceLastPeek = peekCtrl.getTimeSinceLastPeek();
 
-            CoverPositionController.MovementIntent intent = ctrl.getIntent();
+            CoverPositionController.MovementResult moveResult = ctrl.getLastResult();
             Vec3 ctrlTarget = ctrl.getDebugTargetPos();
             double ctrlTolerance = ctrl.getDebugTolerance();
 
@@ -360,7 +362,7 @@ public class CombatDebugCommand {
                 "Soldier " + soldier.getId() +
                 " | State: " + manager.getState() +
                 " | Peek: " + peekState + "(" + timeInPeekState + "ms, last=" + timeSinceLastPeek + "ms)" +
-                " | Intent: " + intent +
+                " | ctrlResult: " + moveResult +
                 " | ctrlDist=" + String.format("%.2f", ctrlDist) +
                 " | tol=" + String.format("%.2f", ctrlTolerance) +
                 " | toCover=" + String.format("%.2f", distToCover) +

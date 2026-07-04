@@ -13,7 +13,6 @@ import com.stevesarmy.combat.cover.CoverBehaviorManager;
 import com.stevesarmy.combat.cover.CoverPoint;
 import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.entity.TargetEntity;
-import com.stevesarmy.entity.ai.CoverPositionController.MovementIntent;
 import com.stevesarmy.network.NetworkHandler;
 import com.stevesarmy.network.PotentialTargetsDebugMessage;
 import com.stevesarmy.squad.SquadMode;
@@ -62,8 +61,6 @@ public class SoldierCombatGoal extends Goal {
     
     private static final int PEEK_CYCLE_LOG_INTERVAL = 100;
     private int peekCycleLogCounter = 0;
-    
-    private CoverBehaviorManager.PeekState lastPeekState = CoverBehaviorManager.PeekState.HIDING;
 
     private static boolean combatDebugLogging = false;
     
@@ -256,7 +253,7 @@ public class SoldierCombatGoal extends Goal {
             CoverBehaviorManager coverManager = soldier.getCoverBehaviorManager();
             if (++debugSyncTickCounter % PEEK_CYCLE_LOG_INTERVAL == 0) {
                 StevesArmyMod.LOGGER.info("[CombatGoal] Soldier {} tick: target=null, inCover={}, peekState={}, coverState={}",
-                    soldier.getId(), inCover, coverManager.getPeekState(), coverManager.getState());
+                    soldier.getId(), inCover, soldier.getPeekController().getState(), coverManager.getState());
             }
             if (inCover) {
                 tickCoverPeekCycle(coverManager);
@@ -314,7 +311,7 @@ public class SoldierCombatGoal extends Goal {
         
         if (hasGun) {
             boolean shouldShoot = canSee || 
-                (coverManager.isInCover() && coverManager.getPeekState() == CoverBehaviorManager.PeekState.EXPOSED);
+                (coverManager.isInCover() && soldier.getPeekController().getState() == PeekController.State.EXPOSED);
             if (shouldShoot) {
                 tickGunCombat();
             }
@@ -344,7 +341,7 @@ public class SoldierCombatGoal extends Goal {
             return;
         }
         
-        if (coverManager.isInCover() && coverManager.getPeekState() != CoverBehaviorManager.PeekState.EXPOSED) {
+        if (coverManager.isInCover() && soldier.getPeekController().getState() != PeekController.State.EXPOSED) {
             GunIntegration.aim(soldier, false);
             return;
         }
@@ -440,12 +437,8 @@ public class SoldierCombatGoal extends Goal {
     }
     
 private void tickCoverPeekCycle(CoverBehaviorManager coverManager) {
-        CoverBehaviorManager.PeekState peekState = coverManager.getPeekState();
-
-        CoverPositionController.MovementIntent moveIntent = MovementIntent.NONE;
-        if (soldier.getMoveControl() instanceof CoverPositionController controller) {
-            moveIntent = controller.getIntent();
-        }
+        PeekController peekCtrl = soldier.getPeekController();
+        PeekController.State peekState = peekCtrl.getState();
 
         if (++peekCycleLogCounter >= PEEK_CYCLE_LOG_INTERVAL) {
             peekCycleLogCounter = 0;
@@ -466,11 +459,11 @@ private void tickCoverPeekCycle(CoverBehaviorManager coverManager) {
             soldier.setTarget(target);
         }
         
-        if (peekState == CoverBehaviorManager.PeekState.EXPOSED) {
+        if (peekState == PeekController.State.EXPOSED 
+            || peekState == PeekController.State.MOVING_TO_PEEK
+            || peekState == PeekController.State.RETURNING_TO_COVER) {
             lookTowardThreat();
         }
-        
-        lastPeekState = peekState;
     }
     
     @javax.annotation.Nullable
@@ -634,15 +627,13 @@ private void tickCoverPeekCycle(CoverBehaviorManager coverManager) {
     }
 
     private void onTargetAcquiredDuringPeek() {
-        if (soldier.getMoveControl() instanceof CoverPositionController controller) {
-            if (controller.getIntent() == MovementIntent.PEEKING) {
-                controller.clearIntent();
-                CoverBehaviorManager coverManager = soldier.getCoverBehaviorManager();
-                if (coverManager.getPeekState() == CoverBehaviorManager.PeekState.HIDING) {
-                    coverManager.setPeekState(CoverBehaviorManager.PeekState.EXPOSED);
-                    if (isDebugLogging()) {
-                        StevesArmyMod.LOGGER.info("[CombatGoal] Soldier {} acquired target during progressive peek, stopping slide", soldier.getId());
-                    }
+        PeekController peekCtrl = soldier.getPeekController();
+        if (peekCtrl.isMovingToPeek()) {
+            // Target acquired during progressive peek - shortcut to exposed
+            if (peekCtrl.getState() == PeekController.State.HIDING) {
+                // This is a no-op in the new system; PeekController handles its own timing
+                if (isDebugLogging()) {
+                    StevesArmyMod.LOGGER.info("[CombatGoal] Soldier {} acquired target during peek", soldier.getId());
                 }
             }
         }

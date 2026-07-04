@@ -7,13 +7,13 @@ import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.Tesselator;
 import com.mojang.blaze3d.vertex.VertexFormat;
 import com.stevesarmy.combat.cover.CoverBehaviorManager;
-import com.stevesarmy.combat.cover.CoverBehaviorManager.PeekState;
 import com.stevesarmy.combat.cover.CoverDebugManager;
 import com.stevesarmy.combat.cover.CoverPoint;
 import com.stevesarmy.combat.cover.CoverType;
 import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.entity.TargetEntity;
 import com.stevesarmy.entity.ai.CoverPositionController;
+import com.stevesarmy.entity.ai.PeekController;
 import net.minecraft.client.Camera;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.GameRenderer;
@@ -522,9 +522,9 @@ public class CoverDebugRenderer {
             
             BlockPos peekPos = soldier.getSyncedPeekPosition();
             int peekStateOrdinal = soldier.getSyncedPeekState();
-            PeekState peekState = PeekState.values()[peekStateOrdinal];
+            PeekController.State peekState = PeekController.State.values()[peekStateOrdinal];
             
-            if (!peekPos.equals(BlockPos.ZERO) && peekState != PeekState.HIDING) {
+            if (!peekPos.equals(BlockPos.ZERO) && peekState != PeekController.State.HIDING) {
                 int peekColor = getPeekStateColor(peekState);
                 int pr = (peekColor >> 16) & 0xFF;
                 int pg = (peekColor >> 8) & 0xFF;
@@ -643,7 +643,7 @@ private static void renderSoldierCoverLabels(PoseStack poseStack, Vec3 cameraPos
             CoverBehaviorManager.CoverState state = CoverBehaviorManager.CoverState.values()[stateOrdinal];
             
             int peekStateOrdinal = soldier.getSyncedPeekState();
-            PeekState peekState = PeekState.values()[peekStateOrdinal];
+            PeekController.State peekState = PeekController.State.values()[peekStateOrdinal];
             
             Vec3 soldierPos = soldier.position();
             double x = soldierPos.x - cameraPos.x + 0.5;
@@ -664,27 +664,26 @@ private static void renderSoldierCoverLabels(PoseStack poseStack, Vec3 cameraPos
             lineOffset += 10;
             
             int peekStateColor = getPeekStateColor(peekState);
-            CoverBehaviorManager manager = soldier.getCoverBehaviorManager();
-            long peekTimeMs = manager.getTimeInCurrentPeekState();
-            long sinceLastPeekMs = manager.getTimeSinceLastPeek();
+            PeekController peekCtrl = soldier.getPeekController();
+            long peekTimeMs = peekCtrl.getTimeInCurrentState();
+            long sinceLastPeekMs = peekCtrl.getTimeSinceLastPeek();
             String peekLabel = "Peek: " + peekState.name() + "(" + peekTimeMs + "ms,last=" + sinceLastPeekMs + "ms)";
             font.drawInBatch(peekLabel, -font.width(peekLabel) / 2.0f, lineOffset, peekStateColor | 0xFF000000, false,
                              poseStack.last().pose(), bufferSource, net.minecraft.client.gui.Font.DisplayMode.NORMAL, 0, 15728880);
             lineOffset += 10;
             
             CoverPositionController ctrl = (CoverPositionController) soldier.getMoveControl();
-            CoverPositionController.MovementIntent intent = ctrl.getIntent();
+            CoverPositionController.MovementResult moveResult = ctrl.getLastResult();
             Vec3 ctrlTarget = ctrl.getDebugTargetPos();
             double ctrlDist = ctrlTarget != null ?
                 Math.sqrt(Math.pow(ctrlTarget.x - soldier.getX(), 2) + Math.pow(ctrlTarget.z - soldier.getZ(), 2)) : -1;
             Vec3 vel = soldier.getDeltaMovement();
             double velH = Math.sqrt(vel.x * vel.x + vel.z * vel.z);
-            String intentLabel = "Intent: " + intent.name() + " t=" + ctrl.getDebugIntentTicks() + " dist=" + String.format("%.2f", ctrlDist);
+            String intentLabel = "Result: " + moveResult.name() + " dist=" + String.format("%.2f", ctrlDist);
             String velLabel = "Vel: " + String.format("%.3f", velH) + " (" + String.format("%.2f", vel.x) + "," + String.format("%.2f", vel.z) + ")";
             String srcLabel = "Src: " + ctrl.getDebugMoveSource() + " / " + ctrl.getDebugMoveReason();
-            int intentColor = intent == CoverPositionController.MovementIntent.PEEKING ? 0x00FF00 :
-                              intent == CoverPositionController.MovementIntent.POSITIONING ? 0xFFFF00 :
-                              intent == CoverPositionController.MovementIntent.RETURNING ? 0xFF8800 : 0xAAAAAA;
+            int intentColor = moveResult == CoverPositionController.MovementResult.IN_PROGRESS ? 0xFFFF00 :
+                              moveResult == CoverPositionController.MovementResult.REACHED_TARGET ? 0x00FF00 : 0xAAAAAA;
             font.drawInBatch(intentLabel, -font.width(intentLabel) / 2.0f, lineOffset, intentColor | 0xFF000000, false,
                              poseStack.last().pose(), bufferSource, net.minecraft.client.gui.Font.DisplayMode.NORMAL, 0, 15728880);
             lineOffset += 10;
@@ -713,11 +712,12 @@ private static void renderSoldierCoverLabels(PoseStack poseStack, Vec3 cameraPos
         }
     }
     
-    private static int getPeekStateColor(PeekState peekState) {
+    private static int getPeekStateColor(PeekController.State peekState) {
         switch (peekState) {
             case HIDING: return 0x808080;
             case EXPOSED: return 0x00FF00;
-            case DUCKING_BACK: return 0xFF8800;
+            case RETURNING_TO_COVER: return 0xFF8800;
+            case MOVING_TO_PEEK: return 0x00FFFF;
             default: return 0x808080;
         }
     }
