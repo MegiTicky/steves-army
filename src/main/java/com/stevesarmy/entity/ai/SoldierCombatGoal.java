@@ -13,6 +13,7 @@ import com.stevesarmy.combat.cover.CoverBehaviorManager;
 import com.stevesarmy.combat.cover.CoverPoint;
 import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.entity.TargetEntity;
+import com.stevesarmy.entity.ai.CoverPositionController.MovementIntent;
 import com.stevesarmy.network.NetworkHandler;
 import com.stevesarmy.network.PotentialTargetsDebugMessage;
 import com.stevesarmy.squad.SquadMode;
@@ -438,9 +439,14 @@ public class SoldierCombatGoal extends Goal {
         }
     }
     
-    private void tickCoverPeekCycle(CoverBehaviorManager coverManager) {
+private void tickCoverPeekCycle(CoverBehaviorManager coverManager) {
         CoverBehaviorManager.PeekState peekState = coverManager.getPeekState();
-        
+
+        CoverPositionController.MovementIntent moveIntent = MovementIntent.NONE;
+        if (soldier.getMoveControl() instanceof CoverPositionController controller) {
+            moveIntent = controller.getIntent();
+        }
+
         if (++peekCycleLogCounter >= PEEK_CYCLE_LOG_INTERVAL) {
             peekCycleLogCounter = 0;
             StevesArmyMod.LOGGER.info("[PeekCycle] Soldier {} tick: peekState={}, target={}, inCover={}, hasThreat={}",
@@ -627,7 +633,30 @@ public class SoldierCombatGoal extends Goal {
         return potentialTargets.stream().anyMatch(detectionSystem::isTargetDetected);
     }
 
+    private void onTargetAcquiredDuringPeek() {
+        if (soldier.getMoveControl() instanceof CoverPositionController controller) {
+            if (controller.getIntent() == MovementIntent.PEEKING) {
+                controller.clearIntent();
+                CoverBehaviorManager coverManager = soldier.getCoverBehaviorManager();
+                if (coverManager.getPeekState() == CoverBehaviorManager.PeekState.HIDING) {
+                    coverManager.setPeekState(CoverBehaviorManager.PeekState.EXPOSED);
+                    if (isDebugLogging()) {
+                        StevesArmyMod.LOGGER.info("[CombatGoal] Soldier {} acquired target during progressive peek, stopping slide", soldier.getId());
+                    }
+                }
+            }
+        }
+    }
+
     private boolean findNewTarget() {
+        boolean found = findNewTargetInternal();
+        if (found) {
+            onTargetAcquiredDuringPeek();
+        }
+        return found;
+    }
+
+    private boolean findNewTargetInternal() {
         List<LivingEntity> potentialTargets = getPotentialTargets();
         ThreatAwareness threats = soldier.getThreatAwareness();
         

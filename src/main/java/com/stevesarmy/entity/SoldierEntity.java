@@ -126,7 +126,7 @@ public class SoldierEntity extends PathfinderMob implements Container {
 
     public SoldierEntity(EntityType<? extends SoldierEntity> type, Level level) {
         super(type, level);
-        this.moveControl = new com.stevesarmy.entity.ai.ExactCoverMoveControl(this);
+        this.moveControl = new com.stevesarmy.entity.ai.CoverPositionController(this);
         this.setCanPickUpLoot(true);
         this.inventory = new SoldierInventory();
         this.inventoryHandler = new SoldierInventoryHandler(inventory);

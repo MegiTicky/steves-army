@@ -27,7 +27,9 @@ public class SoldierMoveToPingGoal extends Goal {
         if (!soldier.hasValidPingMoveTarget()) return false;
         
         this.targetPos = soldier.getPingMoveTarget();
-        return targetPos != null;
+        boolean result = targetPos != null;
+        com.stevesarmy.StevesArmyMod.LOGGER.info("[PingGoal] canUse={}, targetPos={}", result, targetPos);
+        return result;
     }
 
     @Override
@@ -41,7 +43,8 @@ public class SoldierMoveToPingGoal extends Goal {
     @Override
     public void start() {
         timeToRecalcPath = 0;
-        soldier.getNavigation().moveTo(targetPos.getX(), targetPos.getY(), targetPos.getZ(), speedModifier);
+        boolean ok = soldier.getNavigation().moveTo(targetPos.getX(), targetPos.getY(), targetPos.getZ(), speedModifier);
+        com.stevesarmy.StevesArmyMod.LOGGER.info("[PingGoal] start: nav.moveTo result={}", ok);
     }
 
     @Override

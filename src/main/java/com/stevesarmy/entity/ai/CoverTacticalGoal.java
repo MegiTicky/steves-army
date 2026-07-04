@@ -47,7 +47,6 @@ public class CoverTacticalGoal extends Goal {
     private static final double COVER_VALID_DISTANCE = 2.0D;
     private static final double COMBAT_COVER_VALID_DISTANCE = 6.0D;
     private static final double COVER_ABANDON_DISTANCE = 8.0D;
-    private static final double LOCK_DISTANCE = 2.5D;
     
     private static final int SEARCH_RADIUS = 12;
     private static final long MIN_COVER_DWELL_TIME_MS = 4000;
@@ -65,7 +64,7 @@ public class CoverTacticalGoal extends Goal {
 
     private static final int PEEK_NO_LOS_REPOSITION_TICKS = 100; // ~5 seconds of no LOS
     private static final double FULL_COVER_PEEK_SPEED = 0.15;
-    private static final double PEEK_POSITION_REACHED_DISTANCE = 0.3;
+    private static final double PEEK_POSITION_REACHED_DISTANCE = 0.5;
     private static final int PEEK_SEARCH_RADIUS = 2;
     private static final long BLACKLIST_CLEAR_INTERVAL_MS = 15000;
 
@@ -115,42 +114,62 @@ public class CoverTacticalGoal extends Goal {
         
         if (!soldier.isAlive()) return false;
         
-        if (soldier.hasValidPingMoveTarget()) return false;
+        if (soldier.hasValidPingMoveTarget()) {
+            StevesArmyMod.LOGGER.info("[CoverGoal] canUse=false: hasValidPingMoveTarget");
+            return false;
+        }
         
         getCoverManager().tickSuppression(getCoverManager().isInCover());
         
         CoverBehaviorManager.CoverState state = getCoverManager().getState();
         
+        boolean result;
         switch (state) {
             case NO_COVER: {
-                return shouldSeekCover();
+                result = shouldSeekCover();
+                break;
             }
             case SEEKING_COVER:
-                return true;
+                result = true;
+                break;
             case IN_COVER:
             case SUPPRESSED_IN_COVER: {
                 CoverPoint cover = getCoverManager().getCurrentCover();
                 if (cover != null) {
                     double distance = soldier.position().distanceTo(cover.getPosition().getCenter());
                     if (distance > COVER_ABANDON_DISTANCE) {
+                        StevesArmyMod.LOGGER.info("[CoverGoal] canUse=false: cover abandoned (dist={})", distance);
+                        getCoverManager().resetPeekState();
+                        getPositionController().clearIntent();
                         getCoverManager().clearCover();
                         cooldown = COOLDOWN_TICKS;
-                        return false;
+                        result = false;
+                        break;
                     }
                 }
-                return true;
+                result = true;
+                break;
             }
             case REPOSITIONING:
-                return true;
+                result = true;
+                break;
             default:
-                return false;
+                result = false;
+                break;
         }
+        StevesArmyMod.LOGGER.info("[CoverGoal] canUse={}, state={}, hasThreat={}, suppressed={}, health={}",
+            result, state, getThreats().hasActiveThreat(),
+            getCoverManager().isSuppressed(),
+            String.format("%.2f", soldier.getHealth() / soldier.getMaxHealth()));
+        return result;
     }
     
     @Override
     public boolean canContinueToUse() {
         if (!soldier.isAlive()) return false;
-        return getCoverManager().getState() != CoverBehaviorManager.CoverState.NO_COVER;
+        boolean result = getCoverManager().getState() != CoverBehaviorManager.CoverState.NO_COVER;
+        StevesArmyMod.LOGGER.info("[CoverGoal] canContinueToUse={}, state={}", result, getCoverManager().getState());
+        return result;
     }
     
     @Override
@@ -241,9 +260,9 @@ public class CoverTacticalGoal extends Goal {
         }
         
         if (distance < COVER_VALID_DISTANCE) {
-            ExactCoverMoveControl moveControl = getExactMoveControl();
-            if (!moveControl.isLocked()) {
-                moveControl.lockToBlock(targetCover.getPosition(), getProtectedDirection(targetCover));
+            CoverPositionController moveControl = getPositionController();
+            if (moveControl.getIntent() == CoverPositionController.MovementIntent.NONE) {
+                moveControl.setTarget(targetCover.getPosition().getCenter(), CoverPositionController.MovementIntent.POSITIONING, 0.5, 0.08);
             }
         }
         
@@ -267,6 +286,8 @@ public class CoverTacticalGoal extends Goal {
         }
         
         if (getCoverManager().getTimeSeeking() > MAX_SEEKING_TIME_MS) {
+            getCoverManager().resetPeekState();
+            getPositionController().clearIntent();
             getCoverManager().clearTargetCover();
             getCoverManager().setState(CoverBehaviorManager.CoverState.NO_COVER);
         }
@@ -346,7 +367,7 @@ public class CoverTacticalGoal extends Goal {
                         soldier.getId(), String.format("%.1f", distance), COVER_ABANDON_DISTANCE);
                 }
                 getCoverManager().clearCover();
-                getExactMoveControl().clearLock();
+                getPositionController().clearIntent();
                 return;
             }
             if (distance > COVER_VALID_DISTANCE && !isPeeking()) {
@@ -357,12 +378,12 @@ public class CoverTacticalGoal extends Goal {
                 getCoverManager().clearCover();
                 getCoverManager().setState(CoverBehaviorManager.CoverState.SEEKING_COVER);
                 setFlags(EnumSet.of(Flag.MOVE, Flag.LOOK));
-                getExactMoveControl().clearLock();
+                getPositionController().clearIntent();
                 return;
             }
             
-            if (!peeking && !getExactMoveControl().isLocked()) {
-                getExactMoveControl().lockToBlock(currentCover.getPosition(), getProtectedDirection(currentCover));
+            if (!peeking && getPositionController().getIntent() == CoverPositionController.MovementIntent.NONE) {
+                getPositionController().setTarget(currentCover.getPosition().getCenter(), CoverPositionController.MovementIntent.POSITIONING, 0.5, 0.08);
             }
         }
 
@@ -378,6 +399,8 @@ public class CoverTacticalGoal extends Goal {
         }
 
         if (shouldExitCoverForFollow()) {
+            getCoverManager().resetPeekState();
+            getPositionController().clearIntent();
             getCoverManager().clearCover();
             return;
         }
@@ -484,7 +507,7 @@ public class CoverTacticalGoal extends Goal {
                 StevesArmyMod.LOGGER.info("[CoverGoal] Soldier {} half-cover peek: LOS clear to {}, exposing",
                     soldier.getId(), target.getName().getString());
             }
-            getExactMoveControl().clearLock();
+            getPositionController().clearIntent();
             manager.setPeekState(CoverBehaviorManager.PeekState.EXPOSED);
             soldier.refreshDimensions();
             GunIntegration.crawl(soldier, false);
@@ -534,7 +557,9 @@ public class CoverTacticalGoal extends Goal {
                 double dz = targetPos.z - currentPos.z;
                 double dist = Math.sqrt(dx * dx + dz * dz);
 
-                if (dist < PEEK_POSITION_REACHED_DISTANCE) {
+                boolean peekSlideActive = getPositionController().getIntent() == CoverPositionController.MovementIntent.PEEKING;
+
+                if (!peekSlideActive && dist < PEEK_POSITION_REACHED_DISTANCE) {
                     // Re-check LOS from peek position before exposing
                     Vec3 peekEye = new Vec3(targetPos.x, currentPos.y + 1.62, targetPos.z);
                     Vec3 targetEye = new Vec3(target.getX(), target.getEyeY(), target.getZ());
@@ -544,7 +569,6 @@ public class CoverTacticalGoal extends Goal {
                         if (debugLoggingEnabled) {
                             StevesArmyMod.LOGGER.info("[CoverGoal] Soldier {} reached full-cover peek position, exposing", soldier.getId());
                         }
-                        getExactMoveControl().clearLock();
                         manager.setPeekState(CoverBehaviorManager.PeekState.EXPOSED);
                         soldier.refreshDimensions();
                     } else {
@@ -554,15 +578,14 @@ public class CoverTacticalGoal extends Goal {
                         manager.setPeekState(CoverBehaviorManager.PeekState.HIDING);
                         manager.setLastPeekEndTime(System.currentTimeMillis());
                     }
-                } else {
-                    getExactMoveControl().clearLock();
-                    double speed = FULL_COVER_PEEK_SPEED;
-                    soldier.setDeltaMovement((dx / dist) * speed, soldier.getDeltaMovement().y, (dz / dist) * speed);
-                    soldier.setYya(0);
-                    soldier.setZza(0);
-                    soldier.setXxa(0);
-                    faceTarget();
+                } else if (!peekSlideActive) {
+                    // Start sliding to peek position
+                    if (debugLoggingEnabled) {
+                        StevesArmyMod.LOGGER.info("[CoverGoal] Soldier {} starting full-cover peek slide to {}", soldier.getId(), peekPos);
+                    }
+                    getPositionController().startPeekAt(targetPos);
                 }
+                // If peekSlideActive, controller handles the slide — wait for it to finish
             } else {
                 manager.setNonPeekableCover(true);
             }
@@ -664,7 +687,7 @@ public class CoverTacticalGoal extends Goal {
             soldier.refreshDimensions();
             doCrawlIfHalfCover();
             if (cover != null) {
-                getExactMoveControl().lockToBlock(cover.getPosition(), getProtectedDirection(cover));
+                getPositionController().setTarget(cover.getPosition().getCenter(), CoverPositionController.MovementIntent.POSITIONING, 0.5, 0.08);
             }
             if (debugLoggingEnabled) {
                 StevesArmyMod.LOGGER.info("[CoverGoal] Soldier {} returned to cover, back to HIDING", soldier.getId());
@@ -687,32 +710,28 @@ public class CoverTacticalGoal extends Goal {
             return getCoverManager().getTimeInCurrentPeekState() > 200;
         }
 
-        BlockPos coverPos = cover.getPosition();
-        Vec3 targetPos = coverPos.getCenter();
-        Set<Direction> protectedDirs = cover.getProtectedDirections();
-        if (protectedDirs != null && !protectedDirs.isEmpty()) {
-            Direction protectDir = protectedDirs.iterator().next();
-            targetPos = targetPos.add(-protectDir.getStepX() * 0.5, 0, -protectDir.getStepZ() * 0.5);
+        // Full cover: delegate return movement to CoverPositionController
+        CoverPositionController controller = getPositionController();
+        if (controller.getIntent() == CoverPositionController.MovementIntent.NONE) {
+            // Start positioning back to cover
+            BlockPos coverPos = cover.getPosition();
+            Vec3 targetPos = coverPos.getCenter();
+            Set<Direction> protectedDirs = cover.getProtectedDirections();
+            if (protectedDirs != null && !protectedDirs.isEmpty()) {
+                Direction protectDir = protectedDirs.iterator().next();
+                targetPos = targetPos.add(-protectDir.getStepX() * 0.5, 0, -protectDir.getStepZ() * 0.5);
+            }
+            controller.setTarget(targetPos, CoverPositionController.MovementIntent.POSITIONING, 0.5, 0.08);
         }
 
-        Vec3 currentPos = soldier.position();
-        double dx = targetPos.x - currentPos.x;
-        double dz = targetPos.z - currentPos.z;
-        double dist = Math.sqrt(dx * dx + dz * dz);
-
-        if (dist < PEEK_POSITION_REACHED_DISTANCE) {
-            soldier.setPos(targetPos.x, currentPos.y, targetPos.z);
-            soldier.setDeltaMovement(0, soldier.getDeltaMovement().y, 0);
+        // Check if controller has finished positioning
+        if (controller.getIntent() == CoverPositionController.MovementIntent.NONE) {
+            // Positioning complete
             return true;
-        } else {
-            double speed = FULL_COVER_PEEK_SPEED;
-            soldier.setDeltaMovement((dx / dist) * speed, soldier.getDeltaMovement().y, (dz / dist) * speed);
-            soldier.setYya(0);
-            soldier.setZza(0);
-            soldier.setXxa(0);
-            faceTarget();
-            return false;
         }
+        // Still sliding back
+        faceTarget();
+        return false;
     }
     
     private boolean isPeeking() {
@@ -742,15 +761,20 @@ public class CoverTacticalGoal extends Goal {
         
         if (soldier.getSquadMode() == SquadMode.HOLD) {
             boolean hasValid = getCoverManager().getCurrentCover() != null && isCoverStillValid();
-            if (hasValid) return false;
-            return true;
+            boolean result = !hasValid;
+            StevesArmyMod.LOGGER.info("[CoverGoal] shouldSeekCover={} (HOLD mode, hasValidCover={})", result, hasValid);
+            return result;
         }
         
-        if (getCoverManager().isSuppressed() || soldier.getHealth() / soldier.getMaxHealth() < LOW_HEALTH_THRESHOLD) {
-            return true;
-        }
+        boolean suppressed = getCoverManager().isSuppressed();
+        float healthRatio = soldier.getHealth() / soldier.getMaxHealth();
+        boolean lowHealth = healthRatio < LOW_HEALTH_THRESHOLD;
+        boolean hasThreat = threats.hasActiveThreat();
         
-        return threats.hasActiveThreat();
+        boolean result = (suppressed || lowHealth) || hasThreat;
+        StevesArmyMod.LOGGER.info("[CoverGoal] shouldSeekCover={} (suppressed={}, lowHealth={} health={}, hasThreat={})",
+            result, suppressed, lowHealth, String.format("%.2f", healthRatio), hasThreat);
+        return result;
     }
     
     private boolean isCoverStillValid() {
@@ -868,6 +892,8 @@ public class CoverTacticalGoal extends Goal {
     
     private void startRepositioning() {
         findAndMoveToCover();
+        getCoverManager().resetPeekState();
+        getPositionController().clearIntent();
         if (getCoverManager().getTargetCover() != null) {
             getCoverManager().setState(CoverBehaviorManager.CoverState.REPOSITIONING);
             setFlags(EnumSet.of(Flag.MOVE, Flag.LOOK));
@@ -883,6 +909,8 @@ public class CoverTacticalGoal extends Goal {
         if (currentCover != null && newCover.getPosition().equals(currentCover.getPosition())) return;
         
         getCoverManager().clearTargetCover();
+        getCoverManager().resetPeekState();
+        getPositionController().clearIntent();
         
         if (CoverReservationManager.reserve(newCover.getPosition(), soldier)) {
             if (currentCover != null) {
@@ -1030,18 +1058,11 @@ private Optional<CoverPoint> findBetterCover() {
             ));
     }
     
-    private ExactCoverMoveControl getExactMoveControl() {
-        return (ExactCoverMoveControl) soldier.getMoveControl();
+    private CoverPositionController getPositionController() {
+        return (CoverPositionController) soldier.getMoveControl();
     }
     
-    @Nullable
-    private Direction getProtectedDirection(CoverPoint cover) {
-        Set<Direction> dirs = cover.getProtectedDirections();
-        if (dirs != null && !dirs.isEmpty()) {
-            return dirs.iterator().next();
-        }
-        return null;
-    }
+    
     
     private void moveToCover(CoverPoint cover) {
         BlockPos pos = cover.getPosition();
@@ -1074,7 +1095,7 @@ private Optional<CoverPoint> findBetterCover() {
         getCoverManager().setNonPeekableCover(false);
         nonPeekableTicks = 0;
         
-        getExactMoveControl().lockToBlock(cover.getPosition(), getProtectedDirection(cover));
+        getPositionController().setTarget(cover.getPosition().getCenter(), CoverPositionController.MovementIntent.POSITIONING, 0.5, 0.08);
         
         // Compute peek position with LOS validation for full cover
         if (cover.getType() == CoverType.FULL) {

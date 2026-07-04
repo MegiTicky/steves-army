@@ -52,8 +52,8 @@ public class SuppressionTracker {
         lastSuppressionTime = now;
         nearMissCount++;
 
-        StevesArmyMod.LOGGER.info("[Suppression] Soldier {} near miss: dist={:.1f}, speedMult={:.2f}, burstMult={:.2f}, +{:.2f} sup -> {:.2f}",
-            soldier.getId(), distance, speedMultiplier, burstMultiplier, add, suppressionLevel);
+        StevesArmyMod.LOGGER.info("[Suppression] Soldier {} near miss: dist=" + String.format("%.1f", distance) + ", speedMult=" + String.format("%.2f", speedMultiplier) + ", burstMult=" + String.format("%.2f", burstMultiplier) + ", +" + String.format("%.2f", add) + " sup -> " + String.format("%.2f", suppressionLevel),
+            soldier.getId());
     }
 
     public void onIncomingFire(LivingEntity shooter) {
@@ -67,8 +67,8 @@ public class SuppressionTracker {
         if (suppressionLevel > peakSuppression) peakSuppression = suppressionLevel;
         lastSuppressionTime = System.currentTimeMillis();
 
-        StevesArmyMod.LOGGER.info("[Suppression] incoming fire from {}: speedMult={:.2f}, +{:.2f} sup -> {:.2f}",
-            shooter.getName().getString(), speedMultiplier, add, suppressionLevel);
+        StevesArmyMod.LOGGER.info("[Suppression] incoming fire from {}: speedMult=" + String.format("%.2f", speedMultiplier) + ", +" + String.format("%.2f", add) + " sup -> " + String.format("%.2f", suppressionLevel),
+            shooter.getName().getString());
     }
 
     public void onTakeDamage() {
@@ -77,7 +77,7 @@ public class SuppressionTracker {
         if (suppressionLevel > peakSuppression) peakSuppression = suppressionLevel;
         lastSuppressionTime = System.currentTimeMillis();
 
-        StevesArmyMod.LOGGER.info("[Suppression] took damage: +{:.2f} sup -> {:.2f}", add, suppressionLevel);
+        StevesArmyMod.LOGGER.info("[Suppression] took damage: +" + String.format("%.2f", add) + " sup -> " + String.format("%.2f", suppressionLevel));
     }
 
     public void tick(boolean inCover) {
@@ -95,14 +95,14 @@ public class SuppressionTracker {
         }
 
         if (debugLog()) {
-            StevesArmyMod.LOGGER.info("[Suppression] Soldier tick: inCover={}, decay={:.4f}, peakSlow={:.2f}, sup {:.2f} -> {:.2f}, suppressed={}, pinned={}",
-                inCover, decayAmount, peakSlowdown, oldLevel, suppressionLevel, isSuppressed(), isPinned());
+            StevesArmyMod.LOGGER.info("[Suppression] Soldier tick: inCover={}, decay=" + String.format("%.4f", decayAmount) + ", peakSlow=" + String.format("%.2f", peakSlowdown) + ", sup " + String.format("%.2f", oldLevel) + " -> " + String.format("%.2f", suppressionLevel) + ", suppressed={}, pinned={}",
+                inCover, isSuppressed(), isPinned());
         }
     }
 
     public void reset() {
         if (suppressionLevel > 0.01f) {
-            StevesArmyMod.LOGGER.info("[Suppression] Soldier reset: {:.2f} -> 0.0", suppressionLevel);
+            StevesArmyMod.LOGGER.info("[Suppression] Soldier reset: " + String.format("%.2f", suppressionLevel) + " -> 0.0");
         }
         suppressionLevel = 0.0f;
         peakSuppression = 0.0f;

@@ -17,6 +17,7 @@ import net.minecraft.world.level.pathfinder.WalkNodeEvaluator;
 import java.util.EnumSet;
 
 public class SoldierFollowOwnerGoal extends Goal {
+    private static final com.stevesarmy.StevesArmyMod LOGGER = null; // not used, use StevesArmyMod.LOGGER directly
     private final SoldierEntity soldier;
     private LivingEntity owner;
     private Level level;
@@ -62,10 +63,14 @@ public class SoldierFollowOwnerGoal extends Goal {
             return false;
         }
         if (soldier.distanceToSqr(owner) < (double)(stopDistance * stopDistance)) {
+            com.stevesarmy.StevesArmyMod.LOGGER.info("[FollowGoal] canUse=false: too close to owner (distSq={} < {})",
+                soldier.distanceToSqr(owner), stopDistance * stopDistance);
             return false;
         }
         
         this.owner = owner;
+        com.stevesarmy.StevesArmyMod.LOGGER.info("[FollowGoal] canUse=true, soldier={}, coverState={}, distSq={})",
+            soldier.getId(), coverState, soldier.distanceToSqr(owner));
         return true;
     }
 
@@ -115,9 +120,12 @@ public class SoldierFollowOwnerGoal extends Goal {
             timeToRecalcPath = adjustTicks(10);
             if (!soldier.isLeashed() && !soldier.isPassenger()) {
                 if (soldier.distanceToSqr(owner) >= (double)(followDistance * followDistance)) {
+                    com.stevesarmy.StevesArmyMod.LOGGER.info("[FollowGoal] tick: pathToOwner (distSq={} >= {})",
+                        soldier.distanceToSqr(owner), followDistance * followDistance);
                     pathToOwner();
                 } else {
-                    soldier.getNavigation().moveTo(owner, speedModifier);
+                    boolean ok = soldier.getNavigation().moveTo(owner, speedModifier);
+                    com.stevesarmy.StevesArmyMod.LOGGER.info("[FollowGoal] tick: moveToOwner result={}", ok);
                 }
             }
         }
