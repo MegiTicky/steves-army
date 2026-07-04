@@ -106,11 +106,16 @@ public class PeekController {
         lastCoverPosition = coverPosition;
     }
 
-    public void recordPeekCycle() {
+    public void recordPeekCycle(SoldierEntity soldier) {
         peekCountSameCover++;
+        
+        if (soldier != null) {
+            soldier.getCoverBehaviorManager().recordPeekCycle();
+        }
+        
         if (CoverTacticalGoal.isDebugLoggingEnabled()) {
             StevesArmyMod.LOGGER.info("[PeekController] Soldier {} recordPeekCycle: count={}",
-                null, peekCountSameCover);
+                soldier != null ? soldier.getId() : "null", peekCountSameCover);
         }
     }
 
@@ -418,7 +423,7 @@ public class PeekController {
 
     private void completeReturn(SoldierEntity soldier, CoverPoint cover) {
         lastPeekEndTime = System.currentTimeMillis();
-        recordPeekCycle();
+        recordPeekCycle(soldier);
         setState(soldier, State.HIDING);
         stateStartTime = 0;
         currentPeekPos = null;
