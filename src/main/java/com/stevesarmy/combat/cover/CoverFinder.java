@@ -8,6 +8,8 @@ import net.minecraft.world.phys.shapes.VoxelShape;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.phys.Vec3;
+import net.minecraft.world.phys.HitResult;
+import net.minecraft.world.level.ClipContext;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
@@ -115,7 +117,7 @@ public class CoverFinder {
             if (primaryThreat != null) {
                 evaluator.evaluateWithRaycast(coverPoint, primaryThreat);
             }
-            float score = calculateThreatAwareScore(coverPoint, soldier, threatDirection, allThreats);
+            float score = calculateThreatAwareScore(coverPoint, soldier, threatDirection, allThreats, primaryThreat);
             coverPoint.setQuality(score);
         }
 
@@ -138,7 +140,7 @@ public class CoverFinder {
     }
     
     private float calculateThreatAwareScore(CoverPoint coverPoint, LivingEntity soldier,
-                                            Vec3 threatDirection, List<LivingEntity> allThreats) {
+                                            Vec3 threatDirection, List<LivingEntity> allThreats, LivingEntity primaryThreat) {
         float primaryProtection = calculatePrimaryProtection(coverPoint, threatDirection);
         
         float flankingProtection = calculateFlankingProtection(coverPoint, allThreats);
@@ -147,7 +149,7 @@ public class CoverFinder {
         
         float firingQuality = calculateFiringQuality(coverPoint, threatDirection);
         
-        float peekAngleScore = calculatePeekAngleScore(coverPoint, threatDirection);
+        float peekAngleScore = calculatePeekAngleScore(coverPoint, threatDirection, primaryThreat);
         
         float fightability = 0.0f;
         if (coverPoint.canShootFrom()) {
@@ -250,7 +252,7 @@ public class CoverFinder {
                (dir1 == Direction.WEST && (dir2 == Direction.NORTH || dir2 == Direction.SOUTH));
     }
     
-    private float calculatePeekAngleScore(CoverPoint coverPoint, Vec3 threatDirection) {
+    private float calculatePeekAngleScore(CoverPoint coverPoint, Vec3 threatDirection, LivingEntity primaryThreat) {
         if (threatDirection == null || threatDirection.lengthSqr() < 0.001) {
             return 0.0f;
         }
@@ -268,6 +270,13 @@ public class CoverFinder {
             
             BlockPos peekPos = coverPos.relative(peekDir);
             if (!isValidPeekPosition(peekPos)) continue;
+            
+            // Check LOS from peek position to target
+            if (primaryThreat != null && primaryThreat.isAlive()) {
+                Vec3 peekEye = new Vec3(peekPos.getX() + 0.5, peekPos.getY() + 1.62, peekPos.getZ() + 0.5);
+                Vec3 targetEye = new Vec3(primaryThreat.getX(), primaryThreat.getEyeY(), primaryThreat.getZ());
+                if (!hasLineOfSight(peekEye, targetEye)) continue;
+            }
             
             Vec3 peekCenter = peekPos.getCenter();
             Vec3 toThreat = threatDirection.normalize();
@@ -321,9 +330,19 @@ public class CoverFinder {
         double qualityScore = coverPoint.getQuality() * 10;
         double shootBonus = coverPoint.canShootFrom() ? 2.0 : 0.0;
         
-        return qualityScore + shootBonus - distancePenalty;
+return qualityScore + shootBonus - distancePenalty;
     }
-    
+
+    private boolean hasLineOfSight(Vec3 from, Vec3 to) {
+        ClipContext context = new ClipContext(
+            from, to,
+            ClipContext.Block.COLLIDER,
+            ClipContext.Fluid.NONE,
+            null
+        );
+        return level.clip(context).getType() == HitResult.Type.MISS;
+    }
+
     private double calculateThreatAwareScore(CoverPoint coverPoint, BlockPos soldierPos, LivingEntity threat, Vec3 threatDirection) {
         if (threatDirection == null || threatDirection.lengthSqr() < 0.001) {
             return calculateScore(coverPoint, soldierPos, threat);
