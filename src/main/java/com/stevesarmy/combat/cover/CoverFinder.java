@@ -14,6 +14,8 @@ import net.minecraft.world.level.ClipContext;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
+import com.stevesarmy.StevesArmyMod;
+
 public class CoverFinder {
     private static final int DEFAULT_SEARCH_RADIUS = 12;
     private static final int MAX_COVER_POINTS = 50;
@@ -180,11 +182,25 @@ public class CoverFinder {
             blindPenalty = 0.50f;
         }
         
-        return (float)(primaryProtection * PRIMARY_PROTECTION_WEIGHT +
+        float weightedScore = (float)(primaryProtection * PRIMARY_PROTECTION_WEIGHT +
                        flankingProtection * FLANKING_PROTECTION_WEIGHT +
                        distanceScore * DISTANCE_WEIGHT +
                        firingQuality * FIRING_QUALITY_WEIGHT +
                        peekAngleScore * PEEK_ANGLE_WEIGHT) + fightability - blindPenalty;
+        
+        StevesArmyMod.LOGGER.info("[CoverScore] {} type={} q={} prim={} flank={} dist={} firing={} peek={} fight={} blindPen={} TOTAL={}",
+            coverPoint.getPosition(), coverPoint.getType(),
+            String.format("%.2f", coverPoint.getQuality()),
+            String.format("%.2f", primaryProtection * PRIMARY_PROTECTION_WEIGHT),
+            String.format("%.2f", flankingProtection * FLANKING_PROTECTION_WEIGHT),
+            String.format("%.2f", distanceScore * DISTANCE_WEIGHT),
+            String.format("%.2f", firingQuality * FIRING_QUALITY_WEIGHT),
+            String.format("%.2f", peekAngleScore * PEEK_ANGLE_WEIGHT),
+            String.format("%.2f", fightability),
+            String.format("%.2f", blindPenalty),
+            String.format("%.2f", weightedScore));
+        
+        return weightedScore;
     }
     
     private float calculatePrimaryProtection(CoverPoint coverPoint, Vec3 threatDirection) {
@@ -287,18 +303,33 @@ public class CoverFinder {
         
         BlockPos coverPos = coverPoint.getPosition();
         float bestPeekScore = 0.0f;
+        StringBuilder debug = new StringBuilder();
+        debug.append("calculatePeekAngleScore for ").append(coverPos).append(":\n");
         
         for (Direction peekDir : Direction.Plane.HORIZONTAL) {
-            if (protectedDirs.contains(peekDir)) continue;
+            if (protectedDirs.contains(peekDir)) {
+                debug.append("  ").append(peekDir).append(": protected\n");
+                continue;
+            }
             
             BlockPos peekPos = coverPos.relative(peekDir);
-            if (!isValidPeekPosition(peekPos)) continue;
+            if (!isValidPeekPosition(peekPos)) {
+                debug.append("  ").append(peekDir).append(" -> ").append(peekPos).append(": invalid position\n");
+                continue;
+            }
             
             // Check LOS from peek position to target
+            boolean losOk = true;
             if (primaryThreat != null && primaryThreat.isAlive()) {
                 Vec3 peekEye = new Vec3(peekPos.getX() + 0.5, peekPos.getY() + 1.62, peekPos.getZ() + 0.5);
                 Vec3 targetEye = new Vec3(primaryThreat.getX(), primaryThreat.getEyeY(), primaryThreat.getZ());
-                if (!hasLineOfSight(peekEye, targetEye)) continue;
+                losOk = hasLineOfSight(peekEye, targetEye);
+                debug.append("  ").append(peekDir).append(" -> ").append(peekPos)
+                    .append(" LOS=").append(losOk)
+                    .append(" from=").append(String.format("%.1f,%.1f,%.1f", peekEye.x, peekEye.y, peekEye.z))
+                    .append(" to=").append(String.format("%.1f,%.1f,%.1f", targetEye.x, targetEye.y, targetEye.z))
+                    .append("\n");
+                if (!losOk) continue;
             }
             
             Vec3 peekCenter = peekPos.getCenter();
@@ -313,12 +344,19 @@ public class CoverFinder {
             dot = Math.max(-1.0, Math.min(1.0, dot));
             double angleBetween = Math.toDegrees(Math.acos(dot));
             
+            debug.append("    dot=").append(String.format("%.3f", dot))
+                .append(" angle=").append(String.format("%.1f", angleBetween))
+                .append("\n");
+            
             if (angleBetween >= 45 && angleBetween <= 135) {
                 float score = 1.0f - (float)Math.abs(angleBetween - 90) / 90;
                 bestPeekScore = Math.max(bestPeekScore, score);
+                debug.append("    -> SCORED ").append(String.format("%.3f", score)).append("\n");
             }
         }
         
+        debug.append("  FINAL score=").append(String.format("%.3f", bestPeekScore)).append("\n");
+        StevesArmyMod.LOGGER.info(debug.toString());
         return bestPeekScore;
     }
     
