@@ -27,7 +27,22 @@ public class CoverFinder {
     
     private static final float HALF_COVER_FIGHTABILITY_BONUS = 0.25f;
     private static final float FULL_COVER_FIGHTABILITY_BONUS = 0.15f;
-    
+
+    // Pre-calculate inside-out search pattern to eliminate directional bias
+    private static final List<BlockPos> SEARCH_OFFSETS = new ArrayList<>();
+    static {
+        int r = DEFAULT_SEARCH_RADIUS;
+        for (int x = -r; x <= r; x++) {
+            for (int z = -r; z <= r; z++) {
+                for (int y = -r / 2; y <= r / 2; y++) {
+                    SEARCH_OFFSETS.add(new BlockPos(x, y, z));
+                }
+            }
+        }
+        // Sort by distance squared from center
+        SEARCH_OFFSETS.sort(Comparator.comparingDouble(p -> p.getX() * p.getX() + p.getY() * p.getY() + p.getZ() * p.getZ()));
+    }
+
     private final Level level;
     
     public CoverFinder(Level level) {
@@ -41,26 +56,28 @@ public class CoverFinder {
     public List<CoverPoint> findCoverPoints(BlockPos center, int radius, LivingEntity threat) {
         List<CoverPoint> coverPoints = new ArrayList<>();
         int searchRadius = Math.min(radius, DEFAULT_SEARCH_RADIUS);
-        
-        for (int x = -searchRadius; x <= searchRadius; x++) {
-            for (int z = -searchRadius; z <= searchRadius; z++) {
-                for (int y = -searchRadius / 2; y <= searchRadius / 2; y++) {
-                    BlockPos checkPos = center.offset(x, y, z);
-                    
-                    if (isValidCoverPosition(checkPos)) {
-                        CoverPoint coverPoint = evaluatePosition(checkPos, threat);
-                        if (coverPoint != null && coverPoint.getType() != CoverType.NONE) {
-                            coverPoints.add(coverPoint);
-                            
-                            if (coverPoints.size() >= MAX_COVER_POINTS) {
-                                return coverPoints;
-                            }
-                        }
+        int maxDistSq = searchRadius * searchRadius;
+
+        // Search closest blocks first to guarantee we find the best nearby cover before hitting the 50 limit
+        for (BlockPos offset : SEARCH_OFFSETS) {
+            // Skip offsets outside our current dynamic radius
+            if (offset.getX() * offset.getX() + offset.getZ() * offset.getZ() > maxDistSq) continue;
+            if (Math.abs(offset.getY()) > searchRadius / 2) continue;
+
+            BlockPos checkPos = center.offset(offset);
+
+            if (isValidCoverPosition(checkPos)) {
+                CoverPoint coverPoint = evaluatePosition(checkPos, threat);
+                if (coverPoint != null && coverPoint.getType() != CoverType.NONE) {
+                    coverPoints.add(coverPoint);
+
+                    if (coverPoints.size() >= MAX_COVER_POINTS) {
+                        return coverPoints;
                     }
                 }
             }
         }
-        
+
         return coverPoints;
     }
     
@@ -157,11 +174,17 @@ public class CoverFinder {
                 HALF_COVER_FIGHTABILITY_BONUS : FULL_COVER_FIGHTABILITY_BONUS;
         }
         
+        // Severe penalty for full cover with no valid peek spots
+        float blindPenalty = 0.0f;
+        if (coverPoint.getType() == CoverType.FULL && peekAngleScore <= 0.01f && primaryThreat != null) {
+            blindPenalty = 0.50f;
+        }
+        
         return (float)(primaryProtection * PRIMARY_PROTECTION_WEIGHT +
                        flankingProtection * FLANKING_PROTECTION_WEIGHT +
                        distanceScore * DISTANCE_WEIGHT +
                        firingQuality * FIRING_QUALITY_WEIGHT +
-                       peekAngleScore * PEEK_ANGLE_WEIGHT) + fightability;
+                       peekAngleScore * PEEK_ANGLE_WEIGHT) + fightability - blindPenalty;
     }
     
     private float calculatePrimaryProtection(CoverPoint coverPoint, Vec3 threatDirection) {
