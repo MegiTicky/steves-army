@@ -29,6 +29,9 @@ public class PeekController {
     private static final long MIN_EXPOSURE_TIME_MS = 800;
     private static final long DUCK_COOLDOWN_MS = 1000;
     private static final long SUPPRESSED_HIDE_EXTRA_MS = 2000;
+    private static final long PROACTIVE_PEEK_INTERVAL_MS = 8000;
+    private static final long PROACTIVE_PEEK_EXPOSURE_MS = 1000;
+    private static final double SUPPRESSION_THRESHOLD_FOR_PROACTIVE = 0.3;
     private static final double PEEK_REACHED_DISTANCE = 0.05;
     private static final double RETURN_REACHED_DISTANCE = 0.5;
     private static final double PEEK_SPEED = 0.5;
@@ -48,6 +51,9 @@ public class PeekController {
     private int peekCountSameCover = 0;
     private BlockPos lastCoverPosition = null;
     private int peekRevalidateCounter = 0;
+    private boolean isProactivePeek = false;
+    private long currentMaxExposureTime = EXPOSURE_TIME_MS;
+    private long lastProactivePeekTime = 0;
 
     public State getState() { return state; }
 
@@ -81,6 +87,8 @@ public class PeekController {
         currentPeekPos = null;
         targetEnemy = null;
         nonPeekableTicks = 0;
+        isProactivePeek = false;
+        currentMaxExposureTime = EXPOSURE_TIME_MS;
     }
 
     public void reset() {
@@ -89,6 +97,8 @@ public class PeekController {
         currentPeekPos = null;
         targetEnemy = null;
         nonPeekableTicks = 0;
+        isProactivePeek = false;
+        currentMaxExposureTime = EXPOSURE_TIME_MS;
     }
 
     private void setState(SoldierEntity soldier, State newState) {
@@ -148,7 +158,6 @@ public class PeekController {
         boolean isHalf = cover.getType() == CoverType.HALF;
         boolean isFull = cover.getType() == CoverType.FULL;
 
-        // Non-peekable reposition timer
         if (soldier.getCoverBehaviorManager().isNonPeekableCover()) {
             nonPeekableTicks++;
             if (nonPeekableTicks >= NON_PEEKABLE_REPOSITION_TICKS) {
@@ -165,18 +174,175 @@ public class PeekController {
             nonPeekableTicks = 0;
         }
 
-        // Cooldown check
         long cooldown = soldier.getCoverBehaviorManager().isSuppressed() ?
             DUCK_COOLDOWN_MS + SUPPRESSED_HIDE_EXTRA_MS : DUCK_COOLDOWN_MS;
         if (getTimeSinceLastPeek() < cooldown) {
             return;
         }
 
-        if (isHalf) {
-            tryHalfCoverPeek(soldier, cover);
-        } else if (isFull) {
-            tryFullCoverPeek(soldier, cover, mover);
+        LivingEntity target = soldier.getTarget();
+        if (target != null && target.isAlive()) {
+            isProactivePeek = false;
+            currentMaxExposureTime = EXPOSURE_TIME_MS;
+            if (isHalf) {
+                tryHalfCoverPeek(soldier, cover);
+            } else if (isFull) {
+                tryFullCoverPeek(soldier, cover, mover);
+            }
+            return;
         }
+
+        if (shouldTryProactivePeek(soldier)) {
+            if (isHalf) {
+                tryProactiveHalfCoverPeek(soldier, cover);
+            } else if (isFull) {
+                tryProactiveFullCoverPeek(soldier, cover, mover);
+            }
+        }
+    }
+
+    private boolean shouldTryProactivePeek(SoldierEntity soldier) {
+        double suppression = soldier.getCoverBehaviorManager().getSuppressionTracker().getSuppressionLevel();
+        if (suppression >= SUPPRESSION_THRESHOLD_FOR_PROACTIVE) {
+            return false;
+        }
+
+        long timeSinceLastProactive = System.currentTimeMillis() - lastProactivePeekTime;
+        if (timeSinceLastProactive < PROACTIVE_PEEK_INTERVAL_MS) {
+            return false;
+        }
+
+        Vec3 threatDir = soldier.getThreatAwareness().getPrimaryDirection(soldier.position());
+        return threatDir != null && threatDir.lengthSqr() > 0.001;
+    }
+
+    private void tryProactiveHalfCoverPeek(SoldierEntity soldier, CoverPoint cover) {
+        Vec3 threatDir = soldier.getThreatAwareness().getPrimaryDirection(soldier.position());
+        preAimToward(soldier, threatDir);
+        
+        List<LivingEntity> potentials = soldier.getCombatGoal().getPotentialTargets();
+        LivingEntity target = evaluateHalfCoverTargets(soldier, potentials);
+        
+        if (target != null) {
+            if (CoverTacticalGoal.isDebugLoggingEnabled()) {
+                StevesArmyMod.LOGGER.info("[PeekController] Soldier {} proactive half-cover peek: found target {}",
+                    soldier.getId(), target.getName().getString());
+            }
+            targetEnemy = target;
+            soldier.getCombatGoal().setTarget(target);
+            isProactivePeek = false;
+            currentMaxExposureTime = EXPOSURE_TIME_MS;
+            enterExposed(soldier, cover);
+            return;
+        }
+        
+        if (CoverTacticalGoal.isDebugLoggingEnabled()) {
+            StevesArmyMod.LOGGER.info("[PeekController] Soldier {} proactive half-cover peek: no target found",
+                soldier.getId());
+        }
+        
+        isProactivePeek = true;
+        currentMaxExposureTime = PROACTIVE_PEEK_EXPOSURE_MS;
+        lastProactivePeekTime = System.currentTimeMillis();
+        GunIntegration.crawl(soldier, true);
+        lockRotationToCoverWall(soldier, cover, null);
+        enterExposed(soldier, cover);
+    }
+
+    private void tryProactiveFullCoverPeek(SoldierEntity soldier, CoverPoint cover, CoverPositionController mover) {
+        Vec3 threatDir = soldier.getThreatAwareness().getPrimaryDirection(soldier.position());
+        if (threatDir == null || threatDir.lengthSqr() <= 0.001) {
+            return;
+        }
+        
+        preAimToward(soldier, threatDir);
+        
+        BlockPos peekPos = findBestProactivePeekPosition(soldier, cover, threatDir);
+        if (peekPos == null) {
+            if (CoverTacticalGoal.isDebugLoggingEnabled()) {
+                StevesArmyMod.LOGGER.info("[PeekController] Soldier {} proactive full-cover peek: no valid position",
+                    soldier.getId());
+            }
+            soldier.getCoverBehaviorManager().setNonPeekableCover(true);
+            return;
+        }
+        
+        currentPeekPos = peekPos;
+        Vec3 targetPos = peekPos.getCenter();
+        Vec3 soldierPos = soldier.position();
+        double dist = Math.sqrt(
+            Math.pow(targetPos.x - soldierPos.x, 2) +
+            Math.pow(targetPos.z - soldierPos.z, 2));
+        
+        if (dist < PEEK_REACHED_DISTANCE) {
+            if (CoverTacticalGoal.isDebugLoggingEnabled()) {
+                StevesArmyMod.LOGGER.info("[PeekController] Soldier {} proactive peek already at position, exposing",
+                    soldier.getId());
+            }
+            isProactivePeek = true;
+            currentMaxExposureTime = PROACTIVE_PEEK_EXPOSURE_MS;
+            lastProactivePeekTime = System.currentTimeMillis();
+            enterExposed(soldier, cover);
+            return;
+        }
+        
+        if (CoverTacticalGoal.isDebugLoggingEnabled()) {
+            StevesArmyMod.LOGGER.info("[PeekController] Soldier {} proactive full-cover peek: moving to {}",
+                soldier.getId(), peekPos);
+        }
+        
+        isProactivePeek = true;
+        currentMaxExposureTime = PROACTIVE_PEEK_EXPOSURE_MS;
+        lastProactivePeekTime = System.currentTimeMillis();
+        
+        this.peekTarget = targetPos;
+        this.coverReturnTarget = CoverTacticalGoal.getCoverStandingPositionStatic(cover.getPosition());
+        mover.moveTo(targetPos, PEEK_REACHED_DISTANCE, PEEK_SPEED, "PeekController", "proactive peek slide");
+        setState(soldier, State.MOVING_TO_PEEK);
+        stateStartTime = System.currentTimeMillis();
+    }
+
+    private BlockPos findBestProactivePeekPosition(SoldierEntity soldier, CoverPoint cover, Vec3 threatDirection) {
+        BlockPos coverPos = cover.getPosition();
+        BlockPos bestPeekPos = null;
+        double bestScore = -1;
+        
+        for (int dx = -2; dx <= 2; dx++) {
+            for (int dz = -2; dz <= 2; dz++) {
+                if (dx == 0 && dz == 0) continue;
+                
+                int distSq = dx * dx + dz * dz;
+                if (distSq > 4) continue;
+                
+                BlockPos peekPos = coverPos.offset(dx, 0, dz);
+                
+                if (!isPathClearForPeek(soldier, coverPos, peekPos)) {
+                    continue;
+                }
+                
+                double score = calculateProactivePeekScore(peekPos, coverPos, threatDirection);
+                if (score > bestScore) {
+                    bestScore = score;
+                    bestPeekPos = peekPos;
+                }
+            }
+        }
+        
+        return bestPeekPos;
+    }
+
+    private double calculateProactivePeekScore(BlockPos candidate, BlockPos coverPos, Vec3 threatDirection) {
+        Vec3 toPeek = new Vec3(candidate.getX() - coverPos.getX(), 0, candidate.getZ() - coverPos.getZ()).normalize();
+        double alignment = toPeek.dot(threatDirection);
+        double distance = Math.sqrt(Math.pow(candidate.getX() - coverPos.getX(), 2) + Math.pow(candidate.getZ() - coverPos.getZ(), 2));
+        return alignment * 2.0 - distance * 0.5;
+    }
+
+    private void preAimToward(SoldierEntity soldier, Vec3 direction) {
+        double yaw = Math.toDegrees(Math.atan2(-direction.x, direction.z));
+        soldier.setYRot((float) yaw);
+        soldier.setYHeadRot((float) yaw);
+        soldier.setYBodyRot((float) yaw);
     }
 
     private void tryHalfCoverPeek(SoldierEntity soldier, CoverPoint cover) {
@@ -311,19 +477,22 @@ public class PeekController {
     private void tickExposed(SoldierEntity soldier, CoverPoint cover, CoverPositionController mover) {
         long timeInState = getTimeInCurrentState();
 
-        // Time limit
-        if (timeInState > EXPOSURE_TIME_MS) {
+        if (timeInState > currentMaxExposureTime) {
             if (CoverTacticalGoal.isDebugLoggingEnabled()) {
-                StevesArmyMod.LOGGER.info("[PeekController] Soldier {} exposure time exceeded, ducking back",
-                    soldier.getId());
+                StevesArmyMod.LOGGER.info("[PeekController] Soldier {} exposure time exceeded ({}ms), ducking back",
+                    soldier.getId(), currentMaxExposureTime);
             }
             enterReturning(soldier, cover, mover);
             return;
         }
 
+        if (isProactivePeek) {
+            tickProactiveExposed(soldier, cover, mover, timeInState);
+            return;
+        }
+
         LivingEntity target = soldier.getTarget();
 
-        // Target dead or lost
         if (target == null || !target.isAlive()) {
             if (timeInState < MIN_EXPOSURE_TIME_MS) return;
             if (trySwitchTargetWhileExposed(soldier, cover)) return;
@@ -331,7 +500,6 @@ public class PeekController {
             return;
         }
 
-        // Periodic LOS check
         if (timeInState > 200) {
             Vec3 eyePos = soldier.getEyePosition();
             Vec3 targetEye = new Vec3(target.getX(), target.getEyeY(), target.getZ());
@@ -342,7 +510,6 @@ public class PeekController {
             }
         }
 
-        // Suppression check
         if (soldier.getCoverBehaviorManager().isSuppressed()) {
             if (CoverTacticalGoal.isDebugLoggingEnabled()) {
                 StevesArmyMod.LOGGER.info("[PeekController] Soldier {} suppressed while exposed, ducking back",
@@ -350,6 +517,45 @@ public class PeekController {
             }
             enterReturning(soldier, cover, mover);
             return;
+        }
+    }
+
+    private void tickProactiveExposed(SoldierEntity soldier, CoverPoint cover, CoverPositionController mover, long timeInState) {
+        List<LivingEntity> potentials = soldier.getCombatGoal().getPotentialTargets();
+        
+        LivingEntity target = null;
+        if (cover.getType() == CoverType.HALF) {
+            target = evaluateHalfCoverTargets(soldier, potentials);
+        } else if (currentPeekPos != null) {
+            Vec3 peekCenter = currentPeekPos.getCenter();
+            Vec3 peekEye = new Vec3(peekCenter.x, soldier.getY() + 1.62, peekCenter.z);
+            for (LivingEntity potential : potentials) {
+                Vec3 targetEye = new Vec3(potential.getX(), potential.getEyeY(), potential.getZ());
+                if (hasLineOfSight(soldier, peekEye, targetEye)) {
+                    target = potential;
+                    break;
+                }
+            }
+        }
+        
+        if (target != null) {
+            if (CoverTacticalGoal.isDebugLoggingEnabled()) {
+                StevesArmyMod.LOGGER.info("[PeekController] Soldier {} proactive peek found target {}, switching to combat mode",
+                    soldier.getId(), target.getName().getString());
+            }
+            targetEnemy = target;
+            soldier.getCombatGoal().setTarget(target);
+            isProactivePeek = false;
+            currentMaxExposureTime = EXPOSURE_TIME_MS;
+            return;
+        }
+        
+        if (soldier.getCoverBehaviorManager().isSuppressed()) {
+            if (CoverTacticalGoal.isDebugLoggingEnabled()) {
+                StevesArmyMod.LOGGER.info("[PeekController] Soldier {} suppressed during proactive peek, ducking back",
+                    soldier.getId());
+            }
+            enterReturning(soldier, cover, mover);
         }
     }
 
@@ -394,10 +600,8 @@ public class PeekController {
         
         boolean isHalf = cover.getType() == CoverType.HALF;
         if (isHalf) {
-            // Half cover: stand up from crawl when peeking
             GunIntegration.crawl(soldier, false);
         } else {
-            // Full cover: stop movement and navigation
             CoverPositionController mover = (CoverPositionController) soldier.getMoveControl();
             mover.clear();
             soldier.getNavigation().stop();
@@ -407,8 +611,8 @@ public class PeekController {
         soldier.refreshDimensions();
 
         if (CoverTacticalGoal.isDebugLoggingEnabled()) {
-            StevesArmyMod.LOGGER.info("[PeekController] Soldier {} state: HIDING -> EXPOSED",
-                soldier.getId());
+            StevesArmyMod.LOGGER.info("[PeekController] Soldier {} state: HIDING -> EXPOSED ({}, exposure={}ms)",
+                soldier.getId(), isProactivePeek ? "proactive" : "combat", currentMaxExposureTime);
         }
     }
 
