@@ -1019,17 +1019,19 @@ private static void renderSoldierCoverLabels(PoseStack poseStack, Vec3 cameraPos
             
             List<BlockPos> candidates = data.candidatePositions;
             List<Boolean> losResults = data.losResults;
+            List<Vec3> peekEyePositions = data.peekEyePositions;
             Vec3 targetEye = data.targetEyePosition;
             if (targetEye == null) continue;
             
             for (int i = 0; i < candidates.size(); i++) {
                 if (i >= losResults.size()) continue;
-                BlockPos pos = candidates.get(i);
                 
-                Vec3 eyePos = new Vec3(pos.getX() + 0.5, pos.getY() + 1.62, pos.getZ() + 0.5);
-                double fromX = eyePos.x - cameraPos.x;
-                double fromY = eyePos.y - cameraPos.y;
-                double fromZ = eyePos.z - cameraPos.z;
+                Vec3 peekEye = peekEyePositions.get(i);
+                if (peekEye == null) continue;
+                
+                double fromX = peekEye.x - cameraPos.x;
+                double fromY = peekEye.y - cameraPos.y;
+                double fromZ = peekEye.z - cameraPos.z;
                 double toX = targetEye.x - cameraPos.x;
                 double toY = targetEye.y - cameraPos.y;
                 double toZ = targetEye.z - cameraPos.z;
@@ -1037,7 +1039,7 @@ private static void renderSoldierCoverLabels(PoseStack poseStack, Vec3 cameraPos
                 boolean hasLos = losResults.get(i);
                 int lr = hasLos ? 0 : 255;
                 int lg = hasLos ? 255 : 0;
-                int lb = 0;
+                int lb = hasLos ? 0 : 255;
                 int la = 180;
                 
                 buffer.vertex(matrix, (float)fromX, (float)fromY, (float)fromZ).color(lr, lg, lb, la).endVertex();
@@ -1076,6 +1078,8 @@ private static void renderSoldierCoverLabels(PoseStack poseStack, Vec3 cameraPos
             List<Integer> reasons = data.rejectionReasons;
             List<Double> scores = data.angleScores;
             List<Boolean> losResults = data.losResults;
+            List<Vec3> peekEyePositions = data.peekEyePositions;
+            List<Float> coneScores = data.coneCoverageScores;
             
             for (int i = 0; i < candidates.size(); i++) {
                 BlockPos pos = candidates.get(i);
@@ -1095,6 +1099,7 @@ private static void renderSoldierCoverLabels(PoseStack poseStack, Vec3 cameraPos
                 poseStack.scale(-0.025f, -0.025f, 0.025f);
                 
                 String label;
+                String sublabel = null;
                 int color;
                 
                 switch (reason) {
@@ -1108,6 +1113,10 @@ private static void renderSoldierCoverLabels(PoseStack poseStack, Vec3 cameraPos
                         break;
                     case CoverDebugManager.PeekCandidateDebugData.REASON_NO_LOS:
                         label = "NO_LOS";
+                        Vec3 peekEye = peekEyePositions.get(i);
+                        if (peekEye != null) {
+                            sublabel = String.format("eyeY=%.1f", peekEye.y);
+                        }
                         color = 0xFF_00_00;
                         break;
                     case CoverDebugManager.PeekCandidateDebugData.REASON_BAD_ANGLE:
@@ -1115,9 +1124,18 @@ private static void renderSoldierCoverLabels(PoseStack poseStack, Vec3 cameraPos
                         color = 0xFF_FF_00;
                         break;
                     case CoverDebugManager.PeekCandidateDebugData.REASON_ACCEPTED:
+                    case CoverDebugManager.PeekCandidateDebugData.REASON_CHOSEN:
                         double score = i < scores.size() ? scores.get(i) : 0;
                         boolean isChosen = data.chosenPosition != null && pos.equals(data.chosenPosition);
-                        label = isChosen ? "CHOSEN" : String.format("SCORE:%.2f", score);
+                        boolean hasLos = i < losResults.size() && losResults.get(i);
+                        float coneScore = i < coneScores.size() ? coneScores.get(i) : 0;
+                        label = isChosen ? "CHOSEN" : String.format("S:%.2f", score);
+                        if (isChosen) {
+                            Vec3 eye = peekEyePositions.get(i);
+                            if (eye != null) {
+                                sublabel = String.format("eyeY=%.1f LOS=%s", eye.y, hasLos ? "Y" : "N");
+                            }
+                        }
                         color = isChosen ? 0x00_FF_FF : 0x00_FF_00;
                         break;
                     default:
@@ -1127,6 +1145,11 @@ private static void renderSoldierCoverLabels(PoseStack poseStack, Vec3 cameraPos
                 
                 font.drawInBatch(label, -font.width(label) / 2.0f, 0, color | 0xFF000000, false,
                         poseStack.last().pose(), bufferSource, net.minecraft.client.gui.Font.DisplayMode.NORMAL, 0, 15728880);
+                
+                if (sublabel != null) {
+                    font.drawInBatch(sublabel, -font.width(sublabel) / 2.0f, 10, (color & 0xFFFFFF) | 0xFF000000, false,
+                            poseStack.last().pose(), bufferSource, net.minecraft.client.gui.Font.DisplayMode.NORMAL, 0, 15728880);
+                }
                 
                 poseStack.popPose();
             }

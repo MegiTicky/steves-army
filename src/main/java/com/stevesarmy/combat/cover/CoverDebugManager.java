@@ -194,11 +194,15 @@ public class CoverDebugManager {
         public final List<Boolean> losResults;
         public final BlockPos chosenPosition;
         public final Vec3 targetEyePosition;
+        public final List<Vec3> peekEyePositions;
+        public final List<Float> coneCoverageScores;
+        public final double soldierY;
         
         public PeekCandidateDebugData(BlockPos coverPos, List<BlockPos> candidatePositions,
                                        List<Integer> rejectionReasons, List<Double> angleScores,
                                        List<Boolean> losResults, BlockPos chosenPosition,
-                                       Vec3 targetEyePosition) {
+                                       Vec3 targetEyePosition, List<Vec3> peekEyePositions,
+                                       List<Float> coneCoverageScores, double soldierY) {
             this.coverPos = coverPos;
             this.candidatePositions = candidatePositions;
             this.rejectionReasons = rejectionReasons;
@@ -206,6 +210,9 @@ public class CoverDebugManager {
             this.losResults = losResults;
             this.chosenPosition = chosenPosition;
             this.targetEyePosition = targetEyePosition;
+            this.peekEyePositions = peekEyePositions;
+            this.coneCoverageScores = coneCoverageScores;
+            this.soldierY = soldierY;
         }
     }
 }

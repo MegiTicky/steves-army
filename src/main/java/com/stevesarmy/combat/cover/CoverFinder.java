@@ -223,10 +223,20 @@ public class CoverFinder {
                 HALF_COVER_FIGHTABILITY_BONUS : FULL_COVER_FIGHTABILITY_BONUS;
         }
         
-        // Severe penalty for full cover with no valid peek spots
         float blindPenalty = 0.0f;
         if (coverPoint.getType() == CoverType.FULL && peekAngleScore <= 0.01f && primaryThreat != null) {
             blindPenalty = 0.50f;
+        }
+        
+        if (coverPoint.getType() == CoverType.NONE) {
+            return 0.0f;
+        }
+        
+        if (coverPoint.getType() == CoverType.CONCEALMENT) {
+            blindPenalty = 0.50f;
+            fightability = 0.0f;
+            firingQuality = 0.0f;
+            peekAngleScore = 0.0f;
         }
         
         float weightedScore = (float)(primaryProtection * PRIMARY_PROTECTION_WEIGHT +

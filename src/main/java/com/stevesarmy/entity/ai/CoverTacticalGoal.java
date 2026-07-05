@@ -1035,6 +1035,11 @@ public class CoverTacticalGoal extends Goal {
     }
     
     public static BlockPos computePeekPositionStatic(CoverPoint cover, Vec3 threatDirection, LivingEntity target, net.minecraft.world.level.Level level, double soldierY) {
+        return computePeekPositionStatic(cover, threatDirection, target, level, soldierY, -1);
+    }
+    
+    public static BlockPos computePeekPositionStatic(CoverPoint cover, Vec3 threatDirection, LivingEntity target, 
+                                                      net.minecraft.world.level.Level level, double soldierY, int debugSoldierId) {
         if (threatDirection == null || threatDirection.lengthSqr() < 0.001) {
             return null;
         }
@@ -1048,34 +1053,69 @@ public class CoverTacticalGoal extends Goal {
         BlockPos bestPeekPos = null;
         float bestPeekScore = 0.0f;
         
+        List<BlockPos> debugCandidatePositions = new ArrayList<>();
+        List<Integer> debugRejectionReasons = new ArrayList<>();
+        List<Double> debugAngleScores = new ArrayList<>();
+        List<Boolean> debugLosResults = new ArrayList<>();
+        List<Vec3> debugPeekEyePositions = new ArrayList<>();
+        List<Float> debugConeCoverageScores = new ArrayList<>();
+        Vec3 debugTargetEye = null;
+        
         for (net.minecraft.core.Direction peekDir : net.minecraft.core.Direction.Plane.HORIZONTAL) {
             if (protectedDirs.contains(peekDir)) {
+                debugCandidatePositions.add(coverPos.relative(peekDir));
+                debugRejectionReasons.add(CoverDebugManager.PeekCandidateDebugData.REASON_PROTECTED_DIR);
+                debugAngleScores.add(0.0);
+                debugLosResults.add(false);
+                debugPeekEyePositions.add(null);
+                debugConeCoverageScores.add(0.0f);
                 continue;
             }
             
             BlockPos peekPos = coverPos.relative(peekDir);
+            debugCandidatePositions.add(peekPos);
             
             if (!com.stevesarmy.combat.cover.CoverFinder.isValidPeekPosition(peekPos, level)) {
+                debugRejectionReasons.add(CoverDebugManager.PeekCandidateDebugData.REASON_INVALID_POS);
+                debugAngleScores.add(0.0);
+                debugLosResults.add(false);
+                debugPeekEyePositions.add(null);
+                debugConeCoverageScores.add(0.0f);
                 continue;
             }
             
             boolean losOk = true;
             float coneCoverageScore = 1.0f;
+            Vec3 peekEye = null;
+            Vec3 targetEye = null;
             
             if (target != null && target.isAlive()) {
-                Vec3 peekEye = new Vec3(peekPos.getX() + 0.5, soldierY + 1.62, peekPos.getZ() + 0.5);
-                Vec3 targetEye = new Vec3(target.getX(), target.getEyeY(), target.getZ());
+                peekEye = new Vec3(peekPos.getX() + 0.5, soldierY + 1.62, peekPos.getZ() + 0.5);
+                targetEye = new Vec3(target.getX(), target.getEyeY(), target.getZ());
+                if (debugTargetEye == null) {
+                    debugTargetEye = targetEye;
+                }
                 losOk = com.stevesarmy.combat.cover.CoverFinder.hasLineOfSightStatic(peekEye, targetEye, level);
                 
                 if (!losOk) {
                     coneCoverageScore = com.stevesarmy.combat.cover.CoverFinder.calculateConeCoverage(peekPos, threatDirection, level);
                     if (coneCoverageScore <= 0.01f) {
+                        debugRejectionReasons.add(CoverDebugManager.PeekCandidateDebugData.REASON_NO_LOS);
+                        debugAngleScores.add(0.0);
+                        debugLosResults.add(false);
+                        debugPeekEyePositions.add(peekEye);
+                        debugConeCoverageScores.add(coneCoverageScore);
                         continue;
                     }
                 }
             } else {
                 coneCoverageScore = com.stevesarmy.combat.cover.CoverFinder.calculateConeCoverage(peekPos, threatDirection, level);
                 if (coneCoverageScore <= 0.01f) {
+                    debugRejectionReasons.add(CoverDebugManager.PeekCandidateDebugData.REASON_NO_LOS);
+                    debugAngleScores.add(0.0);
+                    debugLosResults.add(false);
+                    debugPeekEyePositions.add(null);
+                    debugConeCoverageScores.add(coneCoverageScore);
                     continue;
                 }
             }
@@ -1095,18 +1135,43 @@ public class CoverTacticalGoal extends Goal {
             if (angleBetween >= 45 && angleBetween <= 135) {
                 float angleScore = 1.0f - (float)Math.abs(angleBetween - 90) / 90;
                 float finalScore = angleScore * coneCoverageScore;
+                
+                debugLosResults.add(losOk);
+                debugPeekEyePositions.add(peekEye);
+                debugConeCoverageScores.add(coneCoverageScore);
+                
                 if (finalScore > bestPeekScore) {
                     bestPeekScore = finalScore;
                     bestPeekPos = peekPos;
+                    debugRejectionReasons.add(CoverDebugManager.PeekCandidateDebugData.REASON_CHOSEN);
+                    debugAngleScores.add((double)angleScore);
+                } else {
+                    debugRejectionReasons.add(CoverDebugManager.PeekCandidateDebugData.REASON_ACCEPTED);
+                    debugAngleScores.add((double)angleScore);
                 }
+            } else {
+                debugRejectionReasons.add(CoverDebugManager.PeekCandidateDebugData.REASON_BAD_ANGLE);
+                debugAngleScores.add(0.0);
+                debugLosResults.add(losOk);
+                debugPeekEyePositions.add(peekEye);
+                debugConeCoverageScores.add(coneCoverageScore);
             }
+        }
+        
+        if (debugSoldierId >= 0) {
+            CoverDebugManager.setSoldierPeekCandidates(debugSoldierId, 
+                new CoverDebugManager.PeekCandidateDebugData(
+                    coverPos, debugCandidatePositions, debugRejectionReasons, debugAngleScores,
+                    debugLosResults, bestPeekPos, debugTargetEye, debugPeekEyePositions,
+                    debugConeCoverageScores, soldierY
+                ));
         }
         
         return bestPeekPos;
     }
     
     private BlockPos computePeekPosition(CoverPoint cover, Vec3 threatDirection, LivingEntity target) {
-        return computePeekPositionStatic(cover, threatDirection, target, soldier.level(), soldier.getY());
+        return computePeekPositionStatic(cover, threatDirection, target, soldier.level(), soldier.getY(), soldier.getId());
     }
     
     public static boolean isPathClearStatic(BlockPos from, BlockPos to, net.minecraft.world.level.Level level) {
