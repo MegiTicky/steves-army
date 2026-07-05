@@ -218,7 +218,7 @@ public class CoverFinder {
         }
         
         Direction threatDir = getDirectionFromVector(threatDirection);
-        boolean isProtected = protectedDirs.contains(threatDir.getOpposite());
+        boolean isProtected = protectedDirs.contains(threatDir);
         
         if (isProtected) {
             return coverPoint.getQuality();
