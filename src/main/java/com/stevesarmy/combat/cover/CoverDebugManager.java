@@ -45,27 +45,48 @@ public class CoverDebugManager {
         public final float currentCoverScore;
         public final float penalty;
         public final int peekCount;
+        public final Map<BlockPos, BlacklistDebugEntry> blacklistInfo;
         
         public TopCoversDebugData(CoverFinder.ScoredCover[] topCovers, int[] rejectionReasons, BlockPos chosenCoverPos,
-                                  float currentCoverScore, float penalty, int peekCount) {
+                                  float currentCoverScore, float penalty, int peekCount,
+                                  Map<BlockPos, BlacklistDebugEntry> blacklistInfo) {
             this.topCovers = topCovers;
             this.rejectionReasons = rejectionReasons != null ? rejectionReasons : new int[0];
             this.chosenCoverPos = chosenCoverPos;
             this.currentCoverScore = currentCoverScore;
             this.penalty = penalty;
             this.peekCount = peekCount;
+            this.blacklistInfo = blacklistInfo != null ? blacklistInfo : Collections.emptyMap();
         }
         
         public String getRejectionReason(int index) {
             if (index < 0 || index >= rejectionReasons.length) return "?";
             switch (rejectionReasons[index]) {
-                case REASON_NONE: return "";
+                case REASON_NONE: return "VALID";
                 case REASON_CHOSEN: return "CHOSEN";
                 case REASON_RESERVED: return "RESERVED";
                 case REASON_BLACKLISTED: return "BLACKLISTED";
                 case REASON_ALREADY_CURRENT: return "CURRENT";
                 default: return "?";
             }
+        }
+        
+        public String getBlacklistDetail(int index) {
+            if (index < 0 || index >= topCovers.length) return "";
+            BlockPos pos = topCovers[index].cover.getPosition();
+            BlacklistDebugEntry entry = blacklistInfo.get(pos);
+            if (entry == null) return "";
+            return entry.reason + " " + entry.ageSeconds + "s";
+        }
+    }
+    
+    public static class BlacklistDebugEntry {
+        public final String reason;
+        public final int ageSeconds;
+        
+        public BlacklistDebugEntry(String reason, int ageSeconds) {
+            this.reason = reason;
+            this.ageSeconds = ageSeconds;
         }
     }
     

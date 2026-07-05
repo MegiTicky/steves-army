@@ -11,6 +11,7 @@ import com.stevesarmy.combat.ThreatAwareness;
 import com.stevesarmy.combat.ThreatTracker;
 import com.stevesarmy.combat.cover.CoverBehaviorManager;
 import com.stevesarmy.combat.cover.CoverPoint;
+import com.stevesarmy.combat.cover.CoverType;
 import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.entity.TargetEntity;
 import com.stevesarmy.network.NetworkHandler;
@@ -307,7 +308,16 @@ public class SoldierCombatGoal extends Goal {
             tickCoverPeekCycle(coverManager);
         }
         
-        soldier.getLookControl().setLookAt(target, 30.0F, 30.0F);
+        PeekController.State peekState = soldier.getPeekController().getState();
+        boolean isDuckedInHalfCover = coverManager.isInCover()
+            && coverManager.getCurrentCover() != null
+            && coverManager.getCurrentCover().getType() == CoverType.HALF
+            && (peekState == PeekController.State.HIDING 
+                || peekState == PeekController.State.RETURNING_TO_COVER);
+        
+        if (!isDuckedInHalfCover) {
+            soldier.getLookControl().setLookAt(target, 30.0F, 30.0F);
+        }
         
         if (hasGun) {
             boolean shouldShoot = canSee || 

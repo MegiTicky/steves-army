@@ -79,12 +79,10 @@ public class CoverPositionController extends MoveControl {
     @Override
     public void tick() {
         if (lastResult != MovementResult.IN_PROGRESS) {
-            if (!this.mob.getNavigation().isDone()) {
-                super.tick();
-                this.debugLastSetVelocity = this.mob.getDeltaMovement();
-                this.debugMoveSource = "vanilla";
-                this.debugMoveReason = "navigation";
-            }
+            super.tick();
+            this.debugLastSetVelocity = this.mob.getDeltaMovement();
+            this.debugMoveSource = "vanilla";
+            this.debugMoveReason = "navigation";
             return;
         }
 

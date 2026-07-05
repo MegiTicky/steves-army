@@ -43,8 +43,6 @@ public class CoverDebugRenderer {
             return;
         }
         
-        System.out.println("[CoverDebugRender] Rendering - showSoldierCover=" + CoverDebugManager.isShowSoldierCover());
-        
         Vec3 cameraPos = camera.getPosition();
         
         RenderSystem.enableBlend();
@@ -535,7 +533,7 @@ public class CoverDebugRenderer {
             int peekStateOrdinal = soldier.getSyncedPeekState();
             PeekController.State peekState = PeekController.State.values()[peekStateOrdinal];
             
-            if (!peekPos.equals(BlockPos.ZERO) && peekState != PeekController.State.HIDING) {
+            if (!peekPos.equals(BlockPos.ZERO)) {
                 int peekColor = getPeekStateColor(peekState);
                 int pr = (peekColor >> 16) & 0xFF;
                 int pg = (peekColor >> 8) & 0xFF;
@@ -549,9 +547,169 @@ public class CoverDebugRenderer {
                 
                 buffer.vertex(matrix, (float)soldierRelX, (float)(soldierRelY - 0.8), (float)soldierRelZ).color(pr, pg, pb, a).endVertex();
                 buffer.vertex(matrix, (float)peekRelX, (float)peekRelY, (float)peekRelZ).color(pr, pg, pb, a).endVertex();
+                
+                // Render LOS raycast from peek position eye to nearby target entity
+                // Client-side target is often null, so find nearby TargetEntity
+                LivingEntity losTarget = soldier.getTarget();
+                if (losTarget == null) {
+                    double searchRange = 20.0;
+                    for (net.minecraft.world.entity.LivingEntity entity : level.getEntitiesOfClass(
+                            net.minecraft.world.entity.LivingEntity.class, 
+                            soldier.getBoundingBox().inflate(searchRange))) {
+                        if (entity != soldier && entity.isAlive() && 
+                            entity.getType() == com.stevesarmy.registry.ModEntities.TARGET.get()) {
+                            losTarget = entity;
+                            break;
+                        }
+                    }
+                }
+                
+                if (losTarget != null) {
+                    Vec3 peekEye = new Vec3(peekPos.getX() + 0.5, soldier.getY() + 1.62, peekPos.getZ() + 0.5);
+                    Vec3 targetEye = new Vec3(losTarget.getX(), losTarget.getEyeY(), losTarget.getZ());
+                    
+                    double peekEyeRelX = peekEye.x - cameraPos.x;
+                    double peekEyeRelY = peekEye.y - cameraPos.y;
+                    double peekEyeRelZ = peekEye.z - cameraPos.z;
+                    double targetEyeRelX = targetEye.x - cameraPos.x;
+                    double targetEyeRelY = targetEye.y - cameraPos.y;
+                    double targetEyeRelZ = targetEye.z - cameraPos.z;
+                    
+                    net.minecraft.world.level.ClipContext context = new net.minecraft.world.level.ClipContext(
+                        peekEye, targetEye, 
+                        net.minecraft.world.level.ClipContext.Block.COLLIDER, 
+                        net.minecraft.world.level.ClipContext.Fluid.NONE, 
+                        soldier);
+                    net.minecraft.world.phys.HitResult result = level.clip(context);
+                    boolean hasLOS = result.getType() == net.minecraft.world.phys.HitResult.Type.MISS;
+                    
+                    int lr = hasLOS ? 0 : 255;
+                    int lg = hasLOS ? 255 : 0;
+                    int lb = 0;
+                    
+                    buffer.vertex(matrix, (float)peekEyeRelX, (float)peekEyeRelY, (float)peekEyeRelZ).color(lr, lg, lb, a).endVertex();
+                    buffer.vertex(matrix, (float)targetEyeRelX, (float)targetEyeRelY, (float)targetEyeRelZ).color(lr, lg, lb, a).endVertex();
+                    
+                    if (!hasLOS && result.getType() == net.minecraft.world.phys.HitResult.Type.BLOCK) {
+                        Vec3 hitPoint = result.getLocation();
+                        double hitRelX = hitPoint.x - cameraPos.x;
+                        double hitRelY = hitPoint.y - cameraPos.y;
+                        double hitRelZ = hitPoint.z - cameraPos.z;
+                        
+                        float hitSize = 0.2f;
+                        buffer.vertex(matrix, (float)(hitRelX - hitSize), (float)hitRelY, (float)hitRelZ).color(255, 255, 0, a).endVertex();
+                        buffer.vertex(matrix, (float)(hitRelX + hitSize), (float)hitRelY, (float)hitRelZ).color(255, 255, 0, a).endVertex();
+                        buffer.vertex(matrix, (float)hitRelX, (float)(hitRelY - hitSize), (float)hitRelZ).color(255, 255, 0, a).endVertex();
+                        buffer.vertex(matrix, (float)hitRelX, (float)(hitRelY + hitSize), (float)hitRelZ).color(255, 255, 0, a).endVertex();
+                        buffer.vertex(matrix, (float)hitRelX, (float)hitRelY, (float)(hitRelZ - hitSize)).color(255, 255, 0, a).endVertex();
+                        buffer.vertex(matrix, (float)hitRelX, (float)hitRelY, (float)(hitRelZ + hitSize)).color(255, 255, 0, a).endVertex();
+                    }
+                }
             }
             
-            CoverBehaviorManager coverManager = soldier.getCoverBehaviorManager();
+            // Render all candidate peek positions for full cover soldiers (using synced data)
+            int coverTypeOrdinal = soldier.getSyncedCoverCurrentType();
+            com.stevesarmy.combat.cover.CoverType coverType = coverTypeOrdinal >= 0 && coverTypeOrdinal < com.stevesarmy.combat.cover.CoverType.values().length 
+                ? com.stevesarmy.combat.cover.CoverType.values()[coverTypeOrdinal] 
+                : com.stevesarmy.combat.cover.CoverType.NONE;
+            
+            if (state == CoverBehaviorManager.CoverState.IN_COVER && !currentPos.equals(BlockPos.ZERO) && coverType == com.stevesarmy.combat.cover.CoverType.FULL) {
+                // Find target entity on client side
+                LivingEntity losTarget = soldier.getTarget();
+                if (losTarget == null) {
+                    double searchRange = 20.0;
+                    for (net.minecraft.world.entity.LivingEntity entity : level.getEntitiesOfClass(
+                            net.minecraft.world.entity.LivingEntity.class,
+                            soldier.getBoundingBox().inflate(searchRange))) {
+                        if (entity != soldier && entity.isAlive() &&
+                            entity.getType() == com.stevesarmy.registry.ModEntities.TARGET.get()) {
+                            losTarget = entity;
+                            break;
+                        }
+                    }
+                }
+                
+                if (losTarget != null) {
+                    BlockPos coverPos = currentPos;
+                    Vec3 targetEye = new Vec3(losTarget.getX(), losTarget.getEyeY(), losTarget.getZ());
+                    
+                    // Iterate all candidate positions (same logic as computePeekPosition)
+                    for (int dx = -2; dx <= 2; dx++) {
+                        for (int dz = -2; dz <= 2; dz++) {
+                            if (dx == 0 && dz == 0) continue;
+                            
+                            int distSq = dx * dx + dz * dz;
+                            if (distSq > 4) continue;
+                            
+                            BlockPos candidate = coverPos.offset(dx, 0, dz);
+                            
+                            // Check if path from cover to peek position crosses solid blocks
+                            boolean pathClear = isPathClearClient(level, coverPos, candidate);
+                            if (!pathClear) {
+                                // Render red line with yellow X for blocked path
+                                double candRelX = candidate.getX() - cameraPos.x + 0.5;
+                                double candRelY = candidate.getY() - cameraPos.y + 1.62;
+                                double candRelZ = candidate.getZ() - cameraPos.z + 0.5;
+                                double targetRelX = targetEye.x - cameraPos.x;
+                                double targetRelY = targetEye.y - cameraPos.y;
+                                double targetRelZ = targetEye.z - cameraPos.z;
+                                
+                                // Red line
+                                buffer.vertex(matrix, (float)candRelX, (float)candRelY, (float)candRelZ).color(255, 0, 0, a).endVertex();
+                                buffer.vertex(matrix, (float)targetRelX, (float)targetRelY, (float)targetRelZ).color(255, 0, 0, a).endVertex();
+                                
+                                // Yellow X at candidate position
+                                float xSize = 0.15f;
+                                buffer.vertex(matrix, (float)(candRelX - xSize), (float)candRelY, (float)(candRelZ - xSize)).color(255, 255, 0, a).endVertex();
+                                buffer.vertex(matrix, (float)(candRelX + xSize), (float)candRelY, (float)(candRelZ + xSize)).color(255, 255, 0, a).endVertex();
+                                buffer.vertex(matrix, (float)(candRelX - xSize), (float)candRelY, (float)(candRelZ + xSize)).color(255, 255, 0, a).endVertex();
+                                buffer.vertex(matrix, (float)(candRelX + xSize), (float)candRelY, (float)(candRelZ - xSize)).color(255, 255, 0, a).endVertex();
+                                continue;
+                            }
+                            
+                            Vec3 candidateCenter = candidate.getCenter();
+                            Vec3 candidateEye = new Vec3(candidateCenter.x, soldier.getY() + 1.62, candidateCenter.z);
+                            
+                            net.minecraft.world.level.ClipContext context = new net.minecraft.world.level.ClipContext(
+                                candidateEye, targetEye,
+                                net.minecraft.world.level.ClipContext.Block.COLLIDER,
+                                net.minecraft.world.level.ClipContext.Fluid.NONE, soldier);
+                            net.minecraft.world.phys.HitResult result = level.clip(context);
+                            
+                            double candRelX = candidate.getX() - cameraPos.x + 0.5;
+                            double candRelY = candidate.getY() - cameraPos.y + 1.62;
+                            double candRelZ = candidate.getZ() - cameraPos.z + 0.5;
+                            double targetRelX = targetEye.x - cameraPos.x;
+                            double targetRelY = targetEye.y - cameraPos.y;
+                            double targetRelZ = targetEye.z - cameraPos.z;
+                            
+                            if (result.getType() == net.minecraft.world.phys.HitResult.Type.MISS) {
+                                // Green line = has LOS
+                                buffer.vertex(matrix, (float)candRelX, (float)candRelY, (float)candRelZ).color(0, 255, 0, a).endVertex();
+                                buffer.vertex(matrix, (float)targetRelX, (float)targetRelY, (float)targetRelZ).color(0, 255, 0, a).endVertex();
+                            } else if (result.getType() == net.minecraft.world.phys.HitResult.Type.BLOCK) {
+                                // Red line = blocked
+                                buffer.vertex(matrix, (float)candRelX, (float)candRelY, (float)candRelZ).color(255, 0, 0, a).endVertex();
+                                buffer.vertex(matrix, (float)targetRelX, (float)targetRelY, (float)targetRelZ).color(255, 0, 0, a).endVertex();
+                                
+                                // Yellow cross at hit point
+                                Vec3 hitPoint = result.getLocation();
+                                double hitRelX = hitPoint.x - cameraPos.x;
+                                double hitRelY = hitPoint.y - cameraPos.y;
+                                double hitRelZ = hitPoint.z - cameraPos.z;
+                                
+                                float hitSize = 0.15f;
+                                buffer.vertex(matrix, (float)(hitRelX - hitSize), (float)hitRelY, (float)hitRelZ).color(255, 255, 0, a).endVertex();
+                                buffer.vertex(matrix, (float)(hitRelX + hitSize), (float)hitRelY, (float)hitRelZ).color(255, 255, 0, a).endVertex();
+                                buffer.vertex(matrix, (float)hitRelX, (float)(hitRelY - hitSize), (float)hitRelZ).color(255, 255, 0, a).endVertex();
+                                buffer.vertex(matrix, (float)hitRelX, (float)(hitRelY + hitSize), (float)hitRelZ).color(255, 255, 0, a).endVertex();
+                                buffer.vertex(matrix, (float)hitRelX, (float)hitRelY, (float)(hitRelZ - hitSize)).color(255, 255, 0, a).endVertex();
+                                buffer.vertex(matrix, (float)hitRelX, (float)hitRelY, (float)(hitRelZ + hitSize)).color(255, 255, 0, a).endVertex();
+                            }
+                        }
+                    }
+                }
+            }
             
             LivingEntity target = soldier.getTarget();
             if (target != null) {
@@ -910,18 +1068,8 @@ private static void renderSoldierCoverLabels(PoseStack poseStack, Vec3 cameraPos
     private static void renderTopCoversVisualization(BufferBuilder buffer, PoseStack poseStack, Vec3 cameraPos, Level level) {
         Matrix4f matrix = poseStack.last().pose();
         
-        var soldiers = level.getEntitiesOfClass(SoldierEntity.class,
-                Minecraft.getInstance().player.getBoundingBox().inflate(50));
-        
-        if (!soldiers.isEmpty()) {
-            SoldierEntity firstSoldier = soldiers.iterator().next();
-            CoverDebugManager.TopCoversDebugData topData = CoverDebugManager.getSoldierTopCovers(firstSoldier.getId());
-            System.out.println("[TopCoversDebug] Soldiers found: " + soldiers.size() + 
-                ", first soldier id: " + firstSoldier.getId() + 
-                ", topData: " + (topData != null ? "exists, covers=" + (topData.topCovers != null ? topData.topCovers.length : "null") : "null"));
-        }
-        
-        for (SoldierEntity soldier : soldiers) {
+        for (SoldierEntity soldier : level.getEntitiesOfClass(SoldierEntity.class,
+                Minecraft.getInstance().player.getBoundingBox().inflate(50))) {
             
             CoverDebugManager.TopCoversDebugData topData = CoverDebugManager.getSoldierTopCovers(soldier.getId());
             if (topData == null || topData.topCovers == null) continue;
@@ -1027,8 +1175,35 @@ private static void renderSoldierCoverLabels(PoseStack poseStack, Vec3 cameraPos
                 font.drawInBatch(label, -font.width(label) / 2.0f, 0, color, false,
                         poseStack.last().pose(), bufferSource, net.minecraft.client.gui.Font.DisplayMode.NORMAL, 0, 15728880);
                 
+                String blacklistDetail = topData.getBlacklistDetail(i);
+                if (!blacklistDetail.isEmpty()) {
+                    font.drawInBatch(blacklistDetail, -font.width(blacklistDetail) / 2.0f, 10, 0xFFFF8888, false,
+                            poseStack.last().pose(), bufferSource, net.minecraft.client.gui.Font.DisplayMode.NORMAL, 0, 15728880);
+                }
+                
                 poseStack.popPose();
             }
         }
+    }
+    
+    private static boolean isPathClearClient(Level level, BlockPos from, BlockPos to) {
+        int dx = to.getX() - from.getX();
+        int dz = to.getZ() - from.getZ();
+        int steps = Math.max(Math.abs(dx), Math.abs(dz));
+        
+        if (steps == 0) return true;
+        
+        for (int i = 1; i <= steps; i++) {
+            int x = from.getX() + (dx * i) / steps;
+            int z = from.getZ() + (dz * i) / steps;
+            BlockPos checkPos = new BlockPos(x, from.getY(), z);
+            
+            net.minecraft.world.level.block.state.BlockState state = level.getBlockState(checkPos);
+            if (!state.isAir() && !state.getCollisionShape(level, checkPos).isEmpty()) {
+                return false;
+            }
+        }
+        
+        return true;
     }
 }

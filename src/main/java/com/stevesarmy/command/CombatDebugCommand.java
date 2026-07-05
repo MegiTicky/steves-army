@@ -192,7 +192,7 @@ public class CombatDebugCommand {
     // ALL
     // ======================================================================
     private static int enableAllDebug(CommandContext<CommandSourceStack> context) {
-        CombatDebugRenderer.setDebugMode(CombatDebugRenderer.DEBUG_MODE_MINIMAL);
+        CombatDebugRenderer.setDebugMode(CombatDebugRenderer.DEBUG_MODE_VERBOSE);
         CoverDebugManager.setShowSoldierCover(true);
         CoverDebugManager.setShowPeekCandidates(true);
         CoverDebugManager.setVisualizationEnabled(true);
@@ -200,11 +200,11 @@ public class CombatDebugCommand {
 
         context.getSource().sendSuccess(() -> Component.literal(
             "=== Steve's Army Debug: ALL ON ===\n" +
-            "  Combat debug overlay: MINIMAL\n" +
+            "  Combat debug overlay: VERBOSE\n" +
             "  Soldier cover visualization: ON\n" +
             "  Peek candidate visualization: ON\n" +
             "  Cover behavior logging: ON\n" +
-            "Use /stevesarmy_debug render mode verbose for arc visualization\n" +
+            "Use /stevesarmy_debug render mode minimal for compact display\n" +
             "Use /stevesarmy_debug log cover off to disable console logs"
         ), true);
         return 1;

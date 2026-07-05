@@ -111,18 +111,18 @@ public class CoverFinder {
     
     public Optional<CoverPoint> findBestCover(LivingEntity soldier, Vec3 threatDirection, 
                                                List<LivingEntity> allThreats, int radius) {
-        List<ScoredCover> all = evaluateAndScoreAll(soldier, threatDirection, allThreats, radius);
+        List<ScoredCover> all = evaluateAndScoreAll(soldier, threatDirection, allThreats, radius, false);
         return all.isEmpty() ? Optional.empty() : Optional.of(all.get(0).cover);
     }
 
     public List<ScoredCover> findTopCovers(LivingEntity soldier, Vec3 threatDirection,
-                                            List<LivingEntity> allThreats, int radius, int count) {
-        List<ScoredCover> all = evaluateAndScoreAll(soldier, threatDirection, allThreats, radius);
+                                            List<LivingEntity> allThreats, int radius, int count, boolean includeReserved) {
+        List<ScoredCover> all = evaluateAndScoreAll(soldier, threatDirection, allThreats, radius, includeReserved);
         return all.subList(0, Math.min(count, all.size()));
     }
 
     private List<ScoredCover> evaluateAndScoreAll(LivingEntity soldier, Vec3 threatDirection,
-                                                   List<LivingEntity> allThreats, int radius) {
+                                                   List<LivingEntity> allThreats, int radius, boolean includeReserved) {
         List<CoverPoint> coverPoints = findCoverPoints(soldier.blockPosition(), radius);
         if (coverPoints.isEmpty()) return Collections.emptyList();
 
@@ -130,7 +130,7 @@ public class CoverFinder {
         CoverQualityEvaluator evaluator = new CoverQualityEvaluator(level);
 
         for (CoverPoint coverPoint : coverPoints) {
-            if (!CoverReservationManager.isAvailable(coverPoint.getPosition())) {
+            if (!includeReserved && !CoverReservationManager.isAvailable(coverPoint.getPosition())) {
                 continue;
             }
             if (primaryThreat != null) {
@@ -142,9 +142,9 @@ public class CoverFinder {
         }
 
         List<ScoredCover> scored = coverPoints.stream()
-            .filter(cp -> CoverReservationManager.isAvailable(cp.getPosition()))
+            .filter(cp -> includeReserved || CoverReservationManager.isAvailable(cp.getPosition()))
             .filter(cp -> cp.getType() != CoverType.NONE)
-            .map(cp -> new ScoredCover(cp, cp.getQuality()))
+            .map(cp -> new ScoredCover(cp, cp.getCombatScore()))
             .sorted(Comparator.comparingDouble((ScoredCover s) -> s.score).reversed())
             .collect(java.util.stream.Collectors.toList());
         return scored;

@@ -6,6 +6,8 @@ import com.stevesarmy.combat.ThreatAwareness;
 import com.stevesarmy.combat.cover.*;
 import com.stevesarmy.entity.SoldierEntity;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.util.Mth;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.phys.HitResult;
@@ -179,6 +181,7 @@ public class PeekController {
 
     private void tryHalfCoverPeek(SoldierEntity soldier, CoverPoint cover) {
         GunIntegration.crawl(soldier, true);
+        lockRotationToCoverWall(soldier, cover, soldier.getTarget());
         List<LivingEntity> potentials = soldier.getCombatGoal().getPotentialTargets();
         LivingEntity target = evaluateHalfCoverTargets(soldier, potentials);
         if (target == null) {
@@ -359,6 +362,7 @@ public class PeekController {
 
         // Half cover: instant return after time
         if (cover.getType() == CoverType.HALF) {
+            lockRotationToCoverWall(soldier, cover, soldier.getTarget());
             if (getTimeInCurrentState() > 200) {
                 completeReturn(soldier, cover);
             }
@@ -387,16 +391,20 @@ public class PeekController {
     private void enterExposed(SoldierEntity soldier, CoverPoint cover) {
         setState(soldier, State.EXPOSED);
         stateStartTime = System.currentTimeMillis();
-        soldier.refreshDimensions();
-
+        
         boolean isHalf = cover.getType() == CoverType.HALF;
-        if (!isHalf) {
+        if (isHalf) {
+            // Half cover: stand up from crawl when peeking
+            GunIntegration.crawl(soldier, false);
+        } else {
             // Full cover: stop movement and navigation
             CoverPositionController mover = (CoverPositionController) soldier.getMoveControl();
             mover.clear();
             soldier.getNavigation().stop();
             soldier.setDeltaMovement(0, soldier.getDeltaMovement().y, 0);
         }
+        
+        soldier.refreshDimensions();
 
         if (CoverTacticalGoal.isDebugLoggingEnabled()) {
             StevesArmyMod.LOGGER.info("[PeekController] Soldier {} state: HIDING -> EXPOSED",
@@ -407,13 +415,19 @@ public class PeekController {
     private void enterReturning(SoldierEntity soldier, CoverPoint cover, CoverPositionController mover) {
         setState(soldier, State.RETURNING_TO_COVER);
         stateStartTime = System.currentTimeMillis();
-        soldier.refreshDimensions();
-
+        
         boolean isHalf = cover.getType() == CoverType.HALF;
-        if (!isHalf) {
+        if (isHalf) {
+            // Half cover: duck back into crawl
+            GunIntegration.crawl(soldier, true);
+            lockRotationToCoverWall(soldier, cover, targetEnemy);
+        } else {
+            // Full cover: start slide movement back to cover position
             coverReturnTarget = CoverTacticalGoal.getCoverStandingPositionStatic(cover.getPosition());
             mover.moveTo(coverReturnTarget, RETURN_TOLERANCE, RETURN_SPEED, "PeekController", "return to cover");
         }
+        
+        soldier.refreshDimensions();
 
         if (CoverTacticalGoal.isDebugLoggingEnabled()) {
             StevesArmyMod.LOGGER.info("[PeekController] Soldier {} state: EXPOSED -> RETURNING_TO_COVER",
@@ -428,9 +442,7 @@ public class PeekController {
         stateStartTime = 0;
         currentPeekPos = null;
         soldier.refreshDimensions();
-        if (cover.getType() == CoverType.HALF) {
-            GunIntegration.crawl(soldier, true);
-        }
+        
         if (CoverTacticalGoal.isDebugLoggingEnabled()) {
             StevesArmyMod.LOGGER.info("[PeekController] Soldier {} state: RETURNING_TO_COVER -> HIDING",
                 soldier.getId());
@@ -500,26 +512,38 @@ public class PeekController {
         if (threatDirection == null || threatDirection.lengthSqr() < 0.001) return null;
 
         BlockPos coverPos = cover.getPosition();
-        Set<net.minecraft.core.Direction> protectedDirs = cover.getProtectedDirections();
-        if (protectedDirs == null || protectedDirs.isEmpty()) return null;
-
+        
         BlockPos bestPeekPos = null;
         LivingEntity bestTarget = null;
         double bestScore = -1;
 
-        for (net.minecraft.core.Direction protectedDir : protectedDirs) {
-            BlockPos peekPos = coverPos.offset(protectedDir.getStepX(), 0, protectedDir.getStepZ());
-            Vec3 peekCenter = peekPos.getCenter();
-            Vec3 peekEye = new Vec3(peekCenter.x, soldier.getY() + 1.62, peekCenter.z);
-
-            for (LivingEntity target : potentials) {
-                Vec3 targetEye = new Vec3(target.getX(), target.getEyeY(), target.getZ());
-                if (hasLineOfSight(soldier, peekEye, targetEye)) {
-                    double score = calculatePeekScore(peekPos, coverPos, threatDirection, target);
-                    if (score > bestScore) {
-                        bestScore = score;
-                        bestPeekPos = peekPos;
-                        bestTarget = target;
+        // Use 5x5 grid search (same as CoverTacticalGoal.computePeekPosition)
+        for (int dx = -2; dx <= 2; dx++) {
+            for (int dz = -2; dz <= 2; dz++) {
+                if (dx == 0 && dz == 0) continue;
+                
+                int distSq = dx * dx + dz * dz;
+                if (distSq > 4) continue;
+                
+                BlockPos peekPos = coverPos.offset(dx, 0, dz);
+                
+                // Check if path from cover to peek position crosses solid blocks
+                if (!isPathClearForPeek(soldier, coverPos, peekPos)) {
+                    continue;
+                }
+                
+                Vec3 peekCenter = peekPos.getCenter();
+                Vec3 peekEye = new Vec3(peekCenter.x, soldier.getY() + 1.62, peekCenter.z);
+                
+                for (LivingEntity target : potentials) {
+                    Vec3 targetEye = new Vec3(target.getX(), target.getEyeY(), target.getZ());
+                    if (hasLineOfSight(soldier, peekEye, targetEye)) {
+                        double score = calculatePeekScore(peekPos, coverPos, threatDirection, target);
+                        if (score > bestScore) {
+                            bestScore = score;
+                            bestPeekPos = peekPos;
+                            bestTarget = target;
+                        }
                     }
                 }
             }
@@ -535,6 +559,27 @@ public class PeekController {
         double distance = Math.sqrt(Math.pow(candidate.getX() - coverPos.getX(), 2) + Math.pow(candidate.getZ() - coverPos.getZ(), 2));
         return alignment * 2.0 - distance * 0.5;
     }
+    
+    private boolean isPathClearForPeek(SoldierEntity soldier, BlockPos from, BlockPos to) {
+        int dx = to.getX() - from.getX();
+        int dz = to.getZ() - from.getZ();
+        int steps = Math.max(Math.abs(dx), Math.abs(dz));
+        
+        if (steps == 0) return true;
+        
+        for (int i = 1; i <= steps; i++) {
+            int x = from.getX() + (dx * i) / steps;
+            int z = from.getZ() + (dz * i) / steps;
+            BlockPos checkPos = new BlockPos(x, from.getY(), z);
+            
+            net.minecraft.world.level.block.state.BlockState state = soldier.level().getBlockState(checkPos);
+            if (!state.isAir() && !state.getCollisionShape(soldier.level(), checkPos).isEmpty()) {
+                return false;
+            }
+        }
+        
+        return true;
+    }
 
     // Simple result wrapper (duplicated from CoverTacticalGoal for independence)
     public static class TargetPeekResult {
@@ -544,5 +589,31 @@ public class PeekController {
             this.target = target;
             this.peekPos = peekPos;
         }
+    }
+    
+    private void lockRotationToCoverWall(SoldierEntity soldier, CoverPoint cover, LivingEntity target) {
+        Set<Direction> protectedDirs = cover.getProtectedDirections();
+        if (protectedDirs.isEmpty()) return;
+        
+        Direction wallDir = protectedDirs.iterator().next();
+        float baseYaw = wallDir.toYRot();
+        
+        float offset = 0.0f;
+        if (target != null && target.isAlive()) {
+            Vec3 toTarget = target.position().subtract(soldier.position()).normalize();
+            float targetAngle = (float) Math.toDegrees(Math.atan2(-toTarget.x, toTarget.z));
+            float angleDiff = Mth.wrapDegrees(targetAngle - baseYaw);
+            
+            if (Math.abs(angleDiff) < 90) {
+                offset = Math.signum(angleDiff) * 15.0f;
+            }
+        }
+        
+        float finalYaw = Mth.wrapDegrees(baseYaw + offset);
+        
+        soldier.setYBodyRot(finalYaw);
+        soldier.setYHeadRot(finalYaw);
+        soldier.yBodyRotO = finalYaw;
+        soldier.yHeadRotO = finalYaw;
     }
 }

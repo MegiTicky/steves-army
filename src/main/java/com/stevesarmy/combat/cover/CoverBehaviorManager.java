@@ -217,6 +217,7 @@ public class CoverBehaviorManager {
         this.peekCountSameCover = 0;
         this.state = CoverState.NO_COVER;
         syncState();
+        soldier.getPeekController().reset();
         soldier.refreshDimensions();
         GunIntegration.crawl(soldier, false);
     }
