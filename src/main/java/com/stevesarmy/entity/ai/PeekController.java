@@ -146,13 +146,15 @@ public class PeekController {
 
         if (soldier.getCoverBehaviorManager().isNonPeekableCover()) {
             nonPeekableTicks++;
-            if (nonPeekableTicks >= NON_PEEKABLE_REPOSITION_TICKS) {
+            LivingEntity target = soldier.getTarget();
+            if (nonPeekableTicks >= NON_PEEKABLE_REPOSITION_TICKS && target != null && target.isAlive()) {
                 if (CoverTacticalGoal.isDebugLoggingEnabled()) {
-                    StevesArmyMod.LOGGER.info("[PeekController] Soldier {} non-peekable for {} ticks, repositioning",
+                    StevesArmyMod.LOGGER.info("[PeekController] Soldier {} non-peekable for {} ticks with target, requesting reposition",
                         soldier.getId(), nonPeekableTicks);
                 }
                 nonPeekableTicks = 0;
                 soldier.getCoverBehaviorManager().setNonPeekableCover(false);
+                soldier.getCoverBehaviorManager().requestReposition();
                 setState(soldier, State.HIDING);
                 return;
             }

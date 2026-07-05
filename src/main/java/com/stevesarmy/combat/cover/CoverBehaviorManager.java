@@ -42,6 +42,7 @@ public class CoverBehaviorManager {
     private int peekCountSameCover = 0;
     private int savedPeekCount = 0;
     private BlockPos savedCoverPosition = null;
+    private boolean repositionRequested = false;
     
     public CoverBehaviorManager(SoldierEntity soldier) {
         this.soldier = soldier;
@@ -380,6 +381,18 @@ public class CoverBehaviorManager {
     
     public void setNonPeekableCover(boolean nonPeekable) {
         this.nonPeekableCover = nonPeekable;
+    }
+    
+    public boolean isRepositionRequested() {
+        return repositionRequested;
+    }
+    
+    public void requestReposition() {
+        this.repositionRequested = true;
+    }
+    
+    public void clearRepositionRequest() {
+        this.repositionRequested = false;
     }
     
     public boolean hasCurrentCover() {

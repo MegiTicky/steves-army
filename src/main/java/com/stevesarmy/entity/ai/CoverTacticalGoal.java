@@ -573,14 +573,15 @@ public class CoverTacticalGoal extends Goal {
 
         if (getCoverManager().getTimeInCover() < MIN_COVER_DWELL_TIME_MS) return;
 
-        // Non-peekable safety net
-        if (getCoverManager().isNonPeekableCover()) {
-            if (nonPeekableTicks >= NON_PEEKABLE_REPOSITION_TICKS * 2) {
-                nonPeekableTicks = 0;
-                getCoverManager().setNonPeekableCover(false);
-                getCoverManager().clearCover();
-                return;
+        // Handle reposition request from PeekController (non-peekable cover)
+        if (getCoverManager().isRepositionRequested()) {
+            if (debugLoggingEnabled) {
+                StevesArmyMod.LOGGER.info("[CoverGoal] Soldier {} reposition requested (non-peekable cover)",
+                    soldier.getId());
             }
+            getCoverManager().clearRepositionRequest();
+            startRepositioning();
+            return;
         }
 
         // Threat direction change
