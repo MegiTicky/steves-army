@@ -101,6 +101,13 @@ public class SoldierEntity extends PathfinderMob implements Container {
         SynchedEntityData.defineId(SoldierEntity.class, EntityDataSerializers.BLOCK_POS);
     private static final EntityDataAccessor<Boolean> CRAWLING =
         SynchedEntityData.defineId(SoldierEntity.class, EntityDataSerializers.BOOLEAN);
+    
+    private static final EntityDataAccessor<Float> THREAT_DIR_X =
+        SynchedEntityData.defineId(SoldierEntity.class, EntityDataSerializers.FLOAT);
+    private static final EntityDataAccessor<Float> THREAT_DIR_Y =
+        SynchedEntityData.defineId(SoldierEntity.class, EntityDataSerializers.FLOAT);
+    private static final EntityDataAccessor<Float> THREAT_DIR_Z =
+        SynchedEntityData.defineId(SoldierEntity.class, EntityDataSerializers.FLOAT);
 
     @Nullable
     private UUID squadId;
@@ -183,6 +190,9 @@ public class SoldierEntity extends PathfinderMob implements Container {
         this.entityData.define(PEEK_STATE, 0);
         this.entityData.define(PEEK_POSITION, BlockPos.ZERO);
         this.entityData.define(CRAWLING, false);
+        this.entityData.define(THREAT_DIR_X, 0f);
+        this.entityData.define(THREAT_DIR_Y, 0f);
+        this.entityData.define(THREAT_DIR_Z, 0f);
     }
 
     @Override
@@ -721,5 +731,28 @@ case HOLD -> {
     
     public ThreatAwareness getThreatAwareness() {
         return threatAwareness;
+    }
+    
+    public void syncThreatDirection(Vec3 direction) {
+        if (direction == null || direction.lengthSqr() < 0.001) {
+            this.entityData.set(THREAT_DIR_X, 0f);
+            this.entityData.set(THREAT_DIR_Y, 0f);
+            this.entityData.set(THREAT_DIR_Z, 0f);
+        } else {
+            Vec3 normalized = direction.normalize();
+            this.entityData.set(THREAT_DIR_X, (float) normalized.x);
+            this.entityData.set(THREAT_DIR_Y, (float) normalized.y);
+            this.entityData.set(THREAT_DIR_Z, (float) normalized.z);
+        }
+    }
+    
+    public Vec3 getSyncedThreatDirection() {
+        float x = this.entityData.get(THREAT_DIR_X);
+        float y = this.entityData.get(THREAT_DIR_Y);
+        float z = this.entityData.get(THREAT_DIR_Z);
+        if (x == 0f && y == 0f && z == 0f) {
+            return null;
+        }
+        return new Vec3(x, y, z);
     }
 }

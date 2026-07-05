@@ -348,7 +348,7 @@ public class ThreatAwareness {
         StevesArmyMod.LOGGER.info("  Active threats: {}", threats.size());
         
         for (ThreatEntry entry : threats) {
-            StevesArmyMod.LOGGER.info("    - Source: {}, Entity: {}, Pos: {}, Weight: {:.2f}", 
+            StevesArmyMod.LOGGER.info("    - Source: {}, Entity: {}, Pos: {}, Weight: {}", 
                 entry.source, 
                 entry.entity != null ? entry.entity.getName().getString() : "null",
                 entry.position,

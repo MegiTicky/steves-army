@@ -112,12 +112,47 @@ public class CoverFinder {
     public Optional<CoverPoint> findBestCover(LivingEntity soldier, Vec3 threatDirection, 
                                                List<LivingEntity> allThreats, int radius) {
         List<ScoredCover> all = evaluateAndScoreAll(soldier, threatDirection, allThreats, radius, false);
-        return all.isEmpty() ? Optional.empty() : Optional.of(all.get(0).cover);
+        
+        if (all.isEmpty()) {
+            return Optional.empty();
+        }
+        
+        // Hard filter: prefer covers that protect from primary threat direction
+        if (threatDirection != null && threatDirection.lengthSqr() > 0.001) {
+            Direction threatDir = getDirectionFromVector(threatDirection);
+            List<ScoredCover> protectedCovers = all.stream()
+                .filter(s -> s.cover.getProtectedDirections().contains(threatDir))
+                .collect(java.util.stream.Collectors.toList());
+            
+            if (!protectedCovers.isEmpty()) {
+                StevesArmyMod.LOGGER.info("[CoverFinder] Selected protected cover: {} (threatDir={}, {} protected covers available)",
+                    protectedCovers.get(0).cover.getPosition(), threatDir, protectedCovers.size());
+                return Optional.of(protectedCovers.get(0).cover);
+            }
+            
+            StevesArmyMod.LOGGER.info("[CoverFinder] No protected covers available for threatDir={}, using best unprotected cover",
+                threatDir);
+        }
+        
+        return Optional.of(all.get(0).cover);
     }
 
     public List<ScoredCover> findTopCovers(LivingEntity soldier, Vec3 threatDirection,
                                             List<LivingEntity> allThreats, int radius, int count, boolean includeReserved) {
         List<ScoredCover> all = evaluateAndScoreAll(soldier, threatDirection, allThreats, radius, includeReserved);
+        
+        // Apply hard filter: prefer protected covers when threat direction exists
+        if (threatDirection != null && threatDirection.lengthSqr() > 0.001) {
+            Direction threatDir = getDirectionFromVector(threatDirection);
+            List<ScoredCover> protectedCovers = all.stream()
+                .filter(s -> s.cover.getProtectedDirections().contains(threatDir))
+                .collect(java.util.stream.Collectors.toList());
+            
+            if (!protectedCovers.isEmpty()) {
+                return protectedCovers.subList(0, Math.min(count, protectedCovers.size()));
+            }
+        }
+        
         return all.subList(0, Math.min(count, all.size()));
     }
 
@@ -141,9 +176,13 @@ public class CoverFinder {
             coverPoint.setCombatScore(score);
         }
 
+        Direction threatDir = threatDirection != null && threatDirection.lengthSqr() > 0.001 
+            ? getDirectionFromVector(threatDirection) : null;
+        
         List<ScoredCover> scored = coverPoints.stream()
             .filter(cp -> includeReserved || CoverReservationManager.isAvailable(cp.getPosition()))
-            .filter(cp -> cp.getType() != CoverType.NONE)
+            .filter(cp -> cp.getType() != CoverType.NONE || 
+                         (threatDir != null && cp.getProtectedDirections().contains(threatDir)))
             .map(cp -> new ScoredCover(cp, cp.getCombatScore()))
             .sorted(Comparator.comparingDouble((ScoredCover s) -> s.score).reversed())
             .collect(java.util.stream.Collectors.toList());
@@ -161,7 +200,7 @@ public class CoverFinder {
     
     private float calculateThreatAwareScore(CoverPoint coverPoint, LivingEntity soldier,
                                             Vec3 threatDirection, List<LivingEntity> allThreats, LivingEntity primaryThreat) {
-        StevesArmyMod.LOGGER.info("[ThreatAwareScore] coverPos={}, threatDirection=({:.2f},{:.2f},{:.2f}), primaryThreat={}",
+        StevesArmyMod.LOGGER.info("[ThreatAwareScore] coverPos={}, threatDirection=({}, {}, {}), primaryThreat={}",
             coverPoint.getPosition(),
             threatDirection != null ? String.format("%.2f", threatDirection.x) : "null",
             threatDirection != null ? String.format("%.2f", threatDirection.y) : "null",
@@ -227,7 +266,7 @@ public class CoverFinder {
         Direction threatDir = getDirectionFromVector(threatDirection);
         boolean isProtected = protectedDirs.contains(threatDir);
         
-        StevesArmyMod.LOGGER.info("[PrimaryProtection] coverPos={}, threatDirection=({:.2f},{:.2f},{:.2f}), threatDir={}, protectedDirs={}, isProtected={}",
+        StevesArmyMod.LOGGER.info("[PrimaryProtection] coverPos={}, threatDirection=({}, {}, {}), threatDir={}, protectedDirs={}, isProtected={}",
             coverPos,
             String.format("%.2f", threatDirection.x),
             String.format("%.2f", threatDirection.y),

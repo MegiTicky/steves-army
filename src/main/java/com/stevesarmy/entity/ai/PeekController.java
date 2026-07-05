@@ -34,7 +34,7 @@ public class PeekController {
     private static final double SUPPRESSION_THRESHOLD_FOR_PROACTIVE = 0.3;
     private static final double PEEK_REACHED_DISTANCE = 0.05;
     private static final double RETURN_REACHED_DISTANCE = 0.5;
-    private static final double PEEK_SPEED = 0.5;
+    private static final double PEEK_SPEED = 0.75;
     private static final double RETURN_TOLERANCE = 0.3;
     private static final double RETURN_SPEED = 1.0;
     private static final int NON_PEEKABLE_REPOSITION_TICKS = 60;

@@ -721,6 +721,45 @@ public class CoverDebugRenderer {
                 buffer.vertex(matrix, (float)soldierRelX, (float)(soldierRelY - 0.3), (float)soldierRelZ).color(255, 100, 0, a).endVertex();
                 buffer.vertex(matrix, (float)targetRelX, (float)(targetRelY - 0.3), (float)targetRelZ).color(255, 100, 0, a).endVertex();
             }
+            
+            // Render threat direction as a bold arrow (multiple parallel lines)
+            // Render threat direction using synced data from ThreatAwareness
+            Vec3 threatDir = soldier.getSyncedThreatDirection();
+            
+            if (threatDir != null) {
+                double arrowLength = 2.5;
+                double arrowHeadSize = 0.3;
+                
+                // Arrow end point
+                double arrowEndX = soldierRelX + threatDir.x * arrowLength;
+                double arrowEndY = soldierRelY + threatDir.y * arrowLength;
+                double arrowEndZ = soldierRelZ + threatDir.z * arrowLength;
+                
+                // Bold arrow - draw multiple parallel lines (3 offsets)
+                int tr = 255, tg = 50, tb = 255; // Magenta/pink color for threat direction
+                int ta = 255;
+                
+                // Draw 3 parallel lines for bold effect
+                for (double offset : new double[]{0.0, 0.02, -0.02}) {
+                    buffer.vertex(matrix, (float)(soldierRelX + offset), (float)(soldierRelY + offset), (float)(soldierRelZ + offset)).color(tr, tg, tb, ta).endVertex();
+                    buffer.vertex(matrix, (float)(arrowEndX + offset), (float)(arrowEndY + offset), (float)(arrowEndZ + offset)).color(tr, tg, tb, ta).endVertex();
+                }
+                
+                // Arrow head (perpendicular lines at the tip)
+                // Compute perpendicular direction (in horizontal plane)
+                double perpX = -threatDir.z;
+                double perpZ = threatDir.x;
+                
+                // Arrow head lines (forming a V)
+                double headBaseX = arrowEndX - threatDir.x * arrowHeadSize;
+                double headBaseZ = arrowEndZ - threatDir.z * arrowHeadSize;
+                
+                buffer.vertex(matrix, (float)headBaseX, (float)arrowEndY, (float)headBaseZ).color(tr, tg, tb, ta).endVertex();
+                buffer.vertex(matrix, (float)(headBaseX + perpX * arrowHeadSize), (float)arrowEndY, (float)(headBaseZ + perpZ * arrowHeadSize)).color(tr, tg, tb, ta).endVertex();
+                
+                buffer.vertex(matrix, (float)headBaseX, (float)arrowEndY, (float)headBaseZ).color(tr, tg, tb, ta).endVertex();
+                buffer.vertex(matrix, (float)(headBaseX - perpX * arrowHeadSize), (float)arrowEndY, (float)(headBaseZ - perpZ * arrowHeadSize)).color(tr, tg, tb, ta).endVertex();
+            }
         }
     }
     
