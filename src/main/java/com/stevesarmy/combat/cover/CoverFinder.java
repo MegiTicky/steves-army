@@ -379,17 +379,34 @@ public class CoverFinder {
             debug.append("    -> ").append(peekPos).append(": valid position\n");
             
             boolean losOk = true;
+            float coneCoverageScore = 1.0f;
+            
             if (primaryThreat != null && primaryThreat.isAlive()) {
+                // Try direct LOS to entity first
                 Vec3 peekEye = new Vec3(peekPos.getX() + 0.5, peekPos.getY() + 1.62, peekPos.getZ() + 0.5);
                 Vec3 targetEye = new Vec3(primaryThreat.getX(), primaryThreat.getEyeY(), primaryThreat.getZ());
                 losOk = hasLineOfSight(peekEye, targetEye);
-                debug.append("    LOS check from=").append(String.format("%.1f,%.1f,%.1f", peekEye.x, peekEye.y, peekEye.z))
-                    .append(" to=").append(String.format("%.1f,%.1f,%.1f", targetEye.x, targetEye.y, targetEye.z))
-                    .append(" result=").append(losOk)
-                    .append("\n");
-                if (!losOk) continue;
+                debug.append("    Direct LOS to entity: ").append(losOk ? "SUCCESS" : "FAILED").append("\n");
+                
+                if (!losOk) {
+                    // Direct LOS failed - fallback to cone raycast to find openings
+                    debug.append("    Falling back to cone raycast...\n");
+                    coneCoverageScore = calculateConeCoverage(peekPos, threatDirection, debug);
+                    if (coneCoverageScore <= 0.01f) {
+                        debug.append("    Cone raycast: NO OPENING FOUND, skipping this peek direction\n");
+                        continue;
+                    }
+                    debug.append("    Cone raycast found opening, coverage=").append(String.format("%.2f", coneCoverageScore)).append("\n");
+                }
             } else {
-                debug.append("    No primaryThreat, skipping LOS check\n");
+                // No primaryThreat entity - always use cone raycast
+                debug.append("    No entity target, using cone raycast...\n");
+                coneCoverageScore = calculateConeCoverage(peekPos, threatDirection, debug);
+                if (coneCoverageScore <= 0.01f) {
+                    debug.append("    Cone raycast: NO OPENING FOUND, skipping this peek direction\n");
+                    continue;
+                }
+                debug.append("    Cone raycast: coverage=").append(String.format("%.2f", coneCoverageScore)).append("\n");
             }
             
             Vec3 peekCenter = peekPos.getCenter();
@@ -409,9 +426,12 @@ public class CoverFinder {
                 .append("\n");
             
             if (angleBetween >= 45 && angleBetween <= 135) {
-                float score = 1.0f - (float)Math.abs(angleBetween - 90) / 90;
-                bestPeekScore = Math.max(bestPeekScore, score);
-                debug.append("    -> SCORED ").append(String.format("%.3f", score)).append("\n");
+                float angleScore = 1.0f - (float)Math.abs(angleBetween - 90) / 90;
+                float finalScore = angleScore * coneCoverageScore;
+                bestPeekScore = Math.max(bestPeekScore, finalScore);
+                debug.append("    -> SCORED ").append(String.format("%.3f", finalScore))
+                    .append(" (angle=").append(String.format("%.3f", angleScore))
+                    .append(" * cone=").append(String.format("%.3f", coneCoverageScore)).append(")\n");
             }
         }
         
@@ -462,6 +482,105 @@ return qualityScore + shootBonus - distancePenalty;
             null
         );
         return level.clip(context).getType() == HitResult.Type.MISS;
+    }
+    
+    /**
+     * Calculates how much of a cone has clear line-of-sight from peek position toward threat direction.
+     * Returns a score from 0.0 (no opening) to 1.0 (full cone coverage).
+     * Uses "area covered" approach - measures how far each ray travels before hitting a block,
+     * then normalizes by expected distance.
+     */
+    private float calculateConeCoverage(BlockPos peekPos, Vec3 threatDirection, StringBuilder debug) {
+        final int RAY_COUNT = 7;  // Odd number for symmetric distribution
+        final double CONE_HALF_ANGLE_DEG = 30.0;
+        final double MAX_RAY_DISTANCE = 20.0;
+        final double MIN_OPENING_DISTANCE = 5.0;
+        
+        Vec3 peekEye = new Vec3(peekPos.getX() + 0.5, peekPos.getY() + 1.62, peekPos.getZ() + 0.5);
+        Vec3 threatDir = threatDirection.normalize();
+        
+        double totalCoverage = 0.0;
+        int validRays = 0;
+        
+        debug.append("    Cone raycast from ").append(String.format("%.1f,%.1f,%.1f", peekEye.x, peekEye.y, peekEye.z))
+            .append(" toward threat\n");
+        
+        for (int i = 0; i < RAY_COUNT; i++) {
+            // Calculate angle for this ray (symmetric around center)
+            double angleOffset = -CONE_HALF_ANGLE_DEG + (2.0 * CONE_HALF_ANGLE_DEG * i / (RAY_COUNT - 1));
+            
+            Vec3 rayDir = rotateVectorY(threatDir, angleOffset);
+            double distance = raycastDistance(peekEye, rayDir, MAX_RAY_DISTANCE);
+            
+            // Normalize distance: 0 = blocked immediately, 1 = traveled full distance
+            double normalizedDistance = distance / MAX_RAY_DISTANCE;
+            
+            // Only count rays that travel at least MIN_OPENING_DISTANCE
+            if (distance >= MIN_OPENING_DISTANCE) {
+                totalCoverage += normalizedDistance;
+                validRays++;
+            }
+            
+            debug.append("      ray ").append(i)
+                .append(" angle=").append(String.format("%.1f°", angleOffset))
+                .append(" dist=").append(String.format("%.1f", distance))
+                .append(" norm=").append(String.format("%.2f", normalizedDistance))
+                .append(" valid=").append(distance >= MIN_OPENING_DISTANCE)
+                .append("\n");
+        }
+        
+        // Score = average coverage of valid rays, weighted by how many rays found openings
+        if (validRays == 0) {
+            return 0.0f;
+        }
+        
+        float avgCoverage = (float) (totalCoverage / validRays);
+        float validRatio = (float) validRays / RAY_COUNT;
+        
+        // Final score: balance between coverage quality and how many rays found openings
+        float score = avgCoverage * validRatio;
+        
+        debug.append("      RESULT: avgCoverage=").append(String.format("%.2f", avgCoverage))
+            .append(" validRatio=").append(String.format("%.2f", validRatio))
+            .append(" score=").append(String.format("%.2f", score)).append("\n");
+        
+        return score;
+    }
+    
+    /**
+     * Rotates a vector around the Y axis by the given angle (in degrees).
+     */
+    private Vec3 rotateVectorY(Vec3 vec, double angleDeg) {
+        double angleRad = Math.toRadians(angleDeg);
+        double cos = Math.cos(angleRad);
+        double sin = Math.sin(angleRad);
+        
+        double x = vec.x * cos - vec.z * sin;
+        double z = vec.x * sin + vec.z * cos;
+        
+        return new Vec3(x, vec.y, z).normalize();
+    }
+    
+    /**
+     * Casts a ray and returns how far it travels before hitting a solid block.
+     */
+    private double raycastDistance(Vec3 start, Vec3 direction, double maxDistance) {
+        Vec3 end = start.add(direction.scale(maxDistance));
+        
+        ClipContext context = new ClipContext(
+            start, end,
+            ClipContext.Block.COLLIDER,
+            ClipContext.Fluid.NONE,
+            null
+        );
+        
+        net.minecraft.world.phys.BlockHitResult result = level.clip(context);
+        
+        if (result.getType() == HitResult.Type.MISS) {
+            return maxDistance;
+        }
+        
+        return start.distanceTo(result.getLocation());
     }
 
     private double calculateThreatAwareScore(CoverPoint coverPoint, BlockPos soldierPos, LivingEntity threat, Vec3 threatDirection) {

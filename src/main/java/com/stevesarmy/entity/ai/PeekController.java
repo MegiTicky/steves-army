@@ -469,7 +469,15 @@ public class PeekController {
         CoverPositionController.MovementResult result = mover.getLastResult();
 
         if (result == CoverPositionController.MovementResult.REACHED_TARGET) {
-            // Check LOS from peek position
+            if (isProactivePeek) {
+                if (CoverTacticalGoal.isDebugLoggingEnabled()) {
+                    StevesArmyMod.LOGGER.info("[PeekController] Soldier {} proactive peek slide done, exposing",
+                        soldier.getId());
+                }
+                enterExposed(soldier, cover);
+                return;
+            }
+            
             if (currentPeekPos == null || targetEnemy == null || !targetEnemy.isAlive()) {
                 enterReturning(soldier, cover, mover);
                 return;
@@ -499,7 +507,6 @@ public class PeekController {
             setState(soldier, State.HIDING);
             stateStartTime = 0;
         }
-        // IN_PROGRESS — wait
     }
 
     private void tickExposed(SoldierEntity soldier, CoverPoint cover, CoverPositionController mover) {
