@@ -745,6 +745,14 @@ public class CoverTacticalGoal extends Goal {
 
         Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
         List<LivingEntity> threats = getThreatList();
+        
+        StevesArmyMod.LOGGER.info("[CoverGoal] Soldier {} finding cover: soldierPos={}, threatDirection=({:.2f},{:.2f},{:.2f}), threats={}",
+            soldier.getId(),
+            soldier.blockPosition(),
+            threatDirection != null ? String.format("%.2f", threatDirection.x) : "null",
+            threatDirection != null ? String.format("%.2f", threatDirection.y) : "null",
+            threatDirection != null ? String.format("%.2f", threatDirection.z) : "null",
+            threats.size());
 
         CoverPoint currentCover = getCoverManager().getCurrentCover();
 

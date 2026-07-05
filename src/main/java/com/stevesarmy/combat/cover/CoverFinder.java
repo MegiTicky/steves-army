@@ -161,6 +161,13 @@ public class CoverFinder {
     
     private float calculateThreatAwareScore(CoverPoint coverPoint, LivingEntity soldier,
                                             Vec3 threatDirection, List<LivingEntity> allThreats, LivingEntity primaryThreat) {
+        StevesArmyMod.LOGGER.info("[ThreatAwareScore] coverPos={}, threatDirection=({:.2f},{:.2f},{:.2f}), primaryThreat={}",
+            coverPoint.getPosition(),
+            threatDirection != null ? String.format("%.2f", threatDirection.x) : "null",
+            threatDirection != null ? String.format("%.2f", threatDirection.y) : "null",
+            threatDirection != null ? String.format("%.2f", threatDirection.z) : "null",
+            primaryThreat != null ? primaryThreat.blockPosition() : "null");
+        
         float primaryProtection = calculatePrimaryProtection(coverPoint, threatDirection);
         
         float flankingProtection = calculateFlankingProtection(coverPoint, allThreats);
@@ -220,6 +227,15 @@ public class CoverFinder {
         Direction threatDir = getDirectionFromVector(threatDirection);
         boolean isProtected = protectedDirs.contains(threatDir);
         
+        StevesArmyMod.LOGGER.info("[PrimaryProtection] coverPos={}, threatDirection=({:.2f},{:.2f},{:.2f}), threatDir={}, protectedDirs={}, isProtected={}",
+            coverPos,
+            String.format("%.2f", threatDirection.x),
+            String.format("%.2f", threatDirection.y),
+            String.format("%.2f", threatDirection.z),
+            threatDir,
+            protectedDirs,
+            isProtected);
+        
         if (isProtected) {
             return coverPoint.getQuality();
         }
@@ -244,7 +260,7 @@ public class CoverFinder {
             Vec3 toThreat = threat.position().subtract(coverPoint.getPosition().getCenter());
             Direction threatDir = getDirectionFromVector(toThreat);
             
-            if (protectedDirs.contains(threatDir.getOpposite())) {
+            if (protectedDirs.contains(threatDir)) {
                 protectedCount++;
             }
         }
