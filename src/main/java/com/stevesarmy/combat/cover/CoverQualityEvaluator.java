@@ -17,8 +17,9 @@ import java.util.Set;
 
 public class CoverQualityEvaluator {
     private static final double SOLDIER_STANDING_HEIGHT = 1.8;
-    private static final double SOLDIER_CROUCHING_HEIGHT = 1.5;
+    private static final double SOLDIER_CRAWLING_HEIGHT = 0.8;
     private static final double SOLDIER_WIDTH = 0.6;
+    private static final double SOLDIER_CRAWL_WIDTH = 0.6;
     
     private final Level level;
     
@@ -35,14 +36,14 @@ public class CoverQualityEvaluator {
         Vec3 threatEye = threat.getEyePosition();
         
         List<Vec3> standingTestPoints = generateTestPoints(pos, SOLDIER_STANDING_HEIGHT);
-        List<Vec3> crouchingTestPoints = generateTestPoints(pos, SOLDIER_CROUCHING_HEIGHT);
+        List<Vec3> crawlTestPoints = generateCrawlTestPoints(pos);
         
         int standingBlocked = 0;
-        int crouchingBlocked = 0;
+        int crawlBlocked = 0;
         
         StringBuilder rayDebug = new StringBuilder();
         rayDebug.append("Threat eye: ").append(String.format("%.1f,%.1f,%.1f", threatEye.x, threatEye.y, threatEye.z)).append("\n");
-        rayDebug.append("Standing rays (height 1.8m):\n");
+        rayDebug.append("Standing rays (height 1.8m, 8 points):\n");
         
         for (int i = 0; i < standingTestPoints.size(); i++) {
             Vec3 testPoint = standingTestPoints.get(i);
@@ -52,33 +53,33 @@ public class CoverQualityEvaluator {
                     .append(" -> ").append(blocked ? "BLOCKED" : "CLEAR").append("\n");
         }
         
-        rayDebug.append("Crouching rays (height 1.5m):\n");
-        for (int i = 0; i < crouchingTestPoints.size(); i++) {
-            Vec3 testPoint = crouchingTestPoints.get(i);
+        rayDebug.append("Crawl rays (height 0.4m, 4 points at corners):\n");
+        for (int i = 0; i < crawlTestPoints.size(); i++) {
+            Vec3 testPoint = crawlTestPoints.get(i);
             boolean blocked = isRayBlockedBySolidBlock(threatEye, testPoint);
-            if (blocked) crouchingBlocked++;
+            if (blocked) crawlBlocked++;
             rayDebug.append("  [").append(i).append("] y=").append(String.format("%.2f", testPoint.y))
                     .append(" -> ").append(blocked ? "BLOCKED" : "CLEAR").append("\n");
         }
         
-        float standingProtection = (float) standingBlocked / standingTestPoints.size();
-        float crouchingProtection = (float) crouchingBlocked / crouchingTestPoints.size();
-        
         boolean canShoot = canShootAtTarget(coverPoint, threat);
         coverPoint.setCanShootFrom(canShoot);
         
-        CoverType type = determineTypeFromRaycast(standingProtection, crouchingProtection);
+        CoverType type = determineTypeFromRaycast(standingBlocked, crawlBlocked, standingTestPoints.size(), crawlTestPoints.size());
         coverPoint.setType(type);
         
-        float quality = calculateQualityFromProtection(standingProtection, crouchingProtection, canShoot);
+        float standingProtection = (float) standingBlocked / standingTestPoints.size();
+        float crawlProtection = (float) crawlBlocked / crawlTestPoints.size();
+        
+        float quality = calculateQualityFromProtection(standingProtection, crawlProtection, canShoot);
         coverPoint.setQuality(quality);
         
-        float coverHeight = estimateCoverHeightFromProtection(standingProtection, crouchingProtection);
+        float coverHeight = estimateCoverHeightFromProtection(standingBlocked, crawlBlocked, standingTestPoints.size(), crawlTestPoints.size());
         coverPoint.setCoverHeight(coverHeight);
         
-        coverPoint.setDebugInfo(String.format("Stand: %d/8 (%.0f%%) | Crouch: %d/8 (%.0f%%) | Type: %s | Shoot: %s\n%s",
+        coverPoint.setDebugInfo(String.format("Stand: %d/8 (%.0f%%) | Crawl: %d/4 (%.0f%%) | Type: %s | Shoot: %s\n%s",
             standingBlocked, standingProtection * 100,
-            crouchingBlocked, crouchingProtection * 100,
+            crawlBlocked, crawlProtection * 100,
             type, canShoot ? "YES" : "NO",
             rayDebug.toString()));
         
@@ -107,6 +108,26 @@ public class CoverQualityEvaluator {
         points.add(new Vec3(baseX + halfWidth, upperY, baseZ));
         points.add(new Vec3(baseX - halfWidth, headY, baseZ));
         points.add(new Vec3(baseX + halfWidth, headY, baseZ));
+        
+        return points;
+    }
+    
+    private List<Vec3> generateCrawlTestPoints(BlockPos pos) {
+        List<Vec3> points = new ArrayList<>();
+        
+        double baseX = pos.getX() + 0.5;
+        double baseY = pos.getY();
+        double baseZ = pos.getZ() + 0.5;
+        
+        double crawlBodyCenterY = baseY + SOLDIER_CRAWLING_HEIGHT / 2.0;
+        
+        double halfWidth = SOLDIER_CRAWL_WIDTH * 0.45;
+        double halfLength = SOLDIER_CRAWL_WIDTH * 0.45;
+        
+        points.add(new Vec3(baseX - halfWidth, crawlBodyCenterY, baseZ - halfLength));
+        points.add(new Vec3(baseX + halfWidth, crawlBodyCenterY, baseZ - halfLength));
+        points.add(new Vec3(baseX - halfWidth, crawlBodyCenterY, baseZ + halfLength));
+        points.add(new Vec3(baseX + halfWidth, crawlBodyCenterY, baseZ + halfLength));
         
         return points;
     }
@@ -256,43 +277,43 @@ public class CoverQualityEvaluator {
                (head.isAir() || head.getCollisionShape(level, pos.above()).isEmpty());
     }
     
-    private CoverType determineTypeFromRaycast(float standingProtection, float crouchingProtection) {
-        if (standingProtection >= 0.85f || crouchingProtection >= 0.85f) {
+    private CoverType determineTypeFromRaycast(int standingBlocked, int crawlBlocked, int standingTotal, int crawlTotal) {
+        if (standingBlocked == standingTotal) {
             return CoverType.FULL;
         }
         
-        if (crouchingProtection >= 0.4f) {
+        if (crawlBlocked == crawlTotal) {
             return CoverType.HALF;
         }
         
-        if (standingProtection > 0.25f || crouchingProtection > 0.25f) {
+        if (standingBlocked > standingTotal / 4 || crawlBlocked > crawlTotal / 2) {
             return CoverType.CONCEALMENT;
         }
         
         return CoverType.NONE;
     }
     
-    private float calculateQualityFromProtection(float standingProtection, float crouchingProtection, boolean canShoot) {
-        float baseQuality = Math.max(standingProtection, crouchingProtection);
+    private float calculateQualityFromProtection(float standingProtection, float crawlProtection, boolean canShoot) {
+        float baseQuality = Math.max(standingProtection, crawlProtection);
         
         float shootBonus = canShoot ? 0.15f : 0.0f;
         
         float stanceBonus = 0.0f;
-        if (crouchingProtection > standingProtection + 0.2f) {
+        if (crawlProtection > standingProtection + 0.2f) {
             stanceBonus = 0.1f;
         }
         
         return Math.min(1.0f, baseQuality + shootBonus + stanceBonus);
     }
     
-    private float estimateCoverHeightFromProtection(float standingProtection, float crouchingProtection) {
-        if (standingProtection >= 0.85f || crouchingProtection >= 0.85f) {
+    private float estimateCoverHeightFromProtection(int standingBlocked, int crawlBlocked, int standingTotal, int crawlTotal) {
+        if (standingBlocked == standingTotal) {
             return 2.0f;
         }
-        if (crouchingProtection >= 0.4f) {
+        if (crawlBlocked == crawlTotal) {
             return 1.0f;
         }
-        if (crouchingProtection > 0.25f || standingProtection > 0.25f) {
+        if (standingBlocked > standingTotal / 4 || crawlBlocked > crawlTotal / 2) {
             return 0.5f;
         }
         return 0.0f;
@@ -307,30 +328,28 @@ public class CoverQualityEvaluator {
         Vec3 threatEye = threat != null ? threat.getEyePosition() : 
             coverPos.getCenter().add(threatDirection.scale(10));
         
-        Vec3 coverCenter = coverPos.getCenter();
-        List<Vec3> crouchingTestPoints = generateTestPoints(coverPos, SOLDIER_CROUCHING_HEIGHT);
+        List<Vec3> crawlTestPoints = generateCrawlTestPoints(coverPos);
         
         int blocked = 0;
-        for (Vec3 testPoint : crouchingTestPoints) {
+        for (Vec3 testPoint : crawlTestPoints) {
             if (isRayBlockedBySolidBlock(threatEye, testPoint)) {
                 blocked++;
             }
         }
         
-        float protection = (float) blocked / crouchingTestPoints.size();
-        return protection >= 0.4f;
+        return blocked == crawlTestPoints.size();
     }
     
     public float evaluateProtectionFromDirection(BlockPos coverPos, Vec3 threatEye) {
-        List<Vec3> crouchingTestPoints = generateTestPoints(coverPos, SOLDIER_CROUCHING_HEIGHT);
+        List<Vec3> crawlTestPoints = generateCrawlTestPoints(coverPos);
         
         int blocked = 0;
-        for (Vec3 testPoint : crouchingTestPoints) {
+        for (Vec3 testPoint : crawlTestPoints) {
             if (isRayBlockedBySolidBlock(threatEye, testPoint)) {
                 blocked++;
             }
         }
         
-        return (float) blocked / crouchingTestPoints.size();
+        return (float) blocked / crawlTestPoints.size();
     }
 }
