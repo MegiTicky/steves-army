@@ -152,6 +152,9 @@ public class CoverBehaviorManager {
             this.coverEntryTime = System.currentTimeMillis();
             this.lastCoverQuality = cover.getCombatScore();
             this.entryThreatDirection = soldier.getThreatAwareness().getPrimaryDirection(soldier.position());
+            
+            soldier.getThreatAwareness().setCoverFacingDirectionFromCover(cover.getProtectedDirections());
+            
             boolean samePosition = (oldCover != null && cover.getPosition().equals(oldCover.getPosition()))
                 || (oldCover == null && savedCoverPosition != null && cover.getPosition().equals(savedCoverPosition));
             if (samePosition) {
@@ -217,6 +220,8 @@ public class CoverBehaviorManager {
         this.peekCountSameCover = 0;
         this.state = CoverState.NO_COVER;
         syncState();
+        
+        soldier.getThreatAwareness().clearCoverFacingDirection();
         soldier.getPeekController().reset();
         soldier.refreshDimensions();
         GunIntegration.crawl(soldier, false);

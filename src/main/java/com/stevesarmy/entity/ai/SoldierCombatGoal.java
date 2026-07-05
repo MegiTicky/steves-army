@@ -206,7 +206,7 @@ public class SoldierCombatGoal extends Goal {
         ThreatAwareness threats = soldier.getThreatAwareness();
         for (LivingEntity potential : potentialTargets) {
             if (detectionSystem.isTargetDetected(potential)) {
-                threats.onEntityDetected(potential);
+                threats.onEntityDetected(potential, soldier.position());
             }
         }
         
@@ -678,7 +678,7 @@ private void tickCoverPeekCycle(CoverBehaviorManager coverManager) {
             if (forcedEntity.isPresent()) {
                 this.target = forcedEntity.get();
                 soldier.setTarget(target);
-                threats.onEntityDetected(target);
+                threats.onEntityDetected(target, soldier.position());
                 threatTracker.reportThreatDirect(target);
                 detectionSystem.forceDetect(target);
                 soldier.clearForcedTarget();
@@ -702,7 +702,7 @@ private void tickCoverPeekCycle(CoverBehaviorManager coverManager) {
             if (pingTarget.isPresent()) {
                 this.target = pingTarget.get();
                 soldier.setTarget(target);
-                threats.onEntityDetected(target);
+                threats.onEntityDetected(target, soldier.position());
                 threatTracker.reportThreatDirect(target);
                 detectionSystem.forceDetect(target);
                 soldier.clearPingThreatPos();
@@ -728,7 +728,7 @@ private void tickCoverPeekCycle(CoverBehaviorManager coverManager) {
             if (best.isPresent()) {
                 this.target = best.get();
                 soldier.setTarget(target);
-                threats.onEntityDetected(target);
+                threats.onEntityDetected(target, soldier.position());
                 threatTracker.reportThreatDirect(target);
                 detectionSystem.forceDetect(target);
                 if (isDebugLogging()) {
@@ -739,7 +739,7 @@ private void tickCoverPeekCycle(CoverBehaviorManager coverManager) {
             
             this.target = losTargets.get(0);
             soldier.setTarget(target);
-            threats.onEntityDetected(target);
+            threats.onEntityDetected(target, soldier.position());
             threatTracker.reportThreatDirect(target);
             if (isDebugLogging()) {
                 StevesArmyMod.LOGGER.info("[CombatGoal] Acquired nearest LOS target: {}", target.getName().getString());
@@ -759,7 +759,7 @@ private void tickCoverPeekCycle(CoverBehaviorManager coverManager) {
                 if (threatDirTarget.isPresent()) {
                     this.target = threatDirTarget.get();
                     soldier.setTarget(target);
-                    threats.onEntityDetected(target);
+                    threats.onEntityDetected(target, soldier.position());
                     threatTracker.reportThreatDirect(target);
                     if (isDebugLogging()) {
                         StevesArmyMod.LOGGER.info("[CombatGoal] Acquired threat-direction target (cover fallback): {}", 
@@ -779,7 +779,7 @@ private void tickCoverPeekCycle(CoverBehaviorManager coverManager) {
                 if (nearLastKnown.isPresent()) {
                     this.target = nearLastKnown.get();
                     soldier.setTarget(target);
-                    threats.onEntityDetected(target);
+                    threats.onEntityDetected(target, soldier.position());
                     threatTracker.reportThreatDirect(target);
                     if (isDebugLogging()) {
                         StevesArmyMod.LOGGER.info("[CombatGoal] Acquired target near last known position (cover fallback): {}", 
@@ -795,7 +795,7 @@ private void tickCoverPeekCycle(CoverBehaviorManager coverManager) {
             if (closest.isPresent()) {
                 this.target = closest.get();
                 soldier.setTarget(target);
-                threats.onEntityDetected(target);
+                threats.onEntityDetected(target, soldier.position());
                 threatTracker.reportThreatDirect(target);
                 if (isDebugLogging()) {
                     StevesArmyMod.LOGGER.info("[CombatGoal] Acquired closest target (cover fallback): {}", 

@@ -212,12 +212,27 @@ public class PeekController {
             return false;
         }
 
-        Vec3 threatDir = soldier.getThreatAwareness().getPrimaryDirection(soldier.position());
+        Vec3 threatDir = soldier.getThreatAwareness().getThreatDirectionForProactivePeek(soldier.position());
         return threatDir != null && threatDir.lengthSqr() > 0.001;
     }
 
     private void tryProactiveHalfCoverPeek(SoldierEntity soldier, CoverPoint cover) {
-        Vec3 threatDir = soldier.getThreatAwareness().getPrimaryDirection(soldier.position());
+        Vec3 threatDir = soldier.getThreatAwareness().getThreatDirectionForProactivePeek(soldier.position());
+        
+        if (CoverTacticalGoal.isDebugLoggingEnabled()) {
+            StevesArmyMod.LOGGER.info("[PeekController] Soldier {} proactive half-cover peek: threatDir={}",
+                soldier.getId(), 
+                threatDir != null ? String.format("%.2f,%.2f,%.2f", threatDir.x, threatDir.y, threatDir.z) : "null");
+        }
+        
+        if (threatDir == null || threatDir.lengthSqr() <= 0.001) {
+            if (CoverTacticalGoal.isDebugLoggingEnabled()) {
+                StevesArmyMod.LOGGER.info("[PeekController] Soldier {} no threat direction, skipping proactive peek",
+                    soldier.getId());
+            }
+            return;
+        }
+        
         preAimToward(soldier, threatDir);
         
         List<LivingEntity> potentials = soldier.getCombatGoal().getPotentialTargets();
@@ -250,10 +265,23 @@ public class PeekController {
     }
 
     private void tryProactiveFullCoverPeek(SoldierEntity soldier, CoverPoint cover, CoverPositionController mover) {
-        Vec3 threatDir = soldier.getThreatAwareness().getPrimaryDirection(soldier.position());
+        Vec3 threatDir = soldier.getThreatAwareness().getThreatDirectionForProactivePeek(soldier.position());
+        
+        if (CoverTacticalGoal.isDebugLoggingEnabled()) {
+            StevesArmyMod.LOGGER.info("[PeekController] Soldier {} proactive full-cover peek attempt: threatDir={}",
+                soldier.getId(), 
+                threatDir != null ? String.format("%.2f,%.2f,%.2f", threatDir.x, threatDir.y, threatDir.z) : "null");
+        }
+        
         if (threatDir == null || threatDir.lengthSqr() <= 0.001) {
+            if (CoverTacticalGoal.isDebugLoggingEnabled()) {
+                StevesArmyMod.LOGGER.info("[PeekController] Soldier {} no threat direction, skipping proactive peek",
+                    soldier.getId());
+            }
             return;
         }
+        
+        soldier.getThreatAwareness().setSoldierPosReference(soldier.position());
         
         preAimToward(soldier, threatDir);
         

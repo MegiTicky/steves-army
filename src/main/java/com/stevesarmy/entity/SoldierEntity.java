@@ -43,6 +43,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.LevelAccessor;
 import net.minecraft.world.damagesource.DamageSource;
+import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.common.capabilities.Capability;
 import net.minecraftforge.common.capabilities.ForgeCapabilities;
 import net.minecraftforge.common.util.LazyOptional;
@@ -459,6 +460,9 @@ public class SoldierEntity extends PathfinderMob implements Container {
             
             if (source.getEntity() instanceof LivingEntity attacker && attacker != this) {
                 coverBehaviorManager.onIncomingFire(attacker);
+                
+                Vec3 toAttacker = attacker.position().subtract(this.position()).normalize();
+                threatAwareness.setPersistentThreatDirection(toAttacker);
             }
         }
         
