@@ -363,12 +363,12 @@ public class CoverFinder {
         debug.append("calculatePeekAngleScore for ").append(coverPos).append(" protectedDirs=").append(protectedDirs).append(":\n");
         
         for (Direction peekDir : Direction.Plane.HORIZONTAL) {
-            if (!protectedDirs.contains(peekDir)) {
-                debug.append("  ").append(peekDir).append(": not protected (no wall to peek around)\n");
+            if (protectedDirs.contains(peekDir)) {
+                debug.append("  ").append(peekDir).append(": protected (wall blocks this direction)\n");
                 continue;
             }
             
-            debug.append("  ").append(peekDir).append(": IS PROTECTED, checking...\n");
+            debug.append("  ").append(peekDir).append(": NOT protected, checking...\n");
             
             BlockPos peekPos = coverPos.relative(peekDir);
             if (!isValidPeekPosition(peekPos)) {
