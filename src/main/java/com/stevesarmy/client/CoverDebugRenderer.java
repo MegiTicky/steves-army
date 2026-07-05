@@ -614,100 +614,129 @@ public class CoverDebugRenderer {
                 : com.stevesarmy.combat.cover.CoverType.NONE;
             
             if (state == CoverBehaviorManager.CoverState.IN_COVER && !currentPos.equals(BlockPos.ZERO) && coverType == com.stevesarmy.combat.cover.CoverType.FULL) {
-                // Find target entity on client side
-                LivingEntity losTarget = soldier.getTarget();
-                if (losTarget == null) {
-                    double searchRange = 20.0;
-                    for (net.minecraft.world.entity.LivingEntity entity : level.getEntitiesOfClass(
-                            net.minecraft.world.entity.LivingEntity.class,
-                            soldier.getBoundingBox().inflate(searchRange))) {
-                        if (entity != soldier && entity.isAlive() &&
-                            entity.getType() == com.stevesarmy.registry.ModEntities.TARGET.get()) {
-                            losTarget = entity;
-                            break;
-                        }
-                    }
+                BlockPos coverPos = currentPos;
+                
+                // Get protected directions from synced data
+                java.util.Set<net.minecraft.core.Direction> protectedDirs = null;
+                CoverPoint currentCover = soldier.getCoverBehaviorManager().getCurrentCover();
+                if (currentCover != null) {
+                    protectedDirs = currentCover.getProtectedDirections();
                 }
                 
-                if (losTarget != null) {
-                    BlockPos coverPos = currentPos;
-                    Vec3 targetEye = new Vec3(losTarget.getX(), losTarget.getEyeY(), losTarget.getZ());
-                    
-                    // Iterate all candidate positions (same logic as computePeekPosition)
-                    for (int dx = -2; dx <= 2; dx++) {
-                        for (int dz = -2; dz <= 2; dz++) {
-                            if (dx == 0 && dz == 0) continue;
-                            
-                            int distSq = dx * dx + dz * dz;
-                            if (distSq > 4) continue;
-                            
-                            BlockPos candidate = coverPos.offset(dx, 0, dz);
-                            
-                            // Check if path from cover to peek position crosses solid blocks
-                            boolean pathClear = isPathClearClient(level, coverPos, candidate);
-                            if (!pathClear) {
-                                // Render red line with yellow X for blocked path
-                                double candRelX = candidate.getX() - cameraPos.x + 0.5;
-                                double candRelY = candidate.getY() - cameraPos.y + 1.62;
-                                double candRelZ = candidate.getZ() - cameraPos.z + 0.5;
-                                double targetRelX = targetEye.x - cameraPos.x;
-                                double targetRelY = targetEye.y - cameraPos.y;
-                                double targetRelZ = targetEye.z - cameraPos.z;
-                                
-                                // Red line
-                                buffer.vertex(matrix, (float)candRelX, (float)candRelY, (float)candRelZ).color(255, 0, 0, a).endVertex();
-                                buffer.vertex(matrix, (float)targetRelX, (float)targetRelY, (float)targetRelZ).color(255, 0, 0, a).endVertex();
-                                
-                                // Yellow X at candidate position
-                                float xSize = 0.15f;
-                                buffer.vertex(matrix, (float)(candRelX - xSize), (float)candRelY, (float)(candRelZ - xSize)).color(255, 255, 0, a).endVertex();
-                                buffer.vertex(matrix, (float)(candRelX + xSize), (float)candRelY, (float)(candRelZ + xSize)).color(255, 255, 0, a).endVertex();
-                                buffer.vertex(matrix, (float)(candRelX - xSize), (float)candRelY, (float)(candRelZ + xSize)).color(255, 255, 0, a).endVertex();
-                                buffer.vertex(matrix, (float)(candRelX + xSize), (float)candRelY, (float)(candRelZ - xSize)).color(255, 255, 0, a).endVertex();
-                                continue;
-                            }
-                            
-                            Vec3 candidateCenter = candidate.getCenter();
-                            Vec3 candidateEye = new Vec3(candidateCenter.x, soldier.getY() + 1.62, candidateCenter.z);
-                            
-                            net.minecraft.world.level.ClipContext context = new net.minecraft.world.level.ClipContext(
-                                candidateEye, targetEye,
-                                net.minecraft.world.level.ClipContext.Block.COLLIDER,
-                                net.minecraft.world.level.ClipContext.Fluid.NONE, soldier);
-                            net.minecraft.world.phys.HitResult result = level.clip(context);
-                            
-                            double candRelX = candidate.getX() - cameraPos.x + 0.5;
-                            double candRelY = candidate.getY() - cameraPos.y + 1.62;
-                            double candRelZ = candidate.getZ() - cameraPos.z + 0.5;
-                            double targetRelX = targetEye.x - cameraPos.x;
-                            double targetRelY = targetEye.y - cameraPos.y;
-                            double targetRelZ = targetEye.z - cameraPos.z;
-                            
-                            if (result.getType() == net.minecraft.world.phys.HitResult.Type.MISS) {
-                                // Green line = has LOS
-                                buffer.vertex(matrix, (float)candRelX, (float)candRelY, (float)candRelZ).color(0, 255, 0, a).endVertex();
-                                buffer.vertex(matrix, (float)targetRelX, (float)targetRelY, (float)targetRelZ).color(0, 255, 0, a).endVertex();
-                            } else if (result.getType() == net.minecraft.world.phys.HitResult.Type.BLOCK) {
-                                // Red line = blocked
-                                buffer.vertex(matrix, (float)candRelX, (float)candRelY, (float)candRelZ).color(255, 0, 0, a).endVertex();
-                                buffer.vertex(matrix, (float)targetRelX, (float)targetRelY, (float)targetRelZ).color(255, 0, 0, a).endVertex();
-                                
-                                // Yellow cross at hit point
-                                Vec3 hitPoint = result.getLocation();
-                                double hitRelX = hitPoint.x - cameraPos.x;
-                                double hitRelY = hitPoint.y - cameraPos.y;
-                                double hitRelZ = hitPoint.z - cameraPos.z;
-                                
-                                float hitSize = 0.15f;
-                                buffer.vertex(matrix, (float)(hitRelX - hitSize), (float)hitRelY, (float)hitRelZ).color(255, 255, 0, a).endVertex();
-                                buffer.vertex(matrix, (float)(hitRelX + hitSize), (float)hitRelY, (float)hitRelZ).color(255, 255, 0, a).endVertex();
-                                buffer.vertex(matrix, (float)hitRelX, (float)(hitRelY - hitSize), (float)hitRelZ).color(255, 255, 0, a).endVertex();
-                                buffer.vertex(matrix, (float)hitRelX, (float)(hitRelY + hitSize), (float)hitRelZ).color(255, 255, 0, a).endVertex();
-                                buffer.vertex(matrix, (float)hitRelX, (float)hitRelY, (float)(hitRelZ - hitSize)).color(255, 255, 0, a).endVertex();
-                                buffer.vertex(matrix, (float)hitRelX, (float)hitRelY, (float)(hitRelZ + hitSize)).color(255, 255, 0, a).endVertex();
-                            }
-                        }
+                if (protectedDirs == null || protectedDirs.isEmpty()) {
+                    protectedDirs = java.util.Set.of();
+                }
+                
+                Vec3 threatDir = soldier.getSyncedThreatDirection();
+                
+                // Iterate 4 cardinal directions (same logic as computePeekPositionStatic)
+                for (net.minecraft.core.Direction peekDir : net.minecraft.core.Direction.Plane.HORIZONTAL) {
+                    if (protectedDirs.contains(peekDir)) {
+                        continue;
                     }
+                    
+                    BlockPos candidate = coverPos.relative(peekDir);
+                    
+                    if (!com.stevesarmy.combat.cover.CoverFinder.isValidPeekPosition(candidate, level)) {
+                        continue;
+                    }
+                    
+                    // Cone raycast parameters
+                    final int RAY_COUNT = 7;
+                    final double CONE_HALF_ANGLE_DEG = 30.0;
+                    final double MAX_RAY_DISTANCE = 20.0;
+                    final double MIN_OPENING_DISTANCE = 5.0;
+                    
+                    int validRays = 0;
+                    double totalCoverage = 0.0;
+                    
+                    Vec3 candidateEye = new Vec3(candidate.getX() + 0.5, soldier.getY() + 1.62, candidate.getZ() + 0.5);
+                    
+                    double candRelX = candidate.getX() - cameraPos.x + 0.5;
+                    double candRelY = candidate.getY() - cameraPos.y + 1.62;
+                    double candRelZ = candidate.getZ() - cameraPos.z + 0.5;
+                    
+                    // Render cone rays from candidate position
+                    for (int ri = 0; ri < RAY_COUNT; ri++) {
+                        double angleOffset = -CONE_HALF_ANGLE_DEG + (2.0 * CONE_HALF_ANGLE_DEG * ri / (RAY_COUNT - 1));
+                        
+                        Vec3 rayDir = com.stevesarmy.combat.cover.CoverFinder.rotateVectorY(threatDir != null ? threatDir.normalize() : new Vec3(1, 0, 0), angleOffset);
+                        
+                        Vec3 rayEnd = candidateEye.add(rayDir.scale(MAX_RAY_DISTANCE));
+                        net.minecraft.world.level.ClipContext rayContext = new net.minecraft.world.level.ClipContext(
+                            candidateEye, rayEnd,
+                            net.minecraft.world.level.ClipContext.Block.COLLIDER,
+                            net.minecraft.world.level.ClipContext.Fluid.NONE, null);
+                        net.minecraft.world.phys.HitResult rayResult = level.clip(rayContext);
+                        
+                        double distance;
+                        Vec3 rayHitPoint;
+                        if (rayResult.getType() == net.minecraft.world.phys.HitResult.Type.MISS) {
+                            distance = MAX_RAY_DISTANCE;
+                            rayHitPoint = rayEnd;
+                        } else {
+                            distance = candidateEye.distanceTo(rayResult.getLocation());
+                            rayHitPoint = rayResult.getLocation();
+                        }
+                        
+                        boolean isValid = distance >= MIN_OPENING_DISTANCE;
+                        if (isValid) {
+                            validRays++;
+                            totalCoverage += distance / MAX_RAY_DISTANCE;
+                        }
+                        
+                        int rr = isValid ? 0 : 255;
+                        int rg = isValid ? 255 : 0;
+                        int rb = 0;
+                        
+                        double rayHitRelX = rayHitPoint.x - cameraPos.x;
+                        double rayHitRelY = rayHitPoint.y - cameraPos.y;
+                        double rayHitRelZ = rayHitPoint.z - cameraPos.z;
+                        
+                        buffer.vertex(matrix, (float)candRelX, (float)candRelY, (float)candRelZ).color(rr, rg, rb, a).endVertex();
+                        buffer.vertex(matrix, (float)rayHitRelX, (float)rayHitRelY, (float)rayHitRelZ).color(rr, rg, rb, a).endVertex();
+                    }
+                    
+                    // Calculate cone coverage score
+                    float coneScore = 0.0f;
+                    if (validRays > 0) {
+                        float avgCoverage = (float)(totalCoverage / validRays);
+                        float validRatio = (float)validRays / RAY_COUNT;
+                        coneScore = avgCoverage * validRatio;
+                    }
+                    
+                    // Check angle between peek direction and threat
+                    Vec3 peekCenter = candidate.getCenter();
+                    Vec3 toThreat = threatDir != null ? threatDir.normalize() : new Vec3(1, 0, 0);
+                    Vec3 fromPeekToCover = new Vec3(
+                        coverPos.getX() + 0.5 - peekCenter.x,
+                        0,
+                        coverPos.getZ() + 0.5 - peekCenter.z
+                    ).normalize();
+                    
+                    double dot = toThreat.dot(fromPeekToCover);
+                    dot = Math.max(-1.0, Math.min(1.0, dot));
+                    double angleBetween = Math.toDegrees(Math.acos(dot));
+                    
+                    boolean validAngle = angleBetween >= 45 && angleBetween <= 135;
+                    float angleScore = validAngle ? 1.0f - (float)Math.abs(angleBetween - 90) / 90 : 0.0f;
+                    float finalScore = angleScore * coneScore;
+                    
+                    // Render score indicator at candidate position
+                    int sr, sg, sb;
+                    if (finalScore > 0.3f) {
+                        sr = 0; sg = 255; sb = 0;
+                    } else if (finalScore > 0.1f) {
+                        sr = 255; sg = 255; sb = 0;
+                    } else {
+                        sr = 255; sg = 0; sb = 0;
+                    }
+                    
+                    float boxSize = 0.15f;
+                    buffer.vertex(matrix, (float)(candRelX - boxSize), (float)candRelY, (float)(candRelZ - boxSize)).color(sr, sg, sb, a).endVertex();
+                    buffer.vertex(matrix, (float)(candRelX + boxSize), (float)candRelY, (float)(candRelZ + boxSize)).color(sr, sg, sb, a).endVertex();
+                    buffer.vertex(matrix, (float)(candRelX - boxSize), (float)candRelY, (float)(candRelZ + boxSize)).color(sr, sg, sb, a).endVertex();
+                    buffer.vertex(matrix, (float)(candRelX + boxSize), (float)candRelY, (float)(candRelZ - boxSize)).color(sr, sg, sb, a).endVertex();
                 }
             }
             

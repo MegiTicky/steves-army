@@ -1045,44 +1045,59 @@ public class CoverTacticalGoal extends Goal {
         }
         
         BlockPos coverPos = cover.getPosition();
-        
         BlockPos bestPeekPos = null;
-        double bestAngleScore = -1;
-        int bestDistance = Integer.MAX_VALUE;
+        float bestPeekScore = 0.0f;
         
-        for (int dx = -2; dx <= 2; dx++) {
-            for (int dz = -2; dz <= 2; dz++) {
-                if (dx == 0 && dz == 0) continue;
+        for (net.minecraft.core.Direction peekDir : net.minecraft.core.Direction.Plane.HORIZONTAL) {
+            if (protectedDirs.contains(peekDir)) {
+                continue;
+            }
+            
+            BlockPos peekPos = coverPos.relative(peekDir);
+            
+            if (!com.stevesarmy.combat.cover.CoverFinder.isValidPeekPosition(peekPos, level)) {
+                continue;
+            }
+            
+            boolean losOk = true;
+            float coneCoverageScore = 1.0f;
+            
+            if (target != null && target.isAlive()) {
+                Vec3 peekEye = new Vec3(peekPos.getX() + 0.5, soldierY + 1.62, peekPos.getZ() + 0.5);
+                Vec3 targetEye = new Vec3(target.getX(), target.getEyeY(), target.getZ());
+                losOk = com.stevesarmy.combat.cover.CoverFinder.hasLineOfSightStatic(peekEye, targetEye, level);
                 
-                int distSq = dx * dx + dz * dz;
-                if (distSq > 4) continue;
-                
-                BlockPos candidate = coverPos.offset(dx, 0, dz);
-                
-                if (!isPathClearStatic(coverPos, candidate, level)) {
-                    continue;
-                }
-
-                boolean inProtectedDir = false;
-                for (net.minecraft.core.Direction dir : protectedDirs) {
-                    if (dx * dir.getStepX() + dz * dir.getStepZ() > 0) {
-                        inProtectedDir = true;
-                        break;
+                if (!losOk) {
+                    coneCoverageScore = com.stevesarmy.combat.cover.CoverFinder.calculateConeCoverage(peekPos, threatDirection, level);
+                    if (coneCoverageScore <= 0.01f) {
+                        continue;
                     }
                 }
-                if (inProtectedDir) {
+            } else {
+                coneCoverageScore = com.stevesarmy.combat.cover.CoverFinder.calculateConeCoverage(peekPos, threatDirection, level);
+                if (coneCoverageScore <= 0.01f) {
                     continue;
                 }
-                
-                Vec3 toPeek = new Vec3(candidate.getX() - coverPos.getX(), 0, candidate.getZ() - coverPos.getZ()).normalize();
-                double alignment = toPeek.dot(threatDirection);
-                double dist = Math.sqrt(distSq);
-                double angleScore = alignment * 2.0 - dist * 0.5;
-                
-                if (angleScore > bestAngleScore || (Math.abs(angleScore - bestAngleScore) < 0.01 && dist < bestDistance)) {
-                    bestAngleScore = angleScore;
-                    bestPeekPos = candidate;
-                    bestDistance = (int) dist;
+            }
+            
+            Vec3 peekCenter = peekPos.getCenter();
+            Vec3 toThreat = threatDirection.normalize();
+            Vec3 fromPeekToCover = new Vec3(
+                coverPos.getX() + 0.5 - peekCenter.x,
+                0,
+                coverPos.getZ() + 0.5 - peekCenter.z
+            ).normalize();
+            
+            double dot = toThreat.dot(fromPeekToCover);
+            dot = Math.max(-1.0, Math.min(1.0, dot));
+            double angleBetween = Math.toDegrees(Math.acos(dot));
+            
+            if (angleBetween >= 45 && angleBetween <= 135) {
+                float angleScore = 1.0f - (float)Math.abs(angleBetween - 90) / 90;
+                float finalScore = angleScore * coneCoverageScore;
+                if (finalScore > bestPeekScore) {
+                    bestPeekScore = finalScore;
+                    bestPeekPos = peekPos;
                 }
             }
         }
