@@ -179,7 +179,8 @@ public class PeekController {
             lockRotationToCoverWall(soldier, cover, null);
             enterExposed(soldier, cover);
         } else if (isFull) {
-            BlockPos peekPos = findBestPeekPositionTowardThreat(soldier, cover, threatDir);
+            LivingEntity target = soldier.getTarget();
+            BlockPos peekPos = CoverTacticalGoal.computePeekPositionStatic(cover, threatDir, target, soldier.level(), soldier.getY());
             if (peekPos == null) {
                 if (CoverTacticalGoal.isDebugLoggingEnabled()) {
                     StevesArmyMod.LOGGER.info("[PeekController] Soldier {} no valid peek position toward threat",
@@ -216,42 +217,6 @@ public class PeekController {
             setState(soldier, State.MOVING_TO_PEEK);
             stateStartTime = System.currentTimeMillis();
         }
-    }
-
-    private BlockPos findBestPeekPositionTowardThreat(SoldierEntity soldier, CoverPoint cover, Vec3 threatDirection) {
-        BlockPos coverPos = cover.getPosition();
-        BlockPos bestPeekPos = null;
-        double bestScore = -1;
-        
-        for (int dx = -2; dx <= 2; dx++) {
-            for (int dz = -2; dz <= 2; dz++) {
-                if (dx == 0 && dz == 0) continue;
-                
-                int distSq = dx * dx + dz * dz;
-                if (distSq > 4) continue;
-                
-                BlockPos peekPos = coverPos.offset(dx, 0, dz);
-                
-                if (!isPathClearForPeek(soldier, coverPos, peekPos)) {
-                    continue;
-                }
-                
-                double score = calculatePeekPositionScore(peekPos, coverPos, threatDirection);
-                if (score > bestScore) {
-                    bestScore = score;
-                    bestPeekPos = peekPos;
-                }
-            }
-        }
-        
-        return bestPeekPos;
-    }
-
-    private double calculatePeekPositionScore(BlockPos candidate, BlockPos coverPos, Vec3 threatDirection) {
-        Vec3 toPeek = new Vec3(candidate.getX() - coverPos.getX(), 0, candidate.getZ() - coverPos.getZ()).normalize();
-        double alignment = toPeek.dot(threatDirection);
-        double distance = Math.sqrt(Math.pow(candidate.getX() - coverPos.getX(), 2) + Math.pow(candidate.getZ() - coverPos.getZ(), 2));
-        return alignment * 2.0 - distance * 0.5;
     }
 
     private void preAimToward(SoldierEntity soldier, Vec3 direction) {
@@ -413,27 +378,6 @@ public class PeekController {
         ClipContext context = new ClipContext(from, to, ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, soldier);
         HitResult result = soldier.level().clip(context);
         return result.getType() == HitResult.Type.MISS;
-    }
-    
-    private boolean isPathClearForPeek(SoldierEntity soldier, BlockPos from, BlockPos to) {
-        int dx = to.getX() - from.getX();
-        int dz = to.getZ() - from.getZ();
-        int steps = Math.max(Math.abs(dx), Math.abs(dz));
-        
-        if (steps == 0) return true;
-        
-        for (int i = 1; i <= steps; i++) {
-            int x = from.getX() + (dx * i) / steps;
-            int z = from.getZ() + (dz * i) / steps;
-            BlockPos checkPos = new BlockPos(x, from.getY(), z);
-            
-            net.minecraft.world.level.block.state.BlockState state = soldier.level().getBlockState(checkPos);
-            if (!state.isAir() && !state.getCollisionShape(soldier.level(), checkPos).isEmpty()) {
-                return false;
-            }
-        }
-        
-        return true;
     }
     
     private void lockRotationToCoverWall(SoldierEntity soldier, CoverPoint cover, LivingEntity target) {

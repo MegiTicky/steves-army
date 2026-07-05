@@ -1034,12 +1034,8 @@ public class CoverTacticalGoal extends Goal {
         return list;
     }
     
-    private BlockPos computePeekPosition(CoverPoint cover, Vec3 threatDirection, LivingEntity target) {
+    public static BlockPos computePeekPositionStatic(CoverPoint cover, Vec3 threatDirection, LivingEntity target, net.minecraft.world.level.Level level, double soldierY) {
         if (threatDirection == null || threatDirection.lengthSqr() < 0.001) {
-            return null;
-        }
-
-        if (target == null || !target.isAlive()) {
             return null;
         }
 
@@ -1063,32 +1059,30 @@ public class CoverTacticalGoal extends Goal {
                 
                 BlockPos candidate = coverPos.offset(dx, 0, dz);
                 
-                // Check if path from cover to peek position crosses solid blocks
-                if (!isPathClear(coverPos, candidate)) {
+                if (!isPathClearStatic(coverPos, candidate, level)) {
+                    continue;
+                }
+
+                boolean inProtectedDir = false;
+                for (net.minecraft.core.Direction dir : protectedDirs) {
+                    if (dx * dir.getStepX() + dz * dir.getStepZ() > 0) {
+                        inProtectedDir = true;
+                        break;
+                    }
+                }
+                if (inProtectedDir) {
                     continue;
                 }
                 
-                Vec3 candidateCenter = candidate.getCenter();
-                Vec3 candidateEye = new Vec3(candidateCenter.x, soldier.getY() + 1.62, candidateCenter.z);
+                Vec3 toPeek = new Vec3(candidate.getX() - coverPos.getX(), 0, candidate.getZ() - coverPos.getZ()).normalize();
+                double alignment = toPeek.dot(threatDirection);
+                double dist = Math.sqrt(distSq);
+                double angleScore = alignment * 2.0 - dist * 0.5;
                 
-                Vec3 targetEye = new Vec3(target.getX(), target.getEyeY(), target.getZ());
-                
-                net.minecraft.world.level.ClipContext context = new net.minecraft.world.level.ClipContext(
-                    candidateEye, targetEye,
-                    net.minecraft.world.level.ClipContext.Block.COLLIDER,
-                    net.minecraft.world.level.ClipContext.Fluid.NONE, soldier);
-                net.minecraft.world.phys.HitResult result = soldier.level().clip(context);
-                if (result.getType() == net.minecraft.world.phys.HitResult.Type.MISS) {
-                    Vec3 toTarget = new Vec3(target.getX() - candidate.getX(), 0, target.getZ() - candidate.getZ()).normalize();
-                    double alignment = Math.abs(toTarget.dot(threatDirection));
-                    double dist = Math.sqrt(distSq);
-                    double angleScore = alignment * 2.0 - dist * 0.5;
-                    
-                    if (angleScore > bestAngleScore || (Math.abs(angleScore - bestAngleScore) < 0.01 && dist < bestDistance)) {
-                        bestAngleScore = angleScore;
-                        bestPeekPos = candidate;
-                        bestDistance = (int) dist;
-                    }
+                if (angleScore > bestAngleScore || (Math.abs(angleScore - bestAngleScore) < 0.01 && dist < bestDistance)) {
+                    bestAngleScore = angleScore;
+                    bestPeekPos = candidate;
+                    bestDistance = (int) dist;
                 }
             }
         }
@@ -1096,7 +1090,11 @@ public class CoverTacticalGoal extends Goal {
         return bestPeekPos;
     }
     
-    private boolean isPathClear(BlockPos from, BlockPos to) {
+    private BlockPos computePeekPosition(CoverPoint cover, Vec3 threatDirection, LivingEntity target) {
+        return computePeekPositionStatic(cover, threatDirection, target, soldier.level(), soldier.getY());
+    }
+    
+    public static boolean isPathClearStatic(BlockPos from, BlockPos to, net.minecraft.world.level.Level level) {
         int dx = to.getX() - from.getX();
         int dz = to.getZ() - from.getZ();
         int steps = Math.max(Math.abs(dx), Math.abs(dz));
@@ -1108,12 +1106,16 @@ public class CoverTacticalGoal extends Goal {
             int z = from.getZ() + (dz * i) / steps;
             BlockPos checkPos = new BlockPos(x, from.getY(), z);
             
-            net.minecraft.world.level.block.state.BlockState state = soldier.level().getBlockState(checkPos);
-            if (!state.isAir() && !state.getCollisionShape(soldier.level(), checkPos).isEmpty()) {
+            net.minecraft.world.level.block.state.BlockState state = level.getBlockState(checkPos);
+            if (!state.isAir() && !state.getCollisionShape(level, checkPos).isEmpty()) {
                 return false;
             }
         }
         
         return true;
+    }
+    
+    private boolean isPathClear(BlockPos from, BlockPos to) {
+        return isPathClearStatic(from, to, soldier.level());
     }
 }
