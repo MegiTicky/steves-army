@@ -8,6 +8,7 @@ import com.mojang.blaze3d.vertex.Tesselator;
 import com.mojang.blaze3d.vertex.VertexFormat;
 import com.stevesarmy.combat.cover.CoverBehaviorManager;
 import com.stevesarmy.combat.cover.CoverDebugManager;
+import com.stevesarmy.combat.cover.CoverFinder;
 import com.stevesarmy.combat.cover.CoverPoint;
 import com.stevesarmy.combat.cover.CoverType;
 import com.stevesarmy.entity.SoldierEntity;
@@ -41,6 +42,8 @@ public class CoverDebugRenderer {
         if (mc.player == null || mc.level == null) {
             return;
         }
+        
+        System.out.println("[CoverDebugRender] Rendering - showSoldierCover=" + CoverDebugManager.isShowSoldierCover());
         
         Vec3 cameraPos = camera.getPosition();
         
@@ -103,6 +106,14 @@ public class CoverDebugRenderer {
             MultiBufferSource.BufferSource soldierBufferSource = mc.renderBuffers().bufferSource();
             renderSoldierCoverLabels(poseStack, cameraPos, mc.level, mc, soldierBufferSource);
             soldierBufferSource.endBatch();
+            
+            buffer.begin(VertexFormat.Mode.DEBUG_LINES, DefaultVertexFormat.POSITION_COLOR);
+            renderTopCoversVisualization(buffer, poseStack, cameraPos, mc.level);
+            tesselator.end();
+            
+            MultiBufferSource.BufferSource topCoversBufferSource = mc.renderBuffers().bufferSource();
+            renderTopCoversLabels(poseStack, cameraPos, mc.level, mc, topCoversBufferSource);
+            topCoversBufferSource.endBatch();
         }
         
         if (CoverDebugManager.isShowPeekCandidates()) {
@@ -889,6 +900,131 @@ private static void renderSoldierCoverLabels(PoseStack poseStack, Vec3 cameraPos
                 }
                 
                 font.drawInBatch(label, -font.width(label) / 2.0f, 0, color | 0xFF000000, false,
+                        poseStack.last().pose(), bufferSource, net.minecraft.client.gui.Font.DisplayMode.NORMAL, 0, 15728880);
+                
+                poseStack.popPose();
+            }
+        }
+    }
+    
+    private static void renderTopCoversVisualization(BufferBuilder buffer, PoseStack poseStack, Vec3 cameraPos, Level level) {
+        Matrix4f matrix = poseStack.last().pose();
+        
+        var soldiers = level.getEntitiesOfClass(SoldierEntity.class,
+                Minecraft.getInstance().player.getBoundingBox().inflate(50));
+        
+        if (!soldiers.isEmpty()) {
+            SoldierEntity firstSoldier = soldiers.iterator().next();
+            CoverDebugManager.TopCoversDebugData topData = CoverDebugManager.getSoldierTopCovers(firstSoldier.getId());
+            System.out.println("[TopCoversDebug] Soldiers found: " + soldiers.size() + 
+                ", first soldier id: " + firstSoldier.getId() + 
+                ", topData: " + (topData != null ? "exists, covers=" + (topData.topCovers != null ? topData.topCovers.length : "null") : "null"));
+        }
+        
+        for (SoldierEntity soldier : soldiers) {
+            
+            CoverDebugManager.TopCoversDebugData topData = CoverDebugManager.getSoldierTopCovers(soldier.getId());
+            if (topData == null || topData.topCovers == null) continue;
+            
+            int[][] rankColors = {
+                {255, 215, 0},   // Gold #1
+                {192, 192, 192}, // Silver #2
+                {205, 127, 50},  // Bronze #3
+                {100, 200, 255}, // Blue #4
+                {200, 100, 255}  // Purple #5
+            };
+            
+            for (int i = 0; i < topData.topCovers.length && i < 5; i++) {
+                CoverFinder.ScoredCover sc = topData.topCovers[i];
+                BlockPos pos = sc.cover.getPosition();
+                
+                int[] col = rankColors[i];
+                int r = col[0], g = col[1], b = col[2], a = 200;
+                
+                double x1 = pos.getX() - cameraPos.x;
+                double y1 = pos.getY() - cameraPos.y;
+                double z1 = pos.getZ() - cameraPos.z;
+                double x2 = x1 + 1.0;
+                double y2 = y1 + 1.0;
+                double z2 = z1 + 1.0;
+                
+                for (int layer = 0; layer < 2; layer++) {
+                    double off = layer * 0.05;
+                    double ox1 = x1 - off, oy1 = y1 - off, oz1 = z1 - off;
+                    double ox2 = x2 + off, oy2 = y2 + off, oz2 = z2 + off;
+                    
+                    buffer.vertex(matrix, (float)ox1, (float)oy1, (float)oz1).color(r, g, b, a).endVertex();
+                    buffer.vertex(matrix, (float)ox2, (float)oy1, (float)oz1).color(r, g, b, a).endVertex();
+                    buffer.vertex(matrix, (float)ox2, (float)oy1, (float)oz1).color(r, g, b, a).endVertex();
+                    buffer.vertex(matrix, (float)ox2, (float)oy1, (float)oz2).color(r, g, b, a).endVertex();
+                    buffer.vertex(matrix, (float)ox2, (float)oy1, (float)oz2).color(r, g, b, a).endVertex();
+                    buffer.vertex(matrix, (float)ox1, (float)oy1, (float)oz2).color(r, g, b, a).endVertex();
+                    buffer.vertex(matrix, (float)ox1, (float)oy1, (float)oz2).color(r, g, b, a).endVertex();
+                    buffer.vertex(matrix, (float)ox1, (float)oy1, (float)oz1).color(r, g, b, a).endVertex();
+                    
+                    buffer.vertex(matrix, (float)ox1, (float)oy2, (float)oz1).color(r, g, b, a).endVertex();
+                    buffer.vertex(matrix, (float)ox2, (float)oy2, (float)oz1).color(r, g, b, a).endVertex();
+                    buffer.vertex(matrix, (float)ox2, (float)oy2, (float)oz1).color(r, g, b, a).endVertex();
+                    buffer.vertex(matrix, (float)ox2, (float)oy2, (float)oz2).color(r, g, b, a).endVertex();
+                    buffer.vertex(matrix, (float)ox2, (float)oy2, (float)oz2).color(r, g, b, a).endVertex();
+                    buffer.vertex(matrix, (float)ox1, (float)oy2, (float)oz2).color(r, g, b, a).endVertex();
+                    buffer.vertex(matrix, (float)ox1, (float)oy2, (float)oz2).color(r, g, b, a).endVertex();
+                    buffer.vertex(matrix, (float)ox1, (float)oy2, (float)oz1).color(r, g, b, a).endVertex();
+                    
+                    buffer.vertex(matrix, (float)ox1, (float)oy1, (float)oz1).color(r, g, b, a).endVertex();
+                    buffer.vertex(matrix, (float)ox1, (float)oy2, (float)oz1).color(r, g, b, a).endVertex();
+                    buffer.vertex(matrix, (float)ox2, (float)oy1, (float)oz1).color(r, g, b, a).endVertex();
+                    buffer.vertex(matrix, (float)ox2, (float)oy2, (float)oz1).color(r, g, b, a).endVertex();
+                    buffer.vertex(matrix, (float)ox2, (float)oy1, (float)oz2).color(r, g, b, a).endVertex();
+                    buffer.vertex(matrix, (float)ox2, (float)oy2, (float)oz2).color(r, g, b, a).endVertex();
+                    buffer.vertex(matrix, (float)ox1, (float)oy1, (float)oz2).color(r, g, b, a).endVertex();
+                    buffer.vertex(matrix, (float)ox1, (float)oy2, (float)oz2).color(r, g, b, a).endVertex();
+                }
+            }
+        }
+    }
+    
+    private static void renderTopCoversLabels(PoseStack poseStack, Vec3 cameraPos, Level level,
+                                                Minecraft mc, MultiBufferSource bufferSource) {
+        if (mc.font == null) return;
+        
+        net.minecraft.client.gui.Font font = mc.font;
+        
+        for (SoldierEntity soldier : level.getEntitiesOfClass(SoldierEntity.class,
+                Minecraft.getInstance().player.getBoundingBox().inflate(50))) {
+            
+            CoverDebugManager.TopCoversDebugData topData = CoverDebugManager.getSoldierTopCovers(soldier.getId());
+            if (topData == null || topData.topCovers == null) continue;
+            
+            int[] rankColors = {
+                0xFFFFD700,   // Gold #1
+                0xFFC0C0C0,   // Silver #2
+                0xFFCD7F32,   // Bronze #3
+                0xFF64C8FF,   // Blue #4
+                0xFFC864FF    // Purple #5
+            };
+            
+            for (int i = 0; i < topData.topCovers.length && i < 5; i++) {
+                CoverFinder.ScoredCover sc = topData.topCovers[i];
+                BlockPos pos = sc.cover.getPosition();
+                
+                String rejection = topData.getRejectionReason(i);
+                String label = String.format("#%d %.2f", i + 1, sc.score);
+                if (!rejection.isEmpty()) {
+                    label += " " + rejection;
+                }
+                int color = rankColors[i] | 0xFF000000;
+                
+                double x = pos.getX() - cameraPos.x + 0.5;
+                double y = pos.getY() - cameraPos.y + 1.6;
+                double z = pos.getZ() - cameraPos.z + 0.5;
+                
+                poseStack.pushPose();
+                poseStack.translate(x, y, z);
+                poseStack.mulPose(mc.gameRenderer.getMainCamera().rotation());
+                poseStack.scale(-0.025f, -0.025f, 0.025f);
+                
+                font.drawInBatch(label, -font.width(label) / 2.0f, 0, color, false,
                         poseStack.last().pose(), bufferSource, net.minecraft.client.gui.Font.DisplayMode.NORMAL, 0, 15728880);
                 
                 poseStack.popPose();

@@ -667,6 +667,11 @@ public class CoverTacticalGoal extends Goal {
         if (bestCover.isPresent()) {
             CoverPoint cover = bestCover.get();
             
+            if (debugLoggingEnabled) {
+                List<CoverFinder.ScoredCover> top = finder.findTopCovers(soldier, threatDirection, threats, searchRadius, 5);
+                cachedTopCovers = top.toArray(new CoverFinder.ScoredCover[0]);
+            }
+            
             if (failedCoverPositions.contains(cover.getPosition())) {
                 List<CoverPoint> allPoints = finder.findCoverPoints(searchCenter, searchRadius);
                 allPoints.removeIf(cp -> failedCoverPositions.contains(cp.getPosition()));
@@ -722,8 +727,8 @@ public class CoverTacticalGoal extends Goal {
             }
         }
 
-        if (debugLoggingEnabled && currentCover != null) {
-            List<CoverFinder.ScoredCover> top = finder.findTopCovers(soldier, threatDirection, threats, SEARCH_RADIUS, 3);
+        if (debugLoggingEnabled) {
+            List<CoverFinder.ScoredCover> top = finder.findTopCovers(soldier, threatDirection, threats, SEARCH_RADIUS, 5);
             cachedTopCovers = top.toArray(new CoverFinder.ScoredCover[0]);
         }
 
@@ -732,10 +737,43 @@ public class CoverTacticalGoal extends Goal {
 
     private void populateCoverDebugData() {
         CoverPoint currentCover = getCoverManager().getCurrentCover();
+        CoverPoint targetCover = getCoverManager().getTargetCover();
+        
+        if (debugLoggingEnabled && cachedTopCovers.length == 0) {
+            System.out.println("[CoverDebugData] Populating top covers for soldier " + soldier.getId());
+            CoverFinder finder = new CoverFinder(soldier.level());
+            Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
+            List<LivingEntity> threats = getThreatList();
+            List<CoverFinder.ScoredCover> top = finder.findTopCovers(soldier, threatDirection, threats, SEARCH_RADIUS, 5);
+            cachedTopCovers = top.toArray(new CoverFinder.ScoredCover[0]);
+            System.out.println("[CoverDebugData] Found " + cachedTopCovers.length + " top covers");
+        }
+        
+        BlockPos chosenPos = targetCover != null ? targetCover.getPosition() : 
+                            (currentCover != null ? currentCover.getPosition() : null);
+        
+        int[] rejectionReasons = new int[cachedTopCovers.length];
+        for (int i = 0; i < cachedTopCovers.length; i++) {
+            BlockPos pos = cachedTopCovers[i].cover.getPosition();
+            if (chosenPos != null && pos.equals(chosenPos)) {
+                rejectionReasons[i] = CoverDebugManager.TopCoversDebugData.REASON_CHOSEN;
+            } else if (currentCover != null && pos.equals(currentCover.getPosition())) {
+                rejectionReasons[i] = CoverDebugManager.TopCoversDebugData.REASON_ALREADY_CURRENT;
+            } else if (failedCoverPositions.contains(pos)) {
+                rejectionReasons[i] = CoverDebugManager.TopCoversDebugData.REASON_BLACKLISTED;
+            } else if (!CoverReservationManager.isAvailable(pos)) {
+                rejectionReasons[i] = CoverDebugManager.TopCoversDebugData.REASON_RESERVED;
+            } else {
+                rejectionReasons[i] = CoverDebugManager.TopCoversDebugData.REASON_NONE;
+            }
+        }
+        
         CoverDebugManager.setSoldierTopCovers(soldier.getId(),
             new CoverDebugManager.TopCoversDebugData(
                 cachedTopCovers,
-                currentCover != null ? currentCover.getQuality() : 0,
+                rejectionReasons,
+                chosenPos,
+                currentCover != null ? currentCover.getCombatScore() : 0,
                 getCoverManager().getCoverQualityPenalty(),
                 getCoverManager().getPeekCountSameCover()
             ));

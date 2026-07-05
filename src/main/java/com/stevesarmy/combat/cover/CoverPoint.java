@@ -8,6 +8,7 @@ import java.util.Set;
 public class CoverPoint {
     private final BlockPos position;
     private float quality;
+    private float combatScore;
     private CoverType type;
     private Set<Direction> protectedDirections;
     private boolean canShootFrom;
@@ -18,6 +19,7 @@ public class CoverPoint {
     public CoverPoint(BlockPos position) {
         this.position = position;
         this.quality = 0.0f;
+        this.combatScore = 0.0f;
         this.type = CoverType.NONE;
         this.protectedDirections = Set.of();
         this.canShootFrom = false;
@@ -36,6 +38,14 @@ public class CoverPoint {
 
     public void setQuality(float quality) {
         this.quality = Math.max(0.0f, Math.min(1.0f, quality));
+    }
+
+    public float getCombatScore() {
+        return combatScore;
+    }
+
+    public void setCombatScore(float score) {
+        this.combatScore = score;
     }
 
     public CoverType getType() {

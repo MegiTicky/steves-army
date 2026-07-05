@@ -507,25 +507,19 @@ public class PeekController {
         LivingEntity bestTarget = null;
         double bestScore = -1;
 
-        for (int dx = -2; dx <= 2; dx++) {
-            for (int dz = -2; dz <= 2; dz++) {
-                if (dx == 0 && dz == 0) continue;
-                int distSq = dx * dx + dz * dz;
-                if (distSq > 4) continue;
+        for (net.minecraft.core.Direction protectedDir : protectedDirs) {
+            BlockPos peekPos = coverPos.offset(protectedDir.getStepX(), 0, protectedDir.getStepZ());
+            Vec3 peekCenter = peekPos.getCenter();
+            Vec3 peekEye = new Vec3(peekCenter.x, soldier.getY() + 1.62, peekCenter.z);
 
-                BlockPos candidate = coverPos.offset(dx, 0, dz);
-                Vec3 candidateCenter = candidate.getCenter();
-                Vec3 candidateEye = new Vec3(candidateCenter.x, soldier.getY() + 1.62, candidateCenter.z);
-
-                for (LivingEntity target : potentials) {
-                    Vec3 targetEye = new Vec3(target.getX(), target.getEyeY(), target.getZ());
-                    if (hasLineOfSight(soldier, candidateEye, targetEye)) {
-                        double score = calculatePeekScore(candidate, coverPos, threatDirection, target);
-                        if (score > bestScore) {
-                            bestScore = score;
-                            bestPeekPos = candidate;
-                            bestTarget = target;
-                        }
+            for (LivingEntity target : potentials) {
+                Vec3 targetEye = new Vec3(target.getX(), target.getEyeY(), target.getZ());
+                if (hasLineOfSight(soldier, peekEye, targetEye)) {
+                    double score = calculatePeekScore(peekPos, coverPos, threatDirection, target);
+                    if (score > bestScore) {
+                        bestScore = score;
+                        bestPeekPos = peekPos;
+                        bestTarget = target;
                     }
                 }
             }

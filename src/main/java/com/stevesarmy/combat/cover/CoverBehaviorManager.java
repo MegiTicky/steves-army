@@ -60,7 +60,7 @@ public class CoverBehaviorManager {
                 soldier.syncCoverCurrent(
                     currentCover.getPosition(),
                     currentCover.getType().ordinal(),
-                    currentCover.getQuality()
+                    currentCover.getCombatScore()
                 );
             } else {
                 soldier.syncCoverCurrent(BlockPos.ZERO, 0, 0f);
@@ -74,7 +74,7 @@ public class CoverBehaviorManager {
                 soldier.syncCoverTarget(
                     targetCover.getPosition(),
                     targetCover.getType().ordinal(),
-                    targetCover.getQuality()
+                    targetCover.getCombatScore()
                 );
             } else {
                 soldier.syncCoverTarget(BlockPos.ZERO, 0, 0f);
@@ -146,11 +146,11 @@ public class CoverBehaviorManager {
             StevesArmyMod.LOGGER.info("[CoverBehaviorManager] Soldier {} currentCover: {} -> {}", 
                 soldier.getId(), 
                 oldCover != null ? oldCover.getPosition() + " type=" + oldCover.getType() : "null",
-                cover != null ? cover.getPosition() + " type=" + cover.getType() + " score=" + String.format("%.2f", cover.getQuality()) : "null");
+                cover != null ? cover.getPosition() + " type=" + cover.getType() + " combatScore=" + String.format("%.2f", cover.getCombatScore()) + " quality=" + String.format("%.2f", cover.getQuality()) : "null");
         }
         if (cover != null) {
             this.coverEntryTime = System.currentTimeMillis();
-            this.lastCoverQuality = cover.getQuality();
+            this.lastCoverQuality = cover.getCombatScore();
             this.entryThreatDirection = soldier.getThreatAwareness().getPrimaryDirection(soldier.position());
             boolean samePosition = (oldCover != null && cover.getPosition().equals(oldCover.getPosition()))
                 || (oldCover == null && savedCoverPosition != null && cover.getPosition().equals(savedCoverPosition));

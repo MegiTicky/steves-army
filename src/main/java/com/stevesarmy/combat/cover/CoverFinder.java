@@ -138,6 +138,7 @@ public class CoverFinder {
             }
             float score = calculateThreatAwareScore(coverPoint, soldier, threatDirection, allThreats, primaryThreat);
             coverPoint.setQuality(score);
+            coverPoint.setCombatScore(score);
         }
 
         List<ScoredCover> scored = coverPoints.stream()
@@ -304,32 +305,36 @@ public class CoverFinder {
         BlockPos coverPos = coverPoint.getPosition();
         float bestPeekScore = 0.0f;
         StringBuilder debug = new StringBuilder();
-        debug.append("calculatePeekAngleScore for ").append(coverPos).append(":\n");
+        debug.append("calculatePeekAngleScore for ").append(coverPos).append(" protectedDirs=").append(protectedDirs).append(":\n");
         
         for (Direction peekDir : Direction.Plane.HORIZONTAL) {
-            if (protectedDirs.contains(peekDir)) {
-                debug.append("  ").append(peekDir).append(": protected\n");
+            if (!protectedDirs.contains(peekDir)) {
+                debug.append("  ").append(peekDir).append(": not protected (no wall to peek around)\n");
                 continue;
             }
+            
+            debug.append("  ").append(peekDir).append(": IS PROTECTED, checking...\n");
             
             BlockPos peekPos = coverPos.relative(peekDir);
             if (!isValidPeekPosition(peekPos)) {
-                debug.append("  ").append(peekDir).append(" -> ").append(peekPos).append(": invalid position\n");
+                debug.append("    -> ").append(peekPos).append(": INVALID position (blocked or no ground)\n");
                 continue;
             }
             
-            // Check LOS from peek position to target
+            debug.append("    -> ").append(peekPos).append(": valid position\n");
+            
             boolean losOk = true;
             if (primaryThreat != null && primaryThreat.isAlive()) {
                 Vec3 peekEye = new Vec3(peekPos.getX() + 0.5, peekPos.getY() + 1.62, peekPos.getZ() + 0.5);
                 Vec3 targetEye = new Vec3(primaryThreat.getX(), primaryThreat.getEyeY(), primaryThreat.getZ());
                 losOk = hasLineOfSight(peekEye, targetEye);
-                debug.append("  ").append(peekDir).append(" -> ").append(peekPos)
-                    .append(" LOS=").append(losOk)
-                    .append(" from=").append(String.format("%.1f,%.1f,%.1f", peekEye.x, peekEye.y, peekEye.z))
+                debug.append("    LOS check from=").append(String.format("%.1f,%.1f,%.1f", peekEye.x, peekEye.y, peekEye.z))
                     .append(" to=").append(String.format("%.1f,%.1f,%.1f", targetEye.x, targetEye.y, targetEye.z))
+                    .append(" result=").append(losOk)
                     .append("\n");
                 if (!losOk) continue;
+            } else {
+                debug.append("    No primaryThreat, skipping LOS check\n");
             }
             
             Vec3 peekCenter = peekPos.getCenter();

@@ -33,16 +33,39 @@ public class CoverDebugManager {
     }
     
     public static class TopCoversDebugData {
+        public static final int REASON_NONE = 0;
+        public static final int REASON_CHOSEN = 1;
+        public static final int REASON_RESERVED = 2;
+        public static final int REASON_BLACKLISTED = 3;
+        public static final int REASON_ALREADY_CURRENT = 4;
+        
         public final CoverFinder.ScoredCover[] topCovers;
+        public final int[] rejectionReasons;
+        public final BlockPos chosenCoverPos;
         public final float currentCoverScore;
         public final float penalty;
         public final int peekCount;
         
-        public TopCoversDebugData(CoverFinder.ScoredCover[] topCovers, float currentCoverScore, float penalty, int peekCount) {
+        public TopCoversDebugData(CoverFinder.ScoredCover[] topCovers, int[] rejectionReasons, BlockPos chosenCoverPos,
+                                  float currentCoverScore, float penalty, int peekCount) {
             this.topCovers = topCovers;
+            this.rejectionReasons = rejectionReasons != null ? rejectionReasons : new int[0];
+            this.chosenCoverPos = chosenCoverPos;
             this.currentCoverScore = currentCoverScore;
             this.penalty = penalty;
             this.peekCount = peekCount;
+        }
+        
+        public String getRejectionReason(int index) {
+            if (index < 0 || index >= rejectionReasons.length) return "?";
+            switch (rejectionReasons[index]) {
+                case REASON_NONE: return "";
+                case REASON_CHOSEN: return "CHOSEN";
+                case REASON_RESERVED: return "RESERVED";
+                case REASON_BLACKLISTED: return "BLACKLISTED";
+                case REASON_ALREADY_CURRENT: return "CURRENT";
+                default: return "?";
+            }
         }
     }
     
