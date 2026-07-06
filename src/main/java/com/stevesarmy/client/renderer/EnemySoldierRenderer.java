@@ -12,7 +12,7 @@ import net.minecraft.util.Mth;
 import org.joml.Quaternionf;
 
 public class EnemySoldierRenderer extends HumanoidMobRenderer<EnemySoldierEntity, HumanoidModel<EnemySoldierEntity>> {
-    private static final ResourceLocation TEXTURE = new ResourceLocation("minecraft", "textures/entity/player/slim/steve.png");
+    private static final ResourceLocation TEXTURE = new ResourceLocation("minecraft", "textures/entity/player/wide/steve.png");
 
     public EnemySoldierRenderer(EntityRendererProvider.Context context) {
         super(context, new HumanoidModel<>(context.bakeLayer(ModelLayers.PLAYER)), 0.5F);

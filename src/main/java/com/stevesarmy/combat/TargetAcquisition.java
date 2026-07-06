@@ -4,6 +4,7 @@ import com.stevesarmy.StevesArmyMod;
 import net.minecraft.core.BlockPos;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.HitResult;
@@ -83,6 +84,7 @@ public class TargetAcquisition {
         if (target == observer) return false;
         if (!target.isAlive()) return false;
         if (target.isSpectator()) return false;
+        if (target instanceof Player player && player.isCreative()) return false;
         return true;
     }
     

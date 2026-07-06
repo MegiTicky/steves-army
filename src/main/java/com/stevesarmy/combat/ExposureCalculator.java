@@ -15,8 +15,8 @@ import java.util.List;
 public class ExposureCalculator {
     
     public enum AimPointType {
-        HEAD(10, "HEAD"),
-        NECK(9, "NECK"),
+        HEAD(4, "HEAD"),
+        NECK(3, "NECK"),
         CENTER_MASS(8, "CENTER"),
         UPPER_TORSO(7, "UPPER"),
         LOWER_TORSO(6, "LOWER"),
