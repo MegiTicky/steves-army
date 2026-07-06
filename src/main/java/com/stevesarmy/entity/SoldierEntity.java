@@ -382,8 +382,14 @@ public class SoldierEntity extends PathfinderMob implements Container {
         LivingEntity owner = getOwner();
         if (other == owner) return true;
         
+        Optional<UUID> myOwner = getOwnerUUID();
+        if (myOwner.isPresent()) {
+            if (other instanceof Player otherPlayer) {
+                return otherPlayer.getUUID().equals(myOwner.get());
+            }
+        }
+        
         if (other instanceof SoldierEntity otherSoldier) {
-            Optional<UUID> myOwner = getOwnerUUID();
             Optional<UUID> theirOwner = otherSoldier.getOwnerUUID();
             return myOwner.isPresent() && theirOwner.isPresent() 
                 && myOwner.get().equals(theirOwner.get());
