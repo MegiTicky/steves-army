@@ -31,9 +31,10 @@ public class IncomingFireHandler {
         if (event.getEntity() instanceof SoldierEntity soldier) {
             CoverBehaviorManager coverManager = soldier.getCoverBehaviorManager();
             if (coverManager != null) {
-                coverManager.onTakeDamage();
+                LivingEntity attacker = event.getSource().getEntity() instanceof LivingEntity a ? a : null;
+                coverManager.onTakeDamage(attacker);
 
-                if (event.getSource().getEntity() instanceof LivingEntity attacker) {
+                if (attacker != null) {
                     coverManager.onIncomingFire(attacker);
                 }
             }
@@ -106,7 +107,7 @@ public class IncomingFireHandler {
             Vec3 closestPoint = start.add(segment.scale(t));
 
             if (soldier.position().distanceTo(closestPoint) < NEAR_MISS_THRESHOLD) {
-                coverManager.onNearMiss(closestPoint, soldier, bulletSpeed);
+                coverManager.onNearMiss(closestPoint, soldier, bulletSpeed, shooter);
             }
         }
     }

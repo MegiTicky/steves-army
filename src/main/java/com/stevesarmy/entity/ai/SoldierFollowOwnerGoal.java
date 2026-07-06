@@ -32,9 +32,9 @@ public class SoldierFollowOwnerGoal extends Goal {
         this.soldier = soldier;
         this.level = soldier.level();
         this.speedModifier = 1.2D;
-        this.startDistance = 15.0F;
+        this.startDistance = 20.0F;
         this.stopDistance = 10.0F;
-        this.followDistance = 12.0F;
+        this.followDistance = 15.0F;
         this.setFlags(EnumSet.of(Goal.Flag.MOVE));
     }
 
@@ -43,18 +43,20 @@ public class SoldierFollowOwnerGoal extends Goal {
         if (soldier.getSquadMode() != SquadMode.FOLLOW) {
             return false;
         }
-        
+
         CoverBehaviorManager coverManager = soldier.getCoverBehaviorManager();
         CoverBehaviorManager.CoverState coverState = coverManager.getState();
         if (coverState == CoverBehaviorManager.CoverState.SEEKING_COVER ||
-            coverState == CoverBehaviorManager.CoverState.REPOSITIONING) {
+            coverState == CoverBehaviorManager.CoverState.REPOSITIONING ||
+            coverState == CoverBehaviorManager.CoverState.IN_COVER ||
+            coverState == CoverBehaviorManager.CoverState.SUPPRESSED_IN_COVER) {
             return false;
         }
-        
+
         if (coverManager.isSuppressed()) {
             return false;
         }
-        
+
         LivingEntity owner = soldier.getOwner();
         if (owner == null) {
             return false;
@@ -79,14 +81,16 @@ public class SoldierFollowOwnerGoal extends Goal {
         if (soldier.getSquadMode() != SquadMode.FOLLOW) {
             return false;
         }
-        
+
         CoverBehaviorManager coverManager = soldier.getCoverBehaviorManager();
         CoverBehaviorManager.CoverState coverState = coverManager.getState();
         if (coverState == CoverBehaviorManager.CoverState.SEEKING_COVER ||
-            coverState == CoverBehaviorManager.CoverState.REPOSITIONING) {
+            coverState == CoverBehaviorManager.CoverState.REPOSITIONING ||
+            coverState == CoverBehaviorManager.CoverState.IN_COVER ||
+            coverState == CoverBehaviorManager.CoverState.SUPPRESSED_IN_COVER) {
             return false;
         }
-        
+
         if (coverManager.isSuppressed()) {
             return false;
         }

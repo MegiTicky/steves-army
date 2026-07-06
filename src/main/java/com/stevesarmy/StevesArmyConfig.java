@@ -11,6 +11,7 @@ public class StevesArmyConfig {
     public static final ForgeConfigSpec.DoubleValue SHOT_THRESHOLD;
     public static final ForgeConfigSpec.DoubleValue TARGET_SWITCH_IMPROVEMENT;
     public static final ForgeConfigSpec.IntValue TARGET_REEVALUATE_INTERVAL;
+    public static final ForgeConfigSpec.BooleanValue SQUAD_FRIENDLY_FIRE;
     
     static {
         BUILDER.push("combat");
@@ -41,6 +42,17 @@ public class StevesArmyConfig {
         
         BUILDER.pop();
         
+        BUILDER.push("friendly_fire");
+        
+        SQUAD_FRIENDLY_FIRE = BUILDER
+            .comment("Enable squad-friendly fire protection for players/soldiers without a team.",
+                     "When enabled, soldiers cannot damage their owner or squadmates.",
+                     "For team-based protection, use: /team modify <team> friendlyfire false",
+                     "Default: true (squad protection ON)")
+            .define("squadFriendlyFire", true);
+        
+        BUILDER.pop();
+        
         SPEC = BUILDER.build();
     }
     
@@ -58,5 +70,9 @@ public class StevesArmyConfig {
     
     public static int getTargetReevaluateInterval() {
         return TARGET_REEVALUATE_INTERVAL.get();
+    }
+    
+    public static boolean getSquadFriendlyFire() {
+        return SQUAD_FRIENDLY_FIRE.get();
     }
 }

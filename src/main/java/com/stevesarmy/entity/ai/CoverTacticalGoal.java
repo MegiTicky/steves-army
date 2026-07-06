@@ -560,19 +560,32 @@ public class CoverTacticalGoal extends Goal {
     private boolean isCoverStillValid() {
         CoverPoint currentCover = getCoverManager().getCurrentCover();
         if (currentCover == null) return false;
-        
+
         double distance = soldier.position().distanceTo(currentCover.getPosition().getCenter());
         if (distance > COVER_ABANDON_DISTANCE) return false;
-        
+
         PeekController peekCtrl = getPeekController();
         boolean peeking = peekCtrl.isExposed() || peekCtrl.isMovingToPeek() || peekCtrl.isReturning();
         if (peeking) return true;
-        
+
         if (getCoverManager().getTimeInCover() >= MIN_COVER_DWELL_TIME_MS) {
             double maxDistance = soldier.getTarget() != null ? COMBAT_COVER_VALID_DISTANCE : COVER_VALID_DISTANCE;
             if (distance > maxDistance) return false;
         }
-        
+
+        // FOLLOW mode: invalidate cover if player has moved too far away
+        if (soldier.getSquadMode() == SquadMode.FOLLOW) {
+            LivingEntity owner = soldier.getOwner();
+            if (owner != null) {
+                double distToOwner = currentCover.getPosition().distSqr(owner.blockPosition());
+                if (distToOwner > 20 * 20) {
+                    StevesArmyMod.LOGGER.info("[CoverGoal] Cover invalid: too far from owner (dist={})",
+                        String.format("%.1f", Math.sqrt(distToOwner)));
+                    return false;
+                }
+            }
+        }
+
         return true;
     }
     

@@ -310,22 +310,42 @@ public class CoverBehaviorManager {
     }
     
     public void onNearMiss(net.minecraft.world.phys.Vec3 bulletPath, net.minecraft.world.entity.LivingEntity soldier) {
-        suppressionTracker.onNearMiss(bulletPath, soldier);
+        onNearMiss(bulletPath, soldier, 1.0f, null);
     }
 
     public void onNearMiss(net.minecraft.world.phys.Vec3 bulletPath, net.minecraft.world.entity.LivingEntity soldier, float bulletSpeed) {
+        onNearMiss(bulletPath, soldier, bulletSpeed, null);
+    }
+
+    public void onNearMiss(net.minecraft.world.phys.Vec3 bulletPath, net.minecraft.world.entity.LivingEntity soldier, float bulletSpeed, @javax.annotation.Nullable net.minecraft.world.entity.LivingEntity shooter) {
+        if (shooter != null && soldier instanceof com.stevesarmy.entity.SoldierEntity s && s.isFriendlyTo(shooter)) {
+            return;
+        }
         suppressionTracker.onNearMiss(bulletPath, soldier, bulletSpeed);
     }
 
     public void onIncomingFire(net.minecraft.world.entity.LivingEntity shooter) {
+        if (soldier.isFriendlyTo(shooter)) {
+            return;
+        }
         suppressionTracker.onIncomingFire(shooter);
     }
 
     public void onIncomingFire(net.minecraft.world.entity.LivingEntity shooter, float bulletSpeed) {
+        if (soldier.isFriendlyTo(shooter)) {
+            return;
+        }
         suppressionTracker.onIncomingFire(shooter, bulletSpeed);
     }
 
     public void onTakeDamage() {
+        onTakeDamage(null);
+    }
+
+    public void onTakeDamage(@javax.annotation.Nullable net.minecraft.world.entity.LivingEntity attacker) {
+        if (attacker != null && soldier.isFriendlyTo(attacker)) {
+            return;
+        }
         suppressionTracker.onTakeDamage();
     }
     
