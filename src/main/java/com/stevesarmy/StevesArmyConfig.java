@@ -9,6 +9,7 @@ public class StevesArmyConfig {
     
     public static final ForgeConfigSpec.DoubleValue AIM_QUALITY_BASE_ACCURACY;
     public static final ForgeConfigSpec.DoubleValue AIM_QUALITY_THRESHOLD_SCALE;
+    public static final ForgeConfigSpec.DoubleValue AIM_QUALITY_SLOW_GUN_THRESHOLD_SCALE;
     public static final ForgeConfigSpec.DoubleValue AIM_QUALITY_BUILD_RATE;
     public static final ForgeConfigSpec.DoubleValue AIM_QUALITY_RECOIL_SCALE;
     public static final ForgeConfigSpec.DoubleValue AIM_QUALITY_LOS_DECAY_RATE;
@@ -32,11 +33,19 @@ public class StevesArmyConfig {
         
         AIM_QUALITY_THRESHOLD_SCALE = BUILDER
             .comment("Fraction of targetAimQuality required before firing (0.0 to 1.0).",
+                     "Used for guns that don't need bolting (auto/semi-auto).",
                      "shotThreshold = max(0.15, targetAimQuality * thresholdScale).",
                      "Higher = soldier waits longer for better aim. Default: 0.35",
                      "At baseAccuracy=0.50 close range: 0.50 * 0.35 = 0.175 threshold",
                      "At baseAccuracy=0.50 long range: max(0.15, 0.25 * 0.35) = 0.15 (floor)")
             .defineInRange("thresholdScale", 0.35, 0.0, 1.0);
+        
+        AIM_QUALITY_SLOW_GUN_THRESHOLD_SCALE = BUILDER
+            .comment("Fraction of targetAimQuality required for guns that need bolting (bolt-action).",
+                     "shotThreshold = max(0.15, targetAimQuality * slowGunThresholdScale).",
+                     "Bolt-action rifles get a higher scale since each shot is more precious.",
+                     "Default: 0.60 (at close range: 0.50 * 0.60 = 0.30 threshold)")
+            .defineInRange("slowGunThresholdScale", 0.60, 0.0, 1.0);
         
         AIM_QUALITY_BUILD_RATE = BUILDER
             .comment("How fast aimQuality approaches its target per tick (0.0 to 1.0).",
@@ -128,6 +137,10 @@ public class StevesArmyConfig {
     
     public static float getAimQualityThresholdScale() {
         return AIM_QUALITY_THRESHOLD_SCALE.get().floatValue();
+    }
+    
+    public static float getAimQualitySlowGunThresholdScale() {
+        return AIM_QUALITY_SLOW_GUN_THRESHOLD_SCALE.get().floatValue();
     }
     
     public static float getAimQualityBuildRate() {

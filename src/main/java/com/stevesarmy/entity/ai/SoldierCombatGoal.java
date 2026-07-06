@@ -52,6 +52,7 @@ public class SoldierCombatGoal extends Goal {
     
     private float aimQuality = 0.0f;
     private UUID trackedTargetUUID = null;
+    private boolean lastShotNeededBolt = false;
     private ExposureCalculator.AimPointResult currentAimPoint = null;
     
     private static final float ADS_THRESHOLD = 0.8f;
@@ -390,7 +391,9 @@ public class SoldierCombatGoal extends Goal {
         updateAimQuality();
         
         float targetAimQ = AimAccuracyManager.getTargetAimQuality(soldier, target);
-        float thresholdScale = StevesArmyConfig.getAimQualityThresholdScale();
+        float thresholdScale = lastShotNeededBolt || GunIntegration.isBolting(soldier) 
+            ? StevesArmyConfig.getAimQualitySlowGunThresholdScale() 
+            : StevesArmyConfig.getAimQualityThresholdScale();
         float shotThreshold = Math.max(0.15f, targetAimQ * thresholdScale);
         
         if (aimQuality < shotThreshold) {
@@ -439,8 +442,11 @@ public class SoldierCombatGoal extends Goal {
         }
         
         switch (result) {
-            case SUCCESS -> {}
-            case NEED_BOLT -> GunIntegration.bolt(soldier);
+            case SUCCESS -> lastShotNeededBolt = false;
+            case NEED_BOLT -> {
+                GunIntegration.bolt(soldier);
+                lastShotNeededBolt = true;
+            }
             case NO_AMMO -> GunIntegration.reload(soldier);
             case COOLDOWN -> {}
             case IS_BOLTING, IS_RELOADING, IS_DRAWING -> {}
@@ -959,7 +965,9 @@ private void tickCoverPeekCycle(CoverBehaviorManager coverManager) {
                 detectionSystem.getDetectionState(target.getUUID()).lastBrightnessFactor : 0;
             float lockedAimQuality = target != null ? aimQuality : 0;
             float lockedTargetAimQuality = target != null ? AimAccuracyManager.getTargetAimQuality(soldier, target) : 0;
-            float lockedSuppressiveMin = StevesArmyConfig.getAimQualityThresholdScale();
+            float lockedSuppressiveMin = lastShotNeededBolt || GunIntegration.isBolting(soldier) 
+                ? StevesArmyConfig.getAimQualitySlowGunThresholdScale() 
+                : StevesArmyConfig.getAimQualityThresholdScale();
             float lockedAdsProgress = target != null ? GunIntegration.getAimProgress(soldier) : 0;
             String lockedAimPointType = target != null && currentAimPoint != null ? 
                 currentAimPoint.type.displayName : "";
