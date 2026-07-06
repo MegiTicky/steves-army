@@ -326,7 +326,8 @@ public class CombatDebugRenderer {
                 mc.font.drawInBatch(adsText, -mc.font.width(adsText) / 2f, y, 0xAAAAFF, false, matrix4f, bufferSource, net.minecraft.client.gui.Font.DisplayMode.NORMAL, 0, 15728880);
                 y -= 10;
                 String aimQText = String.format("AIM:%d%%", (int)(data.aimQuality * 100));
-                float computedThreshold = Math.max(0.15f, data.targetAimQuality * 0.35f);
+                float thresholdScale = data.shotThreshold;
+                float computedThreshold = Math.max(0.15f, data.targetAimQuality * thresholdScale);
                 int aimQColor = data.aimQuality >= computedThreshold ? 0x00FF00 : 0xFF0000;
                 mc.font.drawInBatch(aimQText, -mc.font.width(aimQText) / 2f, y, aimQColor, false, matrix4f, bufferSource, net.minecraft.client.gui.Font.DisplayMode.NORMAL, 0, 15728880);
                 y -= 10;

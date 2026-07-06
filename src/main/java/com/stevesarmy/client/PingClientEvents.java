@@ -154,7 +154,7 @@ public class PingClientEvents {
                     true,
                     soldierData.lockedAimQuality,
                     soldierData.lockedTargetAimQuality,
-                    StevesArmyConfig.getAimQualityShotThreshold(),
+                    StevesArmyConfig.getAimQualityThresholdScale(),
                     soldierData.lockedSuppressiveMin,
                     soldierData.lockedAdsProgress,
                     soldierData.lockedAimPointType,

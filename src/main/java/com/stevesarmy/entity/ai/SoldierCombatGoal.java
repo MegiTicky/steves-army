@@ -390,7 +390,8 @@ public class SoldierCombatGoal extends Goal {
         updateAimQuality();
         
         float targetAimQ = AimAccuracyManager.getTargetAimQuality(soldier, target);
-        float shotThreshold = Math.max(0.15f, targetAimQ * 0.35f);
+        float thresholdScale = StevesArmyConfig.getAimQualityThresholdScale();
+        float shotThreshold = Math.max(0.15f, targetAimQ * thresholdScale);
         
         if (aimQuality < shotThreshold) {
             targetReevaluateCounter++;
@@ -958,7 +959,7 @@ private void tickCoverPeekCycle(CoverBehaviorManager coverManager) {
                 detectionSystem.getDetectionState(target.getUUID()).lastBrightnessFactor : 0;
             float lockedAimQuality = target != null ? aimQuality : 0;
             float lockedTargetAimQuality = target != null ? AimAccuracyManager.getTargetAimQuality(soldier, target) : 0;
-            float lockedSuppressiveMin = StevesArmyConfig.getSuppressiveFireMinQuality();
+            float lockedSuppressiveMin = StevesArmyConfig.getAimQualityThresholdScale();
             float lockedAdsProgress = target != null ? GunIntegration.getAimProgress(soldier) : 0;
             String lockedAimPointType = target != null && currentAimPoint != null ? 
                 currentAimPoint.type.displayName : "";

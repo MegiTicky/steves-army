@@ -8,14 +8,13 @@ public class StevesArmyConfig {
     public static final ForgeConfigSpec SPEC;
     
     public static final ForgeConfigSpec.DoubleValue AIM_QUALITY_BASE_ACCURACY;
-    public static final ForgeConfigSpec.DoubleValue AIM_QUALITY_SHOT_THRESHOLD;
+    public static final ForgeConfigSpec.DoubleValue AIM_QUALITY_THRESHOLD_SCALE;
     public static final ForgeConfigSpec.DoubleValue AIM_QUALITY_BUILD_RATE;
     public static final ForgeConfigSpec.DoubleValue AIM_QUALITY_RECOIL_SCALE;
     public static final ForgeConfigSpec.DoubleValue AIM_QUALITY_LOS_DECAY_RATE;
     public static final ForgeConfigSpec.DoubleValue AIM_QUALITY_MOVE_DECAY_RATE;
     public static final ForgeConfigSpec.DoubleValue AIM_QUALITY_TARGET_MOVE_PENALTY;
     public static final ForgeConfigSpec.DoubleValue AIM_QUALITY_SWITCH_RESET;
-    public static final ForgeConfigSpec.DoubleValue SUPPRESSIVE_FIRE_MIN_QUALITY;
     public static final ForgeConfigSpec.DoubleValue TARGET_SWITCH_IMPROVEMENT;
     public static final ForgeConfigSpec.IntValue TARGET_REEVALUATE_INTERVAL;
     public static final ForgeConfigSpec.BooleanValue SQUAD_FRIENDLY_FIRE;
@@ -28,15 +27,16 @@ public class StevesArmyConfig {
         AIM_QUALITY_BASE_ACCURACY = BUILDER
             .comment("Maximum aimQuality achievable under ideal conditions (0.0 to 1.0).",
                      "Multiplied by distance, movement, and exposure factors to get targetAimQuality.",
-                     "Default: 0.85 (85% max hit probability)")
-            .defineInRange("baseAccuracy", 0.85, 0.1, 1.0);
+                     "Default: 0.50 (50% max hit probability)")
+            .defineInRange("baseAccuracy", 0.50, 0.1, 1.0);
         
-        AIM_QUALITY_SHOT_THRESHOLD = BUILDER
-            .comment("Minimum aimQuality to fire a shot (0.0 to 1.0).",
-                     "aimQuality IS the hit probability — soldier will attempt to hit when above this.",
-                     "Below this, suppressive fire kicks in if aimQuality >= suppressiveFireMinQuality.",
-                     "Default: 0.30 (30% minimum hit chance before firing)")
-            .defineInRange("shotThreshold", 0.30, 0.0, 1.0);
+        AIM_QUALITY_THRESHOLD_SCALE = BUILDER
+            .comment("Fraction of targetAimQuality required before firing (0.0 to 1.0).",
+                     "shotThreshold = max(0.15, targetAimQuality * thresholdScale).",
+                     "Higher = soldier waits longer for better aim. Default: 0.35",
+                     "At baseAccuracy=0.50 close range: 0.50 * 0.35 = 0.175 threshold",
+                     "At baseAccuracy=0.50 long range: max(0.15, 0.25 * 0.35) = 0.15 (floor)")
+            .defineInRange("thresholdScale", 0.35, 0.0, 1.0);
         
         AIM_QUALITY_BUILD_RATE = BUILDER
             .comment("How fast aimQuality approaches its target per tick (0.0 to 1.0).",
@@ -71,12 +71,6 @@ public class StevesArmyConfig {
                      "0.0 = full reset, 1.0 = retain all aimQuality. Default: 0.30 (keep 30%).",
                      "Values < 1.0 create a small re-aiming delay on target switch.")
             .defineInRange("switchReset", 0.30, 0.0, 1.0);
-        
-        SUPPRESSIVE_FIRE_MIN_QUALITY = BUILDER
-            .comment("Minimum aimQuality for suppressive fire when below shotThreshold.",
-                     "Soldier still shoots, but at a random miss position (no direct hit possible).",
-                     "Default: 0.15")
-            .defineInRange("suppressiveFireMinQuality", 0.15, 0.0, 1.0);
         
         TARGET_SWITCH_IMPROVEMENT = BUILDER
             .comment("Minimum improvement to switch targets (0.0 to 1.0). Default 0.2 (20%).",
@@ -132,8 +126,8 @@ public class StevesArmyConfig {
         return AIM_QUALITY_BASE_ACCURACY.get().floatValue();
     }
     
-    public static float getAimQualityShotThreshold() {
-        return AIM_QUALITY_SHOT_THRESHOLD.get().floatValue();
+    public static float getAimQualityThresholdScale() {
+        return AIM_QUALITY_THRESHOLD_SCALE.get().floatValue();
     }
     
     public static float getAimQualityBuildRate() {
@@ -158,10 +152,6 @@ public class StevesArmyConfig {
     
     public static float getAimQualitySwitchReset() {
         return AIM_QUALITY_SWITCH_RESET.get().floatValue();
-    }
-    
-    public static float getSuppressiveFireMinQuality() {
-        return SUPPRESSIVE_FIRE_MIN_QUALITY.get().floatValue();
     }
     
     public static float getTargetSwitchImprovement() {
