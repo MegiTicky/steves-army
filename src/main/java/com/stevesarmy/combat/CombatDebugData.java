@@ -28,9 +28,10 @@ public class CombatDebugData {
     public final double distance;
     public final boolean isLockedTarget;
     
-    public final float trackingProgress;
-    public final float currentAccuracy;
+    public final float aimQuality;
+    public final float targetAimQuality;
     public final float shotThreshold;
+    public final float suppressiveMin;
     public final float adsProgress;
     public final String aimPointType;
     public final boolean bulletPathClear;
@@ -41,7 +42,7 @@ public class CombatDebugData {
                           double distanceFactor, double exposureFactor, double movementFactor,
                           double brightnessFactor, double baseRate, boolean isDetected, 
                           double distance, boolean isLockedTarget,
-                          float trackingProgress, float currentAccuracy, float shotThreshold, 
+                          float aimQuality, float targetAimQuality, float shotThreshold, float suppressiveMin,
                           float adsProgress, String aimPointType, boolean bulletPathClear) {
         this.soldierId = soldierId;
         this.targetId = targetId;
@@ -60,9 +61,10 @@ public class CombatDebugData {
         this.isDetected = isDetected;
         this.distance = distance;
         this.isLockedTarget = isLockedTarget;
-        this.trackingProgress = trackingProgress;
-        this.currentAccuracy = currentAccuracy;
+        this.aimQuality = aimQuality;
+        this.targetAimQuality = targetAimQuality;
         this.shotThreshold = shotThreshold;
+        this.suppressiveMin = suppressiveMin;
         this.adsProgress = adsProgress;
         this.aimPointType = aimPointType;
         this.bulletPathClear = bulletPathClear;
@@ -90,9 +92,10 @@ public class CombatDebugData {
         buf.writeBoolean(isDetected);
         buf.writeDouble(distance);
         buf.writeBoolean(isLockedTarget);
-        buf.writeFloat(trackingProgress);
-        buf.writeFloat(currentAccuracy);
+        buf.writeFloat(aimQuality);
+        buf.writeFloat(targetAimQuality);
         buf.writeFloat(shotThreshold);
+        buf.writeFloat(suppressiveMin);
         buf.writeFloat(adsProgress);
         buf.writeUtf(aimPointType);
         buf.writeBoolean(bulletPathClear);
@@ -116,9 +119,10 @@ public class CombatDebugData {
         boolean isDetected = buf.readBoolean();
         double distance = buf.readDouble();
         boolean isLockedTarget = buf.readBoolean();
-        float trackingProgress = buf.readFloat();
-        float currentAccuracy = buf.readFloat();
+        float aimQuality = buf.readFloat();
+        float targetAimQuality = buf.readFloat();
         float shotThreshold = buf.readFloat();
+        float suppressiveMin = buf.readFloat();
         float adsProgress = buf.readFloat();
         String aimPointType = buf.readUtf();
         boolean bulletPathClear = buf.readBoolean();
@@ -127,6 +131,6 @@ public class CombatDebugData {
             detectionPoints, detectionThreshold, hasLOS, inFocusedArc, inPeripheralArc,
             distanceFactor, exposureFactor, movementFactor, brightnessFactor, baseRate,
             isDetected, distance, isLockedTarget,
-            trackingProgress, currentAccuracy, shotThreshold, adsProgress, aimPointType, bulletPathClear);
+            aimQuality, targetAimQuality, shotThreshold, suppressiveMin, adsProgress, aimPointType, bulletPathClear);
     }
 }

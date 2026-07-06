@@ -27,9 +27,9 @@ public class PotentialTargetsDebugMessage {
     private final double lockedExposureFactor;
     private final double lockedMovementFactor;
     private final double lockedBrightnessFactor;
-    private final float lockedTrackingProgress;
-    private final float lockedAccuracy;
-    private final float lockedShotThreshold;
+    private final float lockedAimQuality;
+    private final float lockedTargetAimQuality;
+    private final float lockedSuppressiveMin;
     private final float lockedAdsProgress;
     private final String lockedAimPointType;
     private final boolean lockedBulletPathClear;
@@ -42,8 +42,8 @@ public class PotentialTargetsDebugMessage {
                                         boolean lockedInPeripheral, boolean lockedIsDetected,
                                         double lockedDistanceFactor, double lockedExposureFactor,
                                         double lockedMovementFactor, double lockedBrightnessFactor,
-                                        float lockedTrackingProgress, float lockedAccuracy,
-                                        float lockedShotThreshold, float lockedAdsProgress,
+                                        float lockedAimQuality, float lockedTargetAimQuality,
+                                        float lockedSuppressiveMin, float lockedAdsProgress,
                                         String lockedAimPointType, boolean lockedBulletPathClear,
                                         List<PotentialTargetEntry> potentialTargets) {
         this.soldierUUID = soldierUUID;
@@ -60,9 +60,9 @@ public class PotentialTargetsDebugMessage {
         this.lockedExposureFactor = lockedExposureFactor;
         this.lockedMovementFactor = lockedMovementFactor;
         this.lockedBrightnessFactor = lockedBrightnessFactor;
-        this.lockedTrackingProgress = lockedTrackingProgress;
-        this.lockedAccuracy = lockedAccuracy;
-        this.lockedShotThreshold = lockedShotThreshold;
+        this.lockedAimQuality = lockedAimQuality;
+        this.lockedTargetAimQuality = lockedTargetAimQuality;
+        this.lockedSuppressiveMin = lockedSuppressiveMin;
         this.lockedAdsProgress = lockedAdsProgress;
         this.lockedAimPointType = lockedAimPointType;
         this.lockedBulletPathClear = lockedBulletPathClear;
@@ -84,9 +84,9 @@ public class PotentialTargetsDebugMessage {
         this.lockedExposureFactor = hasLockedTarget ? buf.readDouble() : 0;
         this.lockedMovementFactor = hasLockedTarget ? buf.readDouble() : 0;
         this.lockedBrightnessFactor = hasLockedTarget ? buf.readDouble() : 0;
-        this.lockedTrackingProgress = hasLockedTarget ? buf.readFloat() : 0;
-        this.lockedAccuracy = hasLockedTarget ? buf.readFloat() : 0;
-        this.lockedShotThreshold = hasLockedTarget ? buf.readFloat() : 0;
+        this.lockedAimQuality = hasLockedTarget ? buf.readFloat() : 0;
+        this.lockedTargetAimQuality = hasLockedTarget ? buf.readFloat() : 0;
+        this.lockedSuppressiveMin = hasLockedTarget ? buf.readFloat() : 0;
         this.lockedAdsProgress = hasLockedTarget ? buf.readFloat() : 0;
         this.lockedAimPointType = hasLockedTarget ? buf.readUtf() : "";
         this.lockedBulletPathClear = hasLockedTarget ? buf.readBoolean() : false;
@@ -129,9 +129,9 @@ public class PotentialTargetsDebugMessage {
             buf.writeDouble(msg.lockedExposureFactor);
             buf.writeDouble(msg.lockedMovementFactor);
             buf.writeDouble(msg.lockedBrightnessFactor);
-            buf.writeFloat(msg.lockedTrackingProgress);
-            buf.writeFloat(msg.lockedAccuracy);
-            buf.writeFloat(msg.lockedShotThreshold);
+            buf.writeFloat(msg.lockedAimQuality);
+            buf.writeFloat(msg.lockedTargetAimQuality);
+            buf.writeFloat(msg.lockedSuppressiveMin);
             buf.writeFloat(msg.lockedAdsProgress);
             buf.writeUtf(msg.lockedAimPointType);
             buf.writeBoolean(msg.lockedBulletPathClear);
@@ -180,9 +180,9 @@ public class PotentialTargetsDebugMessage {
     public double getLockedExposureFactor() { return lockedExposureFactor; }
     public double getLockedMovementFactor() { return lockedMovementFactor; }
     public double getLockedBrightnessFactor() { return lockedBrightnessFactor; }
-    public float getLockedTrackingProgress() { return lockedTrackingProgress; }
-    public float getLockedAccuracy() { return lockedAccuracy; }
-    public float getLockedShotThreshold() { return lockedShotThreshold; }
+    public float getLockedAimQuality() { return lockedAimQuality; }
+    public float getLockedTargetAimQuality() { return lockedTargetAimQuality; }
+    public float getLockedSuppressiveMin() { return lockedSuppressiveMin; }
     public float getLockedAdsProgress() { return lockedAdsProgress; }
     public String getLockedAimPointType() { return lockedAimPointType; }
     public boolean getLockedBulletPathClear() { return lockedBulletPathClear; }

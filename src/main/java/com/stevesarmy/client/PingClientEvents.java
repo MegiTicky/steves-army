@@ -1,5 +1,6 @@
 package com.stevesarmy.client;
 
+import com.stevesarmy.StevesArmyConfig;
 import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.combat.CombatDebugData;
 import com.stevesarmy.combat.DetectionSystem;
@@ -49,9 +50,9 @@ public class PingClientEvents {
         public double lockedExposureFactor;
         public double lockedMovementFactor;
         public double lockedBrightnessFactor;
-        public float lockedTrackingProgress;
-        public float lockedAccuracy;
-        public float lockedShotThreshold;
+        public float lockedAimQuality;
+        public float lockedTargetAimQuality;
+        public float lockedSuppressiveMin;
         public float lockedAdsProgress;
         public String lockedAimPointType;
         public boolean lockedBulletPathClear;
@@ -81,9 +82,9 @@ public class PingClientEvents {
             data.lockedExposureFactor = msg.getLockedExposureFactor();
             data.lockedMovementFactor = msg.getLockedMovementFactor();
             data.lockedBrightnessFactor = msg.getLockedBrightnessFactor();
-            data.lockedTrackingProgress = msg.getLockedTrackingProgress();
-            data.lockedAccuracy = msg.getLockedAccuracy();
-            data.lockedShotThreshold = msg.getLockedShotThreshold();
+            data.lockedAimQuality = msg.getLockedAimQuality();
+            data.lockedTargetAimQuality = msg.getLockedTargetAimQuality();
+            data.lockedSuppressiveMin = msg.getLockedSuppressiveMin();
             data.lockedAdsProgress = msg.getLockedAdsProgress();
             data.lockedAimPointType = msg.getLockedAimPointType();
             data.lockedBulletPathClear = msg.getLockedBulletPathClear();
@@ -151,9 +152,10 @@ public class PingClientEvents {
                     soldierData.lockedIsDetected,
                     soldierData.lockedDistance,
                     true,
-                    soldierData.lockedTrackingProgress,
-                    soldierData.lockedAccuracy,
-                    soldierData.lockedShotThreshold,
+                    soldierData.lockedAimQuality,
+                    soldierData.lockedTargetAimQuality,
+                    StevesArmyConfig.getAimQualityShotThreshold(),
+                    soldierData.lockedSuppressiveMin,
                     soldierData.lockedAdsProgress,
                     soldierData.lockedAimPointType,
                     soldierData.lockedBulletPathClear
@@ -184,6 +186,7 @@ public class PingClientEvents {
                         entry.detectionPoints >= DetectionSystem.DETECTION_THRESHOLD,
                         entry.distance,
                         false,
+                        0,
                         0,
                         0,
                         0,

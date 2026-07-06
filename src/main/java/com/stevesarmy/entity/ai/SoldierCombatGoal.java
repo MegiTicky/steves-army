@@ -51,6 +51,7 @@ public class SoldierCombatGoal extends Goal {
     private boolean wasReloading = false;
     
     private float aimQuality = 0.0f;
+    private UUID trackedTargetUUID = null;
     private ExposureCalculator.AimPointResult currentAimPoint = null;
     
     private static final float ADS_THRESHOLD = 0.8f;
@@ -174,10 +175,14 @@ public class SoldierCombatGoal extends Goal {
     private void resetAim(LivingEntity newTarget) {
         if (newTarget == null) {
             aimQuality = 0.0f;
+            trackedTargetUUID = null;
             return;
         }
-        float switchReset = StevesArmyConfig.getAimQualitySwitchReset();
-        aimQuality *= switchReset;
+        if (trackedTargetUUID == null || !trackedTargetUUID.equals(newTarget.getUUID())) {
+            trackedTargetUUID = newTarget.getUUID();
+            float switchReset = StevesArmyConfig.getAimQualitySwitchReset();
+            aimQuality *= switchReset;
+        }
     }
 
     @Override
@@ -390,7 +395,6 @@ public class SoldierCombatGoal extends Goal {
             targetReevaluateCounter++;
             if (targetReevaluateCounter >= StevesArmyConfig.getTargetReevaluateInterval()) {
                 targetReevaluateCounter = 0;
-                
                 Optional<LivingEntity> betterTarget = findBetterTarget(aimQuality);
                 if (betterTarget.isPresent()) {
                     this.target = betterTarget.get();
@@ -403,14 +407,7 @@ public class SoldierCombatGoal extends Goal {
                     return;
                 }
             }
-            
-            float suppressiveMin = StevesArmyConfig.getSuppressiveFireMinQuality();
-            if (aimQuality >= suppressiveMin) {
-                StevesArmyMod.LOGGER.debug("Suppressive fire at {} (aimQuality: {})", 
-                    target.getName().getString(), aimQuality);
-            } else {
-                return;
-            }
+            return;
         }
         
         GunIntegration.ShootResult result;
@@ -437,6 +434,8 @@ public class SoldierCombatGoal extends Goal {
                     String.format("%.3f", recoilMagnitude), String.format("%.3f", recoilLoss),
                     String.format("%.3f", aimQuality));
             }
+            
+            updateAimQuality();
         }
         
         switch (result) {
@@ -958,9 +957,9 @@ private void tickCoverPeekCycle(CoverBehaviorManager coverManager) {
                 detectionSystem.getDetectionState(target.getUUID()).lastMovementFactor : 0;
             double lockedBrightnessFactor = target != null && detectionSystem.getDetectionState(target.getUUID()) != null ?
                 detectionSystem.getDetectionState(target.getUUID()).lastBrightnessFactor : 0;
-            float lockedTrackingProgress = target != null ? aimQuality : 0;
-            float lockedAccuracy = target != null ? aimQuality : 0;
-            float lockedShotThreshold = target != null ? aimQuality : 0;
+            float lockedAimQuality = target != null ? aimQuality : 0;
+            float lockedTargetAimQuality = target != null ? AimAccuracyManager.getTargetAimQuality(soldier, target) : 0;
+            float lockedSuppressiveMin = StevesArmyConfig.getSuppressiveFireMinQuality();
             float lockedAdsProgress = target != null ? GunIntegration.getAimProgress(soldier) : 0;
             String lockedAimPointType = target != null && currentAimPoint != null ? 
                 currentAimPoint.type.displayName : "";
@@ -972,7 +971,7 @@ private void tickCoverPeekCycle(CoverBehaviorManager coverManager) {
                 lockedDetectionPoints, lockedDistance, lockedHasLOS, lockedInFocused,
                 lockedInPeripheral, lockedIsDetected,
                 lockedDistanceFactor, lockedExposureFactor, lockedMovementFactor, lockedBrightnessFactor,
-                lockedTrackingProgress, lockedAccuracy, lockedShotThreshold, lockedAdsProgress,
+                lockedAimQuality, lockedTargetAimQuality, lockedSuppressiveMin, lockedAdsProgress,
                 lockedAimPointType, lockedBulletPathClear,
                 entries
             );

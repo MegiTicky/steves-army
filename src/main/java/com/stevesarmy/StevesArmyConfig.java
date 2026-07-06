@@ -46,9 +46,9 @@ public class StevesArmyConfig {
         
         AIM_QUALITY_RECOIL_SCALE = BUILDER
             .comment("Per-shot penalty from gun recoil: (pitch + yaw) * scale.",
-                     "AK47: pitch=0.66, yaw=0.23, scale=0.12 → 0.107 aimQuality loss per shot.",
-                     "Higher = more aim degradation under sustained fire. Default: 0.12")
-            .defineInRange("recoilScale", 0.12, 0.0, 1.0);
+                     "AK47: pitch=0.66, yaw=0.23, scale=0.07 → 0.062 aimQuality loss per shot.",
+                     "Higher = more aim degradation under sustained fire. Default: 0.07")
+            .defineInRange("recoilScale", 0.07, 0.0, 1.0);
         
         AIM_QUALITY_LOS_DECAY_RATE = BUILDER
             .comment("Per-tick aimQuality decay when target is not in line-of-sight.",

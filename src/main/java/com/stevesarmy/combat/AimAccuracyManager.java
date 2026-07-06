@@ -27,9 +27,12 @@ public class AimAccuracyManager {
     }
 
     public static float getBuildRate(LivingEntity soldier, LivingEntity target) {
+        double distance = soldier.distanceTo(target);
+        double effectiveRange = GunIntegration.getEffectiveRange(soldier);
         float baseRate = StevesArmyConfig.getAimQualityBuildRate();
         float exposureFactor = calculateExposureTrackingFactor(soldier, target);
-        return baseRate * exposureFactor;
+        float distanceFactor = calculateDistanceTrackingFactor(distance, effectiveRange);
+        return baseRate * exposureFactor * distanceFactor;
     }
 
     public static float calculateHitProbability(LivingEntity soldier, LivingEntity target) {
