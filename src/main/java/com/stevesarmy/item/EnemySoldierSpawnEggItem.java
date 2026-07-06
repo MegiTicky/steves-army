@@ -16,7 +16,6 @@ import net.minecraft.world.level.Level;
 import net.minecraftforge.common.ForgeSpawnEggItem;
 
 import java.lang.reflect.Method;
-import java.util.Optional;
 
 public class EnemySoldierSpawnEggItem extends ForgeSpawnEggItem {
 
@@ -55,48 +54,44 @@ public class EnemySoldierSpawnEggItem extends ForgeSpawnEggItem {
         }
 
         try {
-            ResourceLocation gunId = ResourceLocation.of(AK47_GUN_ID, ':');
+            ResourceLocation gunId = new ResourceLocation("tacz", "ak47");
 
-            Class<?> timelessApiClass = Class.forName("com.tacz.guns.api.TimelessAPI");
-            Method getCommonGunIndex = timelessApiClass.getMethod("getCommonGunIndex", ResourceLocation.class);
-            Object indexOpt = getCommonGunIndex.invoke(null, gunId);
+            Class<?> builderClass = Class.forName("com.tacz.guns.api.item.builder.GunItemBuilder");
+            Method create = builderClass.getMethod("create");
+            Object builder = create.invoke(null);
 
-            if (!(indexOpt instanceof Optional<?> opt) || opt.isEmpty()) {
-                StevesArmyMod.LOGGER.warn("[EnemySpawnEgg] Gun '{}' not found in TaCZ registry", AK47_GUN_ID);
+            builderClass.getMethod("setId", ResourceLocation.class).invoke(builder, gunId);
+
+            Object gunObj;
+            Object indexOpt = Class.forName("com.tacz.guns.api.TimelessAPI")
+                .getMethod("getCommonGunIndex", ResourceLocation.class)
+                .invoke(null, gunId);
+
+            if (indexOpt instanceof java.util.Optional<?> opt && opt.isPresent()) {
+                gunObj = builderClass.getMethod("build").invoke(builder);
+            } else {
+                gunObj = builderClass.getMethod("forceBuild").invoke(builder);
+            }
+
+            if (!(gunObj instanceof ItemStack gunStack) || gunStack.isEmpty()) {
+                StevesArmyMod.LOGGER.warn("[EnemySpawnEgg] Failed to create AK47 gun stack");
                 return;
             }
 
-            Object gunIndex = opt.get();
-            Method getDefaultItemStack = gunIndex.getClass().getMethod("getDefaultItemStack");
-            Object defaultStackObj = getDefaultItemStack.invoke(gunIndex);
-
-            if (defaultStackObj instanceof ItemStack gunStack) {
-                Class<?> iGunClass = Class.forName("com.tacz.guns.api.item.IGun");
-                Method getIGunOrNull = iGunClass.getMethod("getIGunOrNull", ItemStack.class);
-                Object iGun = getIGunOrNull.invoke(null, gunStack);
-
-                if (iGun != null) {
-                    Method setAmmoInBarrel = iGunClass.getMethod("setAmmoInBarrel", ItemStack.class, boolean.class);
-                    setAmmoInBarrel.invoke(iGun, gunStack, true);
-
-                    Method getGunData = gunIndex.getClass().getMethod("getGunData");
-                    Object gunData = getGunData.invoke(gunIndex);
-                    Method getMagazineSize = gunData.getClass().getMethod("getMagazineSize");
-                    int magSize = (int) getMagazineSize.invoke(gunData);
-
-                    Method setAmmoCount = iGunClass.getMethod("setAmmoCount", ItemStack.class, int.class);
-                    setAmmoCount.invoke(iGun, gunStack, magSize);
-                }
-
-                enemy.setItemSlot(EquipmentSlot.MAINHAND, gunStack.copy());
-                GunIntegration.initialData(enemy);
-                GunIntegration.draw(enemy);
-
-                StevesArmyMod.LOGGER.info("[EnemySpawnEgg] Equipped AK47 to enemy soldier {}", enemy.getId());
+            Class<?> iGunClass = Class.forName("com.tacz.guns.api.item.IGun");
+            Object iGun = iGunClass.getMethod("getIGunOrNull", ItemStack.class).invoke(null, gunStack);
+            if (iGun != null) {
+                iGunClass.getMethod("setAmmoCount", ItemStack.class, int.class).invoke(iGun, gunStack, 999);
+                iGunClass.getMethod("setAmmoInBarrel", ItemStack.class, boolean.class).invoke(iGun, gunStack, true);
             }
+
+            enemy.setItemSlot(EquipmentSlot.MAINHAND, gunStack.copy());
+            GunIntegration.initialData(enemy);
+            GunIntegration.draw(enemy);
+
+            StevesArmyMod.LOGGER.info("[EnemySpawnEgg] Equipped AK47 to enemy soldier {}", enemy.getId());
         } catch (Exception e) {
-            StevesArmyMod.LOGGER.warn("[EnemySpawnEgg] Failed to equip AK47: {}", e.getMessage());
-            e.printStackTrace();
+            StevesArmyMod.LOGGER.warn("[EnemySpawnEgg] Failed to equip AK47: {}", e.toString());
         }
     }
 }

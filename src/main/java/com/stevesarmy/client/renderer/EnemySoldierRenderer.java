@@ -10,7 +10,7 @@ import net.minecraft.client.renderer.entity.layers.HumanoidArmorLayer;
 import net.minecraft.resources.ResourceLocation;
 
 public class EnemySoldierRenderer extends HumanoidMobRenderer<EnemySoldierEntity, HumanoidModel<EnemySoldierEntity>> {
-    private static final ResourceLocation TEXTURE = ResourceLocation.of("minecraft:textures/entity/player/alex.png", '/');
+    private static final ResourceLocation TEXTURE = new ResourceLocation("minecraft", "textures/entity/player/slim/steve.png");
 
     public EnemySoldierRenderer(EntityRendererProvider.Context context) {
         super(context, new HumanoidModel<>(context.bakeLayer(ModelLayers.PLAYER)), 0.5F);
