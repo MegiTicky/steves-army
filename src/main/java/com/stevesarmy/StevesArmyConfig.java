@@ -7,32 +7,76 @@ public class StevesArmyConfig {
     public static final ForgeConfigSpec.Builder BUILDER = new ForgeConfigSpec.Builder();
     public static final ForgeConfigSpec SPEC;
     
-    public static final ForgeConfigSpec.DoubleValue BASE_ACCURACY;
-    public static final ForgeConfigSpec.DoubleValue SHOT_THRESHOLD;
+    public static final ForgeConfigSpec.DoubleValue AIM_QUALITY_BASE_ACCURACY;
+    public static final ForgeConfigSpec.DoubleValue AIM_QUALITY_SHOT_THRESHOLD;
+    public static final ForgeConfigSpec.DoubleValue AIM_QUALITY_BUILD_RATE;
+    public static final ForgeConfigSpec.DoubleValue AIM_QUALITY_RECOIL_SCALE;
+    public static final ForgeConfigSpec.DoubleValue AIM_QUALITY_LOS_DECAY_RATE;
+    public static final ForgeConfigSpec.DoubleValue AIM_QUALITY_MOVE_DECAY_RATE;
+    public static final ForgeConfigSpec.DoubleValue AIM_QUALITY_TARGET_MOVE_PENALTY;
+    public static final ForgeConfigSpec.DoubleValue AIM_QUALITY_SWITCH_RESET;
+    public static final ForgeConfigSpec.DoubleValue SUPPRESSIVE_FIRE_MIN_QUALITY;
     public static final ForgeConfigSpec.DoubleValue TARGET_SWITCH_IMPROVEMENT;
     public static final ForgeConfigSpec.IntValue TARGET_REEVALUATE_INTERVAL;
     public static final ForgeConfigSpec.BooleanValue SQUAD_FRIENDLY_FIRE;
-    
-    public static final ForgeConfigSpec.DoubleValue RECOIL_TRK_SCALE;
-    
     public static final ForgeConfigSpec.DoubleValue THREAT_SMOOTH_BLEND_FACTOR;
     public static final ForgeConfigSpec.IntValue THREAT_SMOOTH_DECAY_TIME_MS;
     
     static {
-        BUILDER.push("combat");
+        BUILDER.push("aim_quality");
         
-        BASE_ACCURACY = BUILDER
-            .comment("Base accuracy for soldiers (0.1 to 1.0). Default 0.5 (50%).",
-                     "This is the base hit chance at optimal range for a stationary, exposed target.",
-                     "Actual accuracy is modified by distance, target movement, and exposure.")
-            .defineInRange("baseAccuracy", 0.5, 0.1, 1.0);
+        AIM_QUALITY_BASE_ACCURACY = BUILDER
+            .comment("Maximum aimQuality achievable under ideal conditions (0.0 to 1.0).",
+                     "Multiplied by distance, movement, and exposure factors to get targetAimQuality.",
+                     "Default: 0.85 (85% max hit probability)")
+            .defineInRange("baseAccuracy", 0.85, 0.1, 1.0);
         
-        SHOT_THRESHOLD = BUILDER
-            .comment("Minimum shot threshold to fire (0.0 to 1.0). Default 0.5 (50%).",
-                     "Soldiers fire when (trackingProgress × accuracy) >= this value.",
-                     "Lower values = soldiers fire sooner with less aim time.",
-                     "If threshold not met, soldier will still fire as suppressive fire after full tracking.")
-            .defineInRange("shotThreshold", 0.5, 0.0, 1.0);
+        AIM_QUALITY_SHOT_THRESHOLD = BUILDER
+            .comment("Minimum aimQuality to fire a shot (0.0 to 1.0).",
+                     "aimQuality IS the hit probability — soldier will attempt to hit when above this.",
+                     "Below this, suppressive fire kicks in if aimQuality >= suppressiveFireMinQuality.",
+                     "Default: 0.30 (30% minimum hit chance before firing)")
+            .defineInRange("shotThreshold", 0.30, 0.0, 1.0);
+        
+        AIM_QUALITY_BUILD_RATE = BUILDER
+            .comment("How fast aimQuality approaches its target per tick (0.0 to 1.0).",
+                     "Used as lerp factor: aimQuality = lerp(buildRate, aimQuality, targetAimQuality).",
+                     "Higher = faster aim acquisition. Default: 0.08 (~2s to reach target)")
+            .defineInRange("buildRate", 0.08, 0.01, 1.0);
+        
+        AIM_QUALITY_RECOIL_SCALE = BUILDER
+            .comment("Per-shot penalty from gun recoil: (pitch + yaw) * scale.",
+                     "AK47: pitch=0.66, yaw=0.23, scale=0.12 → 0.107 aimQuality loss per shot.",
+                     "Higher = more aim degradation under sustained fire. Default: 0.12")
+            .defineInRange("recoilScale", 0.12, 0.0, 1.0);
+        
+        AIM_QUALITY_LOS_DECAY_RATE = BUILDER
+            .comment("Per-tick aimQuality decay when target is not in line-of-sight.",
+                     "aimQuality drops this much per tick (20 ticks/sec) when target breaks LOS.",
+                     "Default: 0.15 (reaches 0 in ~7 ticks = 0.35s)")
+            .defineInRange("losDecayRate", 0.15, 0.0, 0.5);
+        
+        AIM_QUALITY_MOVE_DECAY_RATE = BUILDER
+            .comment("Per-tick aimQuality decay while the soldier is moving.",
+                     "Penalizes shooting while running. Default: 0.02 (minor effect).")
+            .defineInRange("moveDecayRate", 0.02, 0.0, 0.1);
+        
+        AIM_QUALITY_TARGET_MOVE_PENALTY = BUILDER
+            .comment("Additional per-tick aimQuality decay when the target is moving.",
+                     "Makes it harder to track sprinting targets. Default: 0.05.")
+            .defineInRange("targetMovePenalty", 0.05, 0.0, 0.2);
+        
+        AIM_QUALITY_SWITCH_RESET = BUILDER
+            .comment("Proportion of aimQuality retained when switching to a new target (0.0 to 1.0).",
+                     "0.0 = full reset, 1.0 = retain all aimQuality. Default: 0.30 (keep 30%).",
+                     "Values < 1.0 create a small re-aiming delay on target switch.")
+            .defineInRange("switchReset", 0.30, 0.0, 1.0);
+        
+        SUPPRESSIVE_FIRE_MIN_QUALITY = BUILDER
+            .comment("Minimum aimQuality for suppressive fire when below shotThreshold.",
+                     "Soldier still shoots, but at a random miss position (no direct hit possible).",
+                     "Default: 0.15")
+            .defineInRange("suppressiveFireMinQuality", 0.15, 0.0, 1.0);
         
         TARGET_SWITCH_IMPROVEMENT = BUILDER
             .comment("Minimum improvement to switch targets (0.0 to 1.0). Default 0.2 (20%).",
@@ -55,17 +99,6 @@ public class StevesArmyConfig {
                      "For team-based protection, use: /team modify <team> friendlyfire false",
                      "Default: true (squad protection ON)")
             .define("squadFriendlyFire", true);
-        
-        BUILDER.pop();
-        
-        BUILDER.push("recoil");
-        
-        RECOIL_TRK_SCALE = BUILDER
-            .comment("Multiplier from gun recoil magnitude to tracking progress loss per shot.",
-                     "Higher values = more accuracy loss from recoil. Default 0.08.",
-                     "Each shot reduces tracking by: (pitch + yaw) * recoilTrkScale.",
-                     "AK47: pitch=0.66, yaw=0.23, magnitude=0.89 → 0.071 TRK loss at 0.08 scale.")
-            .defineInRange("recoilTrkScale", 0.08, 0.0, 1.0);
         
         BUILDER.pop();
         
@@ -95,12 +128,40 @@ public class StevesArmyConfig {
         SPEC = BUILDER.build();
     }
     
-    public static float getBaseAccuracy() {
-        return BASE_ACCURACY.get().floatValue();
+    public static float getAimQualityBaseAccuracy() {
+        return AIM_QUALITY_BASE_ACCURACY.get().floatValue();
     }
     
-    public static float getShotThreshold() {
-        return SHOT_THRESHOLD.get().floatValue();
+    public static float getAimQualityShotThreshold() {
+        return AIM_QUALITY_SHOT_THRESHOLD.get().floatValue();
+    }
+    
+    public static float getAimQualityBuildRate() {
+        return AIM_QUALITY_BUILD_RATE.get().floatValue();
+    }
+    
+    public static float getAimQualityRecoilScale() {
+        return AIM_QUALITY_RECOIL_SCALE.get().floatValue();
+    }
+    
+    public static float getAimQualityLosDecayRate() {
+        return AIM_QUALITY_LOS_DECAY_RATE.get().floatValue();
+    }
+    
+    public static float getAimQualityMoveDecayRate() {
+        return AIM_QUALITY_MOVE_DECAY_RATE.get().floatValue();
+    }
+    
+    public static float getAimQualityTargetMovePenalty() {
+        return AIM_QUALITY_TARGET_MOVE_PENALTY.get().floatValue();
+    }
+    
+    public static float getAimQualitySwitchReset() {
+        return AIM_QUALITY_SWITCH_RESET.get().floatValue();
+    }
+    
+    public static float getSuppressiveFireMinQuality() {
+        return SUPPRESSIVE_FIRE_MIN_QUALITY.get().floatValue();
     }
     
     public static float getTargetSwitchImprovement() {
@@ -113,10 +174,6 @@ public class StevesArmyConfig {
     
     public static boolean getSquadFriendlyFire() {
         return SQUAD_FRIENDLY_FIRE.get();
-    }
-    
-    public static float getRecoilTrkScale() {
-        return RECOIL_TRK_SCALE.get().floatValue();
     }
     
     public static double getThreatSmoothBlendFactor() {

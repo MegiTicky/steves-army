@@ -21,6 +21,7 @@ import com.stevesarmy.squad.SquadMode;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.util.Mth;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.ai.goal.Goal;
 import net.minecraft.world.entity.monster.Monster;
@@ -49,10 +50,7 @@ public class SoldierCombatGoal extends Goal {
     private boolean wasAiming = false;
     private boolean wasReloading = false;
     
-    private UUID trackedTargetUUID = null;
-    private long trackingStartTime = 0;
-    private float trackingProgress = 0.0f;
-    private float currentAccuracy = 0.0f;
+    private float aimQuality = 0.0f;
     private ExposureCalculator.AimPointResult currentAimPoint = null;
     
     private static final float ADS_THRESHOLD = 0.8f;
@@ -157,7 +155,7 @@ public class SoldierCombatGoal extends Goal {
         if (target != null) {
             soldier.setTarget(target);
             threatTracker.reportThreatDirect(target);
-            resetTracking(target);
+            resetAim(target);
         }
         wasAiming = false;
     }
@@ -170,24 +168,16 @@ public class SoldierCombatGoal extends Goal {
         soldier.setTarget(null);
         this.target = null;
         this.wasAiming = false;
-        resetTracking(null);
+        resetAim(null);
     }
     
-    private void resetTracking(LivingEntity newTarget) {
+    private void resetAim(LivingEntity newTarget) {
         if (newTarget == null) {
-            trackedTargetUUID = null;
-            trackingStartTime = 0;
-            trackingProgress = 0.0f;
-            currentAccuracy = 0.0f;
+            aimQuality = 0.0f;
             return;
         }
-        
-        if (trackedTargetUUID == null || !trackedTargetUUID.equals(newTarget.getUUID())) {
-            trackedTargetUUID = newTarget.getUUID();
-            trackingStartTime = System.currentTimeMillis();
-            trackingProgress = 0.0f;
-            currentAccuracy = AimAccuracyManager.calculateAccuracy(soldier, newTarget);
-        }
+        float switchReset = StevesArmyConfig.getAimQualitySwitchReset();
+        aimQuality *= switchReset;
     }
 
     @Override
@@ -302,7 +292,7 @@ public class SoldierCombatGoal extends Goal {
         
         if (canSee) {
             threatTracker.reportThreatDirect(target);
-            resetTracking(target);
+            resetAim(target);
         }
         
         CoverBehaviorManager coverManager = soldier.getCoverBehaviorManager();
@@ -366,13 +356,13 @@ public class SoldierCombatGoal extends Goal {
                 StevesArmyMod.LOGGER.info("Path blocked for {} ticks, switching target", pathBlockedCounter);
                 pathBlockedCounter = 0;
                 if (findNewTarget()) {
-                    resetTracking(target);
+                    resetAim(target);
                 }
             }
             return;
         }
         
-        if (!FriendlyFireChecker.isSafeToShoot(soldier, currentAimPoint.position, currentAccuracy)) {
+        if (!FriendlyFireChecker.isSafeToShoot(soldier, currentAimPoint.position, aimQuality)) {
             if (isDebugLogging()) {
                 StevesArmyMod.LOGGER.info("[FriendlyFire] Soldier {} blocked shot - friendly in cone", 
                     soldier.getId());
@@ -390,32 +380,32 @@ public class SoldierCombatGoal extends Goal {
             return;
         }
         
-        updateTrackingProgress();
+        updateAimQuality();
         
-        float shotThreshold = AimAccuracyManager.calculateShotThreshold(trackingProgress, currentAccuracy);
-        float configShotThreshold = StevesArmyConfig.getShotThreshold();
+        float shotThreshold = StevesArmyConfig.getAimQualityShotThreshold();
         
-        if (shotThreshold < configShotThreshold) {
+        if (aimQuality < shotThreshold) {
             targetReevaluateCounter++;
             if (targetReevaluateCounter >= StevesArmyConfig.getTargetReevaluateInterval()) {
                 targetReevaluateCounter = 0;
                 
-                Optional<LivingEntity> betterTarget = findBetterTarget(currentAccuracy);
+                Optional<LivingEntity> betterTarget = findBetterTarget(aimQuality);
                 if (betterTarget.isPresent()) {
                     this.target = betterTarget.get();
                     soldier.setTarget(target);
                     threatTracker.reportThreatDirect(target);
                     detectionSystem.forceDetect(target);
-                    resetTracking(target);
+                    resetAim(target);
                     StevesArmyMod.LOGGER.info("Switched to better target: {} (higher hit probability)", 
                         target.getName().getString());
                     return;
                 }
             }
             
-            if (trackingProgress >= 0.8f) {
-                StevesArmyMod.LOGGER.debug("Suppressive fire at {} (accuracy: {}, threshold: {})", 
-                    target.getName().getString(), currentAccuracy, shotThreshold);
+            float suppressiveMin = StevesArmyConfig.getSuppressiveFireMinQuality();
+            if (aimQuality >= suppressiveMin) {
+                StevesArmyMod.LOGGER.debug("Suppressive fire at {} (aimQuality: {})", 
+                    target.getName().getString(), aimQuality);
             } else {
                 return;
             }
@@ -423,7 +413,7 @@ public class SoldierCombatGoal extends Goal {
         
         GunIntegration.ShootResult result;
         
-        if (AimAccuracyManager.rollHit(currentAccuracy, soldier.level())) {
+        if (soldier.level().getRandom().nextFloat() < aimQuality) {
             result = GunIntegration.shootWithDeviation(soldier, currentAimPoint, 0.0f, 0.0f);
         } else {
             Vec3 missPosition = AimAccuracyManager.calculateMissPosition(target, soldier.level());
@@ -436,10 +426,14 @@ public class SoldierCombatGoal extends Goal {
             }
 
             if (GunIntegration.isTaczLoaded() && GunIntegration.hasGun(soldier)) {
-                float[] recoil = GunIntegration.getGunRecoil(soldier);
+                float[] recoil = AimAccuracyManager.getGunRecoil(soldier);
                 float recoilMagnitude = Math.abs(recoil[0]) + Math.abs(recoil[1]);
-                float trkLoss = recoilMagnitude * StevesArmyConfig.getRecoilTrkScale();
-                trackingProgress = Math.max(0.0f, trackingProgress - trkLoss);
+                float recoilLoss = recoilMagnitude * StevesArmyConfig.getAimQualityRecoilScale();
+                aimQuality = Math.max(0.0f, aimQuality - recoilLoss);
+                StevesArmyMod.LOGGER.info("[Recoil] pitch={}, yaw={}, magnitude={}, recoilLoss={}, aimQuality={}",
+                    String.format("%.3f", recoil[0]), String.format("%.3f", recoil[1]),
+                    String.format("%.3f", recoilMagnitude), String.format("%.3f", recoilLoss),
+                    String.format("%.3f", aimQuality));
             }
         }
         
@@ -456,7 +450,7 @@ public class SoldierCombatGoal extends Goal {
                     StevesArmyMod.LOGGER.info("PATH_BLOCKED result, switching target");
                     pathBlockedCounter = 0;
                     if (findNewTarget()) {
-                        resetTracking(target);
+                        resetAim(target);
                     }
                 }
             }
@@ -522,7 +516,7 @@ private void tickCoverPeekCycle(CoverBehaviorManager coverManager) {
         }
     }
     
-    private Optional<LivingEntity> findBetterTarget(float currentAccuracy) {
+    private Optional<LivingEntity> findBetterTarget(float currentAimQuality) {
         List<LivingEntity> potentialTargets = getPotentialTargets();
         
         List<LivingEntity> detectedTargets = potentialTargets.stream()
@@ -539,7 +533,7 @@ private void tickCoverPeekCycle(CoverBehaviorManager coverManager) {
         
         Optional<LivingEntity> betterTarget = detectedTargets.stream()
             .map(e -> new TargetScore(e, AimAccuracyManager.calculateHitProbability(soldier, e)))
-            .filter(ts -> ts.hitProbability > currentAccuracy + improvementThreshold)
+            .filter(ts -> ts.hitProbability > currentAimQuality + improvementThreshold)
             .max(Comparator.comparingDouble(ts -> ts.hitProbability))
             .map(ts -> ts.target);
         
@@ -556,15 +550,34 @@ private void tickCoverPeekCycle(CoverBehaviorManager coverManager) {
         }
     }
     
-    private void updateTrackingProgress() {
-        if (target == null || trackingStartTime == 0) {
-            return;
+    private void updateAimQuality() {
+        if (target == null) return;
+
+        boolean inLOS = TargetAcquisition.hasLineOfSight(soldier, target);
+
+        if (inLOS) {
+            float targetAimQuality = AimAccuracyManager.getTargetAimQuality(soldier, target);
+            float buildRate = AimAccuracyManager.getBuildRate(soldier, target);
+
+            if (soldier.getDeltaMovement().horizontalDistanceSqr() > 0.01) {
+                aimQuality -= StevesArmyConfig.getAimQualityMoveDecayRate();
+            }
+
+            double targetSpeed = target.getDeltaMovement().horizontalDistanceSqr();
+            if (targetSpeed > 0.01) {
+                aimQuality -= StevesArmyConfig.getAimQualityTargetMovePenalty();
+            }
+
+            if (aimQuality < targetAimQuality) {
+                aimQuality = Mth.lerp(buildRate, aimQuality, targetAimQuality);
+            } else if (aimQuality > targetAimQuality) {
+                aimQuality = Mth.lerp(buildRate * 0.5f, aimQuality, targetAimQuality);
+            }
+        } else {
+            aimQuality -= StevesArmyConfig.getAimQualityLosDecayRate();
         }
-        
-        float trackingTimeMs = AimAccuracyManager.getTrackingTimeMs(soldier, target);
-        long elapsedMs = System.currentTimeMillis() - trackingStartTime;
-        
-        trackingProgress = Math.min(1.0f, elapsedMs / trackingTimeMs);
+
+        aimQuality = Mth.clamp(aimQuality, 0.0f, 1.0f);
     }
 
     private void tickScanning(List<LivingEntity> potentialTargets) {
@@ -943,10 +956,9 @@ private void tickCoverPeekCycle(CoverBehaviorManager coverManager) {
                 detectionSystem.getDetectionState(target.getUUID()).lastMovementFactor : 0;
             double lockedBrightnessFactor = target != null && detectionSystem.getDetectionState(target.getUUID()) != null ?
                 detectionSystem.getDetectionState(target.getUUID()).lastBrightnessFactor : 0;
-            float lockedTrackingProgress = target != null ? trackingProgress : 0;
-            float lockedAccuracy = target != null ? currentAccuracy : 0;
-            float lockedShotThreshold = target != null ? 
-                AimAccuracyManager.calculateShotThreshold(trackingProgress, currentAccuracy) : 0;
+            float lockedTrackingProgress = target != null ? aimQuality : 0;
+            float lockedAccuracy = target != null ? aimQuality : 0;
+            float lockedShotThreshold = target != null ? aimQuality : 0;
             float lockedAdsProgress = target != null ? GunIntegration.getAimProgress(soldier) : 0;
             String lockedAimPointType = target != null && currentAimPoint != null ? 
                 currentAimPoint.type.displayName : "";
