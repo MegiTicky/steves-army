@@ -7,7 +7,6 @@ import com.stevesarmy.combat.cover.CoverBehaviorManager;
 import com.stevesarmy.entity.ai.CoverTacticalGoal;
 import com.stevesarmy.entity.ai.EnemyDefendGoal;
 import com.stevesarmy.entity.ai.SoldierCombatGoal;
-import com.stevesarmy.entity.ai.TargetPlayerSoldierGoal;
 import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.resources.ResourceLocation;
@@ -15,8 +14,6 @@ import net.minecraft.world.entity.*;
 import net.minecraft.world.entity.ai.goal.FloatGoal;
 import net.minecraft.world.entity.ai.goal.LookAtPlayerGoal;
 import net.minecraft.world.entity.ai.goal.RandomLookAroundGoal;
-import net.minecraft.world.entity.ai.goal.target.HurtByTargetGoal;
-import net.minecraft.world.entity.ai.goal.target.NearestAttackableTargetGoal;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
@@ -41,10 +38,6 @@ public class EnemySoldierEntity extends SoldierEntity {
         this.goalSelector.addGoal(3, new EnemyDefendGoal(this));
         this.goalSelector.addGoal(4, new LookAtPlayerGoal(this, Player.class, 8.0F));
         this.goalSelector.addGoal(5, new RandomLookAroundGoal(this));
-
-        this.targetSelector.addGoal(1, new HurtByTargetGoal(this));
-        this.targetSelector.addGoal(2, new NearestAttackableTargetGoal<>(this, Player.class, true));
-        this.targetSelector.addGoal(3, new TargetPlayerSoldierGoal(this));
     }
 
     @Override
