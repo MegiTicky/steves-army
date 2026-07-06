@@ -59,6 +59,9 @@ public class CoverTacticalGoal extends Goal {
     private BlockPos lastFailedCover = null;
     private int nonPeekableTicks = 0;
     private int peekCycleLogTick = 0;
+    
+    private CoverPoint pendingRetryCover = null;
+    private boolean isRetryAttempt = false;
 
     private CoverFinder.ScoredCover[] cachedTopCovers = new CoverFinder.ScoredCover[0];
 
@@ -218,6 +221,8 @@ public class CoverTacticalGoal extends Goal {
             getCoverManager().clearTargetCover();
         }
         
+        pendingRetryCover = null;
+        isRetryAttempt = false;
         cooldown = COOLDOWN_TICKS;
         stuckTicks = 0;
     }
@@ -282,6 +287,19 @@ public class CoverTacticalGoal extends Goal {
     }
     
     private void tickSeekingCover() {
+        // Handle pending retry from previous tick
+        if (pendingRetryCover != null) {
+            if (debugLoggingEnabled) {
+                StevesArmyMod.LOGGER.info("[PathDebug] Soldier {} retrying path to cover {}", 
+                    soldier.getId(), pendingRetryCover.getPosition());
+            }
+            isRetryAttempt = true;
+            moveToCover(pendingRetryCover);
+            isRetryAttempt = false;
+            pendingRetryCover = null;
+            return;
+        }
+        
         CoverPoint targetCover = getCoverManager().getTargetCover();
         
         if (targetCover == null) {
@@ -746,23 +764,21 @@ public class CoverTacticalGoal extends Goal {
             }
             
             if (failedCoverPositions.contains(cover.getPosition())) {
-                List<CoverPoint> allPoints = finder.findCoverPoints(searchCenter, searchRadius);
-                allPoints.removeIf(cp -> failedCoverPositions.contains(cp.getPosition()));
+                List<CoverFinder.ScoredCover> scored = finder.evaluateAndScoreAll(
+                    soldier, threatDirection, threats, searchRadius, true);
                 
-                for (CoverPoint cp : allPoints) {
-                    if (!threats.isEmpty()) {
-                        CoverQualityEvaluator evaluator = new CoverQualityEvaluator(level);
-                        evaluator.evaluateWithRaycast(cp, threats.get(0));
-                    }
+                scored = scored.stream()
+                    .filter(sc -> !failedCoverPositions.contains(sc.cover.getPosition()))
+                    .collect(java.util.stream.Collectors.toList());
+                
+                if (scored.isEmpty()) {
+                    StevesArmyMod.LOGGER.info("[CoverGoal] Soldier {} no valid covers after filtering blacklist", soldier.getId());
+                    return;
                 }
                 
-                bestCover = allPoints.stream()
-                    .filter(cp -> CoverReservationManager.isAvailable(cp.getPosition()))
-                    .filter(cp -> cp.getType() != CoverType.NONE)
-                    .max(Comparator.comparingDouble(CoverPoint::getQuality));
-                
-                if (bestCover.isEmpty()) return;
-                cover = bestCover.get();
+                cover = scored.get(0).cover;
+                StevesArmyMod.LOGGER.info("[CoverGoal] Soldier {} selected fallback cover {} (score={})", 
+                    soldier.getId(), cover.getPosition(), String.format("%.2f", scored.get(0).score));
             }
             
             CoverPoint currentCover = getCoverManager().getCurrentCover();
@@ -892,7 +908,7 @@ public class CoverTacticalGoal extends Goal {
         }
         
         Vec3 standingPos = getCoverStandingPosition(wallPos);
-        Path path = navigation.createPath(standingPos.x, standingPos.y, standingPos.z, 0);
+        Path path = navigation.createPath(standingPos.x, standingPos.y, standingPos.z, 1);
         
         boolean isReachable = false;
         String failReason = "null path";
@@ -931,15 +947,27 @@ public class CoverTacticalGoal extends Goal {
         }
         
         if (isReachable) {
+            pendingRetryCover = null; // Clear any pending retry on success
             navigation.moveTo(path, 1.2);
             if (debugLoggingEnabled) {
                 StevesArmyMod.LOGGER.info("[PathDebug] Soldier {} started navigation to cover {} from pos {} (path nodes={})", 
                     soldier.getId(), wallPos, soldier.blockPosition(), path.getNodeCount());
             }
         } else {
+            // If this is a null path and NOT already a retry, schedule retry for next tick
+            if (path == null && !isRetryAttempt) {
+                if (debugLoggingEnabled) {
+                    StevesArmyMod.LOGGER.info("[PathDebug] Soldier {} at {} null path to cover {}, scheduling retry next tick", 
+                        soldier.getId(), soldier.blockPosition(), wallPos);
+                }
+                pendingRetryCover = cover;
+                getCoverManager().setTargetCover(cover);
+                return;
+            }
+            
             if (debugLoggingEnabled) {
-                StevesArmyMod.LOGGER.info("[PathDebug] Soldier {} at {} BLACKLISTED cover {} reason: {}", 
-                    soldier.getId(), soldier.blockPosition(), wallPos, failReason);
+                StevesArmyMod.LOGGER.info("[PathDebug] Soldier {} at {} BLACKLISTED cover {} reason: {}{}", 
+                    soldier.getId(), soldier.blockPosition(), wallPos, failReason, isRetryAttempt ? " (after retry)" : "");
             }
             blacklistCover(wallPos, BlacklistReason.PATH_FAILED);
         }

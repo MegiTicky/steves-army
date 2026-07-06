@@ -156,7 +156,7 @@ public class CoverFinder {
         return all.subList(0, Math.min(count, all.size()));
     }
 
-    private List<ScoredCover> evaluateAndScoreAll(LivingEntity soldier, Vec3 threatDirection,
+    public List<ScoredCover> evaluateAndScoreAll(LivingEntity soldier, Vec3 threatDirection,
                                                    List<LivingEntity> allThreats, int radius, boolean includeReserved) {
         List<CoverPoint> coverPoints = findCoverPoints(soldier.blockPosition(), radius);
         if (coverPoints.isEmpty()) return Collections.emptyList();

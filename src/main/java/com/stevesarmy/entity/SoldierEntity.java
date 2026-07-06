@@ -451,11 +451,17 @@ public class SoldierEntity extends PathfinderMob implements Container {
     }
     
     @Override
+    public void remove(RemovalReason reason) {
+        super.remove(reason);
+        
+        if (!this.level().isClientSide && coverBehaviorManager != null) {
+            com.stevesarmy.combat.cover.CoverReservationManager.releaseAll(this);
+        }
+    }
+    
+    @Override
     public EntityDimensions getDimensions(Pose pose) {
-        if (entityData.get(CRAWLING)
-            || (coverBehaviorManager != null 
-                && coverBehaviorManager.isInCover() 
-                && peekController.getState() == PeekController.State.HIDING)) {
+        if (entityData.get(CRAWLING)) {
             return EntityDimensions.scalable(0.6F, 0.8F);
         }
         return super.getDimensions(pose);
