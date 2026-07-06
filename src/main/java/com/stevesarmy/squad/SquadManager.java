@@ -1,5 +1,6 @@
 package com.stevesarmy.squad;
 
+import com.stevesarmy.StevesArmyMod;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.Tag;
@@ -65,6 +66,22 @@ public class SquadManager extends SavedData {
                 squadsByMember.remove(memberId);
             }
             squadsById.remove(squad.getSquadId());
+            this.setDirty();
+        }
+    }
+
+    public void setSquadFormation(UUID squadId, SquadFormation formation) {
+        SquadData squad = squadsById.get(squadId);
+        if (squad != null) {
+            squad.setFormation(formation);
+            this.setDirty();
+        }
+    }
+
+    public void setSquadFormationByLeader(UUID leaderId, SquadFormation formation) {
+        SquadData squad = squadsByLeader.get(leaderId);
+        if (squad != null) {
+            squad.setFormation(formation);
             this.setDirty();
         }
     }

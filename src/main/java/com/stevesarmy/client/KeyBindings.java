@@ -11,8 +11,8 @@ import org.lwjgl.glfw.GLFW;
 
 @Mod.EventBusSubscriber(modid = "steves_army", bus = Mod.EventBusSubscriber.Bus.MOD, value = Dist.CLIENT)
 public class KeyBindings {
-    public static final KeyMapping TOGGLE_SQUAD_MODE = new KeyMapping(
-        "key.steves_army.toggle_squad",
+    public static final KeyMapping FORMATION_WHEEL = new KeyMapping(
+        "key.steves_army.formation_wheel",
         KeyConflictContext.IN_GAME,
         InputConstants.Type.KEYSYM,
         GLFW.GLFW_KEY_G,
@@ -37,7 +37,7 @@ public class KeyBindings {
     
     @SubscribeEvent
     public static void registerKeyMappings(RegisterKeyMappingsEvent event) {
-        event.register(TOGGLE_SQUAD_MODE);
+        event.register(FORMATION_WHEEL);
         event.register(DEBUG);
         event.register(PING_WHEEL);
     }

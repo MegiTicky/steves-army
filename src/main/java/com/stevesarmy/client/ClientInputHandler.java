@@ -1,7 +1,7 @@
 package com.stevesarmy.client;
 
+import com.stevesarmy.network.DebugMessage;
 import com.stevesarmy.network.NetworkHandler;
-import com.stevesarmy.network.ToggleSquadModeMessage;
 import net.minecraft.client.Minecraft;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.client.event.InputEvent;
@@ -13,8 +13,8 @@ public class ClientInputHandler {
     
     @SubscribeEvent
     public static void onKeyInput(InputEvent.Key event) {
-        if (KeyBindings.TOGGLE_SQUAD_MODE.consumeClick()) {
-            NetworkHandler.INSTANCE.sendToServer(new ToggleSquadModeMessage());
+        if (KeyBindings.DEBUG.consumeClick()) {
+            NetworkHandler.INSTANCE.sendToServer(new DebugMessage());
         }
     }
 }

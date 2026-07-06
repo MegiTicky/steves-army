@@ -11,6 +11,7 @@ public class SquadData {
     private UUID leaderId;
     private final List<UUID> memberIds = new ArrayList<>();
     private SquadMode mode = SquadMode.FOLLOW;
+    private SquadFormation formation = SquadFormation.NONE;
 
     public SquadData(UUID leaderId) {
         this.squadId = UUID.randomUUID();
@@ -61,11 +62,20 @@ public class SquadData {
         this.mode = mode;
     }
 
+    public SquadFormation getFormation() {
+        return formation;
+    }
+
+    public void setFormation(SquadFormation formation) {
+        this.formation = formation;
+    }
+
     public CompoundTag toNBT() {
         CompoundTag tag = new CompoundTag();
         tag.putUUID("SquadId", squadId);
         tag.putUUID("LeaderId", leaderId);
         tag.putString("Mode", mode.name());
+        tag.putString("Formation", formation.name());
         
         ListTag membersList = new ListTag();
         for (UUID memberId : memberIds) {
@@ -82,6 +92,11 @@ public class SquadData {
         SquadData data = new SquadData(tag.getUUID("LeaderId"));
         data.squadId = tag.getUUID("SquadId");
         data.mode = SquadMode.valueOf(tag.getString("Mode"));
+        if (tag.contains("Formation")) {
+            data.formation = SquadFormation.valueOf(tag.getString("Formation"));
+        } else {
+            data.formation = SquadFormation.NONE;
+        }
         
         ListTag membersList = tag.getList("Members", Tag.TAG_COMPOUND);
         for (int i = 0; i < membersList.size(); i++) {

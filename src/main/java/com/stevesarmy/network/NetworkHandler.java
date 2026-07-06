@@ -43,6 +43,10 @@ public class NetworkHandler {
             PotentialTargetsDebugMessage::encode,
             PotentialTargetsDebugMessage::new,
             PotentialTargetsDebugMessage::handle);
+        INSTANCE.registerMessage(id++, FormationMessage.class,
+            FormationMessage::encode,
+            FormationMessage::new,
+            FormationMessage::handle);
     }
 
     public static void sendTo(ServerPlayer player, Object message) {

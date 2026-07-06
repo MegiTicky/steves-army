@@ -20,6 +20,7 @@ import com.stevesarmy.network.NetworkHandler;
 import com.stevesarmy.network.OpenSoldierInventoryMessage;
 import com.stevesarmy.squad.SquadManager;
 import com.stevesarmy.squad.SquadMode;
+import com.stevesarmy.squad.SquadFormation;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.nbt.CompoundTag;
@@ -111,6 +112,7 @@ public class SoldierEntity extends PathfinderMob implements Container {
 
     @Nullable
     private UUID squadId;
+    private SquadFormation squadFormation = SquadFormation.NONE;
     @Nullable
     private LivingEntity cachedOwner;
     private final SoldierInventory inventory;
@@ -337,6 +339,14 @@ public class SoldierEntity extends PathfinderMob implements Container {
 
     public void setSquadId(UUID squadId) {
         this.squadId = squadId;
+    }
+
+    public SquadFormation getSquadFormation() {
+        return squadFormation;
+    }
+
+    public void setSquadFormation(SquadFormation formation) {
+        this.squadFormation = formation;
     }
 
     @Override
