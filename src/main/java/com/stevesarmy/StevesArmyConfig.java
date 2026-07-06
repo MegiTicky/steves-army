@@ -13,6 +13,9 @@ public class StevesArmyConfig {
     public static final ForgeConfigSpec.IntValue TARGET_REEVALUATE_INTERVAL;
     public static final ForgeConfigSpec.BooleanValue SQUAD_FRIENDLY_FIRE;
     
+    public static final ForgeConfigSpec.DoubleValue THREAT_SMOOTH_BLEND_FACTOR;
+    public static final ForgeConfigSpec.IntValue THREAT_SMOOTH_DECAY_TIME_MS;
+    
     static {
         BUILDER.push("combat");
         
@@ -53,6 +56,29 @@ public class StevesArmyConfig {
         
         BUILDER.pop();
         
+        BUILDER.push("threat_system");
+        
+        THREAT_SMOOTH_BLEND_FACTOR = BUILDER
+            .comment("Blend factor for smooth threat direction (0.0 to 1.0).",
+                     "Higher values = faster adaptation to new threats.",
+                     "0.3 = gradual (30% new, 70% history)",
+                     "0.5 = balanced (50% new, 50% history)",
+                     "0.7 = responsive (70% new, 30% history)",
+                     "Default: 0.5 (balanced)")
+            .defineInRange("smoothBlendFactor", 0.5, 0.0, 1.0);
+        
+        THREAT_SMOOTH_DECAY_TIME_MS = BUILDER
+            .comment("Decay time for smooth threat direction in milliseconds.",
+                     "After this time without threat updates, smooth direction resets.",
+                     "0 = no decay (persists forever)",
+                     "30000 = 30 seconds (short memory)",
+                     "60000 = 60 seconds (medium memory)",
+                     "120000 = 120 seconds (long memory)",
+                     "Default: 60000 (60 seconds)")
+            .defineInRange("smoothDecayTimeMs", 60000, 0, 300000);
+        
+        BUILDER.pop();
+        
         SPEC = BUILDER.build();
     }
     
@@ -74,5 +100,13 @@ public class StevesArmyConfig {
     
     public static boolean getSquadFriendlyFire() {
         return SQUAD_FRIENDLY_FIRE.get();
+    }
+    
+    public static double getThreatSmoothBlendFactor() {
+        return THREAT_SMOOTH_BLEND_FACTOR.get();
+    }
+    
+    public static int getThreatSmoothDecayTimeMs() {
+        return THREAT_SMOOTH_DECAY_TIME_MS.get();
     }
 }

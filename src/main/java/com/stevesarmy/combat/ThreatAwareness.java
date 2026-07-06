@@ -1,5 +1,6 @@
 package com.stevesarmy.combat;
 
+import com.stevesarmy.StevesArmyConfig;
 import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.entity.ai.CoverTacticalGoal;
 import net.minecraft.core.BlockPos;
@@ -52,11 +53,10 @@ public class ThreatAwareness {
     private static final float WEIGHT_DECAY_PER_TICK = 0.995f;
     private static final float MIN_WEIGHT = 0.1f;
     private static final double FLANKING_ANGLE_THRESHOLD_DEG = 90.0;
-    private static final float PERSISTENT_THREAT_BLEND_FACTOR = 0.3f;
 
     private final List<ThreatEntry> threats = new ArrayList<>();
-    private Vec3 persistentThreatDirection = null;
-    private Vec3 coverFacingDirection = null;
+    private Vec3 smoothDirection = null;
+    private long smoothDirectionLastUpdateTime = 0;
     private Vec3 soldierPosReference = null;
 
     public void setSoldierPosReference(Vec3 pos) {
@@ -68,7 +68,7 @@ public class ThreatAwareness {
         threats.add(new ThreatEntry(ThreatSource.PING_DIRECTION, null, pos, PING_DIRECTION_INITIAL_WEIGHT));
         
         Vec3 threatPos = Vec3.atCenterOf(pos);
-        updatePersistentThreatDirection(threatPos);
+        updateSmoothDirection(threatPos);
         
         if (CoverTacticalGoal.isDebugLoggingEnabled()) {
             StevesArmyMod.LOGGER.info("[ThreatAwareness] Ping direction added: pos={}, weight={}", pos, PING_DIRECTION_INITIAL_WEIGHT);
@@ -80,7 +80,7 @@ public class ThreatAwareness {
         threats.add(new ThreatEntry(ThreatSource.ENEMY_PING, null, pos, ENEMY_PING_INITIAL_WEIGHT));
         
         Vec3 threatPos = Vec3.atCenterOf(pos);
-        updatePersistentThreatDirection(threatPos);
+        updateSmoothDirection(threatPos);
         
         if (CoverTacticalGoal.isDebugLoggingEnabled()) {
             StevesArmyMod.LOGGER.info("[ThreatAwareness] Enemy ping added: pos={}, weight={}", pos, ENEMY_PING_INITIAL_WEIGHT);
@@ -93,7 +93,7 @@ public class ThreatAwareness {
         float weight = calculateDistanceWeight(entity, soldierPos);
         threats.add(new ThreatEntry(ThreatSource.ENTITY_DETECTED, entity, entity.blockPosition(), weight));
         
-        updatePersistentThreatDirection(entity.position());
+        updateSmoothDirection(entity.position());
         
         if (CoverTacticalGoal.isDebugLoggingEnabled()) {
             double distance = entity.position().distanceTo(soldierPos);
@@ -123,75 +123,42 @@ public class ThreatAwareness {
         }
     }
 
-    public void updatePersistentThreatDirection(Vec3 threatPos) {
+    public void updateSmoothDirection(Vec3 threatPos) {
         if (soldierPosReference == null) return;
         
         Vec3 toThreat = threatPos.subtract(soldierPosReference).normalize();
+        float blendFactor = (float) StevesArmyConfig.getThreatSmoothBlendFactor();
         
-        if (persistentThreatDirection == null) {
-            persistentThreatDirection = toThreat;
+        if (smoothDirection == null) {
+            smoothDirection = toThreat;
         } else {
-            persistentThreatDirection = persistentThreatDirection.scale(1.0f - PERSISTENT_THREAT_BLEND_FACTOR)
-                .add(toThreat.scale(PERSISTENT_THREAT_BLEND_FACTOR))
+            smoothDirection = smoothDirection.scale(1.0f - blendFactor)
+                .add(toThreat.scale(blendFactor))
                 .normalize();
         }
         
-        if (CoverTacticalGoal.isDebugLoggingEnabled()) {
-            StevesArmyMod.LOGGER.info("[ThreatAwareness] Persistent threat direction updated: ({}, {}, {})",
-                String.format("%.2f", persistentThreatDirection.x),
-                String.format("%.2f", persistentThreatDirection.y),
-                String.format("%.2f", persistentThreatDirection.z));
-        }
-    }
-
-    public void setPersistentThreatDirection(Vec3 direction) {
-        this.persistentThreatDirection = direction != null ? direction.normalize() : null;
-    }
-
-    public void clearPersistentThreatDirection() {
-        this.persistentThreatDirection = null;
-    }
-
-    public Vec3 getPersistentThreatDirection() {
-        return persistentThreatDirection;
-    }
-
-    public void setCoverFacingDirection(Vec3 direction) {
-        this.coverFacingDirection = direction;
+        smoothDirectionLastUpdateTime = System.currentTimeMillis();
         
         if (CoverTacticalGoal.isDebugLoggingEnabled()) {
-            StevesArmyMod.LOGGER.info("[ThreatAwareness] Cover facing direction set: ({}, {}, {})",
-                direction != null ? String.format("%.2f", direction.x) : "null",
-                direction != null ? String.format("%.2f", direction.y) : "null",
-                direction != null ? String.format("%.2f", direction.z) : "null");
+            StevesArmyMod.LOGGER.info("[ThreatAwareness] Smooth direction updated: ({}, {}, {})",
+                String.format("%.2f", smoothDirection.x),
+                String.format("%.2f", smoothDirection.y),
+                String.format("%.2f", smoothDirection.z));
         }
     }
 
-    public void setCoverFacingDirectionFromCover(Set<Direction> protectedDirs) {
-        if (protectedDirs == null || protectedDirs.isEmpty()) {
-            this.coverFacingDirection = null;
-            return;
-        }
-        
-        Direction wallDir = protectedDirs.iterator().next();
-        Vec3 threatDir = vec3FromDirection(wallDir.getOpposite());
-        this.coverFacingDirection = threatDir;
-        
-        if (CoverTacticalGoal.isDebugLoggingEnabled()) {
-            StevesArmyMod.LOGGER.info("[ThreatAwareness] Cover facing direction from wall {}: ({}, {}, {})",
-                wallDir, 
-                String.format("%.2f", threatDir.x),
-                String.format("%.2f", threatDir.y),
-                String.format("%.2f", threatDir.z));
-        }
+    public void setSmoothDirection(Vec3 direction) {
+        this.smoothDirection = direction != null ? direction.normalize() : null;
+        this.smoothDirectionLastUpdateTime = direction != null ? System.currentTimeMillis() : 0;
     }
 
-    public void clearCoverFacingDirection() {
-        this.coverFacingDirection = null;
+    public void clearSmoothDirection() {
+        this.smoothDirection = null;
+        this.smoothDirectionLastUpdateTime = 0;
     }
 
-    public Vec3 getCoverFacingDirection() {
-        return coverFacingDirection;
+    public Vec3 getSmoothDirection() {
+        return smoothDirection;
     }
 
     public Vec3 getThreatDirectionForProactivePeek(Vec3 soldierPos) {
@@ -205,12 +172,8 @@ public class ThreatAwareness {
             }
         }
         
-        if (persistentThreatDirection != null) {
-            return persistentThreatDirection;
-        }
-        
-        if (coverFacingDirection != null) {
-            return coverFacingDirection;
+        if (smoothDirection != null) {
+            return smoothDirection;
         }
         
         return null;
@@ -233,6 +196,18 @@ public class ThreatAwareness {
                 continue;
             }
         }
+        
+        int decayTimeMs = StevesArmyConfig.getThreatSmoothDecayTimeMs();
+        if (decayTimeMs > 0 && smoothDirection != null) {
+            long timeSinceUpdate = System.currentTimeMillis() - smoothDirectionLastUpdateTime;
+            if (timeSinceUpdate > decayTimeMs) {
+                smoothDirection = null;
+                smoothDirectionLastUpdateTime = 0;
+                if (CoverTacticalGoal.isDebugLoggingEnabled()) {
+                    StevesArmyMod.LOGGER.info("[ThreatAwareness] Smooth direction decayed (no updates for {}ms)", decayTimeMs);
+                }
+            }
+        }
     }
 
     public void clear() {
@@ -240,16 +215,23 @@ public class ThreatAwareness {
     }
 
     public Vec3 getPrimaryDirection(Vec3 soldierPos) {
-        if (threats.isEmpty()) return Vec3.ZERO;
+        if (!threats.isEmpty()) {
+            Vec3 total = Vec3.ZERO;
+            for (ThreatEntry entry : threats) {
+                Vec3 dir = Vec3.atCenterOf(entry.position).subtract(soldierPos).normalize();
+                total = total.add(dir.scale(entry.weight));
+            }
 
-        Vec3 total = Vec3.ZERO;
-        for (ThreatEntry entry : threats) {
-            Vec3 dir = Vec3.atCenterOf(entry.position).subtract(soldierPos).normalize();
-            total = total.add(dir.scale(entry.weight));
+            if (total.lengthSqr() > 0.001) {
+                return total.normalize();
+            }
         }
-
-        if (total.lengthSqr() < 0.001) return Vec3.ZERO;
-        return total.normalize();
+        
+        if (smoothDirection != null) {
+            return smoothDirection;
+        }
+        
+        return Vec3.ZERO;
     }
 
     public float getThreatLevel() {
@@ -361,15 +343,19 @@ public class ThreatAwareness {
             weightedCenter != Vec3.ZERO ? String.format("%.1f", weightedCenter.y) : "none",
             weightedCenter != Vec3.ZERO ? String.format("%.1f", weightedCenter.z) : "none");
         
-        StevesArmyMod.LOGGER.info("  Persistent threat dir: ({}, {}, {})", 
-            persistentThreatDirection != null ? String.format("%.2f", persistentThreatDirection.x) : "none",
-            persistentThreatDirection != null ? String.format("%.2f", persistentThreatDirection.y) : "none",
-            persistentThreatDirection != null ? String.format("%.2f", persistentThreatDirection.z) : "none");
+        StevesArmyMod.LOGGER.info("  Smooth threat dir: ({}, {}, {})", 
+            smoothDirection != null ? String.format("%.2f", smoothDirection.x) : "none",
+            smoothDirection != null ? String.format("%.2f", smoothDirection.y) : "none",
+            smoothDirection != null ? String.format("%.2f", smoothDirection.z) : "none");
         
-        StevesArmyMod.LOGGER.info("  Cover facing dir: ({}, {}, {})", 
-            coverFacingDirection != null ? String.format("%.2f", coverFacingDirection.x) : "none",
-            coverFacingDirection != null ? String.format("%.2f", coverFacingDirection.y) : "none",
-            coverFacingDirection != null ? String.format("%.2f", coverFacingDirection.z) : "none");
+        if (smoothDirection != null) {
+            long timeSinceUpdate = System.currentTimeMillis() - smoothDirectionLastUpdateTime;
+            int decayTimeMs = StevesArmyConfig.getThreatSmoothDecayTimeMs();
+            if (decayTimeMs > 0) {
+                StevesArmyMod.LOGGER.info("  Smooth direction age: {}ms / {}ms decay threshold",
+                    timeSinceUpdate, decayTimeMs);
+            }
+        }
         
         Vec3 finalDir = getThreatDirectionForProactivePeek(soldierPos);
         StevesArmyMod.LOGGER.info("  Final proactive peek dir: ({}, {}, {})", 

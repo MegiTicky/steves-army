@@ -38,6 +38,7 @@ public class CoverBehaviorManager {
     private float lastCoverQuality = 0.0f;
     private float coverQualityPenalty = 0.0f;
     private Vec3 entryThreatDirection = null;
+    private Vec3 coverFacingDirection = null;
     
     private int peekCountSameCover = 0;
     private int savedPeekCount = 0;
@@ -154,7 +155,7 @@ public class CoverBehaviorManager {
             this.lastCoverQuality = cover.getCombatScore();
             this.entryThreatDirection = soldier.getThreatAwareness().getPrimaryDirection(soldier.position());
             
-            soldier.getThreatAwareness().setCoverFacingDirectionFromCover(cover.getProtectedDirections());
+            setCoverFacingDirectionFromCover(cover.getProtectedDirections());
             
             boolean samePosition = (oldCover != null && cover.getPosition().equals(oldCover.getPosition()))
                 || (oldCover == null && savedCoverPosition != null && cover.getPosition().equals(savedCoverPosition));
@@ -171,6 +172,8 @@ public class CoverBehaviorManager {
             }
             this.savedPeekCount = 0;
             this.savedCoverPosition = null;
+        } else {
+            this.coverFacingDirection = null;
         }
     }
     
@@ -199,6 +202,37 @@ public class CoverBehaviorManager {
         syncLastCover();
     }
     
+    public void setCoverFacingDirection(Vec3 direction) {
+        this.coverFacingDirection = direction;
+    }
+    
+    public void setCoverFacingDirectionFromCover(java.util.Set<Direction> protectedDirs) {
+        if (protectedDirs == null || protectedDirs.isEmpty()) {
+            this.coverFacingDirection = null;
+            return;
+        }
+        
+        Direction wallDir = protectedDirs.iterator().next();
+        Vec3 threatDir = new Vec3(wallDir.getOpposite().getStepX(), 0, wallDir.getOpposite().getStepZ()).normalize();
+        this.coverFacingDirection = threatDir;
+        
+        if (debugLog()) {
+            StevesArmyMod.LOGGER.info("[CoverBehaviorManager] Cover facing direction from wall {}: ({}, {}, {})",
+                wallDir, 
+                String.format("%.2f", threatDir.x),
+                String.format("%.2f", threatDir.y),
+                String.format("%.2f", threatDir.z));
+        }
+    }
+    
+    public void clearCoverFacingDirection() {
+        this.coverFacingDirection = null;
+    }
+    
+    public Vec3 getCoverFacingDirection() {
+        return coverFacingDirection;
+    }
+    
     public void clearCover() {
         if (debugLog()) {
             StevesArmyMod.LOGGER.info("[CoverBehaviorManager] Soldier {} clearCover: current={}, state={}->NO_COVER", 
@@ -217,12 +251,12 @@ public class CoverBehaviorManager {
         syncCurrentCover();
         this.coverEntryTime = 0;
         this.entryThreatDirection = null;
+        this.coverFacingDirection = null;
         this.savedPeekCount = this.peekCountSameCover;
         this.peekCountSameCover = 0;
         this.state = CoverState.NO_COVER;
         syncState();
         
-        soldier.getThreatAwareness().clearCoverFacingDirection();
         soldier.getPeekController().reset();
         soldier.refreshDimensions();
         GunIntegration.crawl(soldier, false);

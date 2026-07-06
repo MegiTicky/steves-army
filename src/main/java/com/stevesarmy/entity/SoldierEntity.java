@@ -504,7 +504,7 @@ public class SoldierEntity extends PathfinderMob implements Container {
                 coverBehaviorManager.onIncomingFire(attacker);
                 
                 Vec3 toAttacker = attacker.position().subtract(this.position()).normalize();
-                threatAwareness.setPersistentThreatDirection(toAttacker);
+                threatAwareness.setSmoothDirection(toAttacker);
             }
         }
         
