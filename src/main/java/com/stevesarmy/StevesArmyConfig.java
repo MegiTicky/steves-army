@@ -13,6 +13,8 @@ public class StevesArmyConfig {
     public static final ForgeConfigSpec.IntValue TARGET_REEVALUATE_INTERVAL;
     public static final ForgeConfigSpec.BooleanValue SQUAD_FRIENDLY_FIRE;
     
+    public static final ForgeConfigSpec.DoubleValue RECOIL_TRK_SCALE;
+    
     public static final ForgeConfigSpec.DoubleValue THREAT_SMOOTH_BLEND_FACTOR;
     public static final ForgeConfigSpec.IntValue THREAT_SMOOTH_DECAY_TIME_MS;
     
@@ -53,6 +55,17 @@ public class StevesArmyConfig {
                      "For team-based protection, use: /team modify <team> friendlyfire false",
                      "Default: true (squad protection ON)")
             .define("squadFriendlyFire", true);
+        
+        BUILDER.pop();
+        
+        BUILDER.push("recoil");
+        
+        RECOIL_TRK_SCALE = BUILDER
+            .comment("Multiplier from gun recoil magnitude to tracking progress loss per shot.",
+                     "Higher values = more accuracy loss from recoil. Default 0.08.",
+                     "Each shot reduces tracking by: (pitch + yaw) * recoilTrkScale.",
+                     "AK47: pitch=0.66, yaw=0.23, magnitude=0.89 → 0.071 TRK loss at 0.08 scale.")
+            .defineInRange("recoilTrkScale", 0.08, 0.0, 1.0);
         
         BUILDER.pop();
         
@@ -100,6 +113,10 @@ public class StevesArmyConfig {
     
     public static boolean getSquadFriendlyFire() {
         return SQUAD_FRIENDLY_FIRE.get();
+    }
+    
+    public static float getRecoilTrkScale() {
+        return RECOIL_TRK_SCALE.get().floatValue();
     }
     
     public static double getThreatSmoothBlendFactor() {

@@ -434,6 +434,13 @@ public class SoldierCombatGoal extends Goal {
             if (coverManager.isInCover()) {
                 coverManager.onPeekShot();
             }
+
+            if (GunIntegration.isTaczLoaded() && GunIntegration.hasGun(soldier)) {
+                float[] recoil = GunIntegration.getGunRecoil(soldier);
+                float recoilMagnitude = Math.abs(recoil[0]) + Math.abs(recoil[1]);
+                float trkLoss = recoilMagnitude * StevesArmyConfig.getRecoilTrkScale();
+                trackingProgress = Math.max(0.0f, trackingProgress - trkLoss);
+            }
         }
         
         switch (result) {

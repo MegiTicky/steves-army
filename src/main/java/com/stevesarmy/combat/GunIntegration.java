@@ -55,6 +55,7 @@ public class GunIntegration {
     public static String getAmmoId(LivingEntity entity) { return gunHandler.getAmmoId(entity); }
     public static void crawl(LivingEntity entity, boolean isCrawl) { gunHandler.crawl(entity, isCrawl); }
     public static boolean isCrawling(LivingEntity entity) { return gunHandler.isCrawling(entity); }
+    public static float[] getGunRecoil(LivingEntity entity) { return gunHandler.getGunRecoil(entity); }
 
     public enum ShootResult {
         SUCCESS, NO_AMMO, COOLDOWN, NOT_GUN, NO_TARGET, OUT_OF_RANGE,
@@ -88,6 +89,7 @@ public class GunIntegration {
         String getAmmoId(LivingEntity entity);
         void crawl(LivingEntity entity, boolean isCrawl);
         boolean isCrawling(LivingEntity entity);
+        float[] getGunRecoil(LivingEntity entity);
     }
 
     private static class FallbackGunHandler implements GunHandler {
@@ -116,6 +118,7 @@ public class GunIntegration {
         @Override public String getAmmoId(LivingEntity entity) { return ""; }
         @Override public void crawl(LivingEntity entity, boolean isCrawl) {}
         @Override public boolean isCrawling(LivingEntity entity) { return false; }
+        @Override public float[] getGunRecoil(LivingEntity entity) { return new float[]{0.5f, 0.25f}; }
     }
 
     private static class ReflectionGunHandler implements GunHandler {
@@ -728,6 +731,51 @@ public class GunIntegration {
                 return soldier.isCrawling();
             }
             return entity.getPose() == net.minecraft.world.entity.Pose.SWIMMING && !entity.isInWater();
+        }
+
+        @Override
+        public float[] getGunRecoil(LivingEntity entity) {
+            try {
+                ItemStack gunStack = entity.getMainHandItem();
+                Class<?> iGunClass = Class.forName("com.tacz.guns.api.item.IGun");
+                Method getIGunOrNull = iGunClass.getMethod("getIGunOrNull", ItemStack.class);
+                Object iGun = getIGunOrNull.invoke(null, gunStack);
+                if (iGun == null) return new float[]{0.5f, 0.25f};
+
+                Method getGunId = iGunClass.getMethod("getGunId", ItemStack.class);
+                Object gunId = getGunId.invoke(iGun, gunStack);
+
+                Class<?> timelessApiClass = Class.forName("com.tacz.guns.api.TimelessAPI");
+                Method getCommonGunIndex = timelessApiClass.getMethod("getCommonGunIndex", ResourceLocation.class);
+                Object indexOpt = getCommonGunIndex.invoke(null, gunId);
+
+                if (indexOpt instanceof Optional<?> opt && opt.isPresent()) {
+                    Object gunIndex = opt.get();
+                    Method getGunData = gunIndex.getClass().getMethod("getGunData");
+                    Object gunData = getGunData.invoke(gunIndex);
+
+                    Method getRecoilMethod = gunData.getClass().getMethod("getRecoil");
+                    Object recoil = getRecoilMethod.invoke(gunData);
+
+                    Method getPitch = recoil.getClass().getMethod("getPitch");
+                    Object[] pitchFrames = (Object[]) getPitch.invoke(recoil);
+
+                    Method getYaw = recoil.getClass().getMethod("getYaw");
+                    Object[] yawFrames = (Object[]) getYaw.invoke(recoil);
+
+                    Method getValue = pitchFrames[0].getClass().getMethod("getValue");
+                    float[] pitchValues = (float[]) getValue.invoke(pitchFrames[0]);
+                    float[] yawValues = (float[]) getValue.invoke(yawFrames[0]);
+
+                    float vertical = Math.abs(pitchValues.length > 0 ? pitchValues[0] : 0);
+                    float horizontal = Math.abs(yawValues.length > 0 ? yawValues[0] : 0);
+
+                    return new float[]{vertical, horizontal};
+                }
+            } catch (Exception e) {
+                StevesArmyMod.LOGGER.debug("[TaCZ] Failed to get gun recoil: {}", e.getMessage());
+            }
+            return new float[]{0.5f, 0.25f};
         }
     }
 }
