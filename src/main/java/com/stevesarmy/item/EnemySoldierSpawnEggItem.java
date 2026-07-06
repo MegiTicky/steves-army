@@ -81,8 +81,8 @@ public class EnemySoldierSpawnEggItem extends ForgeSpawnEggItem {
             Class<?> iGunClass = Class.forName("com.tacz.guns.api.item.IGun");
             Object iGun = iGunClass.getMethod("getIGunOrNull", ItemStack.class).invoke(null, gunStack);
             if (iGun != null) {
-                iGunClass.getMethod("setAmmoCount", ItemStack.class, int.class).invoke(iGun, gunStack, 999);
-                iGunClass.getMethod("setAmmoInBarrel", ItemStack.class, boolean.class).invoke(iGun, gunStack, true);
+                iGunClass.getMethod("setCurrentAmmoCount", ItemStack.class, int.class).invoke(iGun, gunStack, 999);
+                iGunClass.getMethod("setBulletInBarrel", ItemStack.class, boolean.class).invoke(iGun, gunStack, true);
             }
 
             enemy.setItemSlot(EquipmentSlot.MAINHAND, gunStack.copy());

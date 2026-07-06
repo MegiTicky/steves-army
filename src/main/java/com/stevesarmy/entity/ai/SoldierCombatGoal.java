@@ -24,6 +24,7 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.ai.goal.Goal;
 import net.minecraft.world.entity.monster.Monster;
+import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.network.PacketDistributor;
@@ -609,31 +610,54 @@ private void tickCoverPeekCycle(CoverBehaviorManager coverManager) {
 
     public List<LivingEntity> getPotentialTargets() {
         List<LivingEntity> potentialTargets = new ArrayList<>();
-        
+
         double maxRange = Math.max(DetectionSystem.FOCUSED_RANGE, DetectionSystem.PERIPHERAL_RANGE);
-        
+
         List<Monster> nearbyMonsters = soldier.level().getEntitiesOfClass(
             Monster.class,
             soldier.getBoundingBox().inflate(maxRange)
         );
-        
+
         for (Monster monster : nearbyMonsters) {
-            if (TargetAcquisition.isValidTarget(soldier, monster)) {
+            if (TargetAcquisition.isValidTarget(soldier, monster) && !soldier.isFriendlyTo(monster)) {
                 potentialTargets.add(monster);
             }
         }
-        
+
         List<TargetEntity> nearbyTargets = soldier.level().getEntitiesOfClass(
             TargetEntity.class,
             soldier.getBoundingBox().inflate(maxRange)
         );
-        
+
         for (TargetEntity targetEntity : nearbyTargets) {
-            if (TargetAcquisition.isValidTarget(soldier, targetEntity)) {
+            if (TargetAcquisition.isValidTarget(soldier, targetEntity) && !soldier.isFriendlyTo(targetEntity)) {
                 potentialTargets.add(targetEntity);
             }
         }
-        
+
+        List<Player> nearbyPlayers = soldier.level().getEntitiesOfClass(
+            Player.class,
+            soldier.getBoundingBox().inflate(maxRange)
+        );
+
+        for (Player player : nearbyPlayers) {
+            if (TargetAcquisition.isValidTarget(soldier, player) && !soldier.isFriendlyTo(player)) {
+                potentialTargets.add(player);
+            }
+        }
+
+        List<SoldierEntity> nearbySoldiers = soldier.level().getEntitiesOfClass(
+            SoldierEntity.class,
+            soldier.getBoundingBox().inflate(maxRange)
+        );
+
+        for (SoldierEntity otherSoldier : nearbySoldiers) {
+            if (otherSoldier == soldier) continue;
+            if (TargetAcquisition.isValidTarget(soldier, otherSoldier) && !soldier.isFriendlyTo(otherSoldier)) {
+                potentialTargets.add(otherSoldier);
+            }
+        }
+
         return potentialTargets;
     }
 

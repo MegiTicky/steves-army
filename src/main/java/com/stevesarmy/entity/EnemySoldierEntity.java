@@ -140,7 +140,7 @@ public class EnemySoldierEntity extends SoldierEntity {
                 int magSize = (int) getMagazineSize.invoke(gunData);
 
                 if (currentAmmo < magSize) {
-                    Method setAmmoCount = iGunClass.getMethod("setAmmoCount", ItemStack.class, int.class);
+                    Method setAmmoCount = iGunClass.getMethod("setCurrentAmmoCount", ItemStack.class, int.class);
                     setAmmoCount.invoke(iGun, gunStack, magSize);
                 }
             }
