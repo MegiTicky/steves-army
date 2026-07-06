@@ -25,7 +25,7 @@ public class ModMenuTypes {
                         soldierInv.setItem(i, data.readItem());
                     }
                 }
-                return new SoldierInventoryMenu(windowId, inv, soldierInv, soldierId);
+                return new SoldierInventoryMenu(windowId, inv, soldierInv, soldierId, null);
             }));
 
     public static void register(IEventBus eventBus) {

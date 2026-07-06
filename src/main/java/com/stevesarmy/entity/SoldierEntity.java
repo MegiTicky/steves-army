@@ -146,7 +146,7 @@ public class SoldierEntity extends PathfinderMob implements Container {
         this.coverBehaviorManager = new CoverBehaviorManager(this);
         this.peekController = new PeekController();
         this.threatAwareness = new ThreatAwareness();
-        this.inventory.setSlot0ChangedCallback(stack -> {
+        this.inventory.setMainHandChangedCallback(stack -> {
             if (!this.level().isClientSide) {
                 if (GunIntegration.isTaczLoaded() && GunIntegration.isReloading(this)) {
                     StevesArmyMod.LOGGER.info("[Soldier] Blocked gun swap during reload (callback)");
@@ -243,6 +243,7 @@ public class SoldierEntity extends PathfinderMob implements Container {
         if (tag.contains("Inventory")) {
             inventory.load(tag.getCompound("Inventory"));
         }
+        inventory.syncArmorToEntity(this);
     }
 
     @Override
@@ -438,12 +439,12 @@ public class SoldierEntity extends PathfinderMob implements Container {
 
     @Override
     public void setItem(int slot, ItemStack stack) {
-        if (slot == 0 && GunIntegration.isTaczLoaded() && GunIntegration.isReloading(this)) {
+        if (slot == SoldierInventory.SLOT_MAIN_HAND && GunIntegration.isTaczLoaded() && GunIntegration.isReloading(this)) {
             StevesArmyMod.LOGGER.info("[Soldier] Blocked gun swap during reload (setItem)");
             return;
         }
         inventory.setItem(slot, stack);
-        if (slot == 0) {
+        if (slot == SoldierInventory.SLOT_MAIN_HAND) {
             setItemSlot(EquipmentSlot.MAINHAND, stack.copy());
             if (GunIntegration.isTaczLoaded() && !stack.isEmpty()) {
                 GunIntegration.initialData(this);

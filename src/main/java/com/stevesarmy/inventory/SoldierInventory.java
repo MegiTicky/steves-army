@@ -10,22 +10,41 @@ import net.minecraft.world.ContainerHelper;
 import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.SwordItem;
 
 import javax.annotation.Nullable;
 import java.util.function.Consumer;
 
 public class SoldierInventory implements Container {
+    public static final int INVENTORY_SIZE = 15;
+    public static final int ARMOR_FEET = 0;
+    public static final int ARMOR_LEGS = 1;
+    public static final int ARMOR_CHEST = 2;
+    public static final int ARMOR_HEAD = 3;
+    public static final int SLOT_MAIN_HAND = 5;
+    public static final int SLOT_GENERAL_START = 6;
+
+    private static final EquipmentSlot[] ARMOR_SLOTS = {
+        EquipmentSlot.FEET, EquipmentSlot.LEGS, EquipmentSlot.CHEST, EquipmentSlot.HEAD
+    };
+
     private final NonNullList<ItemStack> items;
-    public static final int INVENTORY_SIZE = 9;
     @Nullable
-    private Consumer<ItemStack> slot0ChangedCallback;
+    private Consumer<ItemStack> mainHandChangedCallback;
 
     public SoldierInventory() {
         this.items = NonNullList.withSize(INVENTORY_SIZE, ItemStack.EMPTY);
     }
 
-    public void setSlot0ChangedCallback(@Nullable Consumer<ItemStack> callback) {
-        this.slot0ChangedCallback = callback;
+    public void setMainHandChangedCallback(@Nullable Consumer<ItemStack> callback) {
+        this.mainHandChangedCallback = callback;
+    }
+
+    public void syncArmorToEntity(SoldierEntity soldier) {
+        for (int i = 0; i < 4; i++) {
+            soldier.setItemSlot(ARMOR_SLOTS[i], items.get(i));
+        }
+        soldier.setItemSlot(EquipmentSlot.MAINHAND, items.get(SLOT_MAIN_HAND));
     }
 
     @Override
@@ -49,8 +68,8 @@ public class SoldierInventory implements Container {
     @Override
     public ItemStack removeItem(int slot, int amount) {
         ItemStack result = ContainerHelper.removeItem(items, slot, amount);
-        if (slot == 0 && slot0ChangedCallback != null && !result.isEmpty()) {
-            slot0ChangedCallback.accept(items.get(slot));
+        if (slot == SLOT_MAIN_HAND && mainHandChangedCallback != null) {
+            mainHandChangedCallback.accept(items.get(SLOT_MAIN_HAND));
         }
         return result;
     }
@@ -58,8 +77,8 @@ public class SoldierInventory implements Container {
     @Override
     public ItemStack removeItemNoUpdate(int slot) {
         ItemStack result = ContainerHelper.takeItem(items, slot);
-        if (slot == 0 && slot0ChangedCallback != null) {
-            slot0ChangedCallback.accept(ItemStack.EMPTY);
+        if (slot == SLOT_MAIN_HAND && mainHandChangedCallback != null) {
+            mainHandChangedCallback.accept(items.get(SLOT_MAIN_HAND));
         }
         return result;
     }
@@ -68,16 +87,16 @@ public class SoldierInventory implements Container {
     public void setItem(int slot, ItemStack stack) {
         if (slot >= 0 && slot < items.size()) {
             items.set(slot, stack);
-            if (slot == 0 && slot0ChangedCallback != null) {
-                slot0ChangedCallback.accept(stack);
+            if (slot == SLOT_MAIN_HAND && mainHandChangedCallback != null) {
+                mainHandChangedCallback.accept(stack);
             }
         }
     }
 
     @Override
     public void setChanged() {
-        if (slot0ChangedCallback != null) {
-            slot0ChangedCallback.accept(items.get(0));
+        if (mainHandChangedCallback != null) {
+            mainHandChangedCallback.accept(items.get(SLOT_MAIN_HAND));
         }
     }
 
@@ -89,8 +108,8 @@ public class SoldierInventory implements Container {
     @Override
     public void clearContent() {
         items.clear();
-        if (slot0ChangedCallback != null) {
-            slot0ChangedCallback.accept(ItemStack.EMPTY);
+        if (mainHandChangedCallback != null) {
+            mainHandChangedCallback.accept(ItemStack.EMPTY);
         }
     }
 

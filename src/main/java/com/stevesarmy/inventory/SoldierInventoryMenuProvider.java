@@ -26,7 +26,7 @@ public class SoldierInventoryMenuProvider implements MenuProvider {
     @Nullable
     @Override
     public AbstractContainerMenu createMenu(int containerId, Inventory playerInventory, Player player) {
-        return new SoldierInventoryMenu(containerId, playerInventory, soldier.getSoldierInventory(), soldier.getId());
+        return new SoldierInventoryMenu(containerId, playerInventory, soldier.getSoldierInventory(), soldier.getId(), soldier);
     }
 
     public void writeExtraData(FriendlyByteBuf buf) {
