@@ -325,11 +325,8 @@ public class CombatDebugRenderer {
                 String adsText = String.format("ADS:%d%%", (int)(data.adsProgress * 100));
                 mc.font.drawInBatch(adsText, -mc.font.width(adsText) / 2f, y, 0xAAAAFF, false, matrix4f, bufferSource, net.minecraft.client.gui.Font.DisplayMode.NORMAL, 0, 15728880);
                 y -= 10;
-                String trackText = String.format("TRK:%d%%", (int)(data.trackingProgress * 100));
-                mc.font.drawInBatch(trackText, -mc.font.width(trackText) / 2f, y, 0xFFAAFF, false, matrix4f, bufferSource, net.minecraft.client.gui.Font.DisplayMode.NORMAL, 0, 15728880);
-                y -= 10;
-                String accText = String.format("ACC:%d%%", (int)(data.currentAccuracy * 100));
-                mc.font.drawInBatch(accText, -mc.font.width(accText) / 2f, y, 0xFFAAAA, false, matrix4f, bufferSource, net.minecraft.client.gui.Font.DisplayMode.NORMAL, 0, 15728880);
+                String aimQText = String.format("AIM:%d%%", (int)(data.currentAccuracy * 100));
+                mc.font.drawInBatch(aimQText, -mc.font.width(aimQText) / 2f, y, 0xFFAAFF, false, matrix4f, bufferSource, net.minecraft.client.gui.Font.DisplayMode.NORMAL, 0, 15728880);
                 y -= 10;
                 String shotText = String.format("SHOT:%d%%", (int)(data.shotThreshold * 100));
                 mc.font.drawInBatch(shotText, -mc.font.width(shotText) / 2f, y, 0xAAFFAA, false, matrix4f, bufferSource, net.minecraft.client.gui.Font.DisplayMode.NORMAL, 0, 15728880);

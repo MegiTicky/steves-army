@@ -228,13 +228,15 @@ public class SoldierCombatGoal extends Goal {
                 findNewTarget();
             }
         } else if (!TargetAcquisition.hasLineOfSight(soldier, target)) {
-            if (inCover) {
-                if (++targetReevaluateCounter >= StevesArmyConfig.getTargetReevaluateInterval()) {
-                    targetReevaluateCounter = 0;
+            if (!inCover || soldier.getPeekController().getState() != PeekController.State.EXPOSED) {
+                if (inCover) {
+                    if (++targetReevaluateCounter >= StevesArmyConfig.getTargetReevaluateInterval()) {
+                        targetReevaluateCounter = 0;
+                        findNewTarget();
+                    }
+                } else {
                     findNewTarget();
                 }
-            } else {
-                findNewTarget();
             }
         }
         
