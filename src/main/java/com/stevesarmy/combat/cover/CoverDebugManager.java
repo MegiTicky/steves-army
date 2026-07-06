@@ -18,6 +18,8 @@ public class CoverDebugManager {
     private static boolean showSolidBlocks = false;
     private static boolean showSoldierCover = false;
     private static boolean showPeekCandidates = false;
+    private static boolean showSearchCenter = false;
+    private static BlockPos searchCenterPos = null;
     private static final Map<Integer, PeekCandidateDebugData> soldierPeekCandidates = new HashMap<>();
     
     private static final java.util.Map<Integer, TopCoversDebugData> soldierTopCovers = new HashMap<>();
@@ -153,6 +155,22 @@ public class CoverDebugManager {
     public static boolean isShowPeekCandidates() {
         return showPeekCandidates;
     }
+
+    public static void setShowSearchCenter(boolean enabled) {
+        showSearchCenter = enabled;
+    }
+
+    public static boolean isShowSearchCenter() {
+        return showSearchCenter;
+    }
+
+    public static void setSearchCenterPos(BlockPos pos) {
+        searchCenterPos = pos;
+    }
+
+    public static BlockPos getSearchCenterPos() {
+        return searchCenterPos;
+    }
     
     public static void setSoldierPeekCandidates(int soldierId, PeekCandidateDebugData data) {
         soldierPeekCandidates.put(soldierId, data);
@@ -175,6 +193,8 @@ public class CoverDebugManager {
         showSolidBlocks = false;
         showSoldierCover = false;
         showPeekCandidates = false;
+        showSearchCenter = false;
+        searchCenterPos = null;
         soldierPeekCandidates.clear();
         soldierTopCovers.clear();
     }

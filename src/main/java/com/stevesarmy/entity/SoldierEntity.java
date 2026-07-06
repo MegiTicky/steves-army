@@ -375,6 +375,22 @@ public class SoldierEntity extends PathfinderMob implements Container {
         }
         return super.canAttack(target);
     }
+    
+    public boolean isFriendlyTo(LivingEntity other) {
+        if (other == this) return false;
+        
+        LivingEntity owner = getOwner();
+        if (other == owner) return true;
+        
+        if (other instanceof SoldierEntity otherSoldier) {
+            Optional<UUID> myOwner = getOwnerUUID();
+            Optional<UUID> theirOwner = otherSoldier.getOwnerUUID();
+            return myOwner.isPresent() && theirOwner.isPresent() 
+                && myOwner.get().equals(theirOwner.get());
+        }
+        
+        return false;
+    }
 
     @Override
     protected void dropEquipment() {

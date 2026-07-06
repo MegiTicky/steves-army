@@ -10,6 +10,9 @@ import net.minecraft.world.level.storage.DimensionDataStorage;
 
 import java.util.*;
 
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.LivingEntity;
+
 public class SquadManager extends SavedData {
     private final Map<UUID, SquadData> squadsByLeader = new HashMap<>();
     private final Map<UUID, SquadData> squadsByMember = new HashMap<>();
@@ -84,6 +87,38 @@ public class SquadManager extends SavedData {
             squad.setFormation(formation);
             this.setDirty();
         }
+    }
+
+    public int getSquadSize(UUID squadId) {
+        SquadData squad = squadsById.get(squadId);
+        return squad != null ? squad.getMemberCount() + 1 : 0;
+    }
+
+    public List<LivingEntity> getSquadMembers(ServerLevel level, UUID squadId, UUID excludeSelf) {
+        SquadData squad = squadsById.get(squadId);
+        if (squad == null) return List.of();
+        List<UUID> ids = new ArrayList<>();
+        ids.add(squad.getLeaderId());
+        ids.addAll(squad.getMemberIds());
+        List<LivingEntity> result = new ArrayList<>();
+        for (UUID id : ids) {
+            if (id.equals(excludeSelf)) continue;
+            Entity entity = level.getEntity(id);
+            if (entity instanceof LivingEntity le && le.isAlive()) {
+                result.add(le);
+            }
+        }
+        return result;
+    }
+
+    public int getMemberIndex(UUID squadId, UUID memberId) {
+        SquadData squad = squadsById.get(squadId);
+        if (squad == null) return 0;
+        List<UUID> ids = new ArrayList<>();
+        ids.add(squad.getLeaderId());
+        ids.addAll(squad.getMemberIds());
+        int idx = ids.indexOf(memberId);
+        return idx >= 0 ? idx : 0;
     }
 
     public static SquadManager get(ServerLevel level) {

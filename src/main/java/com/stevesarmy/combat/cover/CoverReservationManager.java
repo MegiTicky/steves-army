@@ -9,7 +9,7 @@ import java.util.concurrent.ConcurrentHashMap;
 public class CoverReservationManager {
     
     private static final Map<BlockPos, Set<UUID>> coverReservations = new ConcurrentHashMap<>();
-    private static final int MAX_RESERVATIONS_PER_COVER = 2;
+    private static final int MAX_RESERVATIONS_PER_COVER = 1;
     private static final long RESERVATION_TIMEOUT_MS = 30000;
     private static final Map<UUID, Long> reservationTimestamps = new ConcurrentHashMap<>();
     

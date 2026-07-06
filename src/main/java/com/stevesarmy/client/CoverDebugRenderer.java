@@ -136,12 +136,19 @@ public class CoverDebugRenderer {
             peekBufferSource.endBatch();
         }
         
-        MultiBufferSource.BufferSource bufferSource = mc.renderBuffers().bufferSource();
+MultiBufferSource.BufferSource bufferSource = mc.renderBuffers().bufferSource();
         for (CoverPoint cp : coverPoints) {
             renderQualityLabel(poseStack, cameraPos, cp, mc, bufferSource);
         }
         bufferSource.endBatch();
-        
+
+        if (CoverDebugManager.isShowSearchCenter() && CoverDebugManager.getSearchCenterPos() != null) {
+            BlockPos searchCenter = CoverDebugManager.getSearchCenterPos();
+            buffer.begin(VertexFormat.Mode.DEBUG_LINES, DefaultVertexFormat.POSITION_COLOR);
+            renderSearchCenterBox(buffer, poseStack, cameraPos, searchCenter);
+            tesselator.end();
+        }
+
         RenderSystem.enableDepthTest();
         RenderSystem.disableBlend();
     }
@@ -310,10 +317,53 @@ public class CoverDebugRenderer {
         buffer.vertex(matrix, (float)x2, (float)y2, (float)z1).color(r, g, b, a).endVertex();
         buffer.vertex(matrix, (float)x2, (float)y1, (float)z2).color(r, g, b, a).endVertex();
         buffer.vertex(matrix, (float)x2, (float)y2, (float)z2).color(r, g, b, a).endVertex();
-        buffer.vertex(matrix, (float)x1, (float)y1, (float)z2).color(r, g, b, a).endVertex();
+buffer.vertex(matrix, (float)x1, (float)y1, (float)z2).color(r, g, b, a).endVertex();
         buffer.vertex(matrix, (float)x1, (float)y2, (float)z2).color(r, g, b, a).endVertex();
     }
-    
+
+    private static void renderSearchCenterBox(BufferBuilder buffer, PoseStack poseStack, Vec3 cameraPos, BlockPos searchCenter) {
+        double x1 = searchCenter.getX() - cameraPos.x;
+        double y1 = searchCenter.getY() - cameraPos.y;
+        double z1 = searchCenter.getZ() - cameraPos.z;
+        double x2 = x1 + 1.0;
+        double y2 = y1 + 1.0;
+        double z2 = z1 + 1.0;
+
+        Matrix4f matrix = poseStack.last().pose();
+
+        // Cyan with slight outward offset for visibility
+        int r = 0, g = 255, b = 255, a = 200;
+        float ox = 0.05f, oy = 0.05f, oz = 0.05f;
+
+        // Bottom face
+        buffer.vertex(matrix, (float)x1 - ox, (float)y1 - oy, (float)z1 - oz).color(r, g, b, a).endVertex();
+        buffer.vertex(matrix, (float)x2 + ox, (float)y1 - oy, (float)z1 - oz).color(r, g, b, a).endVertex();
+        buffer.vertex(matrix, (float)x2 + ox, (float)y1 - oy, (float)z1 - oz).color(r, g, b, a).endVertex();
+        buffer.vertex(matrix, (float)x2 + ox, (float)y1 - oy, (float)z2 + oz).color(r, g, b, a).endVertex();
+        buffer.vertex(matrix, (float)x2 + ox, (float)y1 - oy, (float)z2 + oz).color(r, g, b, a).endVertex();
+        buffer.vertex(matrix, (float)x1 - ox, (float)y1 - oy, (float)z2 + oz).color(r, g, b, a).endVertex();
+        buffer.vertex(matrix, (float)x1 - ox, (float)y1 - oy, (float)z2 + oz).color(r, g, b, a).endVertex();
+        buffer.vertex(matrix, (float)x1 - ox, (float)y1 - oy, (float)z1 - oz).color(r, g, b, a).endVertex();
+        // Top face
+        buffer.vertex(matrix, (float)x1 - ox, (float)y2 + oy, (float)z1 - oz).color(r, g, b, a).endVertex();
+        buffer.vertex(matrix, (float)x2 + ox, (float)y2 + oy, (float)z1 - oz).color(r, g, b, a).endVertex();
+        buffer.vertex(matrix, (float)x2 + ox, (float)y2 + oy, (float)z1 - oz).color(r, g, b, a).endVertex();
+        buffer.vertex(matrix, (float)x2 + ox, (float)y2 + oy, (float)z2 + oz).color(r, g, b, a).endVertex();
+        buffer.vertex(matrix, (float)x2 + ox, (float)y2 + oy, (float)z2 + oz).color(r, g, b, a).endVertex();
+        buffer.vertex(matrix, (float)x1 - ox, (float)y2 + oy, (float)z2 + oz).color(r, g, b, a).endVertex();
+        buffer.vertex(matrix, (float)x1 - ox, (float)y2 + oy, (float)z2 + oz).color(r, g, b, a).endVertex();
+        buffer.vertex(matrix, (float)x1 - ox, (float)y2 + oy, (float)z1 - oz).color(r, g, b, a).endVertex();
+        // Vertical edges
+        buffer.vertex(matrix, (float)x1 - ox, (float)y1 - oy, (float)z1 - oz).color(r, g, b, a).endVertex();
+        buffer.vertex(matrix, (float)x1 - ox, (float)y2 + oy, (float)z1 - oz).color(r, g, b, a).endVertex();
+        buffer.vertex(matrix, (float)x2 + ox, (float)y1 - oy, (float)z1 - oz).color(r, g, b, a).endVertex();
+        buffer.vertex(matrix, (float)x2 + ox, (float)y2 + oy, (float)z1 - oz).color(r, g, b, a).endVertex();
+        buffer.vertex(matrix, (float)x2 + ox, (float)y1 - oy, (float)z2 + oz).color(r, g, b, a).endVertex();
+        buffer.vertex(matrix, (float)x2 + ox, (float)y2 + oy, (float)z2 + oz).color(r, g, b, a).endVertex();
+        buffer.vertex(matrix, (float)x1 - ox, (float)y1 - oy, (float)z2 + oz).color(r, g, b, a).endVertex();
+        buffer.vertex(matrix, (float)x1 - ox, (float)y2 + oy, (float)z2 + oz).color(r, g, b, a).endVertex();
+    }
+
     private static void renderProtectedDirections(BufferBuilder buffer, PoseStack poseStack, Vec3 cameraPos, CoverPoint cp) {
         Set<Direction> directions = cp.getProtectedDirections();
         if (directions.isEmpty()) {

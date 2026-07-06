@@ -5,6 +5,7 @@ import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.combat.AimAccuracyManager;
 import com.stevesarmy.combat.DetectionSystem;
 import com.stevesarmy.combat.ExposureCalculator;
+import com.stevesarmy.combat.FriendlyFireChecker;
 import com.stevesarmy.combat.GunIntegration;
 import com.stevesarmy.combat.TargetAcquisition;
 import com.stevesarmy.combat.ThreatAwareness;
@@ -369,6 +370,15 @@ public class SoldierCombatGoal extends Goal {
             }
             return;
         }
+        
+        if (!FriendlyFireChecker.isSafeToShoot(soldier, currentAimPoint.position, currentAccuracy)) {
+            if (isDebugLogging()) {
+                StevesArmyMod.LOGGER.info("[FriendlyFire] Soldier {} blocked shot - friendly in cone", 
+                    soldier.getId());
+            }
+            return;
+        }
+        
         pathBlockedCounter = 0;
         
         GunIntegration.aim(soldier, true);

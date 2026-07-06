@@ -4,8 +4,12 @@ import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.combat.ThreatAwareness;
 import com.stevesarmy.combat.cover.*;
 import com.stevesarmy.entity.SoldierEntity;
+import com.stevesarmy.squad.SquadCoverContext;
+import com.stevesarmy.squad.SquadFormation;
+import com.stevesarmy.squad.SquadManager;
 import com.stevesarmy.squad.SquadMode;
 import net.minecraft.core.BlockPos;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.ai.goal.Goal;
 import net.minecraft.world.entity.ai.navigation.PathNavigation;
@@ -64,6 +68,7 @@ public class CoverTacticalGoal extends Goal {
     private boolean isRetryAttempt = false;
 
     private CoverFinder.ScoredCover[] cachedTopCovers = new CoverFinder.ScoredCover[0];
+    private BlockPos debugSearchCenter = null;
 
     private static boolean debugLoggingEnabled = false;
     
@@ -716,6 +721,7 @@ public class CoverTacticalGoal extends Goal {
         
         Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
         List<LivingEntity> threats = getThreatList();
+        SquadCoverContext squadCtx = buildSquadCoverContext();
         
         int searchRadius = SEARCH_RADIUS;
         BlockPos searchCenter = soldier.blockPosition();
@@ -737,20 +743,31 @@ public class CoverTacticalGoal extends Goal {
                 }
             }
         }
+        this.debugSearchCenter = searchCenter;
         
-        Optional<CoverPoint> bestCover = finder.findBestCover(
+Optional<CoverPoint> bestCover = finder.findBestCover(
             soldier,
             threatDirection,
             threats,
-            searchRadius
+            searchRadius,
+            squadCtx
         );
-        
+
         if (bestCover.isEmpty()) {
             bestCover = finder.findBestCover(
                 searchCenter,
                 searchRadius,
                 threats.isEmpty() ? null : threats.get(0),
                 threatDirection
+            );
+        }
+
+        if (bestCover.isEmpty() && squadCtx.inSquad()) {
+            bestCover = finder.findBestCover(
+                soldier,
+                threatDirection,
+                threats,
+                searchRadius
             );
         }
         
@@ -796,13 +813,14 @@ public class CoverTacticalGoal extends Goal {
         }
     }
     
-    private Optional<CoverPoint> findBetterCover() {
+private Optional<CoverPoint> findBetterCover() {
         Level level = soldier.level();
         CoverFinder finder = new CoverFinder(level);
 
         Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
         List<LivingEntity> threats = getThreatList();
-        
+        SquadCoverContext squadCtx = buildSquadCoverContext();
+
         StevesArmyMod.LOGGER.info("[CoverGoal] Soldier {} finding cover: soldierPos={}, threatDirection=({}, {}, {}), threats={}",
             soldier.getId(),
             soldier.blockPosition(),
@@ -813,7 +831,7 @@ public class CoverTacticalGoal extends Goal {
 
         CoverPoint currentCover = getCoverManager().getCurrentCover();
 
-        Optional<CoverPoint> result = finder.findBestCover(soldier, threatDirection, threats, SEARCH_RADIUS);
+        Optional<CoverPoint> result = finder.findBestCover(soldier, threatDirection, threats, SEARCH_RADIUS, squadCtx);
 
         if (result.isPresent() && currentCover != null && result.get().getPosition().equals(currentCover.getPosition())) {
             List<CoverFinder.ScoredCover> top2 = finder.findTopCovers(soldier, threatDirection, threats, SEARCH_RADIUS, 2, false);
@@ -840,8 +858,9 @@ public class CoverTacticalGoal extends Goal {
         boolean wantsDebug = debugLoggingEnabled || CoverDebugManager.isShowSoldierCover() || CoverDebugManager.isVisualizationEnabled();
         if (wantsDebug && (cachedTopCovers.length == 0 || soldier.tickCount % 10 == 0)) {
             CoverFinder finder = new CoverFinder(soldier.level());
-            Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
-            List<LivingEntity> threats = getThreatList();
+Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
+        List<LivingEntity> threats = getThreatList();
+        SquadCoverContext squadCtx = buildSquadCoverContext();
             List<CoverFinder.ScoredCover> top = finder.findTopCovers(soldier, threatDirection, threats, SEARCH_RADIUS, 5, true);
             cachedTopCovers = top.toArray(new CoverFinder.ScoredCover[0]);
         }
@@ -884,6 +903,10 @@ public class CoverTacticalGoal extends Goal {
                 getCoverManager().getPeekCountSameCover(),
                 blacklistInfo
             ));
+        
+        if (CoverDebugManager.isShowSearchCenter() && debugSearchCenter != null) {
+            CoverDebugManager.setSearchCenterPos(debugSearchCenter);
+        }
     }
     
     private CoverPositionController getPositionController() {
@@ -1226,5 +1249,41 @@ public class CoverTacticalGoal extends Goal {
     
     private boolean isPathClear(BlockPos from, BlockPos to) {
         return isPathClearStatic(from, to, soldier.level());
+    }
+
+    private SquadCoverContext buildSquadCoverContext() {
+        Level level = soldier.level();
+        UUID squadId = soldier.getSquadId();
+        if (squadId == null || !(level instanceof ServerLevel serverLevel)) {
+            return new SquadCoverContext(false, SquadFormation.NONE, 0, 0, List.of(), List.of());
+        }
+
+        SquadManager mgr = SquadManager.get(serverLevel);
+        SquadFormation formation = soldier.getSquadFormation();
+
+        List<LivingEntity> members = mgr.getSquadMembers(serverLevel, squadId, soldier.getUUID());
+        int squadSize = mgr.getSquadSize(squadId);
+        int memberIndex = mgr.getMemberIndex(squadId, soldier.getUUID());
+
+        List<BlockPos> occupiedCovers = new ArrayList<>();
+        List<Vec3> threatDirs = new ArrayList<>();
+
+        for (LivingEntity member : members) {
+            if (member instanceof SoldierEntity ms) {
+                CoverBehaviorManager cbm = ms.getCoverBehaviorManager();
+                CoverPoint current = cbm.getCurrentCover();
+                if (current != null) occupiedCovers.add(current.getPosition());
+                CoverPoint target = cbm.getTargetCover();
+                if (target != null && !occupiedCovers.contains(target.getPosition())) {
+                    occupiedCovers.add(target.getPosition());
+                }
+                Vec3 dir = ms.getThreatAwareness().getPrimaryDirection(member.position());
+                if (dir != null && dir.lengthSqr() > 0.001) {
+                    threatDirs.add(dir);
+                }
+            }
+        }
+
+        return new SquadCoverContext(true, formation, squadSize, memberIndex, occupiedCovers, threatDirs);
     }
 }
