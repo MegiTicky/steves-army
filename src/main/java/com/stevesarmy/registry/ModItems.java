@@ -31,6 +31,11 @@ public class ModItems {
         () -> new TargetSpawnEggItem(new Item.Properties())
     );
 
+    public static final RegistryObject<Item> ENEMY_SOLDIER_SPAWN_EGG = ITEMS.register(
+        "enemy_soldier_spawn_egg",
+        () -> new com.stevesarmy.item.EnemySoldierSpawnEggItem(new Item.Properties())
+    );
+
     public static void register(IEventBus eventBus) {
         ITEMS.register(eventBus);
     }

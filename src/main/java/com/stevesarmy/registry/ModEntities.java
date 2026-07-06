@@ -1,6 +1,7 @@
 package com.stevesarmy.registry;
 
 import com.stevesarmy.StevesArmyMod;
+import com.stevesarmy.entity.EnemySoldierEntity;
 import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.entity.TargetEntity;
 import net.minecraft.world.entity.EntityType;
@@ -39,6 +40,15 @@ public class ModEntities {
             .build(StevesArmyMod.MODID + ":target")
     );
 
+    public static final RegistryObject<EntityType<EnemySoldierEntity>> ENEMY_SOLDIER = ENTITIES.register(
+        "enemy_soldier",
+        () -> EntityType.Builder.of(EnemySoldierEntity::new, MobCategory.MONSTER)
+            .sized(0.6F, 1.8F)
+            .clientTrackingRange(10)
+            .updateInterval(3)
+            .build(StevesArmyMod.MODID + ":enemy_soldier")
+    );
+
     @SubscribeEvent
     public static void registerAttributes(EntityAttributeCreationEvent event) {
         event.put(SOLDIER.get(), Monster.createMonsterAttributes()
@@ -50,6 +60,14 @@ public class ModEntities {
             .build());
         
         event.put(TARGET.get(), TargetEntity.createAttributes().build());
+        
+        event.put(ENEMY_SOLDIER.get(), Monster.createMonsterAttributes()
+            .add(Attributes.MAX_HEALTH, 20.0D)
+            .add(Attributes.MOVEMENT_SPEED, 0.35D)
+            .add(Attributes.ARMOR, 4.0D)
+            .add(Attributes.ATTACK_DAMAGE, 3.0D)
+            .add(Attributes.FOLLOW_RANGE, 32.0D)
+            .build());
     }
 
     public static void register(IEventBus eventBus) {

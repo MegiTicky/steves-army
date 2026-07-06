@@ -1,6 +1,7 @@
 package com.stevesarmy.client;
 
 import com.stevesarmy.StevesArmyMod;
+import com.stevesarmy.client.renderer.EnemySoldierRenderer;
 import com.stevesarmy.client.renderer.SoldierRenderer;
 import com.stevesarmy.client.renderer.TargetRenderer;
 import com.stevesarmy.client.screen.SoldierInventoryScreen;
@@ -20,6 +21,7 @@ public class ClientSetup {
     public static void registerEntityRenderers(EntityRenderersEvent.RegisterRenderers event) {
         event.registerEntityRenderer(ModEntities.SOLDIER.get(), SoldierRenderer::new);
         event.registerEntityRenderer(ModEntities.TARGET.get(), TargetRenderer::new);
+        event.registerEntityRenderer(ModEntities.ENEMY_SOLDIER.get(), EnemySoldierRenderer::new);
     }
 
     @SubscribeEvent
