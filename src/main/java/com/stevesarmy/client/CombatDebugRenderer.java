@@ -326,13 +326,14 @@ public class CombatDebugRenderer {
                 mc.font.drawInBatch(adsText, -mc.font.width(adsText) / 2f, y, 0xAAAAFF, false, matrix4f, bufferSource, net.minecraft.client.gui.Font.DisplayMode.NORMAL, 0, 15728880);
                 y -= 10;
                 String aimQText = String.format("AIM:%d%%", (int)(data.aimQuality * 100));
-                int aimQColor = data.aimQuality >= data.shotThreshold ? 0x00FF00 : 0xFF0000;
+                float computedThreshold = Math.max(0.15f, data.targetAimQuality * 0.35f);
+                int aimQColor = data.aimQuality >= computedThreshold ? 0x00FF00 : 0xFF0000;
                 mc.font.drawInBatch(aimQText, -mc.font.width(aimQText) / 2f, y, aimQColor, false, matrix4f, bufferSource, net.minecraft.client.gui.Font.DisplayMode.NORMAL, 0, 15728880);
                 y -= 10;
                 String tgtText = String.format("TGT:%d%%", (int)(data.targetAimQuality * 100));
                 mc.font.drawInBatch(tgtText, -mc.font.width(tgtText) / 2f, y, 0x88FF88, false, matrix4f, bufferSource, net.minecraft.client.gui.Font.DisplayMode.NORMAL, 0, 15728880);
                 y -= 10;
-                String thrText = String.format("SHT:%d%%", (int)(data.shotThreshold * 100));
+                String thrText = String.format("THR:%d%%", (int)(computedThreshold * 100));
                 mc.font.drawInBatch(thrText, -mc.font.width(thrText) / 2f, y, 0xAAAAAA, false, matrix4f, bufferSource, net.minecraft.client.gui.Font.DisplayMode.NORMAL, 0, 15728880);
                 y -= 10;
                 String aimText = String.format("AIM:%s", data.aimPointType);

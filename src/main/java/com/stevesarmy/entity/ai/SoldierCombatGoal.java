@@ -389,7 +389,8 @@ public class SoldierCombatGoal extends Goal {
         
         updateAimQuality();
         
-        float shotThreshold = StevesArmyConfig.getAimQualityShotThreshold();
+        float targetAimQ = AimAccuracyManager.getTargetAimQuality(soldier, target);
+        float shotThreshold = Math.max(0.15f, targetAimQ * 0.35f);
         
         if (aimQuality < shotThreshold) {
             targetReevaluateCounter++;
@@ -434,8 +435,6 @@ public class SoldierCombatGoal extends Goal {
                     String.format("%.3f", recoilMagnitude), String.format("%.3f", recoilLoss),
                     String.format("%.3f", aimQuality));
             }
-            
-            updateAimQuality();
         }
         
         switch (result) {
