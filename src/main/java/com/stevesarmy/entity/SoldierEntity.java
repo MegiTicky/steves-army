@@ -138,7 +138,12 @@ public class SoldierEntity extends PathfinderMob implements Container {
     private long forcedTargetTimestamp = 0;
     private static final long FORCED_TARGET_MEMORY_MS = 10000;
     
+    private boolean dispatchedBySend = false;
     private boolean inventorySyncingFromEntity = false;
+
+    public boolean isDispatchedBySend() {
+        return dispatchedBySend;
+    }
 
     public SoldierEntity(EntityType<? extends SoldierEntity> type, Level level) {
         super(type, level);
@@ -661,18 +666,21 @@ public class SoldierEntity extends PathfinderMob implements Container {
         com.stevesarmy.StevesArmyMod.LOGGER.info("Soldier received ping: type={} pos={}", type, position);
         
         switch (type) {
-            case ENEMY -> {
+            case SEND -> {
                 BlockPos pos = BlockPos.containing(position);
-                pingThreatPos = pos;
-                pingThreatTimestamp = System.currentTimeMillis();
-                forcedTargetPos = pos;
-                forcedTargetTimestamp = System.currentTimeMillis();
-                threatAwareness.onEnemyPing(pos);
-                com.stevesarmy.StevesArmyMod.LOGGER.info("Set forced target position: {}", forcedTargetPos);
+                pingMoveTarget = pos;
+                pingMoveTimestamp = System.currentTimeMillis();
+                setSquadMode(com.stevesarmy.squad.SquadMode.HOLD);
+                setHoldPosition(pos);
+                coverBehaviorManager.clearCover();
+                dispatchedBySend = true;
+                StevesArmyMod.LOGGER.info("SEND: set hold position at {} (dispatched)", pos);
             }
             case GO_TO -> {
                 pingMoveTarget = BlockPos.containing(position);
                 pingMoveTimestamp = System.currentTimeMillis();
+                setSquadMode(com.stevesarmy.squad.SquadMode.HOLD);
+                setHoldPosition(BlockPos.containing(position));
                 coverBehaviorManager.clearCover();
                 StevesArmyMod.LOGGER.info("Set move target: {}", pingMoveTarget);
             }
@@ -681,22 +689,26 @@ public class SoldierEntity extends PathfinderMob implements Container {
                 threatAwareness.onPingDirection(pos);
                 pingThreatPos = pos;
                 pingThreatTimestamp = System.currentTimeMillis();
-                com.stevesarmy.StevesArmyMod.LOGGER.info("Set threat direction position: {}", pingThreatPos);
+                forcedTargetPos = pos;
+                forcedTargetTimestamp = System.currentTimeMillis();
+                com.stevesarmy.StevesArmyMod.LOGGER.info("Set threat direction position: {} (forced target inherited from ENEMY)", pingThreatPos);
             }
             case LOCATION -> {
             }
             case FOLLOW -> {
                 setSquadMode(com.stevesarmy.squad.SquadMode.FOLLOW);
+                dispatchedBySend = false;
                 clearPingMoveTarget();
                 clearPingThreatPos();
                 clearForcedTarget();
                 threatAwareness.clear();
                 com.stevesarmy.StevesArmyMod.LOGGER.info("Switched to FOLLOW mode, cleared all threat data");
             }
-case HOLD -> {
+            case HOLD -> {
                 setSquadMode(com.stevesarmy.squad.SquadMode.HOLD);
                 setHoldPosition(blockPosition());
                 coverBehaviorManager.clearCover();
+                dispatchedBySend = false;
                 clearPingMoveTarget();
                 clearPingThreatPos();
                 clearForcedTarget();

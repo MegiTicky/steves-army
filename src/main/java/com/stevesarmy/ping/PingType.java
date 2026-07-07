@@ -1,7 +1,7 @@
 package com.stevesarmy.ping;
 
 public enum PingType {
-    ENEMY(0xFFFF5555, "enemy"),
+    SEND(0xFF55AAAA, "send"),
     GO_TO(0xFF55FF55, "go_to"),
     THREAT_DIRECTION(0xFFFF8800, "threat_direction"),
     LOCATION(0xFF5555FF, "location"),

@@ -55,6 +55,44 @@ public class PingMessage {
             PingType type = msg.getType();
             int dimension = msg.getDimension();
             
+            if (type == PingType.SEND) {
+                java.util.List<com.stevesarmy.entity.SoldierEntity> owned = level.getEntitiesOfClass(
+                    com.stevesarmy.entity.SoldierEntity.class,
+                    sender.getBoundingBox().inflate(100),
+                    s -> s.isOwnedBy(sender)
+                );
+
+                java.util.List<com.stevesarmy.entity.SoldierEntity> available = owned.stream()
+                    .filter(s -> !s.isDispatchedBySend())
+                    .collect(java.util.stream.Collectors.toList());
+
+                com.stevesarmy.entity.SoldierEntity target;
+                if (available.isEmpty()) {
+                    target = owned.stream()
+                        .min(java.util.Comparator.comparingDouble(s -> s.distanceToSqr(position)))
+                        .orElse(null);
+                    if (target != null) {
+                        com.stevesarmy.StevesArmyMod.LOGGER.info("SEND: all soldiers dispatched, re-sending nearest");
+                    }
+                } else {
+                    target = available.stream()
+                        .min(java.util.Comparator.comparingDouble(s -> s.distanceToSqr(position)))
+                        .orElse(null);
+                }
+
+                if (target != null) {
+                    target.receivePing(type, position);
+                    PingBroadcastMessage broadcast = new PingBroadcastMessage(
+                        type, position, dimension,
+                        sender.getUUID(), sender.getGameProfile().getName(), 0xFF55AAAA
+                    );
+                    for (ServerPlayer recipient : level.getServer().getPlayerList().getPlayers()) {
+                        NetworkHandler.sendTo(recipient, broadcast);
+                    }
+                }
+                return;
+            }
+
             if (type != PingType.FOLLOW && type != PingType.HOLD) {
                 int teamColor = 0xFFFFFFFF;
                 if (sender.getTeam() != null) {
