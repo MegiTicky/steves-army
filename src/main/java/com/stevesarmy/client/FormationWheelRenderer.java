@@ -14,7 +14,7 @@ import net.minecraft.client.renderer.GameRenderer;
 import org.joml.Matrix4f;
 
 public class FormationWheelRenderer {
-    private static final int SECTOR_SIZE = 90;
+    private static final int SECTOR_SIZE = 72;
     private static final int INNER_RADIUS = 30;
     private static final int OUTER_RADIUS = 80;
     private static final int LABEL_RADIUS = 70;

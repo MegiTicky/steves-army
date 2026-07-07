@@ -89,6 +89,27 @@ public class SquadManager extends SavedData {
         }
     }
 
+    public boolean isSquadCQB(UUID squadId) {
+        SquadData squad = squadsById.get(squadId);
+        return squad != null && squad.isCQB();
+    }
+
+    public void setSquadCQB(UUID squadId, boolean cqb) {
+        SquadData squad = squadsById.get(squadId);
+        if (squad != null) {
+            squad.setCQB(cqb);
+            this.setDirty();
+        }
+    }
+
+    public void setSquadCQBByLeader(UUID leaderId, boolean cqb) {
+        SquadData squad = squadsByLeader.get(leaderId);
+        if (squad != null) {
+            squad.setCQB(cqb);
+            this.setDirty();
+        }
+    }
+
     public int getSquadSize(UUID squadId) {
         SquadData squad = squadsById.get(squadId);
         return squad != null ? squad.getMemberCount() + 1 : 0;

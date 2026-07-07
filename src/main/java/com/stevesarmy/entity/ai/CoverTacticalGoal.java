@@ -542,6 +542,12 @@ public class CoverTacticalGoal extends Goal {
     private boolean shouldSeekCover() {
         ThreatAwareness threats = getThreats();
         
+        if (soldier.isCQB() || soldier.hasCloseRangeTarget()) {
+            StevesArmyMod.LOGGER.info("[CoverGoal] shouldSeekCover=false (CQB mode={}, closeRangeTarget={})",
+                soldier.isCQB(), soldier.hasCloseRangeTarget());
+            return false;
+        }
+        
         if (soldier.getSquadMode() == SquadMode.HOLD) {
             boolean hasValid = getCoverManager().getCurrentCover() != null && isCoverStillValid();
             boolean result = !hasValid;

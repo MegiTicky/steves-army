@@ -140,9 +140,25 @@ public class SoldierEntity extends PathfinderMob implements Container {
     
     private boolean dispatchedBySend = false;
     private boolean inventorySyncingFromEntity = false;
+    private boolean cqbMode = false;
+    
+    public static final double CQB_RANGE = 5.0;
 
     public boolean isDispatchedBySend() {
         return dispatchedBySend;
+    }
+
+    public boolean isCQB() {
+        return cqbMode;
+    }
+
+    public void setCQB(boolean cqbMode) {
+        this.cqbMode = cqbMode;
+    }
+
+    public boolean hasCloseRangeTarget() {
+        if (this.getTarget() == null || !this.getTarget().isAlive()) return false;
+        return this.distanceToSqr(this.getTarget()) < CQB_RANGE * CQB_RANGE;
     }
 
     public SoldierEntity(EntityType<? extends SoldierEntity> type, Level level) {

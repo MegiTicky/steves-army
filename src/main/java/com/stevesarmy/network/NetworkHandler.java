@@ -51,6 +51,10 @@ public class NetworkHandler {
             SyncSoldierInventoryPacket::encode,
             SyncSoldierInventoryPacket::decode,
             SyncSoldierInventoryPacket::handle);
+        INSTANCE.registerMessage(id++, CQBToggleMessage.class,
+            CQBToggleMessage::encode,
+            CQBToggleMessage::decode,
+            CQBToggleMessage::handle);
     }
 
     public static void sendTo(ServerPlayer player, Object message) {

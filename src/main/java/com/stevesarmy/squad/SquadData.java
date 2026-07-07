@@ -12,6 +12,7 @@ public class SquadData {
     private final List<UUID> memberIds = new ArrayList<>();
     private SquadMode mode = SquadMode.FOLLOW;
     private SquadFormation formation = SquadFormation.NONE;
+    private boolean cqbMode = false;
 
     public SquadData(UUID leaderId) {
         this.squadId = UUID.randomUUID();
@@ -70,12 +71,21 @@ public class SquadData {
         this.formation = formation;
     }
 
+    public boolean isCQB() {
+        return cqbMode;
+    }
+
+    public void setCQB(boolean cqbMode) {
+        this.cqbMode = cqbMode;
+    }
+
     public CompoundTag toNBT() {
         CompoundTag tag = new CompoundTag();
         tag.putUUID("SquadId", squadId);
         tag.putUUID("LeaderId", leaderId);
         tag.putString("Mode", mode.name());
         tag.putString("Formation", formation.name());
+        tag.putBoolean("CQB", cqbMode);
         
         ListTag membersList = new ListTag();
         for (UUID memberId : memberIds) {
@@ -96,6 +106,9 @@ public class SquadData {
             data.formation = SquadFormation.valueOf(tag.getString("Formation"));
         } else {
             data.formation = SquadFormation.NONE;
+        }
+        if (tag.contains("CQB")) {
+            data.cqbMode = tag.getBoolean("CQB");
         }
         
         ListTag membersList = tag.getList("Members", Tag.TAG_COMPOUND);

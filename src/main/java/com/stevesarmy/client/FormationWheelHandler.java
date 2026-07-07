@@ -49,8 +49,13 @@ public class FormationWheelHandler {
                 SquadFormation selectedFormation = currentHoveredFormation;
                 StevesArmyMod.LOGGER.info("Formation wheel released after {}ms, selected: {}", holdTime, selectedFormation.getDisplayName());
 
-                FormationMessage message = new FormationMessage(selectedFormation);
-                NetworkHandler.INSTANCE.sendToServer(message);
+                if (selectedFormation == SquadFormation.CQB) {
+                    com.stevesarmy.network.CQBToggleMessage message = new com.stevesarmy.network.CQBToggleMessage();
+                    NetworkHandler.INSTANCE.sendToServer(message);
+                } else {
+                    FormationMessage message = new FormationMessage(selectedFormation);
+                    NetworkHandler.INSTANCE.sendToServer(message);
+                }
             }
 
             isWheelActive = false;
@@ -96,12 +101,13 @@ public class FormationWheelHandler {
             return SquadFormation.NONE;
         }
 
-        // 4 sectors of 90 degrees each
+        // 5 sectors of 72 degrees each
         // Layout (clockwise from top):
-        //   LINE at top (270 deg / sector 0)
-        //   WEDGE at right (0 deg / sector 1)
-        //   COLUMN at bottom (90 deg / sector 2)
-        //   DIAMOND at left (180 deg / sector 3)
+        //   LINE at top (sector 0)
+        //   WEDGE at right (sector 1)
+        //   COLUMN at bottom right (sector 2)
+        //   DIAMOND at bottom left (sector 3)
+        //   CQB at left (sector 4)
         double angle = Math.toDegrees(Math.atan2(deltaY, deltaX));
 
         // Shift so that 0 degrees = top (negative Y), going clockwise
@@ -109,13 +115,14 @@ public class FormationWheelHandler {
         if (adjustedDegrees < 0) adjustedDegrees += 360;
         if (adjustedDegrees >= 360) adjustedDegrees -= 360;
 
-        int sector = ((int) (adjustedDegrees / 90)) % 4;
+        int sector = ((int) (adjustedDegrees / 72)) % 5;
         SquadFormation selected;
         switch (sector) {
             case 0 -> selected = SquadFormation.LINE;
             case 1 -> selected = SquadFormation.WEDGE;
             case 2 -> selected = SquadFormation.COLUMN;
             case 3 -> selected = SquadFormation.DIAMOND;
+            case 4 -> selected = SquadFormation.CQB;
             default -> selected = SquadFormation.NONE;
         }
 

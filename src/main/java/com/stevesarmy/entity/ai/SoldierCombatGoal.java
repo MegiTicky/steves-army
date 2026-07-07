@@ -57,6 +57,7 @@ public class SoldierCombatGoal extends Goal {
     
     private static final float ADS_THRESHOLD = 0.8f;
     private static final int PATH_BLOCKED_SWITCH_TICKS = 40;
+    private static final int CQB_PATH_BLOCKED_SWITCH_TICKS = 10;
     private int pathBlockedCounter = 0;
     private int debugSyncTickCounter = 0;
     private static final int DEBUG_SYNC_INTERVAL = 5;
@@ -320,10 +321,16 @@ public class SoldierCombatGoal extends Goal {
         }
         
         if (hasGun) {
-            boolean shouldShoot = canSee || 
-                (coverManager.isInCover() && soldier.getPeekController().getState() == PeekController.State.EXPOSED);
+            boolean shouldShoot = canSee;
             if (shouldShoot) {
                 tickGunCombat();
+            }
+        }
+        
+        if (soldier.isCQB() && target != null && target.isAlive()) {
+            double distSq = soldier.distanceToSqr(target);
+            if (!soldier.getCoverBehaviorManager().isInCover() && distSq > SoldierEntity.CQB_RANGE * SoldierEntity.CQB_RANGE) {
+                soldier.getNavigation().moveTo(target, 1.0);
             }
         }
     }
@@ -349,19 +356,16 @@ public class SoldierCombatGoal extends Goal {
         
         if (isDrawing || isBolting) {
             return;
-        }
-        
-        if (coverManager.isInCover() && soldier.getPeekController().getState() != PeekController.State.EXPOSED) {
-            GunIntegration.aim(soldier, false);
-            return;
-        }
-        
+}
+
         currentAimPoint = ExposureCalculator.getBestAimPoint(soldier, target, getCoverBlockPos());
         
         if (!currentAimPoint.canShoot()) {
+            int maxBlockedTicks = (soldier.isCQB() || soldier.hasCloseRangeTarget())
+                ? CQB_PATH_BLOCKED_SWITCH_TICKS : PATH_BLOCKED_SWITCH_TICKS;
             pathBlockedCounter++;
-            if (pathBlockedCounter >= PATH_BLOCKED_SWITCH_TICKS) {
-                StevesArmyMod.LOGGER.info("Path blocked for {} ticks, switching target", pathBlockedCounter);
+            if (pathBlockedCounter >= maxBlockedTicks) {
+                StevesArmyMod.LOGGER.info("Path blocked for {} ticks (CQB={}), switching target", pathBlockedCounter, soldier.isCQB() || soldier.hasCloseRangeTarget());
                 pathBlockedCounter = 0;
                 if (findNewTarget()) {
                     resetAim(target);
