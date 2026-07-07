@@ -9,6 +9,7 @@ import com.stevesarmy.squad.SquadFormation;
 import com.stevesarmy.squad.SquadManager;
 import com.stevesarmy.squad.SquadMode;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.ai.goal.Goal;
@@ -56,6 +57,13 @@ public class CoverTacticalGoal extends Goal {
     
     private static final double THREAT_ANGLE_REPOSITION_THRESHOLD = 2.09;
     private static final int NON_PEEKABLE_REPOSITION_TICKS = 60;
+
+    private static final float FLANKING_PROTECTION_THRESHOLD = 0.7f;
+    private static final float MIN_FLANKING_IMPROVEMENT = 0.1f;
+    private static final long FLANK_REPOSITION_COOLDOWN_MS = 5000;
+    private static final double MID_MOVE_ANGLE_THRESHOLD = 1.05;
+
+    private long lastFlankRepositionTime = 0;
 
     private final Set<BlockPos> failedCoverPositions = new HashSet<>();
     private final java.util.Map<BlockPos, BlacklistEntry> blacklistReasons = new java.util.HashMap<>();
@@ -123,6 +131,124 @@ public class CoverTacticalGoal extends Goal {
     
     private ThreatAwareness getThreats() {
         return soldier.getThreatAwareness();
+    }
+
+    private boolean isExposedToFlank() {
+        if (soldier.isCQB() || soldier.hasCloseRangeTarget()) return false;
+        if (System.currentTimeMillis() - lastFlankRepositionTime < FLANK_REPOSITION_COOLDOWN_MS) return false;
+
+        CoverPoint cover = getCoverManager().getCurrentCover();
+        if (cover == null) return false;
+
+        Set<Direction> protectedDirs = cover.getProtectedDirections();
+        if (protectedDirs == null || protectedDirs.isEmpty()) return true;
+
+        List<ThreatAwareness.ThreatInfo> threats = getThreats().getThreatInfos();
+        if (threats.isEmpty()) return false;
+
+        for (ThreatAwareness.ThreatInfo info : threats) {
+            Vec3 toThreat = Vec3.atCenterOf(info.position).subtract(soldier.position());
+            Direction threatDir = CoverFinder.getDirectionFromVector(toThreat);
+            if (!protectedDirs.contains(threatDir)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private float getWeightedFlankingProtection(CoverPoint cover) {
+        Set<Direction> protectedDirs = cover.getProtectedDirections();
+        if (protectedDirs == null || protectedDirs.isEmpty()) return 0.0f;
+
+        List<ThreatAwareness.ThreatInfo> threats = getThreats().getThreatInfos();
+        if (threats.isEmpty()) return 1.0f;
+
+        float protectedWeight = 0.0f;
+        float totalWeight = 0.0f;
+
+        for (ThreatAwareness.ThreatInfo info : threats) {
+            Vec3 toThreat = Vec3.atCenterOf(info.position).subtract(cover.getPosition().getCenter());
+            Direction threatDir = CoverFinder.getDirectionFromVector(toThreat);
+
+            if (protectedDirs.contains(threatDir)) {
+                protectedWeight += info.weight;
+            }
+            totalWeight += info.weight;
+        }
+
+        return totalWeight > 0 ? protectedWeight / totalWeight : 1.0f;
+    }
+
+    private boolean shouldRepositionForFlank() {
+        if (!isExposedToFlank()) return false;
+
+        if (getCoverManager().isPinned()) {
+            return true;
+        }
+
+        float currentProtection = getWeightedFlankingProtection(getCoverManager().getCurrentCover());
+        if (currentProtection >= FLANKING_PROTECTION_THRESHOLD) {
+            return false;
+        }
+
+        Optional<CoverPoint> betterCover = findBetterCoverForFlank();
+        if (betterCover.isEmpty()) {
+            return false;
+        }
+
+        float newProtection = getWeightedFlankingProtection(betterCover.get());
+        if (newProtection - currentProtection < MIN_FLANKING_IMPROVEMENT) {
+            return false;
+        }
+
+        return true;
+    }
+
+    private boolean shouldRepositionFromFlank() {
+        return shouldRepositionForFlank();
+    }
+
+    private Optional<CoverPoint> findBetterCoverForFlank() {
+        Level level = soldier.level();
+        CoverFinder finder = new CoverFinder(level);
+
+        Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
+        List<LivingEntity> threats = getThreatList();
+        SquadCoverContext squadCtx = buildSquadCoverContext();
+
+        int searchRadius = SEARCH_RADIUS;
+        BlockPos searchCenter = soldier.blockPosition();
+
+        if (soldier.getSquadMode() == SquadMode.HOLD) {
+            BlockPos holdPos = soldier.getHoldPosition();
+            if (holdPos != null && !holdPos.equals(BlockPos.ZERO)) {
+                searchCenter = holdPos;
+            }
+        } else if (soldier.getSquadMode() == SquadMode.FOLLOW) {
+            LivingEntity owner = soldier.getOwner();
+            if (owner instanceof Player) {
+                searchCenter = owner.blockPosition();
+                searchRadius = (int) FOLLOW_COVER_SEARCH_RADIUS;
+            }
+        }
+
+        List<CoverFinder.ScoredCover> scored = finder.evaluateAndScoreAll(
+            soldier, threatDirection, threats, searchRadius, true);
+
+        CoverPoint currentCover = getCoverManager().getCurrentCover();
+        float currentProtection = currentCover != null ? getWeightedFlankingProtection(currentCover) : 0.0f;
+
+        for (CoverFinder.ScoredCover sc : scored) {
+            if (currentCover != null && sc.cover.getPosition().equals(currentCover.getPosition())) {
+                continue;
+            }
+            float newProtection = getWeightedFlankingProtection(sc.cover);
+            if (newProtection - currentProtection >= MIN_FLANKING_IMPROVEMENT) {
+                return Optional.of(sc.cover);
+            }
+        }
+
+        return Optional.empty();
     }
     
     @Override
@@ -390,6 +516,35 @@ public class CoverTacticalGoal extends Goal {
     private void tickRepositioning() {
         CoverPoint targetCover = getCoverManager().getTargetCover();
         CoverPoint currentCover = getCoverManager().getCurrentCover();
+
+        // Mid-move organic decision making (50% chance to even consider, 50% chance to cancel if threat shifted)
+        if (soldier.getRandom().nextFloat() < 0.5f) {
+            Vec3 currentThreatDir = getThreats().getPrimaryDirection(soldier.position());
+            Vec3 entryThreatDir = getCoverManager().getEntryThreatDirection();
+            
+            if (currentThreatDir != null && entryThreatDir != null && 
+                currentThreatDir.lengthSqr() > 0.01 && entryThreatDir.lengthSqr() > 0.01) {
+                double dot = currentThreatDir.dot(entryThreatDir) / (currentThreatDir.length() * entryThreatDir.length());
+                double angle = Math.acos(net.minecraft.util.Mth.clamp(dot, -1.0, 1.0));
+                
+                if (angle > MID_MOVE_ANGLE_THRESHOLD) {
+                    if (soldier.getRandom().nextFloat() < 0.5f) {
+                        if (debugLoggingEnabled) {
+                            StevesArmyMod.LOGGER.info("[CoverGoal] Soldier {} mid-move threat shift {:.1f}°, cancelling reposition",
+                                soldier.getId(), Math.toDegrees(angle));
+                        }
+                        getCoverManager().clearTargetCover();
+                        findAndMoveToCover();
+                        return;
+                    } else {
+                        if (debugLoggingEnabled) {
+                            StevesArmyMod.LOGGER.info("[CoverGoal] Soldier {} mid-move threat shift {:.1f}°, committing to move",
+                                soldier.getId(), Math.toDegrees(angle));
+                        }
+                    }
+                }
+            }
+        }
         
         if (targetCover == null) {
             if (currentCover != null) {
@@ -489,6 +644,16 @@ public class CoverTacticalGoal extends Goal {
             }
         }
 
+        // Flank detection
+        if (shouldRepositionFromFlank()) {
+            if (debugLoggingEnabled) {
+                StevesArmyMod.LOGGER.info("[CoverGoal] Soldier {} flanked, repositioning", soldier.getId());
+            }
+            lastFlankRepositionTime = System.currentTimeMillis();
+            startRepositioning();
+            return;
+        }
+
         // Suppressed → transition state
         if (getCoverManager().isSuppressed()) {
             if (getPeekController().isExposed()) {
@@ -524,6 +689,16 @@ public class CoverTacticalGoal extends Goal {
         // Let peek controller handle ongoing duck back
         if (getPeekController().isReturning()) {
             getPeekController().tick(soldier, currentCover, getPositionController());
+        }
+
+        // Flank detection (pinned soldiers bypass threshold)
+        if (shouldRepositionFromFlank()) {
+            if (debugLoggingEnabled) {
+                StevesArmyMod.LOGGER.info("[CoverGoal] Soldier {} flanked while suppressed, repositioning", soldier.getId());
+            }
+            lastFlankRepositionTime = System.currentTimeMillis();
+            startRepositioning();
+            return;
         }
 
         float sup = getCoverManager().getSuppressionTracker().getSuppressionLevel();

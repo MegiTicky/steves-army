@@ -21,12 +21,16 @@ import com.stevesarmy.entity.TargetEntity;
 import com.stevesarmy.entity.ai.CoverPositionController;
 import com.stevesarmy.entity.ai.CoverTacticalGoal;
 import com.stevesarmy.entity.ai.PeekController;
+import com.stevesarmy.squad.SquadData;
+import com.stevesarmy.squad.SquadManager;
+import com.stevesarmy.squad.SquadThreatIntel;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.commands.arguments.EntityArgument;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.network.chat.Component;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.phys.Vec3;
@@ -34,6 +38,7 @@ import net.minecraft.world.phys.Vec3;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 
 public class CombatDebugCommand {
 
@@ -97,6 +102,8 @@ public class CombatDebugCommand {
                     .executes(CombatDebugCommand::showReservations))
                 .then(Commands.literal("suppression")
                     .executes(CombatDebugCommand::showSuppression))
+                .then(Commands.literal("intel")
+                    .executes(CombatDebugCommand::showSquadIntel))
                 .then(Commands.literal("scan")
                     .executes(ctx -> scanDefault(ctx))
                     .then(Commands.argument("radius", IntegerArgumentType.integer(1, 20))
@@ -178,6 +185,7 @@ public class CombatDebugCommand {
             "  info threats        - Show threat direction analysis\n" +
             "  info reservations   - Show cover reservations\n" +
             "  info suppression    - Show suppression levels\n" +
+            "  info intel          - Show squad threat intel (shared enemy positions)\n" +
             "  info scan [radius]  - Scan for cover points\n" +
             "  info target [entity]- Scan with threat\n" +
             "  info best [radius]  - Find best cover point\n" +
@@ -483,6 +491,71 @@ public class CombatDebugCommand {
                 ), false);
             }
         }
+        return 1;
+    }
+
+    private static int showSquadIntel(CommandContext<CommandSourceStack> context) {
+        CommandSourceStack source = context.getSource();
+        if (!(source.getEntity() instanceof Player player)) {
+            source.sendFailure(Component.literal("Player only command"));
+            return 0;
+        }
+        
+        if (!(player.level() instanceof ServerLevel serverLevel)) {
+            source.sendFailure(Component.literal("Server side only"));
+            return 0;
+        }
+        
+        SquadManager manager = SquadManager.get(serverLevel);
+        Optional<SquadData> squadOpt = manager.getSquadByLeader(player.getUUID());
+        
+        if (!squadOpt.isPresent()) {
+            source.sendSuccess(() -> Component.literal("No squad found for player"), false);
+            return 0;
+        }
+        
+        SquadData squad = squadOpt.get();
+        SquadThreatIntel intel = squad.getThreatIntel();
+        
+        source.sendSuccess(() -> Component.literal("=== SQUAD THREAT INTEL ==="), false);
+        
+        List<SquadThreatIntel.ThreatKnowledge> threats = intel.getAllThreats();
+        source.sendSuccess(() -> Component.literal("Total threats: " + threats.size()), false);
+        
+        for (SquadThreatIntel.ThreatKnowledge threat : threats) {
+            BlockPos pos = threat.lastKnownPosition;
+            String posStr = pos != null ? (pos.getX() + "," + pos.getY() + "," + pos.getZ()) : "unknown";
+            String status = threat.isAlive ? (threat.isSuppressed ? "SUPPRESSED" : "ACTIVE") : "DEAD";
+            String suppressedBy = threat.suppressedBy != null ? threat.suppressedBy.toString().substring(0, 8) : "none";
+            
+            source.sendSuccess(() -> Component.literal(
+                "  Threat " + threat.threatEntityId.toString().substring(0, 8) +
+                " | Pos: " + posStr +
+                " | Acc: " + String.format("%.2f", threat.accuracy) +
+                " | Status: " + status +
+                " | SuppressedBy: " + suppressedBy
+            ), false);
+        }
+        
+        List<SoldierEntity> nearbySoldiers = player.level().getEntitiesOfClass(
+            SoldierEntity.class, player.getBoundingBox().inflate(30));
+        
+        source.sendSuccess(() -> Component.literal("=== SOLDIER ASSIGNMENTS ==="), false);
+        for (SoldierEntity soldier : nearbySoldiers) {
+            UUID squadId = soldier.getSquadId();
+            if (squadId == null || !squadId.equals(squad.getSquadId())) continue;
+            
+            Optional<SquadThreatIntel.ThreatKnowledge> assignment = intel.getAssignedThreatForSoldier(soldier.getUUID());
+            String assignmentStr = assignment
+                .map(t -> "suppressing " + t.threatEntityId.toString().substring(0, 8))
+                .orElse("none");
+            
+            source.sendSuccess(() -> Component.literal(
+                "  Soldier " + soldier.getId() +
+                " | Assignment: " + assignmentStr
+            ), false);
+        }
+        
         return 1;
     }
 

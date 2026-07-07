@@ -596,7 +596,7 @@ return weightedScore;
         return isValidPeekPosition(pos, level);
     }
     
-    private Direction getDirectionFromVector(Vec3 vec) {
+    public static Direction getDirectionFromVector(Vec3 vec) {
         if (vec == null) return Direction.NORTH;
         
         double absX = Math.abs(vec.x);

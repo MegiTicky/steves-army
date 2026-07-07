@@ -13,6 +13,7 @@ public class SquadData {
     private SquadMode mode = SquadMode.FOLLOW;
     private SquadFormation formation = SquadFormation.NONE;
     private boolean cqbMode = false;
+    private SquadThreatIntel threatIntel = new SquadThreatIntel();
 
     public SquadData(UUID leaderId) {
         this.squadId = UUID.randomUUID();
@@ -79,6 +80,14 @@ public class SquadData {
         this.cqbMode = cqbMode;
     }
 
+    public SquadThreatIntel getThreatIntel() {
+        return threatIntel;
+    }
+
+    public void tickIntelCleanup(long currentGameTime) {
+        threatIntel.tickCleanup(currentGameTime);
+    }
+
     public CompoundTag toNBT() {
         CompoundTag tag = new CompoundTag();
         tag.putUUID("SquadId", squadId);
@@ -86,6 +95,8 @@ public class SquadData {
         tag.putString("Mode", mode.name());
         tag.putString("Formation", formation.name());
         tag.putBoolean("CQB", cqbMode);
+        
+        tag.put("ThreatIntel", threatIntel.toNBT());
         
         ListTag membersList = new ListTag();
         for (UUID memberId : memberIds) {
@@ -109,6 +120,10 @@ public class SquadData {
         }
         if (tag.contains("CQB")) {
             data.cqbMode = tag.getBoolean("CQB");
+        }
+        
+        if (tag.contains("ThreatIntel")) {
+            data.threatIntel = SquadThreatIntel.fromNBT(tag.getCompound("ThreatIntel"));
         }
         
         ListTag membersList = tag.getList("Members", Tag.TAG_COMPOUND);

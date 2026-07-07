@@ -15,11 +15,16 @@ import com.stevesarmy.combat.cover.CoverPoint;
 import com.stevesarmy.combat.cover.CoverType;
 import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.entity.TargetEntity;
+import com.stevesarmy.inventory.SoldierInventory;
 import com.stevesarmy.network.NetworkHandler;
 import com.stevesarmy.network.PotentialTargetsDebugMessage;
-import com.stevesarmy.squad.SquadMode;
+import com.stevesarmy.squad.SquadData;
+import com.stevesarmy.squad.SquadManager;
+import com.stevesarmy.squad.SquadThreatIntel;
+import com.stevesarmy.squad.SuppressireAssignmentManager;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.LivingEntity;
@@ -67,7 +72,15 @@ public class SoldierCombatGoal extends Goal {
     private int peekCycleLogCounter = 0;
 
     private static boolean combatDebugLogging = false;
-    
+
+    private boolean isSuppressing = false;
+    private BlockPos suppressionTargetPos = null;
+    private UUID suppressionTargetUUID = null;
+    private static final float SUPPRESSION_ADS_THRESHOLD = 0.5f;
+    private static final double SUPPRESSION_SPREAD_RADIUS = 1.5;
+    private static final double SUPPRESSION_MAX_RANGE = 30.0;
+    private static final long STALE_TIMEOUT_TICKS = 60;
+
     public static void setDebugLoggingEnabled(boolean enabled) {
         combatDebugLogging = enabled;
     }
@@ -250,6 +263,10 @@ public class SoldierCombatGoal extends Goal {
         if (target != null && target.isAlive()) {
             tickCombat(hasGun);
             updateDebugSync();
+            
+            if (TargetAcquisition.hasLineOfSight(soldier, target)) {
+                reportThreatToSquadIntel(target, 1.0f);
+            }
         } else {
             tickScanning(potentialTargets);
             CoverBehaviorManager coverManager = soldier.getCoverBehaviorManager();
@@ -323,7 +340,13 @@ public class SoldierCombatGoal extends Goal {
         if (hasGun) {
             boolean shouldShoot = canSee;
             if (shouldShoot) {
+                isSuppressing = false;
                 tickGunCombat();
+            } else if (shouldSuppressTarget()) {
+                isSuppressing = true;
+                trySuppressireFire();
+            } else {
+                isSuppressing = false;
             }
         }
         
@@ -361,6 +384,12 @@ public class SoldierCombatGoal extends Goal {
         currentAimPoint = ExposureCalculator.getBestAimPoint(soldier, target, getCoverBlockPos());
         
         if (!currentAimPoint.canShoot()) {
+            if (shouldSuppressTarget()) {
+                isSuppressing = true;
+                trySuppressireFire();
+                return;
+            }
+            
             int maxBlockedTicks = (soldier.isCQB() || soldier.hasCloseRangeTarget())
                 ? CQB_PATH_BLOCKED_SWITCH_TICKS : PATH_BLOCKED_SWITCH_TICKS;
             pathBlockedCounter++;
@@ -1066,5 +1095,168 @@ private void tickCoverPeekCycle(CoverBehaviorManager coverManager) {
             this.movementFactor = movementFactor;
             this.brightnessFactor = brightnessFactor;
         }
+    }
+
+    private SquadThreatIntel getSquadIntel() {
+        UUID squadId = soldier.getSquadId();
+        if (squadId == null) return null;
+        
+        if (!(soldier.level() instanceof ServerLevel serverLevel)) {
+            return null;
+        }
+        
+        SquadManager manager = SquadManager.get(serverLevel);
+        Optional<SquadData> squad = manager.getSquadById(squadId);
+        return squad.map(SquadData::getThreatIntel).orElse(null);
+    }
+
+    private void reportThreatToSquadIntel(LivingEntity threat, float accuracy) {
+        SquadThreatIntel intel = getSquadIntel();
+        if (intel == null) return;
+        
+        intel.reportThreat(soldier.getUUID(), threat, threat.blockPosition(), accuracy);
+    }
+
+    private boolean shouldSuppressTarget() {
+        if (GunIntegration.isReloading(soldier) || 
+            GunIntegration.isBolting(soldier) || 
+            GunIntegration.isDrawing(soldier)) {
+            return false;
+        }
+        
+        if (target != null && TargetAcquisition.hasLineOfSight(soldier, target)) {
+            return false;
+        }
+        
+        SquadThreatIntel intel = getSquadIntel();
+        if (intel == null) return false;
+        
+        if (!(soldier.level() instanceof ServerLevel serverLevel)) return false;
+        
+        UUID squadId = soldier.getSquadId();
+        if (squadId == null) return false;
+        
+        SquadManager manager = SquadManager.get(serverLevel);
+        Optional<SquadData> squadOpt = manager.getSquadById(squadId);
+        if (!squadOpt.isPresent()) return false;
+        
+        SuppressireAssignmentManager.requestAssignment(squadOpt.get(), intel, serverLevel, soldier.getUUID());
+        
+        Optional<SquadThreatIntel.ThreatKnowledge> assignedThreat = intel.getAssignedThreatForSoldier(soldier.getUUID());
+        if (!assignedThreat.isPresent()) return false;
+        
+        SquadThreatIntel.ThreatKnowledge threat = assignedThreat.get();
+        if (!threat.isAlive) return false;
+        
+        if (intel.isThreatStale(threat.threatEntityId, soldier.level().getGameTime())) {
+            intel.clearThreatSuppression(threat.threatEntityId);
+            return false;
+        }
+        
+        if (threat.lastKnownPosition == null) return false;
+        
+        double dist = soldier.position().distanceTo(threat.lastKnownPosition.getCenter());
+        if (dist > SUPPRESSION_MAX_RANGE) return false;
+        
+        if (GunIntegration.isTaczLoaded() && GunIntegration.hasGun(soldier)) {
+            int magazineAmmo = GunIntegration.getCurrentAmmo(soldier);
+            SoldierInventory inv = soldier.getSoldierInventory();
+            int inventoryAmmo = 0;
+            
+            if (inv != null) {
+                String ammoId = GunIntegration.getAmmoId(soldier);
+                if (ammoId != null && !ammoId.isEmpty()) {
+                    for (int i = SoldierInventory.SLOT_GENERAL_START; i < SoldierInventory.INVENTORY_SIZE; i++) {
+                        ItemStack stack = inv.getItem(i);
+                        if (!stack.isEmpty() && stack.getItem().getDescriptionId().contains(ammoId)) {
+                            inventoryAmmo += stack.getCount();
+                        }
+                    }
+                }
+            }
+            
+            int totalAmmo = magazineAmmo + inventoryAmmo;
+            
+            if (totalAmmo == 0) return false;
+        }
+        
+        suppressionTargetUUID = threat.threatEntityId;
+        suppressionTargetPos = threat.lastKnownPosition;
+        return true;
+    }
+
+    private Vec3 calculateSuppressionSpread(Vec3 targetPos) {
+        double offsetX = (soldier.level().random.nextDouble() - 0.5) * SUPPRESSION_SPREAD_RADIUS;
+        double offsetY = (soldier.level().random.nextDouble() - 0.5) * SUPPRESSION_SPREAD_RADIUS * 0.3;
+        double offsetZ = (soldier.level().random.nextDouble() - 0.5) * SUPPRESSION_SPREAD_RADIUS;
+        
+        return targetPos.add(offsetX, offsetY, offsetZ);
+    }
+
+    private void trySuppressireFire() {
+        if (suppressionTargetPos == null) return;
+        
+        Vec3 targetPos = Vec3.atCenterOf(suppressionTargetPos);
+        
+        soldier.getLookControl().setLookAt(
+            targetPos.x, targetPos.y + 1.0, targetPos.z,
+            30.0F, 30.0F
+        );
+        
+        GunIntegration.aim(soldier, true);
+        wasAiming = true;
+        
+        float adsProgress = GunIntegration.getAimProgress(soldier);
+        if (adsProgress < SUPPRESSION_ADS_THRESHOLD) return;
+        
+        Vec3 spreadPos = calculateSuppressionSpread(targetPos);
+        GunIntegration.ShootResult result = GunIntegration.shootAtPosition(soldier, spreadPos);
+        
+        switch (result) {
+            case SUCCESS -> {
+                if (soldier.getCoverBehaviorManager().isInCover()) {
+                    soldier.getCoverBehaviorManager().onPeekShot();
+                }
+                float[] recoil = AimAccuracyManager.getGunRecoil(soldier);
+                float recoilMagnitude = Math.abs(recoil[0]) + Math.abs(recoil[1]);
+                aimQuality = Math.max(0.0f, aimQuality - recoilMagnitude * StevesArmyConfig.getAimQualityRecoilScale());
+            }
+            case NEED_BOLT -> GunIntegration.bolt(soldier);
+            case NO_AMMO -> GunIntegration.reload(soldier);
+            case IS_RELOADING, IS_BOLTING, IS_DRAWING -> {}
+            case NOT_DRAWN -> GunIntegration.draw(soldier);
+            default -> {}
+        }
+        
+        SquadThreatIntel intel = getSquadIntel();
+        if (intel != null && suppressionTargetUUID != null) {
+            intel.markThreatSuppressed(suppressionTargetUUID, soldier.getUUID());
+        }
+    }
+
+    public void onTargetKilledByTeammate(UUID killedThreatId) {
+        if (suppressionTargetUUID != null && suppressionTargetUUID.equals(killedThreatId)) {
+            suppressionTargetUUID = null;
+            suppressionTargetPos = null;
+            isSuppressing = false;
+        }
+        
+        SquadThreatIntel intel = getSquadIntel();
+        if (intel != null) {
+            intel.markThreatDead(killedThreatId);
+        }
+        
+        if (target != null && target.getUUID().equals(killedThreatId)) {
+            target = null;
+            soldier.setTarget(null);
+        }
+    }
+
+    public boolean isSuppressing() {
+        return isSuppressing;
+    }
+
+    public BlockPos getSuppressireTargetPos() {
+        return suppressionTargetPos;
     }
 }

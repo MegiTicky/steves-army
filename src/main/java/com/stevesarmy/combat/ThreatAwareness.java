@@ -323,6 +323,26 @@ public class ThreatAwareness {
         return positions;
     }
 
+    public List<ThreatInfo> getThreatInfos() {
+        List<ThreatInfo> infos = new ArrayList<>();
+        for (ThreatEntry entry : threats) {
+            infos.add(new ThreatInfo(entry.position, entry.weight, entry.entity));
+        }
+        return infos;
+    }
+
+    public static class ThreatInfo {
+        public final BlockPos position;
+        public final float weight;
+        @Nullable public final LivingEntity entity;
+
+        public ThreatInfo(BlockPos position, float weight, @Nullable LivingEntity entity) {
+            this.position = position;
+            this.weight = weight;
+            this.entity = entity;
+        }
+    }
+
     public void debugLogThreatState(Vec3 soldierPos) {
         if (!CoverTacticalGoal.isDebugLoggingEnabled()) return;
         

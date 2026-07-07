@@ -142,6 +142,10 @@ public class SquadManager extends SavedData {
         return idx >= 0 ? idx : 0;
     }
 
+    public Collection<SquadData> getAllSquads() {
+        return squadsById.values();
+    }
+
     public static SquadManager get(ServerLevel level) {
         DimensionDataStorage storage = level.getDataStorage();
         return storage.computeIfAbsent(

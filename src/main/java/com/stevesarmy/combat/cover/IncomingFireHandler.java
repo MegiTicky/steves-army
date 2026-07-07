@@ -1,7 +1,14 @@
 package com.stevesarmy.combat.cover;
 
+import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.entity.SoldierEntity;
+import com.stevesarmy.entity.ai.CoverTacticalGoal;
+import com.stevesarmy.entity.ai.SoldierCombatGoal;
+import com.stevesarmy.squad.SquadData;
+import com.stevesarmy.squad.SquadManager;
+import com.stevesarmy.squad.SquadThreatIntel;
 import com.tacz.guns.entity.EntityKineticBullet;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
@@ -9,12 +16,14 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.event.entity.EntityJoinLevelEvent;
+import net.minecraftforge.event.entity.living.LivingDeathEvent;
 import net.minecraftforge.event.entity.living.LivingHurtEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.UUID;
 import javax.annotation.Nullable;
 
 @Mod.EventBusSubscriber(modid = "steves_army")
@@ -108,6 +117,45 @@ public class IncomingFireHandler {
 
             if (soldier.position().distanceTo(closestPoint) < NEAR_MISS_THRESHOLD) {
                 coverManager.onNearMiss(closestPoint, soldier, bulletSpeed, shooter);
+            }
+        }
+    }
+
+    @SubscribeEvent
+    public static void onLivingDeath(LivingDeathEvent event) {
+        LivingEntity deadEntity = event.getEntity();
+        if (!(deadEntity.level() instanceof ServerLevel serverLevel)) return;
+        
+        SquadManager manager = SquadManager.get(serverLevel);
+        for (SquadData squad : manager.getAllSquads()) {
+            SquadThreatIntel intel = squad.getThreatIntel();
+            if (intel.hasThreat(deadEntity.getUUID())) {
+                intel.markThreatDead(deadEntity.getUUID());
+                
+                if (CoverTacticalGoal.isDebugLoggingEnabled()) {
+                    StevesArmyMod.LOGGER.info("[IncomingFireHandler] Threat {} killed, marked dead in squad intel",
+                        deadEntity.getName().getString());
+                }
+                
+                for (UUID memberId : squad.getMemberIds()) {
+                    Entity member = serverLevel.getEntity(memberId);
+                    if (member instanceof SoldierEntity soldier) {
+                        SoldierCombatGoal combatGoal = soldier.getCombatGoal();
+                        if (combatGoal != null) {
+                            combatGoal.onTargetKilledByTeammate(deadEntity.getUUID());
+                        }
+                    }
+                }
+                
+                if (squad.getLeaderId() != null) {
+                    Entity leader = serverLevel.getEntity(squad.getLeaderId());
+                    if (leader instanceof SoldierEntity soldierLeader) {
+                        SoldierCombatGoal leaderGoal = soldierLeader.getCombatGoal();
+                        if (leaderGoal != null) {
+                            leaderGoal.onTargetKilledByTeammate(deadEntity.getUUID());
+                        }
+                    }
+                }
             }
         }
     }
