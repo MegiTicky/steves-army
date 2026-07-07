@@ -21,6 +21,7 @@ import com.stevesarmy.network.OpenSoldierInventoryMessage;
 import com.stevesarmy.squad.SquadManager;
 import com.stevesarmy.squad.SquadMode;
 import com.stevesarmy.squad.SquadFormation;
+import com.stevesarmy.util.FormationPositionCalculator;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.nbt.CompoundTag;
@@ -919,7 +920,32 @@ public class SoldierEntity extends PathfinderMob implements Container {
     public boolean isCrawling() {
         return entityData.get(CRAWLING);
     }
-    
+
+    /**
+     * Returns the forward direction for formation positioning.
+     * Uses threat direction first, then falls back to owner's look direction.
+     */
+    public Vec3 getFormationForwardDirection(@Nullable BlockPos goalPos) {
+        Vec3 threatDir = threatAwareness.getPrimaryDirection(position());
+        if (threatDir != null && threatDir.lengthSqr() > 0.001) {
+            return threatDir;
+        }
+        if (goalPos != null) {
+            Vec3 toGoal = Vec3.atCenterOf(goalPos).subtract(position()).normalize();
+            if (toGoal.lengthSqr() > 0.001) {
+                return toGoal;
+            }
+        }
+        LivingEntity owner = getOwner();
+        if (owner != null) {
+            Vec3 look = owner.getLookAngle();
+            if (look != null && look.lengthSqr() > 0.001) {
+                return look;
+            }
+        }
+        return new Vec3(0, 0, -1);
+    }
+
     public ThreatAwareness getThreatAwareness() {
         return threatAwareness;
     }

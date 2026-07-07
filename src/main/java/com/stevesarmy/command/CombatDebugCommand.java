@@ -46,6 +46,8 @@ public class CombatDebugCommand {
             // === MASTER TOGGLE ===
             .then(Commands.literal("all")
                 .executes(CombatDebugCommand::enableAllDebug))
+            .then(Commands.literal("none")
+                .executes(CombatDebugCommand::disableAllDebug))
 
             // === LOG TOGGLES ===
             .then(Commands.literal("log")
@@ -162,6 +164,7 @@ public class CombatDebugCommand {
         context.getSource().sendSuccess(() -> Component.literal(
             "=== /stevesarmy_debug ===\n" +
             "  all                 - Enable ALL debug (logging + render + combat overlay)\n" +
+            "  none                - Disable ALL debug (logging + render + overlays)\n" +
             "  log cover [on|off]  - Toggle cover behavior logging\n" +
             "  render soldiers     - Toggle soldier cover visualization lines/labels\n" +
             "  render peekcandidates - Toggle peek candidate boxes/LOS rays\n" +
@@ -206,6 +209,28 @@ public class CombatDebugCommand {
             "  Cover behavior logging: ON\n" +
             "Use /stevesarmy_debug render mode minimal for compact display\n" +
             "Use /stevesarmy_debug log cover off to disable console logs"
+        ), true);
+        return 1;
+    }
+
+    private static int disableAllDebug(CommandContext<CommandSourceStack> context) {
+        CombatDebugRenderer.setDebugMode(CombatDebugRenderer.DEBUG_MODE_OFF);
+        CoverDebugManager.setShowSoldierCover(false);
+        CoverDebugManager.setShowPeekCandidates(false);
+        CoverDebugManager.setVisualizationEnabled(false);
+        CoverTacticalGoal.setDebugLogging(false);
+        CoverDebugManager.setShowRays(false);
+        CoverDebugManager.setShowSolidBlocks(false);
+
+        context.getSource().sendSuccess(() -> Component.literal(
+            "=== Steve's Army Debug: ALL OFF ===\n" +
+            "  Combat debug overlay: OFF\n" +
+            "  Soldier cover visualization: OFF\n" +
+            "  Peek candidate visualization: OFF\n" +
+            "  Cover point visualization: OFF\n" +
+            "  Raycast visualization: OFF\n" +
+            "  Solid block visualization: OFF\n" +
+            "  Cover behavior logging: OFF"
         ), true);
         return 1;
     }

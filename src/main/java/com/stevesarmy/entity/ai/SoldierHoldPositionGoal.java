@@ -3,15 +3,21 @@ package com.stevesarmy.entity.ai;
 import com.stevesarmy.combat.cover.CoverBehaviorManager;
 import com.stevesarmy.combat.cover.CoverPoint;
 import com.stevesarmy.entity.SoldierEntity;
+import com.stevesarmy.squad.SquadFormation;
+import com.stevesarmy.squad.SquadManager;
 import com.stevesarmy.squad.SquadMode;
+import com.stevesarmy.util.FormationPositionCalculator;
 import net.minecraft.core.BlockPos;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.ai.goal.Goal;
+import net.minecraft.world.phys.Vec3;
 
 import java.util.EnumSet;
+import java.util.UUID;
 
 public class SoldierHoldPositionGoal extends Goal {
-    private static final float HOLD_RADIUS_SQ = 100.0f; // 10 block radius around hold center
-    private static final float RETURN_TO_COVER_DISTANCE_SQ = 9.0f; // 3 blocks - close enough
+    private static final float HOLD_RADIUS_SQ = 100.0f;
+    private static final float RETURN_TO_COVER_DISTANCE_SQ = 9.0f;
     private final SoldierEntity soldier;
     private BlockPos holdPos;
     private final double speedModifier;
@@ -83,7 +89,10 @@ public class SoldierHoldPositionGoal extends Goal {
 
     @Override
     public void start() {
-        if (holdPos != null) {
+        BlockPos target = getFormationTarget();
+        if (target != null) {
+            soldier.getNavigation().moveTo(target.getX(), target.getY(), target.getZ(), speedModifier);
+        } else if (holdPos != null) {
             soldier.getNavigation().moveTo(holdPos.getX(), holdPos.getY(), holdPos.getZ(), speedModifier);
         }
     }
@@ -117,9 +126,34 @@ public class SoldierHoldPositionGoal extends Goal {
 
         double distToHold = soldier.distanceToSqr(holdPos.getX(), holdPos.getY(), holdPos.getZ());
         if (distToHold > HOLD_RADIUS_SQ) {
-            soldier.getNavigation().moveTo(holdPos.getX(), holdPos.getY(), holdPos.getZ(), speedModifier);
+            BlockPos target = getFormationTarget();
+            if (target != null) {
+                soldier.getNavigation().moveTo(target.getX(), target.getY(), target.getZ(), speedModifier);
+            } else {
+                soldier.getNavigation().moveTo(holdPos.getX(), holdPos.getY(), holdPos.getZ(), speedModifier);
+            }
         } else {
             soldier.getNavigation().stop();
         }
+    }
+
+    private BlockPos getFormationTarget() {
+        SquadFormation formation = soldier.getSquadFormation();
+        if (formation == SquadFormation.NONE || formation == SquadFormation.CQB || holdPos == null) {
+            return null;
+        }
+
+        UUID squadId = soldier.getSquadId();
+        if (squadId == null || !(soldier.level() instanceof ServerLevel serverLevel)) {
+            return null;
+        }
+
+        SquadManager mgr = SquadManager.get(serverLevel);
+        int squadSize = mgr.getSquadSize(squadId);
+        int memberIndex = mgr.getMemberIndex(squadId, soldier.getUUID());
+
+        Vec3 fwd = soldier.getFormationForwardDirection(holdPos);
+        BlockPos offset = FormationPositionCalculator.getFormationOffset(fwd, formation, memberIndex, squadSize);
+        return holdPos.offset(offset);
     }
 }

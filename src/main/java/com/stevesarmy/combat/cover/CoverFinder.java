@@ -17,6 +17,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.squad.SquadCoverContext;
 import com.stevesarmy.squad.SquadFormation;
+import com.stevesarmy.util.FormationPositionCalculator;
 
 public class CoverFinder {
     private static final int DEFAULT_SEARCH_RADIUS = 12;
@@ -373,34 +374,10 @@ return weightedScore;
             return 0.5f;
         }
 
-        Vec3 threatDir = threatDirection.normalize();
-        Vec3 perpDir = new Vec3(-threatDir.z, 0, threatDir.x).normalize();
-
-        double spread = 4.0;
-        double half = (ctx.squadSize() - 1) * spread / 2.0;
-        double positionOffset = ctx.memberIndex() * spread - half;
-
-        BlockPos idealPos;
-        switch (ctx.formation()) {
-            case LINE -> idealPos = soldier.blockPosition().offset(
-                (int)(perpDir.x * positionOffset), 0, (int)(perpDir.z * positionOffset));
-            case WEDGE -> {
-                double forward = 5.0 - Math.abs(positionOffset) * 0.5;
-                double side = positionOffset;
-                idealPos = soldier.blockPosition().offset(
-                    (int)(perpDir.x * side + threatDir.x * forward), 0,
-                    (int)(perpDir.z * side + threatDir.z * forward));
-            }
-            case COLUMN -> idealPos = soldier.blockPosition().offset(
-                (int)(-threatDir.x * positionOffset), 0, (int)(-threatDir.z * positionOffset));
-            case DIAMOND -> {
-                double angle = ctx.memberIndex() * Math.PI / 2;
-                double dist = 4.0;
-                idealPos = soldier.blockPosition().offset(
-                    (int)(Math.cos(angle) * dist), 0, (int)(Math.sin(angle) * dist));
-            }
-            default -> { return 0.5f; }
-        }
+        Vec3 dir = threatDirection.normalize();
+        BlockPos idealOffset = FormationPositionCalculator.getFormationOffset(
+                dir, ctx.formation(), ctx.memberIndex(), ctx.squadSize());
+        BlockPos idealPos = soldier.blockPosition().offset(idealOffset);
 
         double distToIdeal = coverPoint.getPosition().distSqr(idealPos);
         double maxDist = 100;
