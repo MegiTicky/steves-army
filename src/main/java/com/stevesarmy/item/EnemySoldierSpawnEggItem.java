@@ -3,12 +3,15 @@ package com.stevesarmy.item;
 import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.combat.GunIntegration;
 import com.stevesarmy.entity.EnemySoldierEntity;
+import com.stevesarmy.inventory.SoldierInventory;
 import com.stevesarmy.registry.ModEntities;
 import net.minecraft.core.BlockPos;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.ListTag;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.InteractionResult;
-import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.context.UseOnContext;
@@ -35,16 +38,70 @@ public class EnemySoldierSpawnEggItem extends ForgeSpawnEggItem {
         BlockPos pos = context.getClickedPos();
         ItemStack stack = context.getItemInHand();
 
-        Entity entity = this.getType(stack.getTag()).spawn(
-            (ServerLevel) level, stack, context.getPlayer(), pos,
-            net.minecraft.world.entity.MobSpawnType.SPAWN_EGG, true, true
-        );
-
-        if (entity instanceof EnemySoldierEntity enemy) {
+        ServerLevel serverLevel = (ServerLevel) level;
+        
+        EntityType<?> entityType = this.getType(stack.getTag());
+        if (entityType == null) {
+            return InteractionResult.FAIL;
+        }
+        
+        EnemySoldierEntity enemy = (EnemySoldierEntity) entityType.create(serverLevel);
+        if (enemy == null) {
+            return InteractionResult.FAIL;
+        }
+        
+        CompoundTag stackTag = stack.getTag();
+        boolean hasEntityTag = stackTag != null && stackTag.contains("EntityTag");
+        
+        if (hasEntityTag) {
+            CompoundTag entityTag = stackTag.getCompound("EntityTag");
+            fillEnemyFromEntityTag(enemy, entityTag, pos);
+        } else {
+            enemy.setPos(pos.getX() + 0.5, pos.getY() + 1.0, pos.getZ() + 0.5);
+        }
+        
+        enemy.setPersistenceRequired();
+        serverLevel.addFreshEntity(enemy);
+        
+        if (context.getPlayer() != null && !context.getPlayer().isCreative()) {
+            stack.shrink(1);
+        }
+        
+        ItemStack mainHand = enemy.getMainHandItem();
+        if (mainHand.isEmpty()) {
             equipAk47(enemy);
+        } else {
+            StevesArmyMod.LOGGER.info("[EnemySpawnEgg] Enemy soldier {} already has item from EntityTag, skipping AK47 equipment", enemy.getId());
         }
 
-        return InteractionResult.CONSUME;
+        return InteractionResult.SUCCESS;
+    }
+    
+    private void fillEnemyFromEntityTag(EnemySoldierEntity enemy, CompoundTag entityTag, BlockPos pos) {
+        enemy.setPos(pos.getX() + 0.5, pos.getY() + 1.0, pos.getZ() + 0.5);
+        
+        if (entityTag.contains("DefendPosition")) {
+            enemy.setDefendPosition(BlockPos.of(entityTag.getLong("DefendPosition")));
+        }
+        
+        if (entityTag.contains("Inventory")) {
+            CompoundTag inventoryTag = entityTag.getCompound("Inventory");
+            SoldierInventory inventory = enemy.getSoldierInventory();
+            
+            if (inventoryTag.contains("Items")) {
+                ListTag itemsList = inventoryTag.getList("Items", 10);
+                for (int i = 0; i < itemsList.size(); i++) {
+                    CompoundTag itemTag = itemsList.getCompound(i);
+                    int slot = itemTag.getInt("Slot");
+                    if (slot >= 0 && slot < inventory.getContainerSize()) {
+                        ItemStack itemStack = ItemStack.of(itemTag);
+                        inventory.setItem(slot, itemStack);
+                    }
+                }
+            }
+            
+            inventory.syncArmorToEntity(enemy);
+        }
     }
 
     private void equipAk47(EnemySoldierEntity enemy) {

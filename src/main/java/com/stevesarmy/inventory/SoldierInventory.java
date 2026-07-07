@@ -47,6 +47,21 @@ public class SoldierInventory implements Container {
         soldier.setItemSlot(EquipmentSlot.MAINHAND, items.get(SLOT_MAIN_HAND));
     }
 
+    public void syncFromEntity(SoldierEntity soldier) {
+        for (int i = 0; i < 4; i++) {
+            ItemStack currentInSlot = items.get(i);
+            ItemStack entityItem = soldier.getItemBySlot(ARMOR_SLOTS[i]);
+            if (!ItemStack.matches(currentInSlot, entityItem)) {
+                items.set(i, entityItem.copy());
+            }
+        }
+        ItemStack currentMainHand = items.get(SLOT_MAIN_HAND);
+        ItemStack entityMainHand = soldier.getMainHandItem();
+        if (!ItemStack.matches(currentMainHand, entityMainHand)) {
+            items.set(SLOT_MAIN_HAND, entityMainHand.copy());
+        }
+    }
+
     @Override
     public int getContainerSize() {
         return INVENTORY_SIZE;

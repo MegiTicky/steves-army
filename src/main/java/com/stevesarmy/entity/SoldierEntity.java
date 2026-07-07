@@ -24,6 +24,7 @@ import com.stevesarmy.squad.SquadFormation;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.ListTag;
 import net.minecraft.network.syncher.EntityDataAccessor;
 import net.minecraft.network.syncher.EntityDataSerializers;
 import net.minecraft.network.syncher.SynchedEntityData;
@@ -44,6 +45,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.LevelAccessor;
 import net.minecraft.world.damagesource.DamageSource;
+import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.common.capabilities.Capability;
 import net.minecraftforge.common.capabilities.ForgeCapabilities;
@@ -244,6 +246,46 @@ public class SoldierEntity extends PathfinderMob implements Container {
             inventory.load(tag.getCompound("Inventory"));
         }
         inventory.syncArmorToEntity(this);
+    }
+
+    @Override
+    public ItemStack getPickedResult(HitResult target) {
+        inventory.syncFromEntity(this);
+        
+        com.stevesarmy.item.SoldierSpawnEggItem egg = 
+            (com.stevesarmy.item.SoldierSpawnEggItem) com.stevesarmy.registry.ModItems.SOLDIER_SPAWN_EGG.get();
+        ItemStack stack = new ItemStack(egg);
+        CompoundTag tag = new CompoundTag();
+        this.addAdditionalSaveData(tag);
+        
+        StevesArmyMod.LOGGER.info("[SoldierEntity] === getPickedResult ===");
+        StevesArmyMod.LOGGER.info("[SoldierEntity] Saving soldier UUID: {}", this.getUUID());
+        StevesArmyMod.LOGGER.info("[SoldierEntity] Saved tag: {}", tag.toString());
+        
+        if (tag.contains("Inventory")) {
+            CompoundTag invTag = tag.getCompound("Inventory");
+            StevesArmyMod.LOGGER.info("[SoldierEntity] Inventory tag: {}", invTag.toString());
+            if (invTag.contains("Items")) {
+                ListTag items = invTag.getList("Items", 10);
+                StevesArmyMod.LOGGER.info("[SoldierEntity] Inventory items count: {}", items.size());
+                for (int i = 0; i < items.size(); i++) {
+                    StevesArmyMod.LOGGER.info("[SoldierEntity]   Item {}: {}", i, items.getCompound(i).toString());
+                }
+            }
+        }
+        
+        StevesArmyMod.LOGGER.info("[SoldierEntity] Current soldier inventory:");
+        for (int i = 0; i < inventory.getContainerSize(); i++) {
+            ItemStack item = inventory.getItem(i);
+            if (!item.isEmpty()) {
+                StevesArmyMod.LOGGER.info("[SoldierEntity]   Slot {}: {} x{}", i, item.getItem().toString(), item.getCount());
+            }
+        }
+        
+        stack.getOrCreateTag().put("EntityTag", tag);
+        StevesArmyMod.LOGGER.info("[SoldierEntity] Final stack tag: {}", stack.getTag().toString());
+        
+        return stack;
     }
 
     @Override

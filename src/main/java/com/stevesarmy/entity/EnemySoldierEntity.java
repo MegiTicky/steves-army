@@ -17,6 +17,7 @@ import net.minecraft.world.entity.ai.goal.RandomLookAroundGoal;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 
 import java.lang.reflect.Method;
@@ -56,6 +57,10 @@ public class EnemySoldierEntity extends SoldierEntity {
     public BlockPos getDefendPosition() {
         return defendPosition;
     }
+    
+    public void setDefendPosition(BlockPos pos) {
+        this.defendPosition = pos;
+    }
 
     public double getDefendRadius() {
         return DEFEND_RADIUS;
@@ -86,6 +91,19 @@ public class EnemySoldierEntity extends SoldierEntity {
         if (other == this) return false;
         if (other instanceof EnemySoldierEntity) return true;
         return false;
+    }
+
+    @Override
+    public ItemStack getPickedResult(HitResult target) {
+        getSoldierInventory().syncFromEntity(this);
+        
+        com.stevesarmy.item.EnemySoldierSpawnEggItem egg = 
+            (com.stevesarmy.item.EnemySoldierSpawnEggItem) com.stevesarmy.registry.ModItems.ENEMY_SOLDIER_SPAWN_EGG.get();
+        ItemStack stack = new ItemStack(egg);
+        CompoundTag tag = new CompoundTag();
+        this.addAdditionalSaveData(tag);
+        stack.getOrCreateTag().put("EntityTag", tag);
+        return stack;
     }
 
     @Override

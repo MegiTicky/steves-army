@@ -273,6 +273,8 @@ public class CoverQualityEvaluator {
         if (!ground.isSolid()) return false;
         BlockState standing = level.getBlockState(pos);
         BlockState head = level.getBlockState(pos.above());
+        if (!standing.getFluidState().isEmpty()) return false;
+        if (!head.getFluidState().isEmpty()) return false;
         return (standing.isAir() || standing.getCollisionShape(level, pos).isEmpty()) &&
                (head.isAir() || head.getCollisionShape(level, pos.above()).isEmpty());
     }

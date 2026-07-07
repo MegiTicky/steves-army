@@ -20,13 +20,13 @@ import javax.annotation.Nullable;
 
 public class SoldierInventoryMenu extends AbstractContainerMenu {
     private static final ResourceLocation[] TEXTURE_EMPTY_ARMOR_SLOTS = new ResourceLocation[]{
-        InventoryMenu.EMPTY_ARMOR_SLOT_BOOTS,
-        InventoryMenu.EMPTY_ARMOR_SLOT_LEGGINGS,
+        InventoryMenu.EMPTY_ARMOR_SLOT_HELMET,
         InventoryMenu.EMPTY_ARMOR_SLOT_CHESTPLATE,
-        InventoryMenu.EMPTY_ARMOR_SLOT_HELMET
+        InventoryMenu.EMPTY_ARMOR_SLOT_LEGGINGS,
+        InventoryMenu.EMPTY_ARMOR_SLOT_BOOTS
     };
     private static final EquipmentSlot[] ARMOR_SLOTS = new EquipmentSlot[]{
-        EquipmentSlot.FEET, EquipmentSlot.LEGS, EquipmentSlot.CHEST, EquipmentSlot.HEAD
+        EquipmentSlot.HEAD, EquipmentSlot.CHEST, EquipmentSlot.LEGS, EquipmentSlot.FEET
     };
 
     private final Container soldierInventory;

@@ -221,8 +221,11 @@ public class CoverTacticalGoal extends Goal {
     public void stop() {
         CoverBehaviorManager.CoverState state = getCoverManager().getState();
         
-        if (state == CoverBehaviorManager.CoverState.SEEKING_COVER ||
-            state == CoverBehaviorManager.CoverState.REPOSITIONING) {
+        if (state == CoverBehaviorManager.CoverState.IN_COVER ||
+            state == CoverBehaviorManager.CoverState.SUPPRESSED_IN_COVER) {
+            getCoverManager().clearCover();
+        } else if (state == CoverBehaviorManager.CoverState.SEEKING_COVER ||
+                   state == CoverBehaviorManager.CoverState.REPOSITIONING) {
             getCoverManager().clearTargetCover();
         }
         

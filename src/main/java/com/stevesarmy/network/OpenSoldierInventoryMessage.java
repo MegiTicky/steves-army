@@ -35,9 +35,8 @@ public class OpenSoldierInventoryMessage {
 
             Entity entity = player.level().getEntity(msg.soldierId);
             if (entity instanceof SoldierEntity soldier && soldier.isOwnedBy(player)) {
-                NetworkHooks.openScreen(player, 
-                    new SoldierInventoryMenuProvider(soldier),
-                    buf -> buf.writeInt(msg.soldierId));
+                SoldierInventoryMenuProvider provider = new SoldierInventoryMenuProvider(soldier);
+                NetworkHooks.openScreen(player, provider, provider::writeExtraData);
             }
         });
         ctx.get().setPacketHandled(true);

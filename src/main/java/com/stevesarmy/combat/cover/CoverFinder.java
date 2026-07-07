@@ -608,6 +608,9 @@ return weightedScore;
         BlockState standingState = level.getBlockState(pos);
         BlockState headState = level.getBlockState(pos.above());
         
+        if (!standingState.getFluidState().isEmpty()) return false;
+        if (!headState.getFluidState().isEmpty()) return false;
+        
         return (standingState.isAir() || standingState.getCollisionShape(level, pos).isEmpty()) &&
                (headState.isAir() || headState.getCollisionShape(level, pos.above()).isEmpty());
     }
@@ -807,7 +810,15 @@ return qualityScore + shootBonus - distancePenalty;
         BlockState standingState = level.getBlockState(pos);
         BlockState headState = level.getBlockState(pos.above());
         
+        if (!standingState.getFluidState().isEmpty()) {
+            return false;
+        }
+        
         if (!standingState.isAir() && !standingState.getCollisionShape(level, pos).isEmpty()) {
+            return false;
+        }
+        
+        if (!headState.getFluidState().isEmpty()) {
             return false;
         }
         
