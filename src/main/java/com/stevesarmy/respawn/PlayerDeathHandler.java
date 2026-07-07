@@ -24,6 +24,14 @@ public class PlayerDeathHandler {
     
     @SubscribeEvent(priority = EventPriority.HIGHEST)
     public static void onPlayerDeath(LivingDeathEvent event) {
+        if (event.getEntity() instanceof SoldierEntity soldier && !soldier.level().isClientSide()) {
+            if (soldier.level() instanceof ServerLevel serverLevel) {
+                SquadManager.get(serverLevel).removeMemberFromSquad(soldier.getUUID());
+                StevesArmyMod.LOGGER.info("[Respawn] Soldier {} removed from squad on death", soldier.getUUID().toString().substring(0, 8));
+            }
+            return;
+        }
+        
         if (!(event.getEntity() instanceof ServerPlayer player)) {
             return;
         }

@@ -1,12 +1,12 @@
 package com.stevesarmy.respawn;
 
 import com.stevesarmy.StevesArmyMod;
+import com.stevesarmy.combat.GunIntegration;
 import com.stevesarmy.combat.cover.CoverReservationManager;
 import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.inventory.SoldierInventory;
 import com.stevesarmy.squad.SquadData;
 import com.stevesarmy.squad.SquadManager;
-import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.EquipmentSlot;
@@ -56,12 +56,15 @@ public class SoldierRespawnManager {
     private static void transferEquipment(ServerPlayer player, SoldierEntity soldier, SoldierInventory soldierInventory) {
         player.getInventory().clearContent();
         
+        boolean foundMainHand = false;
+        
         for (int i = 0; i < soldierInventory.getContainerSize(); i++) {
             ItemStack stack = soldierInventory.getItem(i).copy();
             if (stack.isEmpty()) continue;
             
             if (i == SoldierInventory.SLOT_MAIN_HAND) {
                 player.getInventory().items.set(player.getInventory().selected, stack);
+                foundMainHand = true;
             } else if (i >= SoldierInventory.ARMOR_FEET && i <= SoldierInventory.ARMOR_HEAD) {
                 int armorIndex = i;
                 EquipmentSlot slot = getArmorSlot(armorIndex);
@@ -71,6 +74,26 @@ public class SoldierRespawnManager {
                     player.drop(stack, false);
                 }
             }
+        }
+        
+        if (!foundMainHand) {
+            ItemStack mainHand = soldier.getMainHandItem().copy();
+            if (!mainHand.isEmpty()) {
+                StevesArmyMod.LOGGER.info("[Respawn] Main hand not in SoldierInventory, falling back to entity equipment: {}", mainHand.getItem());
+                player.getInventory().items.set(player.getInventory().selected, mainHand);
+            }
+        }
+        
+        ItemStack offHand = soldier.getOffhandItem().copy();
+        if (!offHand.isEmpty()) {
+            player.getInventory().offhand.set(0, offHand);
+        }
+        
+        ItemStack transferredGun = player.getMainHandItem();
+        if (GunIntegration.isTaczLoaded() && !transferredGun.isEmpty() && GunIntegration.hasGun(player)) {
+            StevesArmyMod.LOGGER.info("[Respawn] Initializing TaCZ state for player's transferred gun");
+            GunIntegration.initialData(player);
+            GunIntegration.draw(player);
         }
         
         soldierInventory.clearContent();

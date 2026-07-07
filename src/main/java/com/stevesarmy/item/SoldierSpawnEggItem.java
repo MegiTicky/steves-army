@@ -125,18 +125,12 @@ public class SoldierSpawnEggItem extends ForgeSpawnEggItem {
                 squad = squadManager.createSquad(player.getUUID());
             }
             
-            if (!squad.isFull() && squad.getMemberCount() < SquadData.MAX_MEMBERS) {
-                soldier.setSquadId(squad.getSquadId());
-                squadManager.addMemberToSquad(squad.getSquadId(), soldier.getUUID());
-                
-                player.sendSystemMessage(Component.literal(
-                    "Soldier added to squad (" + squad.getMemberCount() + "/" + SquadData.MAX_MEMBERS + ")"
-                ));
-            } else {
-                player.sendSystemMessage(Component.literal(
-                    "Squad is full - soldier spawned but not in squad"
-                ));
-            }
+            soldier.setSquadId(squad.getSquadId());
+            squadManager.addMemberToSquad(squad.getSquadId(), soldier.getUUID());
+            
+            player.sendSystemMessage(Component.literal(
+                "Soldier added to squad (" + squad.getMemberCount() + " total)"
+            ));
         }
         
         return InteractionResult.SUCCESS;

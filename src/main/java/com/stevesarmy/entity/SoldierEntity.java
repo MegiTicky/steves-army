@@ -529,8 +529,11 @@ public class SoldierEntity extends PathfinderMob implements Container {
     public void remove(RemovalReason reason) {
         super.remove(reason);
         
-        if (!this.level().isClientSide && coverBehaviorManager != null) {
+        if (!this.level().isClientSide) {
             com.stevesarmy.combat.cover.CoverReservationManager.releaseAll(this);
+            if (this.level() instanceof ServerLevel serverLevel) {
+                com.stevesarmy.squad.SquadManager.get(serverLevel).removeMemberFromSquad(this.getUUID());
+            }
         }
     }
     

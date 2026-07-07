@@ -36,20 +36,6 @@ public class RecruitItem extends Item {
         SquadData squad = squadManager.getSquadByLeader(player.getUUID())
             .orElseGet(() -> squadManager.createSquad(player.getUUID()));
         
-        if (squad.isFull()) {
-            player.sendSystemMessage(net.minecraft.network.chat.Component.literal(
-                "Squad is full (max " + SquadData.MAX_MEMBERS + " soldiers)"
-            ));
-            return InteractionResult.FAIL;
-        }
-        
-        if (squad.getMemberCount() >= SquadData.MAX_MEMBERS) {
-            player.sendSystemMessage(net.minecraft.network.chat.Component.literal(
-                "Maximum soldiers reached (" + SquadData.MAX_MEMBERS + ")"
-            ));
-            return InteractionResult.FAIL;
-        }
-        
         SoldierEntity soldier = ModEntities.SOLDIER.get().create(serverLevel);
         if (soldier == null) {
             return InteractionResult.FAIL;
@@ -66,7 +52,7 @@ public class RecruitItem extends Item {
         context.getItemInHand().shrink(1);
         
         player.sendSystemMessage(net.minecraft.network.chat.Component.literal(
-            "Recruited soldier (" + squad.getMemberCount() + "/" + SquadData.MAX_MEMBERS + ")"
+            "Recruited soldier (" + squad.getMemberCount() + " total)"
         ));
         
         return InteractionResult.SUCCESS;

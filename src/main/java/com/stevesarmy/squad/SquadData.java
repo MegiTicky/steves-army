@@ -35,7 +35,7 @@ public class SquadData {
     }
 
     public boolean addMember(UUID memberId) {
-        if (memberIds.size() < MAX_MEMBERS && !memberIds.contains(memberId)) {
+        if (!memberIds.contains(memberId)) {
             memberIds.add(memberId);
             return true;
         }
@@ -51,7 +51,7 @@ public class SquadData {
     }
 
     public boolean isFull() {
-        return memberIds.size() >= MAX_MEMBERS;
+        return false;
     }
 
     public SquadMode getMode() {
@@ -107,5 +107,5 @@ public class SquadData {
         return data;
     }
 
-    public static final int MAX_MEMBERS = 8;
+    public static final int MAX_MEMBERS_LEGACY = 8;
 }
