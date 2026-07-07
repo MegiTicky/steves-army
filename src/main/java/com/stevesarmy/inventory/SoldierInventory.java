@@ -17,15 +17,15 @@ import java.util.function.Consumer;
 
 public class SoldierInventory implements Container {
     public static final int INVENTORY_SIZE = 15;
-    public static final int ARMOR_FEET = 0;
-    public static final int ARMOR_LEGS = 1;
-    public static final int ARMOR_CHEST = 2;
-    public static final int ARMOR_HEAD = 3;
+    public static final int ARMOR_HEAD = 0;
+    public static final int ARMOR_CHEST = 1;
+    public static final int ARMOR_LEGS = 2;
+    public static final int ARMOR_FEET = 3;
     public static final int SLOT_MAIN_HAND = 5;
     public static final int SLOT_GENERAL_START = 6;
 
     private static final EquipmentSlot[] ARMOR_SLOTS = {
-        EquipmentSlot.FEET, EquipmentSlot.LEGS, EquipmentSlot.CHEST, EquipmentSlot.HEAD
+        EquipmentSlot.HEAD, EquipmentSlot.CHEST, EquipmentSlot.LEGS, EquipmentSlot.FEET
     };
 
     private final NonNullList<ItemStack> items;

@@ -2,8 +2,11 @@ package com.stevesarmy.inventory;
 
 import com.mojang.datafixers.util.Pair;
 import com.stevesarmy.entity.SoldierEntity;
+import com.stevesarmy.network.NetworkHandler;
+import com.stevesarmy.network.SyncSoldierInventoryPacket;
 import com.stevesarmy.registry.ModMenuTypes;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.Container;
 import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.player.Inventory;
@@ -146,6 +149,19 @@ public class SoldierInventoryMenu extends AbstractContainerMenu {
     @Override
     public boolean stillValid(Player player) {
         return this.soldierInventory.stillValid(player);
+    }
+
+    @Override
+    public void removed(Player player) {
+        super.removed(player);
+        
+        if (!player.level().isClientSide && soldier != null && player instanceof ServerPlayer serverPlayer) {
+            SyncSoldierInventoryPacket packet = new SyncSoldierInventoryPacket(
+                soldier.getId(),
+                soldier.getSoldierInventory().save()
+            );
+            NetworkHandler.sendTo(serverPlayer, packet);
+        }
     }
 
     public int getSoldierId() {

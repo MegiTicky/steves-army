@@ -34,7 +34,7 @@ import net.minecraft.world.Container;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.*;
-import net.minecraft.world.entity.ai.attributes.AttributeSupplier;
+import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.ai.goal.*;
 import net.minecraft.world.entity.ai.goal.target.HurtByTargetGoal;
@@ -137,6 +137,8 @@ public class SoldierEntity extends PathfinderMob implements Container {
     private BlockPos forcedTargetPos = null;
     private long forcedTargetTimestamp = 0;
     private static final long FORCED_TARGET_MEMORY_MS = 10000;
+    
+    private boolean inventorySyncingFromEntity = false;
 
     public SoldierEntity(EntityType<? extends SoldierEntity> type, Level level) {
         super(type, level);
@@ -150,6 +152,7 @@ public class SoldierEntity extends PathfinderMob implements Container {
         this.threatAwareness = new ThreatAwareness();
         this.inventory.setMainHandChangedCallback(stack -> {
             if (!this.level().isClientSide) {
+                if (inventorySyncingFromEntity) return;
                 if (GunIntegration.isTaczLoaded() && GunIntegration.isReloading(this)) {
                     StevesArmyMod.LOGGER.info("[Soldier] Blocked gun swap during reload (callback)");
                     return;
@@ -450,6 +453,60 @@ public class SoldierEntity extends PathfinderMob implements Container {
         return true;
     }
 
+    @Override
+    public boolean canHoldItem(ItemStack stack) {
+        return true;
+    }
+
+    @Override
+    protected void pickUpItem(ItemEntity itemEntity) {
+        ItemStack stack = itemEntity.getItem();
+        int count = stack.getCount();
+        
+        // Try to put in an existing partial stack in bag slots first
+        for (int i = SoldierInventory.SLOT_GENERAL_START; i < inventory.getContainerSize(); i++) {
+            ItemStack existing = inventory.getItem(i);
+            if (!existing.isEmpty() && ItemStack.isSameItemSameTags(existing, stack)) {
+                int space = Math.min(existing.getMaxStackSize(), 64) - existing.getCount();
+                if (space > 0) {
+                    int toAdd = Math.min(count, space);
+                    existing.grow(toAdd);
+                    inventory.setChanged();
+                    count -= toAdd;
+                    if (count <= 0) {
+                        itemEntity.discard();
+                        return;
+                    }
+                }
+            }
+        }
+        
+        // Try bag slots for empty slots
+        for (int i = SoldierInventory.SLOT_GENERAL_START; i < inventory.getContainerSize(); i++) {
+            if (inventory.getItem(i).isEmpty()) {
+                ItemStack toInsert = stack.split(count);
+                inventory.setItem(i, toInsert);
+                inventory.setChanged();
+                itemEntity.discard();
+                return;
+            }
+        }
+        
+        // Try main hand
+        ItemStack mainHand = inventory.getItem(SoldierInventory.SLOT_MAIN_HAND);
+        if (mainHand.isEmpty()) {
+            ItemStack toInsert = stack.split(count);
+            inventory.setItem(SoldierInventory.SLOT_MAIN_HAND, toInsert);
+            inventory.setChanged();
+            itemEntity.discard();
+            return;
+        }
+        
+        // Fall back to vanilla behavior (let super handle it)
+        // This will call setItemSlot which our override syncs to inventory
+        super.pickUpItem(itemEntity);
+    }
+
     public SoldierInventory getSoldierInventory() {
         return inventory;
     }
@@ -504,6 +561,28 @@ public class SoldierEntity extends PathfinderMob implements Container {
     public void clearContent() {
         inventory.clearContent();
         setItemSlot(EquipmentSlot.MAINHAND, ItemStack.EMPTY);
+    }
+
+    @Override
+    public void setItemSlot(EquipmentSlot slot, ItemStack stack) {
+        super.setItemSlot(slot, stack);
+        inventorySyncingFromEntity = true;
+        try {
+            if (slot == EquipmentSlot.MAINHAND) {
+                inventory.setItem(SoldierInventory.SLOT_MAIN_HAND, stack.copy());
+            } else if (slot.getType() == EquipmentSlot.Type.ARMOR) {
+                int invSlot;
+                switch (slot) {
+                    case HEAD -> invSlot = SoldierInventory.ARMOR_HEAD;
+                    case CHEST -> invSlot = SoldierInventory.ARMOR_CHEST;
+                    case LEGS -> invSlot = SoldierInventory.ARMOR_LEGS;
+                    default -> invSlot = SoldierInventory.ARMOR_FEET;
+                }
+                inventory.setItem(invSlot, stack.copy());
+            }
+        } finally {
+            inventorySyncingFromEntity = false;
+        }
     }
 
     @Override

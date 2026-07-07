@@ -7,6 +7,7 @@ import com.stevesarmy.combat.GunIntegration;
 import com.stevesarmy.network.NetworkHandler;
 import com.stevesarmy.registry.ModEntities;
 import com.stevesarmy.registry.ModItems;
+import com.stevesarmy.registry.ModCreativeTab;
 import com.stevesarmy.registry.ModMenuTypes;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.event.RegisterCommandsEvent;
@@ -30,6 +31,7 @@ public class StevesArmyMod {
 
         ModEntities.register(modEventBus);
         ModItems.register(modEventBus);
+        ModCreativeTab.register(modEventBus);
         ModMenuTypes.register(modEventBus);
 
         ModLoadingContext.get().registerConfig(ModConfig.Type.SERVER, StevesArmyConfig.SPEC);

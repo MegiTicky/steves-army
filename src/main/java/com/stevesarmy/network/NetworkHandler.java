@@ -47,6 +47,10 @@ public class NetworkHandler {
             FormationMessage::encode,
             FormationMessage::new,
             FormationMessage::handle);
+        INSTANCE.registerMessage(id++, SyncSoldierInventoryPacket.class,
+            SyncSoldierInventoryPacket::encode,
+            SyncSoldierInventoryPacket::decode,
+            SyncSoldierInventoryPacket::handle);
     }
 
     public static void sendTo(ServerPlayer player, Object message) {
