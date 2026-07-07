@@ -7,6 +7,7 @@ import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 
@@ -78,6 +79,47 @@ public class TargetAcquisition {
         
         HitResult result = observer.level().clip(context);
         return result.getType() == HitResult.Type.MISS;
+    }
+    
+    public static boolean hasLineOfSightToPosition(LivingEntity observer, Vec3 targetPos) {
+        Vec3 observerEye = observer.getEyePosition();
+        
+        ClipContext context = new ClipContext(
+            observerEye,
+            targetPos,
+            ClipContext.Block.COLLIDER,
+            ClipContext.Fluid.NONE,
+            observer
+        );
+        
+        HitResult result = observer.level().clip(context);
+        return result.getType() == HitResult.Type.MISS;
+    }
+    
+    public static boolean hasNearLineOfSightToPosition(LivingEntity observer, Vec3 targetPos, double distanceThreshold) {
+        Vec3 observerEye = observer.getEyePosition();
+        
+        ClipContext context = new ClipContext(
+            observerEye,
+            targetPos,
+            ClipContext.Block.COLLIDER,
+            ClipContext.Fluid.NONE,
+            observer
+        );
+        
+        HitResult result = observer.level().clip(context);
+        
+        if (result.getType() == HitResult.Type.MISS) {
+            return true;
+        }
+        
+        if (result.getType() == HitResult.Type.BLOCK) {
+            Vec3 hitLocation = result.getLocation();
+            double dist = hitLocation.distanceTo(targetPos);
+            return dist <= distanceThreshold;
+        }
+        
+        return false;
     }
     
     public static boolean isValidTarget(LivingEntity observer, LivingEntity target) {
