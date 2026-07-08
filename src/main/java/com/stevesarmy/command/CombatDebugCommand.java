@@ -16,6 +16,7 @@ import com.stevesarmy.combat.cover.CoverFinder;
 import com.stevesarmy.combat.cover.CoverPoint;
 import com.stevesarmy.combat.cover.CoverQualityEvaluator;
 import com.stevesarmy.combat.cover.CoverReservationManager;
+import com.stevesarmy.combat.cover.FormationDebugManager;
 import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.entity.TargetEntity;
 import com.stevesarmy.entity.ai.CoverPositionController;
@@ -88,6 +89,8 @@ public class CombatDebugCommand {
                     .executes(CombatDebugCommand::showUntargeted)
                     .then(Commands.argument("count", IntegerArgumentType.integer(0, 10))
                         .executes(CombatDebugCommand::setUntargeted)))
+                .then(Commands.literal("formation")
+                    .executes(CombatDebugCommand::toggleFormationVisualization))
                 .then(Commands.literal("status")
                     .executes(CombatDebugCommand::renderStatus))
             )
@@ -180,6 +183,7 @@ public class CombatDebugCommand {
             "  render coverpoints  - Toggle cover point visualization\n" +
             "  render mode [off|minimal|verbose] - Combat detection overlay\n" +
             "  render untargeted [count] - Show/set max untargeted targets\n" +
+            "  render formation    - Toggle formation target visualization\n" +
             "  render status       - Show current render settings\n" +
             "  info state          - Show cover state + movement for nearby soldiers\n" +
             "  info threats        - Show threat direction analysis\n" +
@@ -208,6 +212,7 @@ public class CombatDebugCommand {
         CoverDebugManager.setShowPeekCandidates(true);
         CoverDebugManager.setVisualizationEnabled(true);
         CoverTacticalGoal.setDebugLogging(true);
+        FormationDebugManager.setVisualizationEnabled(true);
 
         context.getSource().sendSuccess(() -> Component.literal(
             "=== Steve's Army Debug: ALL ON ===\n" +
@@ -215,6 +220,7 @@ public class CombatDebugCommand {
             "  Soldier cover visualization: ON\n" +
             "  Peek candidate visualization: ON\n" +
             "  Cover behavior logging: ON\n" +
+            "  Formation visualization: ON\n" +
             "Use /stevesarmy_debug render mode minimal for compact display\n" +
             "Use /stevesarmy_debug log cover off to disable console logs"
         ), true);
@@ -229,6 +235,7 @@ public class CombatDebugCommand {
         CoverTacticalGoal.setDebugLogging(false);
         CoverDebugManager.setShowRays(false);
         CoverDebugManager.setShowSolidBlocks(false);
+        FormationDebugManager.setVisualizationEnabled(false);
 
         context.getSource().sendSuccess(() -> Component.literal(
             "=== Steve's Army Debug: ALL OFF ===\n" +
@@ -236,9 +243,9 @@ public class CombatDebugCommand {
             "  Soldier cover visualization: OFF\n" +
             "  Peek candidate visualization: OFF\n" +
             "  Cover point visualization: OFF\n" +
-            "  Raycast visualization: OFF\n" +
+"  Raycast visualization: OFF\n" +
             "  Solid block visualization: OFF\n" +
-            "  Cover behavior logging: OFF"
+            "  Formation visualization: OFF"
         ), true);
         return 1;
     }
@@ -306,6 +313,15 @@ public class CombatDebugCommand {
         CoverDebugManager.setVisualizationEnabled(enabled);
         context.getSource().sendSuccess(() -> Component.literal(
             "Cover point visualization: " + (enabled ? "ON" : "OFF")
+        ), true);
+        return 1;
+    }
+
+    private static int toggleFormationVisualization(CommandContext<CommandSourceStack> context) {
+        boolean enabled = !FormationDebugManager.isVisualizationEnabled();
+        FormationDebugManager.setVisualizationEnabled(enabled);
+        context.getSource().sendSuccess(() -> Component.literal(
+            "Formation visualization: " + (enabled ? "ON" : "OFF")
         ), true);
         return 1;
     }
@@ -1009,6 +1025,7 @@ public class CombatDebugCommand {
             "  Cover points: " + (CoverDebugManager.isVisualizationEnabled() ? "ON" : "OFF") + "\n" +
             "  Rays: " + (CoverDebugManager.isShowRays() ? "ON" : "OFF") + "\n" +
             "  Solid blocks: " + (CoverDebugManager.isShowSolidBlocks() ? "ON" : "OFF") + "\n" +
+            "  Formation viz: " + (FormationDebugManager.isVisualizationEnabled() ? "ON" : "OFF") + "\n" +
             "  Untargeted: " + CombatDebugRenderer.getMaxUntargeted()
         ), false);
         return 1;

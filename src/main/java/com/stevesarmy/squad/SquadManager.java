@@ -115,6 +115,11 @@ public class SquadManager extends SavedData {
         return squad != null ? squad.getMemberCount() + 1 : 0;
     }
 
+    public int getMemberCount(UUID squadId) {
+        SquadData squad = squadsById.get(squadId);
+        return squad != null ? squad.getMemberCount() : 0;
+    }
+
     public List<LivingEntity> getSquadMembers(ServerLevel level, UUID squadId, UUID excludeSelf) {
         SquadData squad = squadsById.get(squadId);
         if (squad == null) return List.of();

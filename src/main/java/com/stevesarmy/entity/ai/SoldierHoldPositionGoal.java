@@ -10,10 +10,14 @@ import com.stevesarmy.squad.SquadMode;
 import com.stevesarmy.util.FormationPositionCalculator;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.ai.goal.Goal;
 import net.minecraft.world.phys.Vec3;
 
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.EnumSet;
+import java.util.List;
 import java.util.UUID;
 
 public class SoldierHoldPositionGoal extends Goal {
@@ -150,8 +154,17 @@ public class SoldierHoldPositionGoal extends Goal {
         }
 
         SquadManager mgr = SquadManager.get(serverLevel);
-        int squadSize = mgr.getSquadSize(squadId);
-        int memberIndex = mgr.getMemberIndex(squadId, soldier.getUUID());
+        List<LivingEntity> members = mgr.getSquadMembers(serverLevel, squadId, null);
+        List<SoldierEntity> aliveSoldiers = new ArrayList<>();
+        for (LivingEntity member : members) {
+            if (member instanceof SoldierEntity s && s.isAlive()) {
+                aliveSoldiers.add(s);
+            }
+        }
+        aliveSoldiers.sort(Comparator.comparing(e -> e.getUUID()));
+
+        int squadSize = aliveSoldiers.size();
+        int memberIndex = aliveSoldiers.indexOf(soldier);
 
         Vec3 fwd = soldier.getFormationForwardDirection(holdPos);
         BlockPos offset = FormationPositionCalculator.getFormationOffset(fwd, formation, memberIndex, squadSize);

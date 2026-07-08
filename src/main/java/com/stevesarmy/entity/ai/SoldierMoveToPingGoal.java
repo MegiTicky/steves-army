@@ -1,16 +1,21 @@
 package com.stevesarmy.entity.ai;
 
 import com.stevesarmy.StevesArmyMod;
+import com.stevesarmy.combat.cover.FormationDebugManager;
 import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.squad.SquadFormation;
 import com.stevesarmy.squad.SquadManager;
 import com.stevesarmy.util.FormationPositionCalculator;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.ai.goal.Goal;
 import net.minecraft.world.phys.Vec3;
 
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.EnumSet;
+import java.util.List;
 import java.util.UUID;
 
 public class SoldierMoveToPingGoal extends Goal {
@@ -49,13 +54,10 @@ public class SoldierMoveToPingGoal extends Goal {
     @Override
     public void start() {
         timeToRecalcPath = 0;
-        BlockPos target = getFormationTarget();
+        BlockPos target = getNavigationTarget();
         if (target != null) {
             boolean ok = soldier.getNavigation().moveTo(target.getX(), target.getY(), target.getZ(), speedModifier);
-            com.stevesarmy.StevesArmyMod.LOGGER.info("[PingGoal] start: nav.moveTo formation {} result={}", target, ok);
-        } else {
-            boolean ok = soldier.getNavigation().moveTo(targetPos.getX(), targetPos.getY(), targetPos.getZ(), speedModifier);
-            com.stevesarmy.StevesArmyMod.LOGGER.info("[PingGoal] start: nav.moveTo result={}", ok);
+            com.stevesarmy.StevesArmyMod.LOGGER.info("[PingGoal] start: nav.moveTo target={} result={}", target, ok);
         }
     }
 
@@ -65,6 +67,7 @@ public class SoldierMoveToPingGoal extends Goal {
         
         soldier.clearPingMoveTarget();
         targetPos = null;
+        FormationDebugManager.setSoldierData(soldier.getId(), null);
     }
 
     @Override
@@ -81,11 +84,9 @@ public class SoldierMoveToPingGoal extends Goal {
             
             double distance = soldier.distanceToSqr(targetPos.getX(), targetPos.getY(), targetPos.getZ());
             if (distance > closeDistance * closeDistance) {
-                BlockPos target = getFormationTarget();
+                BlockPos target = getNavigationTarget();
                 if (target != null) {
                     soldier.getNavigation().moveTo(target.getX(), target.getY(), target.getZ(), speedModifier);
-                } else {
-                    soldier.getNavigation().moveTo(targetPos.getX(), targetPos.getY(), targetPos.getZ(), speedModifier);
                 }
                 
                 if (soldier.horizontalCollision || soldier.minorHorizontalCollision) {
@@ -98,29 +99,65 @@ public class SoldierMoveToPingGoal extends Goal {
         }
     }
 
-    private BlockPos getFormationTarget() {
+    private BlockPos getNavigationTarget() {
         SquadFormation formation = soldier.getSquadFormation();
         if (formation == SquadFormation.NONE || formation == SquadFormation.CQB || targetPos == null) {
-            return null;
+            FormationDebugManager.setSoldierData(soldier.getId(), null);
+            return targetPos;
         }
 
         UUID squadId = soldier.getSquadId();
         if (squadId == null || !(soldier.level() instanceof ServerLevel serverLevel)) {
-            return null;
+            FormationDebugManager.setSoldierData(soldier.getId(), null);
+            return targetPos;
         }
 
         SquadManager mgr = SquadManager.get(serverLevel);
-        int squadSize = mgr.getSquadSize(squadId);
-        int memberIndex = mgr.getMemberIndex(squadId, soldier.getUUID());
+
+        List<LivingEntity> members = mgr.getSquadMembers(serverLevel, squadId, null);
+        List<SoldierEntity> aliveSoldiers = new ArrayList<>();
+        for (LivingEntity member : members) {
+            if (member instanceof SoldierEntity s && s.isAlive()) {
+                aliveSoldiers.add(s);
+            }
+        }
+        aliveSoldiers.sort(Comparator.comparing(e -> e.getUUID()));
+
+        int squadSize = aliveSoldiers.size();
+        int memberIndex = aliveSoldiers.indexOf(soldier);
+
+        SoldierEntity soldierLeader = aliveSoldiers.isEmpty() ? null : aliveSoldiers.get(0);
 
         Vec3 fwd = soldier.getFormationForwardDirection(targetPos);
         BlockPos offset = FormationPositionCalculator.getFormationOffset(fwd, formation, memberIndex, squadSize);
-        BlockPos target = targetPos.offset(offset);
 
-        StevesArmyMod.LOGGER.info("[FormationTarget] MoveToPing soldier={} idx={}/{} formation={} fwd=({},{},{}) anchor={} offset={} target={}",
-            soldier.getId(), memberIndex, squadSize, formation,
+        BlockPos anchor;
+        boolean hasLeader;
+        int leaderId;
+        if (soldierLeader != null && soldierLeader != soldier) {
+            anchor = soldierLeader.blockPosition();
+            hasLeader = true;
+            leaderId = soldierLeader.getId();
+        } else {
+            anchor = targetPos;
+            hasLeader = false;
+            leaderId = -1;
+        }
+
+        BlockPos target;
+        if (hasLeader) {
+            target = anchor.offset(offset);
+        } else {
+            target = targetPos;
+        }
+
+        StevesArmyMod.LOGGER.info("[FormationTarget] MoveToPing soldier={} idx={}/{} fwd=({},{},{}) anchor={} offset={} target={}",
+            soldier.getId(), memberIndex, squadSize,
             String.format("%.2f", fwd.x), String.format("%.2f", fwd.y), String.format("%.2f", fwd.z),
-            targetPos, offset, target);
+            anchor, offset, target);
+
+        FormationDebugManager.setSoldierData(soldier.getId(), new FormationDebugManager.FormationSoldierData(
+            target, fwd, anchor, offset, memberIndex, squadSize, formation.name(), hasLeader, leaderId));
 
         return target;
     }

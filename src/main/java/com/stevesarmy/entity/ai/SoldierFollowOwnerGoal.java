@@ -19,7 +19,10 @@ import net.minecraft.world.level.pathfinder.BlockPathTypes;
 import net.minecraft.world.level.pathfinder.WalkNodeEvaluator;
 import net.minecraft.world.phys.Vec3;
 
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.EnumSet;
+import java.util.List;
 import java.util.UUID;
 
 public class SoldierFollowOwnerGoal extends Goal {
@@ -195,8 +198,17 @@ public class SoldierFollowOwnerGoal extends Goal {
         }
 
         SquadManager mgr = SquadManager.get(serverLevel);
-        int squadSize = mgr.getSquadSize(squadId);
-        int memberIndex = mgr.getMemberIndex(squadId, soldier.getUUID());
+        List<LivingEntity> members = mgr.getSquadMembers(serverLevel, squadId, null);
+        List<SoldierEntity> aliveSoldiers = new ArrayList<>();
+        for (LivingEntity member : members) {
+            if (member instanceof SoldierEntity s && s.isAlive()) {
+                aliveSoldiers.add(s);
+            }
+        }
+        aliveSoldiers.sort(Comparator.comparing(e -> e.getUUID()));
+
+        int squadSize = aliveSoldiers.size();
+        int memberIndex = aliveSoldiers.indexOf(soldier);
 
         Vec3 fwd = soldier.getFormationForwardDirection(anchor);
         BlockPos offset = FormationPositionCalculator.getFormationOffset(fwd, formation, memberIndex, squadSize);

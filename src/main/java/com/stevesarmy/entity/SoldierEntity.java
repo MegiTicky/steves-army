@@ -936,19 +936,34 @@ public class SoldierEntity extends PathfinderMob implements Container {
 
     /**
      * Returns the forward direction for formation positioning.
-     * Uses threat direction first, then falls back to owner's look direction.
+     * Uses the goal/movement direction first (squad-consistent via owner's position),
+     * then owner's look direction, then threat direction, then fallback.
      */
     public Vec3 getFormationForwardDirection(@Nullable BlockPos goalPos) {
-        Vec3 threatDir = threatAwareness.getPrimaryDirection(position());
-        if (threatDir != null && threatDir.lengthSqr() > 0.001) {
-            StevesArmyMod.LOGGER.info("[Formation] Soldier {} forward=THREAT dir=({}, {}, {})",
-                getId(), String.format("%.2f", threatDir.x), String.format("%.2f", threatDir.y), String.format("%.2f", threatDir.z));
-            return threatDir;
-        }
         if (goalPos != null) {
+            LivingEntity owner = getOwner();
+            if (owner != null) {
+                if (!goalPos.equals(owner.blockPosition())) {
+                    Vec3 fromOwner = Vec3.atCenterOf(goalPos).subtract(owner.position()).normalize();
+                    if (fromOwner.lengthSqr() > 0.001) {
+                        StevesArmyMod.LOGGER.info("[Formation] Soldier {} forward=OWNER_TO_GOAL owner=({},{},{}) goal=({},{},{}) dir=({}, {}, {})",
+                            getId(),
+                            owner.blockPosition().getX(), owner.blockPosition().getY(), owner.blockPosition().getZ(),
+                            goalPos.getX(), goalPos.getY(), goalPos.getZ(),
+                            String.format("%.2f", fromOwner.x), String.format("%.2f", fromOwner.y), String.format("%.2f", fromOwner.z));
+                        return fromOwner;
+                    }
+                }
+                Vec3 look = owner.getLookAngle();
+                if (look != null && look.lengthSqr() > 0.001) {
+                    StevesArmyMod.LOGGER.info("[Formation] Soldier {} forward=OWNER_LOOK dir=({}, {}, {})",
+                        getId(), String.format("%.2f", look.x), String.format("%.2f", look.y), String.format("%.2f", look.z));
+                    return look;
+                }
+            }
             Vec3 toGoal = Vec3.atCenterOf(goalPos).subtract(position()).normalize();
             if (toGoal.lengthSqr() > 0.001) {
-                StevesArmyMod.LOGGER.info("[Formation] Soldier {} forward=GOAL goal=({},{},{}) self=({},{},{}) dir=({}, {}, {})",
+                StevesArmyMod.LOGGER.info("[Formation] Soldier {} forward=SELF_TO_GOAL goal=({},{},{}) self=({},{},{}) dir=({}, {}, {})",
                     getId(),
                     goalPos.getX(), goalPos.getY(), goalPos.getZ(),
                     blockPosition().getX(), blockPosition().getY(), blockPosition().getZ(),
@@ -957,6 +972,14 @@ public class SoldierEntity extends PathfinderMob implements Container {
             }
         }
         LivingEntity owner = getOwner();
+        Vec3 threatDir = owner != null
+            ? threatAwareness.getPrimaryDirection(owner.position())
+            : threatAwareness.getPrimaryDirection(position());
+        if (threatDir != null && threatDir.lengthSqr() > 0.001) {
+            StevesArmyMod.LOGGER.info("[Formation] Soldier {} forward=THREAT dir=({}, {}, {})",
+                getId(), String.format("%.2f", threatDir.x), String.format("%.2f", threatDir.y), String.format("%.2f", threatDir.z));
+            return threatDir;
+        }
         if (owner != null) {
             Vec3 look = owner.getLookAngle();
             if (look != null && look.lengthSqr() > 0.001) {
