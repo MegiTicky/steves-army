@@ -1116,6 +1116,20 @@ Optional<CoverPoint> bestCover = finder.findBestCover(
                 return;
             }
             
+            if (currentCover != null) {
+                double distToSoldier = soldier.position().distanceTo(cover.getPosition().getCenter());
+                if (distToSoldier < COVER_REACHED_DISTANCE) {
+                    if (debugLoggingEnabled) {
+                        StevesArmyMod.LOGGER.info("[CoverGoal] Soldier {} selected cover {} too close ({:.2f}), blacklisting and falling back to seek",
+                            soldier.getId(), cover.getPosition(), distToSoldier);
+                    }
+                    blacklistCover(cover.getPosition(), BlacklistReason.STUCK_REPOSITIONING);
+                    getCoverManager().clearTargetCover();
+                    getCoverManager().setState(CoverBehaviorManager.CoverState.SEEKING_COVER);
+                    return;
+                }
+            }
+            
             getCoverManager().clearCoverQualityPenalty();
             
             if (CoverReservationManager.reserve(cover.getPosition(), soldier)) {
