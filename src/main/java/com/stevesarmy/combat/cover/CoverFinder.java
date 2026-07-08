@@ -197,8 +197,8 @@ public class CoverFinder {
             if (!includeReserved && !CoverReservationManager.isAvailable(coverPoint.getPosition())) {
                 continue;
             }
-            if (primaryThreat != null) {
-                evaluator.evaluateWithRaycast(coverPoint, primaryThreat);
+            if (threatDirection != null && threatDirection.lengthSqr() > 0.001) {
+                evaluator.evaluateWithCone(coverPoint, threatDirection);
             }
             float score = calculateThreatAwareScore(coverPoint, soldier, threatDirection, allThreats, primaryThreat);
             coverPoint.setQuality(score);
@@ -231,8 +231,8 @@ public class CoverFinder {
             if (!includeReserved && !CoverReservationManager.isAvailable(coverPoint.getPosition())) {
                 continue;
             }
-            if (primaryThreat != null) {
-                evaluator.evaluateWithRaycast(coverPoint, primaryThreat);
+            if (threatDirection != null && threatDirection.lengthSqr() > 0.001) {
+                evaluator.evaluateWithCone(coverPoint, threatDirection);
             }
             float score = calculateThreatAwareScore(coverPoint, soldier, threatDirection, allThreats, primaryThreat, squadCtx);
             coverPoint.setQuality(score);
@@ -757,7 +757,8 @@ return qualityScore + shootBonus - distancePenalty;
         
         if (threat != null) {
             CoverQualityEvaluator evaluator = new CoverQualityEvaluator(level);
-            coverPoint = evaluator.evaluateWithRaycast(coverPoint, threat);
+            Vec3 threatDir = threat.position().subtract(pos.getCenter());
+            coverPoint = evaluator.evaluateWithCone(coverPoint, threatDir);
         } else {
             float maxHeight = coverHeights.values().stream()
                 .max(Float::compare)
@@ -864,7 +865,9 @@ return qualityScore + shootBonus - distancePenalty;
         if (block instanceof net.minecraft.world.level.block.IronBarsBlock ||
             block instanceof net.minecraft.world.level.block.GlassBlock ||
             block instanceof net.minecraft.world.level.block.StainedGlassBlock ||
-            block instanceof net.minecraft.world.level.block.TintedGlassBlock) {
+            block instanceof net.minecraft.world.level.block.TintedGlassBlock ||
+            block instanceof net.minecraft.world.level.block.FenceBlock ||
+            block instanceof net.minecraft.world.level.block.FenceGateBlock) {
             return false;
         }
         
