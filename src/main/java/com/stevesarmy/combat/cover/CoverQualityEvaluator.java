@@ -1,25 +1,30 @@
 package com.stevesarmy.combat.cover;
 
 import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
-import net.minecraft.world.phys.shapes.VoxelShape;
 
 public class CoverQualityEvaluator {
-    private static final int CONE_RAYS_PER_HEIGHT = 3;
+    private static final int RAYS_PER_HEIGHT = 4;
     private static final int CONE_HEIGHTS = 2;
-    private static final double CONE_HALF_ANGLE_DEG = 15.0;
+    private static final double CONE_HALF_ANGLE_DEG = 10.0;
     private static final double CONE_MAX_DISTANCE = 3.0;
 
-    private static final double[] TEST_HEIGHTS = {0.4, 1.6};
+    private static final double WAIST_HEIGHT = 0.8;
+    private static final double EYE_HEIGHT = 1.6;
+    private static final double[] TEST_HEIGHTS = {WAIST_HEIGHT, EYE_HEIGHT};
 
-    private static final float FULL_THRESHOLD = 0.8f;
-    private static final float HALF_THRESHOLD = 0.4f;
+    private static final double HITBOX_OFFSET = 0.25;
+    private static final double[][] CORNER_OFFSETS = {
+        {-HITBOX_OFFSET, -HITBOX_OFFSET},
+        {-HITBOX_OFFSET, +HITBOX_OFFSET},
+        {+HITBOX_OFFSET, -HITBOX_OFFSET},
+        {+HITBOX_OFFSET, +HITBOX_OFFSET}
+    };
 
     private final Level level;
 
@@ -35,48 +40,62 @@ public class CoverQualityEvaluator {
         BlockPos pos = coverPoint.getPosition();
         Vec3 threatDir = threatDirection.normalize();
 
-        int totalRays = 0;
-        int blockedRays = 0;
+        boolean waistCovered = true;
+        boolean eyeCovered = true;
+        boolean anyBlocked = false;
+        boolean allEyeBlocked = true;
 
         StringBuilder debug = new StringBuilder();
         debug.append("Threat dir: ").append(String.format("%.2f,%.2f,%.2f", threatDir.x, threatDir.y, threatDir.z)).append("\n");
-        debug.append("Cone (±").append((int)CONE_HALF_ANGLE_DEG).append("°, ").append((int)CONE_MAX_DISTANCE).append("m):\n");
 
         for (int hi = 0; hi < CONE_HEIGHTS; hi++) {
             double height = TEST_HEIGHTS[hi];
-            Vec3 origin = new Vec3(pos.getX() + 0.5, pos.getY() + height, pos.getZ() + 0.5);
-
             debug.append("  H=").append(String.format("%.1f", height)).append(": ");
 
-            for (int ri = 0; ri < CONE_RAYS_PER_HEIGHT; ri++) {
-                double angleOffset = -CONE_HALF_ANGLE_DEG + (CONE_HALF_ANGLE_DEG * ri / (CONE_RAYS_PER_HEIGHT - 1));
+            int heightBlocked = 0;
+
+            for (int ri = 0; ri < RAYS_PER_HEIGHT; ri++) {
+                Vec3 origin = new Vec3(
+                    pos.getX() + 0.5 + CORNER_OFFSETS[ri][0],
+                    pos.getY() + height,
+                    pos.getZ() + 0.5 + CORNER_OFFSETS[ri][1]
+                );
+
+                double angleOffset = -CONE_HALF_ANGLE_DEG + (2.0 * CONE_HALF_ANGLE_DEG * ri / (RAYS_PER_HEIGHT - 1));
                 Vec3 rayDir = CoverFinder.rotateVectorY(threatDir, angleOffset);
                 double distance = raycastDistance(origin, rayDir, CONE_MAX_DISTANCE);
 
                 boolean blocked = distance < CONE_MAX_DISTANCE - 0.1;
-                if (blocked) blockedRays++;
-                totalRays++;
+                if (blocked) heightBlocked++;
+                if (blocked) anyBlocked = true;
 
                 debug.append(blocked ? "B" : "C");
             }
-            debug.append("\n");
+
+            boolean heightCovered = heightBlocked == RAYS_PER_HEIGHT;
+            if (hi == 0) {
+                waistCovered = heightCovered;
+            } else {
+                eyeCovered = heightCovered;
+                allEyeBlocked = heightBlocked == RAYS_PER_HEIGHT;
+            }
+
+            debug.append(" ").append(heightBlocked).append("/").append(RAYS_PER_HEIGHT).append(heightCovered ? " COVERED" : "").append("\n");
         }
 
-        float coverage = totalRays > 0 ? (float) blockedRays / totalRays : 0.0f;
-
-        CoverType type = determineTypeFromCoverage(coverage);
+        CoverType type = determineType(waistCovered, eyeCovered, anyBlocked);
         coverPoint.setType(type);
 
-        coverPoint.setCanShootFrom(type == CoverType.HALF || type == CoverType.CONCEALMENT);
+        coverPoint.setCanShootFrom(determineCanShoot(type, allEyeBlocked));
 
-        float quality = calculateQualityFromCoverage(coverage, type);
-        coverPoint.setQuality(quality);
+        coverPoint.setQuality(type.getBaseQuality());
 
-        float coverHeight = estimateCoverHeightFromCoverage(coverage, type);
+        float coverHeight = estimateCoverHeight(type);
         coverPoint.setCoverHeight(coverHeight);
 
-        coverPoint.setDebugInfo(String.format("Cone: %d/%d blocked (%.0f%%) | Type: %s | Shoot: %s\n%s",
-            blockedRays, totalRays, coverage * 100,
+        coverPoint.setDebugInfo(String.format("Waist: %s | Eye: %s | Type: %s | Shoot: %s\n%s",
+            waistCovered ? "COVERED" : "EXPOSED",
+            eyeCovered ? "COVERED" : "EXPOSED",
             type, coverPoint.canShootFrom() ? "YES" : "NO",
             debug.toString()));
 
@@ -134,22 +153,20 @@ public class CoverQualityEvaluator {
         return true;
     }
 
-    private CoverType determineTypeFromCoverage(float coverage) {
-        if (coverage >= FULL_THRESHOLD) {
-            return CoverType.FULL;
-        } else if (coverage >= HALF_THRESHOLD) {
-            return CoverType.HALF;
-        } else if (coverage > 0.0f) {
-            return CoverType.CONCEALMENT;
-        }
+    private CoverType determineType(boolean waistCovered, boolean eyeCovered, boolean anyBlocked) {
+        if (waistCovered && eyeCovered) return CoverType.FULL;
+        if (waistCovered) return CoverType.HALF;
+        if (anyBlocked) return CoverType.CONCEALMENT;
         return CoverType.NONE;
     }
 
-    private float calculateQualityFromCoverage(float coverage, CoverType type) {
-        return type.getBaseQuality();
+    private boolean determineCanShoot(CoverType type, boolean allEyeBlocked) {
+        if (type == CoverType.HALF) return true;
+        if (type == CoverType.FULL) return !allEyeBlocked;
+        return false;
     }
 
-    private float estimateCoverHeightFromCoverage(float coverage, CoverType type) {
+    private float estimateCoverHeight(CoverType type) {
         switch (type) {
             case FULL: return 2.0f;
             case HALF: return 1.0f;
@@ -163,46 +180,49 @@ public class CoverQualityEvaluator {
             return false;
         }
 
-        BlockPos coverPos = coverPoint.getPosition();
         Vec3 threatDir = threatDirection.normalize();
+        BlockPos pos = coverPoint.getPosition();
+        double height = WAIST_HEIGHT;
 
-        int totalRays = 0;
         int blockedRays = 0;
 
-        double height = TEST_HEIGHTS[0];
-        Vec3 origin = new Vec3(coverPos.getX() + 0.5, coverPos.getY() + height, coverPos.getZ() + 0.5);
+        for (int ri = 0; ri < RAYS_PER_HEIGHT; ri++) {
+            Vec3 origin = new Vec3(
+                pos.getX() + 0.5 + CORNER_OFFSETS[ri][0],
+                pos.getY() + height,
+                pos.getZ() + 0.5 + CORNER_OFFSETS[ri][1]
+            );
 
-        for (int ri = 0; ri < CONE_RAYS_PER_HEIGHT; ri++) {
-            double angleOffset = -CONE_HALF_ANGLE_DEG + (CONE_HALF_ANGLE_DEG * ri / (CONE_RAYS_PER_HEIGHT - 1));
+            double angleOffset = -CONE_HALF_ANGLE_DEG + (2.0 * CONE_HALF_ANGLE_DEG * ri / (RAYS_PER_HEIGHT - 1));
             Vec3 rayDir = CoverFinder.rotateVectorY(threatDir, angleOffset);
             double distance = raycastDistance(origin, rayDir, CONE_MAX_DISTANCE);
 
             if (distance < CONE_MAX_DISTANCE - 0.1) blockedRays++;
-            totalRays++;
         }
 
-        float coverage = totalRays > 0 ? (float) blockedRays / totalRays : 0.0f;
-        return coverage >= HALF_THRESHOLD;
+        return blockedRays >= 3;
     }
 
-    public float evaluateProtectionFromDirection(BlockPos coverPos, Vec3 threatDirection) {
+    public float evaluateProtectionFromDirection(BlockPos pos, Vec3 threatDirection) {
         Vec3 threatDir = threatDirection.normalize();
+        double height = WAIST_HEIGHT;
 
-        int totalRays = 0;
         int blockedRays = 0;
 
-        double height = TEST_HEIGHTS[0];
-        Vec3 origin = new Vec3(coverPos.getX() + 0.5, coverPos.getY() + height, coverPos.getZ() + 0.5);
+        for (int ri = 0; ri < RAYS_PER_HEIGHT; ri++) {
+            Vec3 origin = new Vec3(
+                pos.getX() + 0.5 + CORNER_OFFSETS[ri][0],
+                pos.getY() + height,
+                pos.getZ() + 0.5 + CORNER_OFFSETS[ri][1]
+            );
 
-        for (int ri = 0; ri < CONE_RAYS_PER_HEIGHT; ri++) {
-            double angleOffset = -CONE_HALF_ANGLE_DEG + (CONE_HALF_ANGLE_DEG * ri / (CONE_RAYS_PER_HEIGHT - 1));
+            double angleOffset = -CONE_HALF_ANGLE_DEG + (2.0 * CONE_HALF_ANGLE_DEG * ri / (RAYS_PER_HEIGHT - 1));
             Vec3 rayDir = CoverFinder.rotateVectorY(threatDir, angleOffset);
             double distance = raycastDistance(origin, rayDir, CONE_MAX_DISTANCE);
 
             if (distance < CONE_MAX_DISTANCE - 0.1) blockedRays++;
-            totalRays++;
         }
 
-        return totalRays > 0 ? (float) blockedRays / totalRays : 0.0f;
+        return (float) blockedRays / RAYS_PER_HEIGHT;
     }
 }
