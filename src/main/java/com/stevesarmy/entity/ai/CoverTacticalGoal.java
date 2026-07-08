@@ -983,10 +983,10 @@ public class CoverTacticalGoal extends Goal {
     }
     
     private void startRepositioning() {
-        findAndMoveToCover();
         getCoverManager().resetPeekState();
         getCoverManager().setPeekPosition(null);
         getPositionController().clear();
+        findAndMoveToCover();
         if (getCoverManager().getTargetCover() != null) {
             getCoverManager().setState(CoverBehaviorManager.CoverState.REPOSITIONING);
             setFlags(EnumSet.of(Flag.MOVE, Flag.LOOK));
