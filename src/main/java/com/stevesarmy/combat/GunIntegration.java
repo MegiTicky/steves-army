@@ -306,7 +306,6 @@ public class GunIntegration {
 
         private static final ResourceLocation DEFAULT_GUN_DISPLAY = ResourceLocation.tryParse("tacz:default");
         private static final int SOUND_DISTANCE = 64;
-        private static final int FALLBACK_SOUND_DISTANCE = 8;
 
         private void play3pSound(LivingEntity shooter, String resultName) {
             if (!resultName.contains("SUCCESS")) return;
@@ -321,12 +320,8 @@ public class GunIntegration {
                 ResourceLocation ammoId = ResourceLocation.tryParse(getAmmoId(shooter));
                 
                 if (gunId != null && ammoId != null) {
-                    // Primary: shoot_3p with full distance (3D positional)
                     sendSound.invoke(null, shooter, SOUND_DISTANCE, gunId, DEFAULT_GUN_DISPLAY,
                         "shoot_3p", 1.0f, 1.0f);
-                    // Fallback: shoot at close range for guns missing 3p audio files
-                    sendSound.invoke(null, shooter, FALLBACK_SOUND_DISTANCE, gunId, DEFAULT_GUN_DISPLAY,
-                        "shoot", 1.0f, 1.0f);
                 }
             } catch (Exception e) {
                 StevesArmyMod.LOGGER.debug("[TaCZ] Failed to send 3p sound: {}", e.getMessage());

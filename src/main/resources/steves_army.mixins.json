@@ -1,0 +1,12 @@
+{
+  "required": true,
+  "package": "com.stevesarmy.mixins",
+  "compatibilityLevel": "JAVA_17",
+  "refmap": "steves_army.refmap.json",
+  "client": [
+    "GunDisplayInstanceMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}
