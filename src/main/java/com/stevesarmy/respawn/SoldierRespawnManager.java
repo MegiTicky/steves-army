@@ -65,7 +65,7 @@ public class SoldierRespawnManager {
             if (i == SoldierInventory.SLOT_MAIN_HAND) {
                 player.getInventory().items.set(player.getInventory().selected, stack);
                 foundMainHand = true;
-            } else if (i >= SoldierInventory.ARMOR_FEET && i <= SoldierInventory.ARMOR_HEAD) {
+            } else if (i >= SoldierInventory.ARMOR_HEAD && i <= SoldierInventory.ARMOR_FEET) {
                 int armorIndex = i;
                 EquipmentSlot slot = getArmorSlot(armorIndex);
                 player.getInventory().armor.set(slot.getIndex(), stack);
@@ -108,10 +108,10 @@ public class SoldierRespawnManager {
     
     private static EquipmentSlot getArmorSlot(int index) {
         return switch (index) {
-            case 0 -> EquipmentSlot.FEET;
-            case 1 -> EquipmentSlot.LEGS;
-            case 2 -> EquipmentSlot.CHEST;
-            case 3 -> EquipmentSlot.HEAD;
+            case 0 -> EquipmentSlot.HEAD;
+            case 1 -> EquipmentSlot.CHEST;
+            case 2 -> EquipmentSlot.LEGS;
+            case 3 -> EquipmentSlot.FEET;
             default -> EquipmentSlot.CHEST;
         };
     }

@@ -185,6 +185,8 @@ public class GunIntegration {
                 
                 String resultName = result.toString();
                 
+                play3pSound(shooter, resultName);
+                
                 ammo = getCurrentAmmo(shooter);
                 barrelAmmo = hasAmmoInBarrel(shooter);
                 cooldown = getShootCoolDown(shooter);
@@ -244,6 +246,8 @@ public class GunIntegration {
                 
                 String resultName = result.toString();
                 
+                play3pSound(shooter, resultName);
+                
                 ammo = getCurrentAmmo(shooter);
                 barrelAmmo = hasAmmoInBarrel(shooter);
                 StevesArmyMod.LOGGER.info("[TaCZ] Post-shoot: result={}, ammo={}, barrel={}", 
@@ -298,6 +302,35 @@ public class GunIntegration {
             if (resultName.contains("NOT_DRAW")) return ShootResult.NOT_DRAWN;
             if (resultName.contains("NOT_GUN")) return ShootResult.NOT_GUN;
             return ShootResult.UNKNOWN;
+        }
+
+        private static final ResourceLocation DEFAULT_GUN_DISPLAY = ResourceLocation.tryParse("tacz:default");
+        private static final int SOUND_DISTANCE = 64;
+        private static final int FALLBACK_SOUND_DISTANCE = 8;
+
+        private void play3pSound(LivingEntity shooter, String resultName) {
+            if (!resultName.contains("SUCCESS")) return;
+            if (shooter instanceof net.minecraft.world.entity.player.Player) return;
+            try {
+                Class<?> soundManagerClass = Class.forName("com.tacz.guns.sound.SoundManager");
+                Method sendSound = soundManagerClass.getMethod("sendSoundToNearby", 
+                    LivingEntity.class, int.class, ResourceLocation.class, ResourceLocation.class,
+                    String.class, float.class, float.class);
+                
+                ResourceLocation gunId = ResourceLocation.tryParse(getGunId(shooter));
+                ResourceLocation ammoId = ResourceLocation.tryParse(getAmmoId(shooter));
+                
+                if (gunId != null && ammoId != null) {
+                    // Primary: shoot_3p with full distance (3D positional)
+                    sendSound.invoke(null, shooter, SOUND_DISTANCE, gunId, DEFAULT_GUN_DISPLAY,
+                        "shoot_3p", 1.0f, 1.0f);
+                    // Fallback: shoot at close range for guns missing 3p audio files
+                    sendSound.invoke(null, shooter, FALLBACK_SOUND_DISTANCE, gunId, DEFAULT_GUN_DISPLAY,
+                        "shoot", 1.0f, 1.0f);
+                }
+            } catch (Exception e) {
+                StevesArmyMod.LOGGER.debug("[TaCZ] Failed to send 3p sound: {}", e.getMessage());
+            }
         }
 
         @Override
