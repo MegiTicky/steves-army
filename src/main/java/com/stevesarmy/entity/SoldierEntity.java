@@ -651,18 +651,15 @@ public class SoldierEntity extends PathfinderMob implements Container {
         boolean result = super.hurt(source, amount);
         
         if (result && !this.level().isClientSide && coverBehaviorManager != null) {
-            // Capture pre-damage state before onTakeDamage() adds suppression
             CoverBehaviorManager.CoverState preState = coverBehaviorManager.getState();
-            boolean wasPinned = coverBehaviorManager.isPinned();
             long timeInCover = coverBehaviorManager.getTimeInCover();
             PeekController.State prePeekState = peekController.getState();
             
             coverBehaviorManager.onTakeDamage();
             
-            // Shot-in-cover trigger: check pre-damage state
-            if (preState == CoverBehaviorManager.CoverState.IN_COVER &&
+            if ((preState == CoverBehaviorManager.CoverState.IN_COVER ||
+                 preState == CoverBehaviorManager.CoverState.SUPPRESSED_IN_COVER) &&
                 timeInCover >= 2000 &&
-                !wasPinned &&
                 prePeekState == PeekController.State.HIDING) {
                 coverBehaviorManager.requestShotInCoverReposition();
             }

@@ -701,10 +701,30 @@ public class CoverTacticalGoal extends Goal {
     
     private void tickSuppressedInCover() {
         CoverPoint currentCover = getCoverManager().getCurrentCover();
-        
+
+        // Shot-in-cover trigger (fires even while suppressed/pinned)
+        if (getCoverManager().isShotInCoverRepositionRequested()) {
+            if (debugLoggingEnabled) {
+                StevesArmyMod.LOGGER.info("[CoverGoal] Soldier {} shot while hiding in cover, repositioning",
+                    soldier.getId());
+            }
+            if (currentCover != null) {
+                blacklistCover(currentCover.getPosition(), BlacklistReason.SHOT_IN_COVER);
+            }
+            getCoverManager().clearShotInCoverRepositionRequest();
+            startRepositioning();
+            return;
+        }
+
+        // Force duck-back if soldier was exposed or moving to peek when suppressed
+        PeekController peekCtrl = getPeekController();
+        if (peekCtrl.isExposed() || peekCtrl.isMovingToPeek()) {
+            peekCtrl.forceReturnToCover(soldier, currentCover, getPositionController());
+        }
+
         // Let peek controller handle ongoing duck back
-        if (getPeekController().isReturning()) {
-            getPeekController().tick(soldier, currentCover, getPositionController());
+        if (peekCtrl.isReturning()) {
+            peekCtrl.tick(soldier, currentCover, getPositionController());
         }
 
         // Flank detection (pinned soldiers bypass threshold)

@@ -145,6 +145,11 @@ public class PeekController {
         }
     }
 
+    public void forceReturnToCover(SoldierEntity soldier, CoverPoint cover, CoverPositionController mover) {
+        if (cover == null || state == State.HIDING || state == State.RETURNING_TO_COVER) return;
+        enterReturning(soldier, cover, mover);
+    }
+
     private void tickHiding(SoldierEntity soldier, CoverPoint cover, CoverPositionController mover) {
         boolean isHalf = cover.getType() == CoverType.HALF;
         boolean isFull = cover.getType() == CoverType.FULL;
