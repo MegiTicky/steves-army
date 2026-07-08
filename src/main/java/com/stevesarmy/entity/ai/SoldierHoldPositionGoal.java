@@ -1,5 +1,6 @@
 package com.stevesarmy.entity.ai;
 
+import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.combat.cover.CoverBehaviorManager;
 import com.stevesarmy.combat.cover.CoverPoint;
 import com.stevesarmy.entity.SoldierEntity;
@@ -154,6 +155,13 @@ public class SoldierHoldPositionGoal extends Goal {
 
         Vec3 fwd = soldier.getFormationForwardDirection(holdPos);
         BlockPos offset = FormationPositionCalculator.getFormationOffset(fwd, formation, memberIndex, squadSize);
-        return holdPos.offset(offset);
+        BlockPos target = holdPos.offset(offset);
+
+        StevesArmyMod.LOGGER.info("[FormationTarget] HoldPosGoal soldier={} idx={}/{} formation={} fwd=({},{},{}) anchor={} offset={} target={}",
+            soldier.getId(), memberIndex, squadSize, formation,
+            String.format("%.2f", fwd.x), String.format("%.2f", fwd.y), String.format("%.2f", fwd.z),
+            holdPos, offset, target);
+
+        return target;
     }
 }

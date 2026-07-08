@@ -9,6 +9,7 @@ import com.stevesarmy.combat.cover.CoverBehaviorManager;
 import com.stevesarmy.combat.cover.IncomingFireHandler;
 import com.stevesarmy.entity.ai.SoldierCombatGoal;
 import com.stevesarmy.entity.ai.SoldierFollowOwnerGoal;
+import com.stevesarmy.entity.ai.SoldierHoleRescueGoal;
 import com.stevesarmy.entity.ai.SoldierHoldPositionGoal;
 import com.stevesarmy.entity.ai.SoldierMoveToPingGoal;
 import com.stevesarmy.entity.ai.SoldierStrollGoal;
@@ -228,6 +229,7 @@ public class SoldierEntity extends PathfinderMob implements Container {
     protected void registerGoals() {
         this.combatGoal = new SoldierCombatGoal(this);
         
+        this.goalSelector.addGoal(0, new SoldierHoleRescueGoal(this));
         this.goalSelector.addGoal(0, new FloatGoal(this));
         this.goalSelector.addGoal(1, new SoldierMoveToPingGoal(this));
         this.goalSelector.addGoal(2, new CoverTacticalGoal(this));
@@ -939,11 +941,18 @@ public class SoldierEntity extends PathfinderMob implements Container {
     public Vec3 getFormationForwardDirection(@Nullable BlockPos goalPos) {
         Vec3 threatDir = threatAwareness.getPrimaryDirection(position());
         if (threatDir != null && threatDir.lengthSqr() > 0.001) {
+            StevesArmyMod.LOGGER.info("[Formation] Soldier {} forward=THREAT dir=({}, {}, {})",
+                getId(), String.format("%.2f", threatDir.x), String.format("%.2f", threatDir.y), String.format("%.2f", threatDir.z));
             return threatDir;
         }
         if (goalPos != null) {
             Vec3 toGoal = Vec3.atCenterOf(goalPos).subtract(position()).normalize();
             if (toGoal.lengthSqr() > 0.001) {
+                StevesArmyMod.LOGGER.info("[Formation] Soldier {} forward=GOAL goal=({},{},{}) self=({},{},{}) dir=({}, {}, {})",
+                    getId(),
+                    goalPos.getX(), goalPos.getY(), goalPos.getZ(),
+                    blockPosition().getX(), blockPosition().getY(), blockPosition().getZ(),
+                    String.format("%.2f", toGoal.x), String.format("%.2f", toGoal.y), String.format("%.2f", toGoal.z));
                 return toGoal;
             }
         }
@@ -951,9 +960,12 @@ public class SoldierEntity extends PathfinderMob implements Container {
         if (owner != null) {
             Vec3 look = owner.getLookAngle();
             if (look != null && look.lengthSqr() > 0.001) {
+                StevesArmyMod.LOGGER.info("[Formation] Soldier {} forward=OWNER_LOOK dir=({}, {}, {})",
+                    getId(), String.format("%.2f", look.x), String.format("%.2f", look.y), String.format("%.2f", look.z));
                 return look;
             }
         }
+        StevesArmyMod.LOGGER.info("[Formation] Soldier {} forward=FALLBACK_NORTH", getId());
         return new Vec3(0, 0, -1);
     }
 

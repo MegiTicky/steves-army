@@ -200,7 +200,14 @@ public class SoldierFollowOwnerGoal extends Goal {
 
         Vec3 fwd = soldier.getFormationForwardDirection(anchor);
         BlockPos offset = FormationPositionCalculator.getFormationOffset(fwd, formation, memberIndex, squadSize);
-        return anchor.offset(offset);
+        BlockPos target = anchor.offset(offset);
+
+        com.stevesarmy.StevesArmyMod.LOGGER.info("[FormationTarget] FollowGoal soldier={} idx={}/{} formation={} fwd=({},{},{}) anchor={} offset={} target={}",
+            soldier.getId(), memberIndex, squadSize, formation,
+            String.format("%.2f", fwd.x), String.format("%.2f", fwd.y), String.format("%.2f", fwd.z),
+            anchor, offset, target);
+
+        return target;
     }
 
     private boolean canPathTo(BlockPos pos) {

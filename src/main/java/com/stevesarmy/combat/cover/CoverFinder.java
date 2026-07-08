@@ -785,6 +785,15 @@ return qualityScore + shootBonus - distancePenalty;
             return false;
         }
         
+        for (Direction dir : Direction.Plane.HORIZONTAL) {
+            BlockPos stepDown = pos.relative(dir).below();
+            BlockPos twoDown = stepDown.below();
+            if (!level.getBlockState(stepDown).isSolid()
+                && !level.getBlockState(twoDown).isSolid()) {
+                return false;
+            }
+        }
+        
         BlockState standingState = level.getBlockState(pos);
         BlockState headState = level.getBlockState(pos.above());
         
@@ -801,6 +810,17 @@ return qualityScore + shootBonus - distancePenalty;
         }
         
         if (!headState.isAir() && !headState.getCollisionShape(level, pos.above()).isEmpty()) {
+            return false;
+        }
+        
+        boolean hasOpenEyeLevel = false;
+        for (Direction dir : Direction.Plane.HORIZONTAL) {
+            if (level.getBlockState(pos.relative(dir).above()).isAir()) {
+                hasOpenEyeLevel = true;
+                break;
+            }
+        }
+        if (!hasOpenEyeLevel) {
             return false;
         }
         

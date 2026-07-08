@@ -1,5 +1,6 @@
 package com.stevesarmy.entity.ai;
 
+import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.squad.SquadFormation;
 import com.stevesarmy.squad.SquadManager;
@@ -114,7 +115,14 @@ public class SoldierMoveToPingGoal extends Goal {
 
         Vec3 fwd = soldier.getFormationForwardDirection(targetPos);
         BlockPos offset = FormationPositionCalculator.getFormationOffset(fwd, formation, memberIndex, squadSize);
-        return targetPos.offset(offset);
+        BlockPos target = targetPos.offset(offset);
+
+        StevesArmyMod.LOGGER.info("[FormationTarget] MoveToPing soldier={} idx={}/{} formation={} fwd=({},{},{}) anchor={} offset={} target={}",
+            soldier.getId(), memberIndex, squadSize, formation,
+            String.format("%.2f", fwd.x), String.format("%.2f", fwd.y), String.format("%.2f", fwd.z),
+            targetPos, offset, target);
+
+        return target;
     }
 
     private int adjustTicks(int ticks) {
