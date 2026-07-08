@@ -42,8 +42,9 @@ public class CoverTacticalGoal extends Goal {
     
     private static final int SEARCH_RADIUS = 12;
     private static final long MIN_COVER_DWELL_TIME_MS = 4000;
+    private static final long MIN_COVER_DWELL_TIME_DAMAGE_MS = 2000;
     private static final long MIN_SUPPRESSED_DWELL_TIME_MS = 6000;
-    private static final float HYSTERESIS_THRESHOLD = 0.35f;
+    private static final float HYSTERESIS_THRESHOLD = 0.20f;
     private static final long MIN_PEEK_INTERVAL_MS = 2000;
     private static final long MAX_SEEKING_TIME_MS = 10000;
     private static final float LOW_HEALTH_THRESHOLD = 0.3f;
@@ -56,7 +57,7 @@ public class CoverTacticalGoal extends Goal {
     private static final long BLACKLIST_CLEAR_INTERVAL_MS = 15000;
     
     private static final double THREAT_ANGLE_REPOSITION_THRESHOLD = 2.09;
-    private static final int NON_PEEKABLE_REPOSITION_TICKS = 60;
+    private static final int NON_PEEKABLE_REPOSITION_TICKS = 40;
 
     private static final float FLANKING_PROTECTION_THRESHOLD = 0.7f;
     private static final float MIN_FLANKING_IMPROVEMENT = 0.1f;
@@ -83,7 +84,8 @@ public class CoverTacticalGoal extends Goal {
     public enum BlacklistReason {
         PATH_FAILED("PATH FAILED"),
         STUCK_SEEKING("STUCK SEEKING"),
-        STUCK_REPOSITIONING("STUCK REPOS");
+        STUCK_REPOSITIONING("STUCK REPOS"),
+        SHOT_IN_COVER("SHOT IN COVER");
         
         public final String label;
         BlacklistReason(String label) { this.label = label; }
@@ -654,6 +656,20 @@ public class CoverTacticalGoal extends Goal {
             return;
         }
 
+        // Shot-in-cover trigger (fires even if suppressed by the shot)
+        if (getCoverManager().isShotInCoverRepositionRequested()) {
+            if (debugLoggingEnabled) {
+                StevesArmyMod.LOGGER.info("[CoverGoal] Soldier {} shot while hiding in cover, repositioning",
+                    soldier.getId());
+            }
+            if (currentCover != null) {
+                blacklistCover(currentCover.getPosition(), BlacklistReason.SHOT_IN_COVER);
+            }
+            getCoverManager().clearShotInCoverRepositionRequest();
+            startRepositioning();
+            return;
+        }
+
         // Suppressed → transition state
         if (getCoverManager().isSuppressed()) {
             if (getPeekController().isExposed()) {
@@ -800,6 +816,20 @@ public class CoverTacticalGoal extends Goal {
                     soldier.getId());
             }
             getCoverManager().clearRepositionRequest();
+            startRepositioning();
+            return;
+        }
+
+        // Shot-in-cover trigger
+        if (getCoverManager().isShotInCoverRepositionRequested()) {
+            if (debugLoggingEnabled) {
+                StevesArmyMod.LOGGER.info("[CoverGoal] Soldier {} shot while hiding in cover, repositioning",
+                    soldier.getId());
+            }
+            if (currentCover != null) {
+                blacklistCover(currentCover.getPosition(), BlacklistReason.SHOT_IN_COVER);
+            }
+            getCoverManager().clearShotInCoverRepositionRequest();
             startRepositioning();
             return;
         }

@@ -449,6 +449,20 @@ public class CoverBehaviorManager {
         this.repositionRequested = false;
     }
     
+    private boolean shotInCoverRepositionRequested = false;
+    
+    public boolean isShotInCoverRepositionRequested() {
+        return shotInCoverRepositionRequested;
+    }
+    
+    public void requestShotInCoverReposition() {
+        this.shotInCoverRepositionRequested = true;
+    }
+    
+    public void clearShotInCoverRepositionRequest() {
+        this.shotInCoverRepositionRequested = false;
+    }
+    
     public boolean hasCurrentCover() {
         return currentCover != null;
     }

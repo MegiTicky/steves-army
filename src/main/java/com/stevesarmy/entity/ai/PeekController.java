@@ -35,7 +35,7 @@ public class PeekController {
     private static final double PEEK_SPEED = 0.75;
     private static final double RETURN_TOLERANCE = 0.3;
     private static final double RETURN_SPEED = 1.0;
-    private static final int NON_PEEKABLE_REPOSITION_TICKS = 60;
+    private static final int NON_PEEKABLE_REPOSITION_TICKS = 40;
 
     private State state = State.HIDING;
     private Vec3 peekTarget = Vec3.ZERO;
