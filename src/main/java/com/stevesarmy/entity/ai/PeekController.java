@@ -25,7 +25,8 @@ public class PeekController {
         RETURNING_TO_COVER
     }
 
-    private static final long EXPOSURE_TIME_MS = 1500;
+    private static final long EXPOSURE_TIME_MIN_MS = 3000;   // 3 seconds
+    private static final long EXPOSURE_TIME_MAX_MS = 8000;   // 8 seconds
     private static final long MIN_EXPOSURE_TIME_MS = 800;
     private static final long DUCK_COOLDOWN_MS = 1000;
     private static final long SUPPRESSED_HIDE_EXTRA_MS = 2000;
@@ -45,7 +46,11 @@ public class PeekController {
     private int nonPeekableTicks = 0;
     private int peekCountSameCover = 0;
     private BlockPos lastCoverPosition = null;
-    private long currentMaxExposureTime = EXPOSURE_TIME_MS;
+    private long currentMaxExposureTime = 3000;
+    
+    private long getRandomExposureTime() {
+        return EXPOSURE_TIME_MIN_MS + (long)(Math.random() * (EXPOSURE_TIME_MAX_MS - EXPOSURE_TIME_MIN_MS));
+    }
 
     public State getState() { return state; }
 
@@ -76,7 +81,7 @@ public class PeekController {
         stateStartTime = 0;
         currentPeekPos = null;
         nonPeekableTicks = 0;
-        currentMaxExposureTime = EXPOSURE_TIME_MS;
+        currentMaxExposureTime = getRandomExposureTime();
     }
 
     public void reset() {
@@ -84,7 +89,7 @@ public class PeekController {
         stateStartTime = 0;
         currentPeekPos = null;
         nonPeekableTicks = 0;
-        currentMaxExposureTime = EXPOSURE_TIME_MS;
+        currentMaxExposureTime = getRandomExposureTime();
     }
 
     private void setState(SoldierEntity soldier, State newState) {
@@ -173,7 +178,7 @@ public class PeekController {
             return;
         }
 
-        currentMaxExposureTime = EXPOSURE_TIME_MS;
+        currentMaxExposureTime = getRandomExposureTime();
         preAimToward(soldier, threatDir);
 
         if (isHalf) {
@@ -333,7 +338,7 @@ public class PeekController {
 
         if (CoverTacticalGoal.isDebugLoggingEnabled()) {
             StevesArmyMod.LOGGER.info("[PeekController] Soldier {} state: HIDING -> EXPOSED (exposure={}ms)",
-                soldier.getId(), EXPOSURE_TIME_MS);
+                soldier.getId(), currentMaxExposureTime);
         }
     }
 

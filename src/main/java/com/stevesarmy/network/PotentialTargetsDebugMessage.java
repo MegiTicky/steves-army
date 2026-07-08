@@ -33,6 +33,8 @@ public class PotentialTargetsDebugMessage {
     private final float lockedAdsProgress;
     private final String lockedAimPointType;
     private final boolean lockedBulletPathClear;
+    private final boolean isSuppressing;
+    private final Vec3 suppressionTargetPos;
     private final List<PotentialTargetEntry> potentialTargets;
     
     public PotentialTargetsDebugMessage(UUID soldierUUID, UUID lockedTargetUUID, 
@@ -42,10 +44,11 @@ public class PotentialTargetsDebugMessage {
                                         boolean lockedInPeripheral, boolean lockedIsDetected,
                                         double lockedDistanceFactor, double lockedExposureFactor,
                                         double lockedMovementFactor, double lockedBrightnessFactor,
-                                        float lockedAimQuality, float lockedTargetAimQuality,
-                                        float lockedSuppressiveMin, float lockedAdsProgress,
-                                        String lockedAimPointType, boolean lockedBulletPathClear,
-                                        List<PotentialTargetEntry> potentialTargets) {
+                                         float lockedAimQuality, float lockedTargetAimQuality,
+                                         float lockedSuppressiveMin, float lockedAdsProgress,
+                                         String lockedAimPointType, boolean lockedBulletPathClear,
+                                         boolean isSuppressing, Vec3 suppressionTargetPos,
+                                         List<PotentialTargetEntry> potentialTargets) {
         this.soldierUUID = soldierUUID;
         this.lockedTargetUUID = lockedTargetUUID;
         this.soldierPos = soldierPos;
@@ -66,6 +69,8 @@ public class PotentialTargetsDebugMessage {
         this.lockedAdsProgress = lockedAdsProgress;
         this.lockedAimPointType = lockedAimPointType;
         this.lockedBulletPathClear = lockedBulletPathClear;
+        this.isSuppressing = isSuppressing;
+        this.suppressionTargetPos = suppressionTargetPos;
         this.potentialTargets = potentialTargets;
     }
     
@@ -90,6 +95,10 @@ public class PotentialTargetsDebugMessage {
         this.lockedAdsProgress = hasLockedTarget ? buf.readFloat() : 0;
         this.lockedAimPointType = hasLockedTarget ? buf.readUtf() : "";
         this.lockedBulletPathClear = hasLockedTarget ? buf.readBoolean() : false;
+        
+        this.isSuppressing = buf.readBoolean();
+        this.suppressionTargetPos = buf.readBoolean() ? 
+            new Vec3(buf.readDouble(), buf.readDouble(), buf.readDouble()) : null;
         
         this.soldierPos = new Vec3(buf.readDouble(), buf.readDouble(), buf.readDouble());
         int count = buf.readInt();
@@ -135,6 +144,13 @@ public class PotentialTargetsDebugMessage {
             buf.writeFloat(msg.lockedAdsProgress);
             buf.writeUtf(msg.lockedAimPointType);
             buf.writeBoolean(msg.lockedBulletPathClear);
+        }
+        buf.writeBoolean(msg.isSuppressing);
+        buf.writeBoolean(msg.suppressionTargetPos != null);
+        if (msg.suppressionTargetPos != null) {
+            buf.writeDouble(msg.suppressionTargetPos.x);
+            buf.writeDouble(msg.suppressionTargetPos.y);
+            buf.writeDouble(msg.suppressionTargetPos.z);
         }
         buf.writeDouble(msg.soldierPos.x);
         buf.writeDouble(msg.soldierPos.y);
@@ -186,6 +202,8 @@ public class PotentialTargetsDebugMessage {
     public float getLockedAdsProgress() { return lockedAdsProgress; }
     public String getLockedAimPointType() { return lockedAimPointType; }
     public boolean getLockedBulletPathClear() { return lockedBulletPathClear; }
+    public boolean isSuppressing() { return isSuppressing; }
+    public Vec3 getSuppressionTargetPos() { return suppressionTargetPos; }
     public List<PotentialTargetEntry> getPotentialTargets() { return potentialTargets; }
     
     public static class PotentialTargetEntry {

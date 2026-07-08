@@ -56,6 +56,8 @@ public class PingClientEvents {
         public float lockedAdsProgress;
         public String lockedAimPointType;
         public boolean lockedBulletPathClear;
+        public boolean isSuppressing;
+        public net.minecraft.world.phys.Vec3 suppressionTargetPos;
         public List<PotentialTargetsDebugMessage.PotentialTargetEntry> potentialTargets;
         
         public SoldierDebugData(UUID soldierUUID) {
@@ -88,6 +90,8 @@ public class PingClientEvents {
             data.lockedAdsProgress = msg.getLockedAdsProgress();
             data.lockedAimPointType = msg.getLockedAimPointType();
             data.lockedBulletPathClear = msg.getLockedBulletPathClear();
+            data.isSuppressing = msg.isSuppressing();
+            data.suppressionTargetPos = msg.getSuppressionTargetPos();
             data.potentialTargets = msg.getPotentialTargets();
         }
     }
@@ -158,7 +162,9 @@ public class PingClientEvents {
                     0,
                     soldierData.lockedAdsProgress,
                     soldierData.lockedAimPointType,
-                    soldierData.lockedBulletPathClear
+                    soldierData.lockedBulletPathClear,
+                    soldierData.isSuppressing,
+                    soldierData.suppressionTargetPos
                 );
                 CombatDebugRenderer.addDebugData(lockedData);
             }
@@ -192,7 +198,9 @@ public class PingClientEvents {
                         0,
                         0,
                         "",
-                        false
+                        false,
+                        false,
+                        null
                     );
                     CombatDebugRenderer.addDebugData(potentialData);
                     count++;

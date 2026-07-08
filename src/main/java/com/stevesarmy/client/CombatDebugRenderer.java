@@ -111,47 +111,55 @@ public class CombatDebugRenderer {
         Vec3 soldierRel = data.soldierPos.subtract(cameraPos);
         Vec3 targetRel = data.targetPos.subtract(cameraPos);
         
-        int lineColor = getLineColor(data);
-        int a = 255;
-        int r = (lineColor >> 16) & 0xFF;
-        int g = (lineColor >> 8) & 0xFF;
-        int b = lineColor & 0xFF;
-        
-        if (data.isLockedTarget) {
-            if (data.hasLOS) {
-                buffer.vertex(matrix, (float) soldierRel.x, (float) soldierRel.y + 1.5f, (float) soldierRel.z).color(r, g, b, a).endVertex();
-                buffer.vertex(matrix, (float) targetRel.x, (float) targetRel.y + 1.0f, (float) targetRel.z).color(r, g, b, a).endVertex();
+        if (data.isSuppressing && data.suppressionTargetPos != null) {
+            Vec3 suppTargetRel = data.suppressionTargetPos.subtract(cameraPos);
+            int orangeR = 255, orangeG = 136, orangeB = 0, orangeA = 255;
+            
+            buffer.vertex(matrix, (float) soldierRel.x, (float) soldierRel.y + 1.5f, (float) soldierRel.z).color(orangeR, orangeG, orangeB, orangeA).endVertex();
+            buffer.vertex(matrix, (float) suppTargetRel.x, (float) suppTargetRel.y + 1.0f, (float) suppTargetRel.z).color(orangeR, orangeG, orangeB, orangeA).endVertex();
+        } else {
+            int lineColor = getLineColor(data);
+            int a = 255;
+            int r = (lineColor >> 16) & 0xFF;
+            int g = (lineColor >> 8) & 0xFF;
+            int b = lineColor & 0xFF;
+            
+            if (data.isLockedTarget) {
+                if (data.hasLOS) {
+                    buffer.vertex(matrix, (float) soldierRel.x, (float) soldierRel.y + 1.5f, (float) soldierRel.z).color(r, g, b, a).endVertex();
+                    buffer.vertex(matrix, (float) targetRel.x, (float) targetRel.y + 1.0f, (float) targetRel.z).color(r, g, b, a).endVertex();
+                } else {
+                    float step = 0.5f;
+                    Vec3 delta = targetRel.subtract(soldierRel);
+                    int segments = (int) (soldierRel.distanceTo(targetRel) / step);
+                    Vec3 normalized = delta.normalize();
+                    
+                    for (int i = 0; i < segments; i += 2) {
+                        if (i + 1 >= segments) break;
+                        Vec3 p1 = soldierRel.add(normalized.scale(i * step));
+                        Vec3 p2 = soldierRel.add(normalized.scale((i + 1) * step));
+                        buffer.vertex(matrix, (float) p1.x, (float) p1.y + 1.5f, (float) p1.z).color(r, g, b, a).endVertex();
+                        buffer.vertex(matrix, (float) p2.x, (float) p2.y + 1.5f, (float) p2.z).color(r, g, b, a).endVertex();
+                    }
+                }
             } else {
-                float step = 0.5f;
+                float dashLength = 0.3f;
+                float gapLength = 0.2f;
                 Vec3 delta = targetRel.subtract(soldierRel);
-                int segments = (int) (soldierRel.distanceTo(targetRel) / step);
+                double totalDistance = soldierRel.distanceTo(targetRel);
                 Vec3 normalized = delta.normalize();
                 
-                for (int i = 0; i < segments; i += 2) {
-                    if (i + 1 >= segments) break;
-                    Vec3 p1 = soldierRel.add(normalized.scale(i * step));
-                    Vec3 p2 = soldierRel.add(normalized.scale((i + 1) * step));
+                float currentDist = 0;
+                while (currentDist < totalDistance) {
+                    Vec3 p1 = soldierRel.add(normalized.scale(currentDist));
+                    float endDist = (float) Math.min(currentDist + dashLength, totalDistance);
+                    Vec3 p2 = soldierRel.add(normalized.scale(endDist));
+                    
                     buffer.vertex(matrix, (float) p1.x, (float) p1.y + 1.5f, (float) p1.z).color(r, g, b, a).endVertex();
                     buffer.vertex(matrix, (float) p2.x, (float) p2.y + 1.5f, (float) p2.z).color(r, g, b, a).endVertex();
+                    
+                    currentDist = endDist + gapLength;
                 }
-            }
-        } else {
-            float dashLength = 0.3f;
-            float gapLength = 0.2f;
-            Vec3 delta = targetRel.subtract(soldierRel);
-            double totalDistance = soldierRel.distanceTo(targetRel);
-            Vec3 normalized = delta.normalize();
-            
-            float currentDist = 0;
-            while (currentDist < totalDistance) {
-                Vec3 p1 = soldierRel.add(normalized.scale(currentDist));
-                float endDist = (float) Math.min(currentDist + dashLength, totalDistance);
-                Vec3 p2 = soldierRel.add(normalized.scale(endDist));
-                
-                buffer.vertex(matrix, (float) p1.x, (float) p1.y + 1.5f, (float) p1.z).color(r, g, b, a).endVertex();
-                buffer.vertex(matrix, (float) p2.x, (float) p2.y + 1.5f, (float) p2.z).color(r, g, b, a).endVertex();
-                
-                currentDist = endDist + gapLength;
             }
         }
         
@@ -282,6 +290,28 @@ public class CombatDebugRenderer {
     }
     
     private static void renderText(PoseStack poseStack, Vec3 cameraPos, CombatDebugData data, Minecraft mc, MultiBufferSource.BufferSource bufferSource) {
+        if (data.isSuppressing && data.suppressionTargetPos != null) {
+            Vec3 suppTargetRel = data.suppressionTargetPos.subtract(cameraPos);
+            
+            poseStack.pushPose();
+            poseStack.translate(suppTargetRel.x, suppTargetRel.y + 2.5, suppTargetRel.z);
+            
+            poseStack.mulPose(com.mojang.math.Axis.YP.rotationDegrees(-mc.player.getYRot()));
+            poseStack.mulPose(com.mojang.math.Axis.XP.rotationDegrees(mc.player.getXRot()));
+            
+            poseStack.scale(-0.025f, -0.025f, 0.025f);
+            
+            Matrix4f matrix4f = poseStack.last().pose();
+            
+            String suppText = "SUPPRESSING";
+            int orangeColor = 0xFF8800;
+            int width = mc.font.width(suppText);
+            mc.font.drawInBatch(suppText, -width / 2f, 0, orangeColor, false, matrix4f, bufferSource, net.minecraft.client.gui.Font.DisplayMode.NORMAL, 0, 15728880);
+            
+            poseStack.popPose();
+            return;
+        }
+        
         Vec3 targetRel = data.targetPos.subtract(cameraPos);
         
         poseStack.pushPose();

@@ -7,9 +7,12 @@ import com.stevesarmy.combat.cover.CoverBehaviorManager;
 import com.stevesarmy.entity.ai.CoverTacticalGoal;
 import com.stevesarmy.entity.ai.EnemyDefendGoal;
 import com.stevesarmy.entity.ai.SoldierCombatGoal;
+import com.stevesarmy.squad.SquadData;
+import com.stevesarmy.squad.SquadManager;
 import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.*;
 import net.minecraft.world.entity.ai.goal.FloatGoal;
 import net.minecraft.world.entity.ai.goal.LookAtPlayerGoal;
@@ -21,10 +24,13 @@ import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 
 import java.lang.reflect.Method;
+import java.util.Optional;
+import java.util.UUID;
 
 public class EnemySoldierEntity extends SoldierEntity {
 
     private static final double DEFEND_RADIUS = 20.0;
+    private static final UUID ENEMY_SQUAD_LEADER_ID = UUID.fromString("00000000-0000-0000-0000-000000000001");
     private BlockPos defendPosition = null;
 
     public EnemySoldierEntity(EntityType<? extends SoldierEntity> type, Level level) {
@@ -50,8 +56,31 @@ public class EnemySoldierEntity extends SoldierEntity {
                 defendPosition = this.blockPosition();
             }
 
+            ensureEnemySquadMembership();
             refillAmmo();
         }
+    }
+    
+    private void ensureEnemySquadMembership() {
+        if (this.getSquadId() != null) return;
+        
+        if (!(this.level() instanceof ServerLevel serverLevel)) return;
+        
+        SquadManager manager = SquadManager.get(serverLevel);
+        Optional<SquadData> existingSquad = manager.getSquadByLeader(ENEMY_SQUAD_LEADER_ID);
+        
+        SquadData enemySquad;
+        if (existingSquad.isPresent()) {
+            enemySquad = existingSquad.get();
+        } else {
+            enemySquad = manager.createSquad(ENEMY_SQUAD_LEADER_ID);
+        }
+        
+        enemySquad.addMember(this.getUUID());
+        manager.addMemberToSquad(enemySquad.getSquadId(), this.getUUID());
+        this.setSquadId(enemySquad.getSquadId());
+        
+        StevesArmyMod.LOGGER.info("[EnemySquad] Enemy soldier {} joined enemy squad {}", this.getId(), enemySquad.getSquadId().toString().substring(0, 8));
     }
 
     public BlockPos getDefendPosition() {

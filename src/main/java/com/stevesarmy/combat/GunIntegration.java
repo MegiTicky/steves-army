@@ -56,6 +56,9 @@ public class GunIntegration {
     public static void crawl(LivingEntity entity, boolean isCrawl) { gunHandler.crawl(entity, isCrawl); }
     public static boolean isCrawling(LivingEntity entity) { return gunHandler.isCrawling(entity); }
     public static float[] getGunRecoil(LivingEntity entity) { return gunHandler.getGunRecoil(entity); }
+    public static int getRPM(LivingEntity entity) { return gunHandler.getRPM(entity); }
+    public static float getBurstMinInterval(LivingEntity entity) { return gunHandler.getBurstMinInterval(entity); }
+    public static float getAimInaccuracy(LivingEntity entity) { return gunHandler.getAimInaccuracy(entity); }
 
     public enum ShootResult {
         SUCCESS, NO_AMMO, COOLDOWN, NOT_GUN, NO_TARGET, OUT_OF_RANGE,
@@ -90,6 +93,9 @@ public class GunIntegration {
         void crawl(LivingEntity entity, boolean isCrawl);
         boolean isCrawling(LivingEntity entity);
         float[] getGunRecoil(LivingEntity entity);
+        int getRPM(LivingEntity entity);
+        float getBurstMinInterval(LivingEntity entity);
+        float getAimInaccuracy(LivingEntity entity);
     }
 
     private static class FallbackGunHandler implements GunHandler {
@@ -119,6 +125,9 @@ public class GunIntegration {
         @Override public void crawl(LivingEntity entity, boolean isCrawl) {}
         @Override public boolean isCrawling(LivingEntity entity) { return false; }
         @Override public float[] getGunRecoil(LivingEntity entity) { return new float[]{0.5f, 0.25f}; }
+        @Override public int getRPM(LivingEntity entity) { return 600; }
+        @Override public float getBurstMinInterval(LivingEntity entity) { return 0.8f; }
+        @Override public float getAimInaccuracy(LivingEntity entity) { return 0.15f; }
     }
 
     private static class ReflectionGunHandler implements GunHandler {
@@ -776,6 +785,106 @@ public class GunIntegration {
                 StevesArmyMod.LOGGER.debug("[TaCZ] Failed to get gun recoil: {}", e.getMessage());
             }
             return new float[]{0.5f, 0.25f};
+        }
+
+        @Override
+        public int getRPM(LivingEntity entity) {
+            try {
+                ItemStack gunStack = entity.getMainHandItem();
+                Class<?> iGunClass = Class.forName("com.tacz.guns.api.item.IGun");
+                Method getIGunOrNull = iGunClass.getMethod("getIGunOrNull", ItemStack.class);
+                Object iGun = getIGunOrNull.invoke(null, gunStack);
+                if (iGun == null) return 600;
+
+                Method getGunId = iGunClass.getMethod("getGunId", ItemStack.class);
+                Object gunId = getGunId.invoke(iGun, gunStack);
+
+                Class<?> timelessApiClass = Class.forName("com.tacz.guns.api.TimelessAPI");
+                Method getCommonGunIndex = timelessApiClass.getMethod("getCommonGunIndex", ResourceLocation.class);
+                Object indexOpt = getCommonGunIndex.invoke(null, gunId);
+
+                if (indexOpt instanceof Optional<?> opt && opt.isPresent()) {
+                    Object gunIndex = opt.get();
+                    Method getGunData = gunIndex.getClass().getMethod("getGunData");
+                    Object gunData = getGunData.invoke(gunIndex);
+                    
+                    Method getRpmMethod = gunData.getClass().getMethod("getRpm");
+                    return (int) getRpmMethod.invoke(gunData);
+                }
+            } catch (Exception e) {
+                StevesArmyMod.LOGGER.debug("[TaCZ] Failed to get RPM: {}", e.getMessage());
+            }
+            return 600;
+        }
+
+        @Override
+        public float getBurstMinInterval(LivingEntity entity) {
+            try {
+                ItemStack gunStack = entity.getMainHandItem();
+                Class<?> iGunClass = Class.forName("com.tacz.guns.api.item.IGun");
+                Method getIGunOrNull = iGunClass.getMethod("getIGunOrNull", ItemStack.class);
+                Object iGun = getIGunOrNull.invoke(null, gunStack);
+                if (iGun == null) return 0.8f;
+
+                Method getGunId = iGunClass.getMethod("getGunId", ItemStack.class);
+                Object gunId = getGunId.invoke(iGun, gunStack);
+
+                Class<?> timelessApiClass = Class.forName("com.tacz.guns.api.TimelessAPI");
+                Method getCommonGunIndex = timelessApiClass.getMethod("getCommonGunIndex", ResourceLocation.class);
+                Object indexOpt = getCommonGunIndex.invoke(null, gunId);
+
+                if (indexOpt instanceof Optional<?> opt && opt.isPresent()) {
+                    Object gunIndex = opt.get();
+                    Method getGunData = gunIndex.getClass().getMethod("getGunData");
+                    Object gunData = getGunData.invoke(gunIndex);
+                    
+                    Method getBurstDataMethod = gunData.getClass().getMethod("getBurstData");
+                    Object burstData = getBurstDataMethod.invoke(gunData);
+                    
+                    if (burstData != null) {
+                        Method getMinIntervalMethod = burstData.getClass().getMethod("getMinInterval");
+                        return (float) getMinIntervalMethod.invoke(burstData);
+                    }
+                }
+            } catch (Exception e) {
+                StevesArmyMod.LOGGER.debug("[TaCZ] Failed to get burst min interval: {}", e.getMessage());
+            }
+            return 0.8f;
+        }
+
+        @Override
+        public float getAimInaccuracy(LivingEntity entity) {
+            try {
+                ItemStack gunStack = entity.getMainHandItem();
+                Class<?> iGunClass = Class.forName("com.tacz.guns.api.item.IGun");
+                Method getIGunOrNull = iGunClass.getMethod("getIGunOrNull", ItemStack.class);
+                Object iGun = getIGunOrNull.invoke(null, gunStack);
+                if (iGun == null) return 0.15f;
+
+                Method getGunId = iGunClass.getMethod("getGunId", ItemStack.class);
+                Object gunId = getGunId.invoke(iGun, gunStack);
+
+                Class<?> timelessApiClass = Class.forName("com.tacz.guns.api.TimelessAPI");
+                Method getCommonGunIndex = timelessApiClass.getMethod("getCommonGunIndex", ResourceLocation.class);
+                Object indexOpt = getCommonGunIndex.invoke(null, gunId);
+
+                if (indexOpt instanceof Optional<?> opt && opt.isPresent()) {
+                    Object gunIndex = opt.get();
+                    Method getGunData = gunIndex.getClass().getMethod("getGunData");
+                    Object gunData = getGunData.invoke(gunIndex);
+                    
+                    Method getInaccuracyMethod = gunData.getClass().getMethod("getInaccuracy");
+                    Object inaccuracy = getInaccuracyMethod.invoke(gunData);
+                    
+                    if (inaccuracy != null) {
+                        Method getAimMethod = inaccuracy.getClass().getMethod("getAim");
+                        return (float) getAimMethod.invoke(inaccuracy);
+                    }
+                }
+            } catch (Exception e) {
+                StevesArmyMod.LOGGER.debug("[TaCZ] Failed to get aim inaccuracy: {}", e.getMessage());
+            }
+            return 0.15f;
         }
     }
 }

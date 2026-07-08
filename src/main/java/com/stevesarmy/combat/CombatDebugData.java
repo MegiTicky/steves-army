@@ -36,6 +36,9 @@ public class CombatDebugData {
     public final String aimPointType;
     public final boolean bulletPathClear;
     
+    public final boolean isSuppressing;
+    public final Vec3 suppressionTargetPos;
+    
     public CombatDebugData(UUID soldierId, UUID targetId, Vec3 soldierPos, Vec3 targetPos,
                           double detectionPoints, double detectionThreshold,
                           boolean hasLOS, boolean inFocusedArc, boolean inPeripheralArc,
@@ -43,7 +46,8 @@ public class CombatDebugData {
                           double brightnessFactor, double baseRate, boolean isDetected, 
                           double distance, boolean isLockedTarget,
                           float aimQuality, float targetAimQuality, float shotThreshold, float suppressiveMin,
-                          float adsProgress, String aimPointType, boolean bulletPathClear) {
+                          float adsProgress, String aimPointType, boolean bulletPathClear,
+                          boolean isSuppressing, Vec3 suppressionTargetPos) {
         this.soldierId = soldierId;
         this.targetId = targetId;
         this.soldierPos = soldierPos;
@@ -68,6 +72,8 @@ public class CombatDebugData {
         this.adsProgress = adsProgress;
         this.aimPointType = aimPointType;
         this.bulletPathClear = bulletPathClear;
+        this.isSuppressing = isSuppressing;
+        this.suppressionTargetPos = suppressionTargetPos;
     }
     
     public void encode(FriendlyByteBuf buf) {
@@ -99,6 +105,13 @@ public class CombatDebugData {
         buf.writeFloat(adsProgress);
         buf.writeUtf(aimPointType);
         buf.writeBoolean(bulletPathClear);
+        buf.writeBoolean(isSuppressing);
+        buf.writeBoolean(suppressionTargetPos != null);
+        if (suppressionTargetPos != null) {
+            buf.writeDouble(suppressionTargetPos.x);
+            buf.writeDouble(suppressionTargetPos.y);
+            buf.writeDouble(suppressionTargetPos.z);
+        }
     }
     
     public static CombatDebugData decode(FriendlyByteBuf buf) {
@@ -126,11 +139,17 @@ public class CombatDebugData {
         float adsProgress = buf.readFloat();
         String aimPointType = buf.readUtf();
         boolean bulletPathClear = buf.readBoolean();
+        boolean isSuppressing = buf.readBoolean();
+        Vec3 suppressionTargetPos = null;
+        if (buf.readBoolean()) {
+            suppressionTargetPos = new Vec3(buf.readDouble(), buf.readDouble(), buf.readDouble());
+        }
         
         return new CombatDebugData(soldierId, targetId, soldierPos, targetPos,
             detectionPoints, detectionThreshold, hasLOS, inFocusedArc, inPeripheralArc,
             distanceFactor, exposureFactor, movementFactor, brightnessFactor, baseRate,
             isDetected, distance, isLockedTarget,
-            aimQuality, targetAimQuality, shotThreshold, suppressiveMin, adsProgress, aimPointType, bulletPathClear);
+            aimQuality, targetAimQuality, shotThreshold, suppressiveMin, adsProgress, aimPointType, bulletPathClear,
+            isSuppressing, suppressionTargetPos);
     }
 }

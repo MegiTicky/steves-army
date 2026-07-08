@@ -28,12 +28,14 @@ public class SquadThreatIntel {
         public boolean isAlive;
         public boolean isSuppressed;
         public UUID suppressedBy;
+        public long lastSuppressionHeartbeat;
 
         public ThreatKnowledge(UUID threatEntityId) {
             this.threatEntityId = threatEntityId;
             this.isAlive = true;
             this.isSuppressed = false;
             this.accuracy = 0.0f;
+            this.lastSuppressionHeartbeat = 0;
         }
 
         public CompoundTag toNBT() {
@@ -54,6 +56,7 @@ public class SquadThreatIntel {
             if (suppressedBy != null) {
                 tag.putUUID("SuppressedBy", suppressedBy);
             }
+            tag.putLong("LastSuppressionHeartbeat", lastSuppressionHeartbeat);
             return tag;
         }
 
@@ -76,6 +79,7 @@ public class SquadThreatIntel {
             if (tag.contains("SuppressedBy")) {
                 knowledge.suppressedBy = tag.getUUID("SuppressedBy");
             }
+            knowledge.lastSuppressionHeartbeat = tag.getLong("LastSuppressionHeartbeat");
             return knowledge;
         }
     }
@@ -133,6 +137,32 @@ public class SquadThreatIntel {
                 StevesArmyMod.LOGGER.info("[SquadThreatIntel] Threat {} now suppressed by {}", threatId, soldierId);
             }
         }
+    }
+    
+    public synchronized boolean tryMarkThreatSuppressed(UUID threatId, UUID soldierId) {
+        ThreatKnowledge knowledge = knownThreats.get(threatId);
+        if (knowledge != null && knowledge.isAlive && !knowledge.isSuppressed) {
+            knowledge.isSuppressed = true;
+            knowledge.suppressedBy = soldierId;
+            knowledge.lastSuppressionHeartbeat = 0;
+            return true;
+        }
+        return false;
+    }
+    
+    public void updateSuppressionHeartbeat(UUID threatId, long currentGameTime) {
+        ThreatKnowledge knowledge = knownThreats.get(threatId);
+        if (knowledge != null && knowledge.isSuppressed) {
+            knowledge.lastSuppressionHeartbeat = currentGameTime;
+        }
+    }
+    
+    public boolean isSuppressionStale(UUID threatId, long currentGameTime) {
+        ThreatKnowledge knowledge = knownThreats.get(threatId);
+        if (knowledge == null || !knowledge.isSuppressed) return false;
+        
+        long heartbeatTimeout = 10;
+        return currentGameTime - knowledge.lastSuppressionHeartbeat > heartbeatTimeout;
     }
 
     public void clearThreatSuppression(UUID threatId) {
