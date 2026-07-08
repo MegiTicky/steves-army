@@ -670,6 +670,17 @@ public class CoverTacticalGoal extends Goal {
             return;
         }
 
+        // Handle non-peekable cover reposition request before suppression check
+        if (getCoverManager().isRepositionRequested()) {
+            if (debugLoggingEnabled) {
+                StevesArmyMod.LOGGER.info("[CoverGoal] Soldier {} reposition requested, acting on it",
+                    soldier.getId());
+            }
+            getCoverManager().clearRepositionRequest();
+            startRepositioning();
+            return;
+        }
+
         // Suppressed → transition state
         if (getCoverManager().isSuppressed()) {
             if (getPeekController().isExposed()) {
@@ -712,6 +723,17 @@ public class CoverTacticalGoal extends Goal {
                 blacklistCover(currentCover.getPosition(), BlacklistReason.SHOT_IN_COVER);
             }
             getCoverManager().clearShotInCoverRepositionRequest();
+            startRepositioning();
+            return;
+        }
+
+        // Handle non-peekable cover reposition request
+        if (getCoverManager().isRepositionRequested()) {
+            if (debugLoggingEnabled) {
+                StevesArmyMod.LOGGER.info("[CoverGoal] Soldier {} reposition requested while suppressed, acting on it",
+                    soldier.getId());
+            }
+            getCoverManager().clearRepositionRequest();
             startRepositioning();
             return;
         }
