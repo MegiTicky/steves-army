@@ -499,7 +499,6 @@ public class CombatDebugCommand {
                     "Soldier " + soldier.getId() +
                     " | Level: " + String.format("%.2f", tracker.getSuppressionLevel()) +
                     " | Suppressed: " + tracker.isSuppressed() +
-                    " | Pinned: " + tracker.isPinned() +
                     " | Since: " + tracker.getTimeSinceLastSuppression() + "ms"
                 ), false);
             }

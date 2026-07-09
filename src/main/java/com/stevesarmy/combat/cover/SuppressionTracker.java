@@ -18,7 +18,6 @@ public class SuppressionTracker {
     private static final float NEAR_MISS_SUPPRESSION = 0.25f;
     private static final float DIRECT_FIRE_SUPPRESSION = 0.3f;
     private static final float SUPPRESSED_THRESHOLD = 0.5f;
-    private static final float PINNED_THRESHOLD = 0.7f;
     private static final long MIN_PEEK_TIME_MS = 2500;
     private static final float MAX_SUPPRESSION = 1.0f;
     private static final float BASE_SPEED = 1.0f;
@@ -95,8 +94,8 @@ public class SuppressionTracker {
         }
 
         if (debugLog()) {
-            StevesArmyMod.LOGGER.info("[Suppression] Soldier tick: inCover={}, decay=" + String.format("%.4f", decayAmount) + ", peakSlow=" + String.format("%.2f", peakSlowdown) + ", sup " + String.format("%.2f", oldLevel) + " -> " + String.format("%.2f", suppressionLevel) + ", suppressed={}, pinned={}",
-                inCover, isSuppressed(), isPinned());
+            StevesArmyMod.LOGGER.info("[Suppression] Soldier tick: inCover={}, decay=" + String.format("%.4f", decayAmount) + ", peakSlow=" + String.format("%.2f", peakSlowdown) + ", sup " + String.format("%.2f", oldLevel) + " -> " + String.format("%.2f", suppressionLevel) + ", suppressed={}",
+                inCover, isSuppressed());
         }
     }
 
@@ -116,7 +115,7 @@ public class SuppressionTracker {
     }
 
     public boolean isPinned() {
-        return suppressionLevel > PINNED_THRESHOLD;
+        return isSuppressed();
     }
 
     public float getSuppressionLevel() {
@@ -128,7 +127,7 @@ public class SuppressionTracker {
     }
 
     public boolean canPeek() {
-        if (suppressionLevel > PINNED_THRESHOLD) {
+        if (isSuppressed()) {
             return false;
         }
         long timeSinceLastSuppression = System.currentTimeMillis() - lastSuppressionTime;

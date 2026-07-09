@@ -185,7 +185,7 @@ public class CoverTacticalGoal extends Goal {
     private boolean shouldRepositionForFlank() {
         if (!isExposedToFlank()) return false;
 
-        if (getCoverManager().isPinned()) {
+        if (getCoverManager().isSuppressed()) {
             return true;
         }
 
@@ -824,9 +824,8 @@ public class CoverTacticalGoal extends Goal {
 
         float sup = getCoverManager().getSuppressionTracker().getSuppressionLevel();
         boolean canPeek = getCoverManager().getSuppressionTracker().canPeek();
-        boolean pinned = getCoverManager().isPinned();
         
-        if (!pinned && canPeek) {
+        if (canPeek) {
             if (currentCover != null && currentCover.getType() == CoverType.HALF) {
                 soldier.setLowCrouching(false);
             }
@@ -1403,7 +1402,7 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
             getCoverManager().setPeekPosition(null);
         }
         
-        if (getCoverManager().isPinned()) {
+        if (getCoverManager().isSuppressed()) {
             getCoverManager().setState(CoverBehaviorManager.CoverState.SUPPRESSED_IN_COVER);
         } else {
             getCoverManager().setState(CoverBehaviorManager.CoverState.IN_COVER);

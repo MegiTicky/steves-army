@@ -537,10 +537,10 @@ private void tickCoverPeekCycle(CoverBehaviorManager coverManager) {
         }
         
         if (isDebugLogging()) {
-            StevesArmyMod.LOGGER.info("[PeekCycle] Soldier {} tick: peekState={}, target={}, isPinned={}, canPeek={}",
+            StevesArmyMod.LOGGER.info("[PeekCycle] Soldier {} tick: peekState={}, target={}, suppressed={}, canPeek={}",
                 soldier.getId(), peekState,
                 (target != null ? target.getName().getString() : "null"),
-                coverManager.isPinned(), coverManager.getSuppressionTracker().canPeek());
+                coverManager.isSuppressed(), coverManager.getSuppressionTracker().canPeek());
         }
         
         if (target != null && target.isAlive()) {
