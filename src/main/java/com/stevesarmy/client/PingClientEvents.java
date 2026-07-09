@@ -19,9 +19,12 @@ import net.minecraftforge.client.event.RenderLevelStageEvent;
 import net.minecraftforge.client.gui.overlay.VanillaGuiOverlay;
 import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
+import net.minecraftforge.event.level.LevelEvent;
 import net.minecraftforge.fml.common.Mod;
 import org.joml.Matrix4f;
 
+import java.util.HashSet;
+import java.util.Set;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -96,9 +99,34 @@ public class PingClientEvents {
         }
     }
     
+    private static void pruneSoldierDebugData() {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.player == null || mc.level == null) {
+            soldierDebugDataMap.clear();
+            return;
+        }
+        
+        Set<UUID> activeSoldierUUIDs = new HashSet<>();
+        for (Entity e : mc.level.entitiesForRendering()) {
+            if (e instanceof SoldierEntity se && se.getOwnerUUID().map(uuid -> uuid.equals(mc.player.getUUID())).orElse(false)) {
+                activeSoldierUUIDs.add(se.getUUID());
+            }
+        }
+        soldierDebugDataMap.keySet().retainAll(activeSoldierUUIDs);
+    }
+    
+    @SubscribeEvent
+    public static void onWorldUnload(LevelEvent.Unload event) {
+        if (event.getLevel().isClientSide()) {
+            soldierDebugDataMap.clear();
+        }
+    }
+    
     @SubscribeEvent
     public static void onClientTick(TickEvent.ClientTickEvent event) {
         if (event.phase != TickEvent.Phase.END) return;
+        
+        pruneSoldierDebugData();
         
         PingManager.tick();
         PingWheelHandler.tick();

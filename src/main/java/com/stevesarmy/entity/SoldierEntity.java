@@ -646,9 +646,10 @@ public class SoldierEntity extends PathfinderMob implements Container {
         }
 
         // Enforce correct pose every tick on BOTH Client and Server to fight vanilla overrides
+        float syncedSup = getSyncedSuppressionLevel();
         if (entityData.get(LOW_CROUCHING)) {
             // If no longer suppressed, clear LOW_CROUCHING and stand up
-            if (!coverBehaviorManager.isSuppressed()) {
+            if (syncedSup <= 0.5f) {
                 setLowCrouching(false);
                 if (this.getPose() != Pose.CROUCHING && this.getPose() != Pose.STANDING) {
                     this.setPose(Pose.STANDING);

@@ -88,28 +88,22 @@ public class ExposureCalculator {
         
         TargetPoint[] targetPoints = getTargetPointsWithPriority(target);
         
-        List<TargetPoint> visiblePoints = new ArrayList<>();
+        TargetPoint bestVisible = null;
+        
         for (TargetPoint point : targetPoints) {
-            if (canSeePoint(level, observerEye, point.position, observer, skipBlock)) {
-                visiblePoints.add(point);
+            boolean canReach = canSeePoint(level, observerEye, point.position, observer, skipBlock);
+            if (canReach) {
+                if (bestVisible == null || point.type.priority > bestVisible.type.priority) {
+                    bestVisible = point;
+                }
             }
         }
         
-        if (visiblePoints.isEmpty()) {
-            return new AimPointResult(target.getEyePosition(), AimPointType.FALLBACK, false, false);
+        if (bestVisible != null) {
+            return new AimPointResult(bestVisible.position, bestVisible.type, true, true);
         }
         
-        visiblePoints.sort(Comparator.comparingInt(p -> -p.type.priority));
-        
-        for (TargetPoint point : visiblePoints) {
-            boolean bulletCanReach = canBulletReach(level, observerEye, point.position, observer, skipBlock);
-            if (bulletCanReach) {
-                return new AimPointResult(point.position, point.type, true, true);
-            }
-        }
-        
-        TargetPoint bestVisible = visiblePoints.get(0);
-        return new AimPointResult(bestVisible.position, bestVisible.type, false, true);
+        return new AimPointResult(target.getEyePosition(), AimPointType.FALLBACK, false, false);
     }
     
     private static TargetPoint[] getTargetPointsWithPriority(LivingEntity target) {
@@ -194,28 +188,8 @@ public class ExposureCalculator {
         return false;
     }
     
-    private static boolean canBulletReach(Level level, Vec3 from, Vec3 to, LivingEntity shooter) {
-        return canBulletReach(level, from, to, shooter, null);
-    }
-
     private static boolean canBulletReach(Level level, Vec3 from, Vec3 to, LivingEntity shooter, BlockPos skipBlock) {
-        ClipContext context = new ClipContext(
-            from,
-            to,
-            ClipContext.Block.COLLIDER,
-            ClipContext.Fluid.NONE,
-            shooter
-        );
-        
-        HitResult result = level.clip(context);
-        if (result.getType() == HitResult.Type.MISS) return true;
-        if (skipBlock != null && result.getType() == HitResult.Type.BLOCK) {
-            BlockHitResult blockResult = (BlockHitResult) result;
-            if (blockResult.getBlockPos().equals(skipBlock) || blockResult.getBlockPos().equals(skipBlock.above())) {
-                return true;
-            }
-        }
-        return false;
+        return canSeePoint(level, from, to, shooter, skipBlock);
     }
     
     private static class TargetPoint {

@@ -86,6 +86,13 @@ public class SoldierCombatGoal extends Goal {
     private int suppressionDurationTicks = 0;
     private int suppressionRemainingTicks = 0;
     
+    private List<LivingEntity> cachedPotentialTargets = null;
+    private long cachedPotentialTargetsTick = -1;
+
+    private ExposureCalculator.AimPointResult cachedAimPoint = null;
+    private int cachedAimPointTick = -1;
+    private UUID cachedAimPointTargetUUID = null;
+
     private static final int BURST_SHOTS_TARGET = 3;
     private static final float BURST_INTERVAL_SECONDS = 0.8f;
     private int burstShotsFired = 0;
@@ -210,6 +217,27 @@ public class SoldierCombatGoal extends Goal {
             float switchReset = StevesArmyConfig.getAimQualitySwitchReset();
             aimQuality *= switchReset;
         }
+    }
+    
+    private ExposureCalculator.AimPointResult getOrComputeAimPoint() {
+        if (target == null) {
+            currentAimPoint = null;
+            return null;
+        }
+        
+        int currentTick = soldier.tickCount;
+        UUID targetUUID = target.getUUID();
+        
+        if (cachedAimPoint != null && cachedAimPointTick == currentTick && cachedAimPointTargetUUID.equals(targetUUID)) {
+            currentAimPoint = cachedAimPoint;
+            return cachedAimPoint;
+        }
+        
+        currentAimPoint = ExposureCalculator.getBestAimPoint(soldier, target, getCoverBlockPos());
+        cachedAimPoint = currentAimPoint;
+        cachedAimPointTick = currentTick;
+        cachedAimPointTargetUUID = targetUUID;
+        return currentAimPoint;
     }
 
     @Override
@@ -405,11 +433,12 @@ public class SoldierCombatGoal extends Goal {
         
         if (isDrawing || isBolting) {
             return;
-}
+        }
 
-        currentAimPoint = ExposureCalculator.getBestAimPoint(soldier, target, getCoverBlockPos());
+        ExposureCalculator.AimPointResult aimPoint = getOrComputeAimPoint();
+        if (aimPoint == null) return;
         
-        if (!currentAimPoint.canShoot()) {
+        if (!aimPoint.canShoot()) {
             if (shouldSuppressTarget()) {
                 isSuppressing = true;
                 trySuppressireFire();
@@ -429,7 +458,7 @@ public class SoldierCombatGoal extends Goal {
             return;
         }
         
-        if (!FriendlyFireChecker.isSafeToShoot(soldier, currentAimPoint.position, aimQuality)) {
+        if (!FriendlyFireChecker.isSafeToShoot(soldier, aimPoint.position, aimQuality)) {
             if (isDebugLogging()) {
                 StevesArmyMod.LOGGER.info("[FriendlyFire] Soldier {} blocked shot - friendly in cone", 
                     soldier.getId());
@@ -477,7 +506,7 @@ public class SoldierCombatGoal extends Goal {
         GunIntegration.ShootResult result;
         
         if (soldier.level().getRandom().nextFloat() < aimQuality) {
-            result = GunIntegration.shootWithDeviation(soldier, currentAimPoint, 0.0f, 0.0f);
+            result = GunIntegration.shootWithDeviation(soldier, aimPoint, 0.0f, 0.0f);
         } else {
             Vec3 missPosition = AimAccuracyManager.calculateMissPosition(target, soldier.level());
             result = GunIntegration.shootAtPosition(soldier, missPosition);
@@ -695,6 +724,18 @@ private void tickCoverPeekCycle(CoverBehaviorManager coverManager) {
     }
 
     public List<LivingEntity> getPotentialTargets() {
+        long currentTick = soldier.tickCount;
+        
+        if (cachedPotentialTargets != null && cachedPotentialTargetsTick == currentTick) {
+            return cachedPotentialTargets;
+        }
+        
+        cachedPotentialTargets = computePotentialTargets();
+        cachedPotentialTargetsTick = currentTick;
+        return cachedPotentialTargets;
+    }
+    
+    private List<LivingEntity> computePotentialTargets() {
         List<LivingEntity> potentialTargets = new ArrayList<>();
 
         double maxRange = Math.max(DetectionSystem.FOCUSED_RANGE, DetectionSystem.PERIPHERAL_RANGE);
@@ -1439,7 +1480,7 @@ private void tickCoverPeekCycle(CoverBehaviorManager coverManager) {
         if (target == null || !target.isAlive()) return false;
         if (!TargetAcquisition.hasLineOfSight(soldier, target)) return false;
         
-        currentAimPoint = ExposureCalculator.getBestAimPoint(soldier, target, getCoverBlockPos());
-        return currentAimPoint.canShoot();
+        ExposureCalculator.AimPointResult aimPoint = getOrComputeAimPoint();
+        return aimPoint != null && aimPoint.canShoot();
     }
 }
