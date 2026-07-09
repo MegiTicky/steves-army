@@ -258,6 +258,8 @@ public class CoverBehaviorManager {
         syncState();
         
         soldier.getPeekController().reset();
+        suppressionTracker.reset();
+        soldier.setLowCrouching(false);
         soldier.refreshDimensions();
         soldier.setPose(net.minecraft.world.entity.Pose.STANDING);
         soldier.refreshDimensions();
