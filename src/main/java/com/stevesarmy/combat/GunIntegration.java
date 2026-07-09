@@ -53,8 +53,8 @@ public class GunIntegration {
     public static boolean useInventoryAmmo(LivingEntity entity) { return gunHandler.useInventoryAmmo(entity); }
     public static String getGunId(LivingEntity entity) { return gunHandler.getGunId(entity); }
     public static String getAmmoId(LivingEntity entity) { return gunHandler.getAmmoId(entity); }
-    public static void crawl(LivingEntity entity, boolean isCrawl) { gunHandler.crawl(entity, isCrawl); }
-    public static boolean isCrawling(LivingEntity entity) { return gunHandler.isCrawling(entity); }
+    public static void lowCrouch(LivingEntity entity, boolean isLowCrouch) { gunHandler.lowCrouch(entity, isLowCrouch); }
+    public static boolean isLowCrouching(LivingEntity entity) { return gunHandler.isLowCrouching(entity); }
     public static float[] getGunRecoil(LivingEntity entity) { return gunHandler.getGunRecoil(entity); }
     public static int getRPM(LivingEntity entity) { return gunHandler.getRPM(entity); }
     public static float getBurstMinInterval(LivingEntity entity) { return gunHandler.getBurstMinInterval(entity); }
@@ -90,8 +90,8 @@ public class GunIntegration {
         boolean useInventoryAmmo(LivingEntity entity);
         String getGunId(LivingEntity entity);
         String getAmmoId(LivingEntity entity);
-        void crawl(LivingEntity entity, boolean isCrawl);
-        boolean isCrawling(LivingEntity entity);
+        void lowCrouch(LivingEntity entity, boolean isLowCrouch);
+        boolean isLowCrouching(LivingEntity entity);
         float[] getGunRecoil(LivingEntity entity);
         int getRPM(LivingEntity entity);
         float getBurstMinInterval(LivingEntity entity);
@@ -122,8 +122,8 @@ public class GunIntegration {
         @Override public boolean useInventoryAmmo(LivingEntity entity) { return false; }
         @Override public String getGunId(LivingEntity entity) { return ""; }
         @Override public String getAmmoId(LivingEntity entity) { return ""; }
-        @Override public void crawl(LivingEntity entity, boolean isCrawl) {}
-        @Override public boolean isCrawling(LivingEntity entity) { return false; }
+        @Override public void lowCrouch(LivingEntity entity, boolean isLowCrouch) {}
+        @Override public boolean isLowCrouching(LivingEntity entity) { return false; }
         @Override public float[] getGunRecoil(LivingEntity entity) { return new float[]{0.5f, 0.25f}; }
         @Override public int getRPM(LivingEntity entity) { return 600; }
         @Override public float getBurstMinInterval(LivingEntity entity) { return 0.8f; }
@@ -739,33 +739,22 @@ public class GunIntegration {
         }
         
         @Override
-        public void crawl(LivingEntity entity, boolean isCrawl) {
-            try {
-                Class<?> gunOperatorClass = Class.forName("com.tacz.guns.api.entity.IGunOperator");
-                Method fromLivingEntity = gunOperatorClass.getMethod("fromLivingEntity", LivingEntity.class);
-                Object gunOperator = fromLivingEntity.invoke(null, entity);
-                
-                Method crawlMethod = gunOperatorClass.getMethod("crawl", boolean.class);
-                crawlMethod.invoke(gunOperator, isCrawl);
-                
-                if (entity instanceof SoldierEntity soldier) {
-                    soldier.setCrawling(isCrawl);
-                } else {
-                    if (isCrawl) {
-                        entity.setPose(net.minecraft.world.entity.Pose.SWIMMING);
-                    } else if (entity.getPose() == net.minecraft.world.entity.Pose.SWIMMING) {
-                        entity.setPose(net.minecraft.world.entity.Pose.STANDING);
-                    }
+        public void lowCrouch(LivingEntity entity, boolean isLowCrouch) {
+            if (entity instanceof SoldierEntity soldier) {
+                soldier.setLowCrouching(isLowCrouch);
+            } else {
+                if (isLowCrouch) {
+                    entity.setPose(net.minecraft.world.entity.Pose.SWIMMING);
+                } else if (entity.getPose() == net.minecraft.world.entity.Pose.SWIMMING) {
+                    entity.setPose(net.minecraft.world.entity.Pose.STANDING);
                 }
-            } catch (Exception e) {
-                StevesArmyMod.LOGGER.debug("[TaCZ] Failed to set crawl state: " + e.getMessage());
             }
         }
         
         @Override
-        public boolean isCrawling(LivingEntity entity) {
+        public boolean isLowCrouching(LivingEntity entity) {
             if (entity instanceof SoldierEntity soldier) {
-                return soldier.isCrawling();
+                return soldier.isLowCrouching();
             }
             return entity.getPose() == net.minecraft.world.entity.Pose.SWIMMING && !entity.isInWater();
         }

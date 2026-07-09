@@ -6,6 +6,7 @@ import com.stevesarmy.combat.DetectionSystem;
 import com.stevesarmy.combat.GunIntegration;
 import com.stevesarmy.combat.ThreatAwareness;
 import com.stevesarmy.combat.cover.CoverBehaviorManager;
+import com.stevesarmy.combat.cover.CoverType;
 import com.stevesarmy.combat.cover.IncomingFireHandler;
 import com.stevesarmy.entity.ai.SoldierCombatGoal;
 import com.stevesarmy.entity.ai.SoldierFollowOwnerGoal;
@@ -104,7 +105,7 @@ public class SoldierEntity extends PathfinderMob implements Container {
         SynchedEntityData.defineId(SoldierEntity.class, EntityDataSerializers.INT);
     private static final EntityDataAccessor<BlockPos> PEEK_POSITION =
         SynchedEntityData.defineId(SoldierEntity.class, EntityDataSerializers.BLOCK_POS);
-    private static final EntityDataAccessor<Boolean> CRAWLING =
+    private static final EntityDataAccessor<Boolean> LOW_CROUCHING =
         SynchedEntityData.defineId(SoldierEntity.class, EntityDataSerializers.BOOLEAN);
     
     private static final EntityDataAccessor<Float> THREAT_DIR_X =
@@ -219,7 +220,7 @@ public class SoldierEntity extends PathfinderMob implements Container {
         this.entityData.define(SUPPRESSION_LEVEL, 0f);
         this.entityData.define(PEEK_STATE, 0);
         this.entityData.define(PEEK_POSITION, BlockPos.ZERO);
-        this.entityData.define(CRAWLING, false);
+        this.entityData.define(LOW_CROUCHING, false);
         this.entityData.define(THREAT_DIR_X, 0f);
         this.entityData.define(THREAT_DIR_Y, 0f);
         this.entityData.define(THREAT_DIR_Z, 0f);
@@ -621,9 +622,34 @@ public class SoldierEntity extends PathfinderMob implements Container {
         if (!this.level().isClientSide) {
             IncomingFireHandler.tick();
             threatAwareness.tick();
-            // Re-apply pose every tick when crawling to fight vanilla pose resets, but NOT refreshDimensions
-            if (entityData.get(CRAWLING) && this.getPose() != Pose.SWIMMING) {
+        }
+
+        // Enforce correct pose every tick on BOTH Client and Server to fight vanilla overrides
+        if (entityData.get(LOW_CROUCHING)) {
+            if (this.getPose() != Pose.SWIMMING) {
                 this.setPose(Pose.SWIMMING);
+                this.refreshDimensions();
+            }
+        } else {
+            // Read synced data so the client knows what the server is doing
+            int coverState = getSyncedCoverState();
+            boolean inCover = coverState == CoverBehaviorManager.CoverState.IN_COVER.ordinal() 
+                           || coverState == CoverBehaviorManager.CoverState.SUPPRESSED_IN_COVER.ordinal();
+            boolean isHalfCover = getSyncedCoverCurrentType() == CoverType.HALF.ordinal();
+
+            if (inCover && isHalfCover) {
+                // Always crouch in half-cover when not suppressed (LOW_CROUCHING=false)
+                // Suppressed state is handled by LOW_CROUCHING flag above
+                if (this.getPose() != Pose.CROUCHING) {
+                    this.setPose(Pose.CROUCHING);
+                    this.refreshDimensions();
+                }
+            } else {
+                // Ensure they stand back up when leaving cover
+                if (this.getPose() == Pose.CROUCHING || this.getPose() == Pose.SWIMMING) {
+                    this.setPose(Pose.STANDING);
+                    this.refreshDimensions();
+                }
             }
         }
     }
@@ -642,10 +668,18 @@ public class SoldierEntity extends PathfinderMob implements Container {
     
     @Override
     public EntityDimensions getDimensions(Pose pose) {
-        if (entityData.get(CRAWLING)) {
-            return EntityDimensions.scalable(0.6F, 0.8F);
+        if (entityData.get(LOW_CROUCHING)) {
+            return EntityDimensions.scalable(0.6F, 0.6F);
         }
         return super.getDimensions(pose);
+    }
+
+    @Override
+    protected float getStandingEyeHeight(Pose pose, EntityDimensions dimensions) {
+        if (entityData.get(LOW_CROUCHING)) {
+            return 0.4F;
+        }
+        return super.getStandingEyeHeight(pose, dimensions);
     }
     
     @Override
@@ -919,19 +953,19 @@ public class SoldierEntity extends PathfinderMob implements Container {
         return this.entityData.get(PEEK_POSITION);
     }
     
-    public void setCrawling(boolean crawling) {
-        boolean wasCrawling = entityData.get(CRAWLING);
-        if (wasCrawling == crawling) {
-            return; // No change
+    public void setLowCrouching(boolean lowCrouch) {
+        boolean wasLowCrouching = entityData.get(LOW_CROUCHING);
+        if (wasLowCrouching == lowCrouch) {
+            return;
         }
         
-        this.entityData.set(CRAWLING, crawling);
-        this.setPose(crawling ? Pose.SWIMMING : Pose.STANDING);
-        this.refreshDimensions(); // Only refresh dimensions on state change
+        this.entityData.set(LOW_CROUCHING, lowCrouch);
+        this.setPose(lowCrouch ? Pose.SWIMMING : Pose.CROUCHING);
+        this.refreshDimensions();
     }
     
-    public boolean isCrawling() {
-        return entityData.get(CRAWLING);
+    public boolean isLowCrouching() {
+        return entityData.get(LOW_CROUCHING);
     }
 
     /**

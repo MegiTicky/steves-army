@@ -744,9 +744,11 @@ public class CoverTacticalGoal extends Goal {
 
         // Suppressed → transition state
         if (getCoverManager().isSuppressed()) {
+            if (currentCover != null && currentCover.getType() == CoverType.HALF) {
+                soldier.setLowCrouching(true);
+            }
             if (getPeekController().isExposed()) {
                 getPeekController().tick(soldier, currentCover, getPositionController());
-                // PeekController will handle duck back
             }
             getCoverManager().setState(CoverBehaviorManager.CoverState.SUPPRESSED_IN_COVER);
             return;
@@ -825,6 +827,9 @@ public class CoverTacticalGoal extends Goal {
         boolean pinned = getCoverManager().isPinned();
         
         if (!pinned && canPeek) {
+            if (currentCover != null && currentCover.getType() == CoverType.HALF) {
+                soldier.setLowCrouching(false);
+            }
             getCoverManager().setState(CoverBehaviorManager.CoverState.IN_COVER);
         }
         
@@ -1404,7 +1409,7 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
             getCoverManager().setState(CoverBehaviorManager.CoverState.IN_COVER);
         }
         soldier.refreshDimensions();
-        doCrawlIfHalfCover();
+        doLowCrouchIfHalfCover();
     }
     
     private void blacklistCover(BlockPos pos, BlacklistReason reason) {
@@ -1418,10 +1423,15 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
         }
     }
     
-    private void doCrawlIfHalfCover() {
+    private void doLowCrouchIfHalfCover() {
         CoverPoint cover = getCoverManager().getCurrentCover();
         if (cover != null && cover.getType() == CoverType.HALF) {
-            com.stevesarmy.combat.GunIntegration.crawl(soldier, true);
+            if (!getCoverManager().isSuppressed()) {
+                soldier.setLowCrouching(false);
+            } else {
+                soldier.setLowCrouching(true);
+            }
+            soldier.refreshDimensions();
         }
     }
     

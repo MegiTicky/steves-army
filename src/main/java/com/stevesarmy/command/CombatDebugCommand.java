@@ -140,25 +140,22 @@ public class CombatDebugCommand {
                         .executes(ctx -> toggleTeleportMode(ctx, false))))
                 .then(Commands.literal("pose")
                     .executes(CombatDebugCommand::poseStatus)
-                    .then(Commands.literal("crawl")
-                        .executes(CombatDebugCommand::forceCrawl))
+                    .then(Commands.literal("lowcrouch")
+                        .executes(CombatDebugCommand::forceLowCrouch))
                     .then(Commands.literal("stand")
                         .executes(CombatDebugCommand::forceStand))
                     .then(Commands.literal("status")
                         .executes(CombatDebugCommand::poseStatus))
                     .then(Commands.literal("noai")
                         .executes(CombatDebugCommand::toggleNoAi))
-                    .then(Commands.literal("angles")
-                        .executes(CombatDebugCommand::showPoseAngles))
-                    .then(Commands.literal("deg")
-                        .executes(CombatDebugCommand::showPoseDegrees))
+                    .then(Commands.literal("config")
+                        .executes(CombatDebugCommand::showLowCrouchConfig))
                     .then(Commands.literal("set")
-                        .then(Commands.argument("part", StringArgumentType.word())
-                            .then(Commands.argument("axis", StringArgumentType.word())
-                                .then(Commands.argument("value", FloatArgumentType.floatArg())
-                                    .executes(CombatDebugCommand::setPoseAngle)))))
+                        .then(Commands.argument("param", StringArgumentType.word())
+                            .then(Commands.argument("value", FloatArgumentType.floatArg())
+                                .executes(CombatDebugCommand::setLowCrouchParam))))
                     .then(Commands.literal("reset")
-                        .executes(CombatDebugCommand::resetPoseAngles)))
+                        .executes(CombatDebugCommand::resetLowCrouchConfig)))
             )
 
             // === STATUS (show all toggle states) ===
@@ -197,7 +194,7 @@ public class CombatDebugCommand {
             "  control peek        - Force nearest soldier to peek\n" +
             "  control reposition  - Force nearest soldier to abandon cover\n" +
             "  control teleport_mode [on|off] - Toggle teleport-only movement mode\n" +
-            "  control pose [...]  - Soldier pose commands (crawl, stand, status, noai, angles, set, reset)\n" +
+            "  control pose [...]  - Pose commands (lowcrouch, stand, status, noai, config, set, reset)\n" +
             "  status              - Show current debug toggle states"
         ), false);
         return 1;
@@ -859,14 +856,14 @@ public class CombatDebugCommand {
         return nearest;
     }
 
-    private static int forceCrawl(CommandContext<CommandSourceStack> context) {
+    private static int forceLowCrouch(CommandContext<CommandSourceStack> context) {
         Player player = context.getSource().getPlayer();
         if (player == null) { context.getSource().sendFailure(Component.literal("Player only")); return 0; }
         SoldierEntity soldier = getNearestSoldier(player, 32);
         if (soldier == null) { context.getSource().sendFailure(Component.literal("No soldier within 32 blocks")); return 0; }
-        GunIntegration.crawl(soldier, true);
+        GunIntegration.lowCrouch(soldier, true);
         context.getSource().sendSuccess(() -> Component.literal(
-            "Forced crawl soldier " + soldier.getId() + " | Pose: " + soldier.getPose()
+            "Forced low crouch soldier " + soldier.getId() + " | Pose: " + soldier.getPose()
         ), true);
         return 1;
     }
@@ -876,7 +873,7 @@ public class CombatDebugCommand {
         if (player == null) { context.getSource().sendFailure(Component.literal("Player only")); return 0; }
         SoldierEntity soldier = getNearestSoldier(player, 32);
         if (soldier == null) { context.getSource().sendFailure(Component.literal("No soldier within 32 blocks")); return 0; }
-        GunIntegration.crawl(soldier, false);
+        GunIntegration.lowCrouch(soldier, false);
         context.getSource().sendSuccess(() -> Component.literal(
             "Forced stand soldier " + soldier.getId() + " | Pose: " + soldier.getPose()
         ), true);
@@ -893,7 +890,7 @@ public class CombatDebugCommand {
             context.getSource().sendSuccess(() -> Component.literal(
                 "Soldier " + s.getId() +
                 " | Pose: " + s.getPose() +
-                " | Crawl: " + GunIntegration.isCrawling(s) +
+                " | LowCrouch: " + GunIntegration.isLowCrouching(s) +
                 " | NoAI: " + s.isNoAi() +
                 " | Cover: " + (cover != null ? cover.getType().name() : "NONE") +
                 " | State: " + (manager != null ? manager.getState().name() : "N/A")
@@ -915,101 +912,61 @@ public class CombatDebugCommand {
         return 1;
     }
 
-    private static int showPoseAngles(CommandContext<CommandSourceStack> context) {
+    private static int showLowCrouchConfig(CommandContext<CommandSourceStack> context) {
         context.getSource().sendSuccess(() -> Component.literal(
-            "=== PRONE POSE ANGLES (radians) ===" +
-            "\n" + PoseConfig.getAngleReport()
+            PoseConfig.getReport()
         ), false);
         return 1;
     }
 
-    private static int showPoseDegrees(CommandContext<CommandSourceStack> context) {
-        context.getSource().sendSuccess(() -> Component.literal(
-            "=== PRONE POSE IN DEGREES ===" +
-            "\n" + PoseConfig.getDegreesReport()
-        ), false);
-        return 1;
-    }
-
-    private static int setPoseAngle(CommandContext<CommandSourceStack> context) {
-        String part = StringArgumentType.getString(context, "part");
-        String axis = StringArgumentType.getString(context, "axis");
+    private static int setLowCrouchParam(CommandContext<CommandSourceStack> context) {
+        String param = StringArgumentType.getString(context, "param").toLowerCase();
         float value = FloatArgumentType.getFloat(context, "value");
 
-        String fieldName = partToFieldPrefix(part) + "_" + axisToFieldSuffix(axis);
-        if (fieldName == null) {
-            context.getSource().sendFailure(Component.literal("Unknown part/axis"));
-            return 0;
+        switch (param) {
+            case "ra_x" -> PoseConfig.RA_X = value;
+            case "ra_y" -> PoseConfig.RA_Y = value;
+            case "ra_z" -> PoseConfig.RA_Z = value;
+            case "ra_pos_x" -> PoseConfig.RA_POS_X = value;
+            case "ra_pos_y" -> PoseConfig.RA_POS_Y = value;
+            case "ra_pos_z" -> PoseConfig.RA_POS_Z = value;
+            case "la_x" -> PoseConfig.LA_X = value;
+            case "la_y" -> PoseConfig.LA_Y = value;
+            case "la_z" -> PoseConfig.LA_Z = value;
+            case "la_pos_x" -> PoseConfig.LA_POS_X = value;
+            case "la_pos_y" -> PoseConfig.LA_POS_Y = value;
+            case "la_pos_z" -> PoseConfig.LA_POS_Z = value;
+            case "h_x" -> PoseConfig.H_X = value;
+            case "h_clamp_min" -> PoseConfig.H_CLAMP_MIN = value;
+            case "h_clamp_max" -> PoseConfig.H_CLAMP_MAX = value;
+            case "b_x" -> PoseConfig.B_X = value;
+            case "b_y" -> PoseConfig.B_Y = value;
+            case "b_z" -> PoseConfig.B_Z = value;
+            case "rl_x" -> PoseConfig.RL_X = value;
+            case "rl_y" -> PoseConfig.RL_Y = value;
+            case "rl_z" -> PoseConfig.RL_Z = value;
+            case "rl_pos_z" -> PoseConfig.RL_POS_Z = value;
+            case "ll_x" -> PoseConfig.LL_X = value;
+            case "ll_y" -> PoseConfig.LL_Y = value;
+            case "ll_z" -> PoseConfig.LL_Z = value;
+            case "ll_pos_z" -> PoseConfig.LL_POS_Z = value;
+            default -> {
+                context.getSource().sendFailure(Component.literal("Unknown param: " + param +
+                    "\nValid: ra_x/y/z, ra_pos_x/y/z, la_x/y/z, la_pos_x/y/z, h_x, h_clamp_min/max, b_x/y/z, rl_x/y/z, rl_pos_z, ll_x/y/z, ll_pos_z"));
+                return 0;
+            }
         }
-        boolean found = setField(fieldName, value);
-        if (!found) {
-            context.getSource().sendFailure(Component.literal("Unknown field"));
-            return 0;
-        }
+
         context.getSource().sendSuccess(() -> Component.literal(
-            "Set " + part + "." + axis + " = " + String.format("%.4f", value)
+            "Set " + param + " = " + String.format("%.2f", value)
         ), false);
         return 1;
     }
 
-    private static int resetPoseAngles(CommandContext<CommandSourceStack> context) {
-        PoseConfig.RA_X = -3.14F; PoseConfig.RA_Y = 0.1F; PoseConfig.RA_Z = 0.1F;
-        PoseConfig.LA_X = -3.14F; PoseConfig.LA_Y = 0.2F; PoseConfig.LA_Z = -0.5F;
-        PoseConfig.H_X = -3.0F; PoseConfig.B_X = -0.1F; PoseConfig.B_Y = 0.0F; PoseConfig.B_Z = 0.0F;
-        PoseConfig.RL_X = 0.0F; PoseConfig.RL_Y = 0.0F; PoseConfig.RL_Z = 0.3F; PoseConfig.RL_POS_Z = -1.5F;
-        PoseConfig.LL_X = 0.0F; PoseConfig.LL_Y = 0.0F; PoseConfig.LL_Z = -0.3F; PoseConfig.LL_POS_Z = -1.5F;
-        PoseConfig.RA_POS_X = 0.8F; PoseConfig.RA_POS_Y = 0.0F; PoseConfig.RA_POS_Z = -2.0F;
-        PoseConfig.LA_POS_X = -2.0F; PoseConfig.LA_POS_Y = -2.0F; PoseConfig.LA_POS_Z = -2.0F;
-        PoseConfig.H_CLAMP_MIN = -1.5F; PoseConfig.H_CLAMP_MAX = 0.3F;
-        context.getSource().sendSuccess(() -> Component.literal("Pose angles reset to defaults"), false);
+    private static int resetLowCrouchConfig(CommandContext<CommandSourceStack> context) {
+        PoseConfig.reset();
+        context.getSource().sendSuccess(() -> Component.literal("Prone pose config reset to defaults"), false);
         return 1;
-    }
-
-    private static String partToFieldPrefix(String part) {
-        return switch (part.toLowerCase()) {
-            case "rightarm" -> "RA"; case "leftarm" -> "LA"; case "head" -> "H";
-            case "body" -> "B"; case "rightleg" -> "RL"; case "leftleg" -> "LL";
-            default -> null;
-        };
-    }
-
-    private static String axisToFieldSuffix(String axis) {
-        return switch (axis.toLowerCase()) {
-            case "xrot" -> "X"; case "yrot" -> "Y"; case "zrot" -> "Z";
-            case "xpos" -> "POS_X"; case "ypos" -> "POS_Y"; case "zpos" -> "POS_Z";
-            case "hclampmin" -> "CLAMP_MIN"; case "hclampmax" -> "CLAMP_MAX";
-            default -> null;
-        };
-    }
-
-    private static boolean setField(String name, float value) {
-        switch (name) {
-            case "RA_X": PoseConfig.RA_X = value; return true;
-            case "RA_Y": PoseConfig.RA_Y = value; return true;
-            case "RA_Z": PoseConfig.RA_Z = value; return true;
-            case "LA_X": PoseConfig.LA_X = value; return true;
-            case "LA_Y": PoseConfig.LA_Y = value; return true;
-            case "LA_Z": PoseConfig.LA_Z = value; return true;
-            case "H_X": PoseConfig.H_X = value; return true;
-            case "B_X": PoseConfig.B_X = value; return true;
-            case "B_Y": PoseConfig.B_Y = value; return true;
-            case "B_Z": PoseConfig.B_Z = value; return true;
-            case "RL_X": PoseConfig.RL_X = value; return true;
-            case "RL_Y": PoseConfig.RL_Y = value; return true;
-            case "RL_Z": PoseConfig.RL_Z = value; return true;
-            case "LL_X": PoseConfig.LL_X = value; return true;
-            case "LL_Y": PoseConfig.LL_Y = value; return true;
-            case "LL_Z": PoseConfig.LL_Z = value; return true;
-            case "RA_POS_X": PoseConfig.RA_POS_X = value; return true;
-            case "RA_POS_Y": PoseConfig.RA_POS_Y = value; return true;
-            case "RA_POS_Z": PoseConfig.RA_POS_Z = value; return true;
-            case "LA_POS_X": PoseConfig.LA_POS_X = value; return true;
-            case "LA_POS_Y": PoseConfig.LA_POS_Y = value; return true;
-            case "LA_POS_Z": PoseConfig.LA_POS_Z = value; return true;
-            case "H_CLAMP_MIN": PoseConfig.H_CLAMP_MIN = value; return true;
-            case "H_CLAMP_MAX": PoseConfig.H_CLAMP_MAX = value; return true;
-            default: return false;
-        }
     }
 
     // ======================================================================

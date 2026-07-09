@@ -187,7 +187,6 @@ public class PeekController {
         preAimToward(soldier, threatDir);
 
         if (isHalf) {
-            GunIntegration.crawl(soldier, true);
             lockRotationToCoverWall(soldier, cover, null);
             enterExposed(soldier, cover);
         } else if (isFull) {
@@ -331,7 +330,7 @@ public class PeekController {
         
         boolean isHalf = cover.getType() == CoverType.HALF;
         if (isHalf) {
-            GunIntegration.crawl(soldier, false);
+            // Pose managed by CoverTacticalGoal + SoldierEntity.tick() enforcement
         } else {
             CoverPositionController mover = (CoverPositionController) soldier.getMoveControl();
             mover.clear();
@@ -353,8 +352,7 @@ public class PeekController {
         
         boolean isHalf = cover.getType() == CoverType.HALF;
         if (isHalf) {
-            // Half cover: duck back into crawl
-            GunIntegration.crawl(soldier, true);
+            // Pose managed by CoverTacticalGoal + SoldierEntity.tick() enforcement
             lockRotationToCoverWall(soldier, cover, soldier.getTarget());
         } else {
             // Full cover: start slide movement back to cover position

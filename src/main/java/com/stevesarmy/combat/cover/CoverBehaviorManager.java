@@ -259,7 +259,8 @@ public class CoverBehaviorManager {
         
         soldier.getPeekController().reset();
         soldier.refreshDimensions();
-        GunIntegration.crawl(soldier, false);
+        soldier.setPose(net.minecraft.world.entity.Pose.STANDING);
+        soldier.refreshDimensions();
     }
     
     public void clearTargetCover() {
