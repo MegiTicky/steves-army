@@ -1,6 +1,7 @@
 package com.stevesarmy.entity.ai;
 
 import com.stevesarmy.combat.cover.CoverBehaviorManager;
+import com.stevesarmy.combat.cover.FormationDebugManager;
 import com.stevesarmy.entity.SoldierEntity;
 
 import com.stevesarmy.squad.SquadFormation;
@@ -118,6 +119,7 @@ public class SoldierFollowOwnerGoal extends Goal {
     public void stop() {
         owner = null;
         soldier.getNavigation().stop();
+        FormationDebugManager.setSoldierData(soldier.getId(), null);
     }
 
     @Override
@@ -212,6 +214,11 @@ public class SoldierFollowOwnerGoal extends Goal {
             soldier.getId(), memberIndex, squadSize, formation,
             String.format("%.2f", fwd.x), String.format("%.2f", fwd.y), String.format("%.2f", fwd.z),
             anchor, offset, target);
+
+        boolean isLeader = memberIndex == 0;
+        int leaderId = isLeader ? -1 : aliveSoldiers.get(0).getId();
+        FormationDebugManager.setSoldierData(soldier.getId(), new FormationDebugManager.FormationSoldierData(
+            target, fwd, anchor, offset, memberIndex, squadSize, formation.name(), !isLeader, leaderId));
 
         return target;
     }
