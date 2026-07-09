@@ -14,7 +14,7 @@ public class FriendlyFireChecker {
     
     private static final float MIN_CONE_ANGLE = 5.0f;
     private static final float MAX_CONE_ANGLE = 15.0f;
-    private static final double SEARCH_RADIUS = 50.0;
+    private static final double SEARCH_RADIUS = 25.0;
     
     public static boolean isSafeToShoot(SoldierEntity shooter, 
                                          Vec3 aimPoint,

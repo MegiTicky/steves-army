@@ -45,6 +45,10 @@ public class CoverBehaviorManager {
     private BlockPos savedCoverPosition = null;
     private boolean repositionRequested = false;
     
+    private float lastSyncedSuppression = -1f;
+    private static final float SUPPRESSION_SYNC_THRESHOLD = 0.5f;
+    private static final float SUPPRESSION_SYNC_DELTA = 0.02f;
+    
     public CoverBehaviorManager(SoldierEntity soldier) {
         this.soldier = soldier;
         this.suppressionTracker = new SuppressionTracker();
@@ -388,7 +392,15 @@ public class CoverBehaviorManager {
     
     public void tickSuppression(boolean inCover) {
         suppressionTracker.tick(inCover);
-        syncSuppression();
+        
+        float currentLevel = suppressionTracker.getSuppressionLevel();
+        boolean crossedThreshold = (lastSyncedSuppression >= SUPPRESSION_SYNC_THRESHOLD) != (currentLevel >= SUPPRESSION_SYNC_THRESHOLD);
+        float delta = Math.abs(currentLevel - lastSyncedSuppression);
+        
+        if (crossedThreshold || delta > SUPPRESSION_SYNC_DELTA || lastSyncedSuppression < 0) {
+            syncSuppression();
+            lastSyncedSuppression = currentLevel;
+        }
     }
     
     private boolean debugLog() {

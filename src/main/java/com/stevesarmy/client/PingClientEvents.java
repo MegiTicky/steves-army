@@ -126,13 +126,12 @@ public class PingClientEvents {
     public static void onClientTick(TickEvent.ClientTickEvent event) {
         if (event.phase != TickEvent.Phase.END) return;
         
-        pruneSoldierDebugData();
-        
         PingManager.tick();
         PingWheelHandler.tick();
         FormationWheelHandler.tick();
         
         if (CombatDebugRenderer.getDebugMode() != CombatDebugRenderer.DEBUG_MODE_OFF) {
+            pruneSoldierDebugData();
             updateCombatDebugData();
         }
 
