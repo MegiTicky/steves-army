@@ -2,6 +2,12 @@ package com.stevesarmy.util;
 
 import com.stevesarmy.squad.SquadFormation;
 import net.minecraft.core.BlockPos;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.LeavesBlock;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.levelgen.Heightmap;
+import net.minecraft.world.level.pathfinder.BlockPathTypes;
+import net.minecraft.world.level.pathfinder.WalkNodeEvaluator;
 import net.minecraft.world.phys.Vec3;
 
 public class FormationPositionCalculator {
@@ -108,5 +114,32 @@ public class FormationPositionCalculator {
         BlockPos offset = getFormationOffset(formationForward, formation, memberIndex, squadSize);
         BlockPos ideal = anchorPos.offset(offset);
         return Math.sqrt(coverPos.distSqr(ideal));
+    }
+
+    /**
+     * Adjusts a formation target position to a walkable surface.
+     * If the position is already walkable (solid block below, air/clear above),
+     * returns it unchanged. Otherwise snaps to the surface at the same X/Z
+     * using Minecraft's heightmap.
+     */
+    public static BlockPos adjustToSurface(Level level, BlockPos target) {
+        BlockPathTypes pathType = WalkNodeEvaluator.getBlockPathTypeStatic(level, target.mutable());
+        if (pathType == BlockPathTypes.WALKABLE || pathType == BlockPathTypes.OPEN) {
+            BlockState below = level.getBlockState(target.below());
+            if (!(below.getBlock() instanceof LeavesBlock)) {
+                return target;
+            }
+        }
+
+        BlockPos surface = level.getHeightmapPos(
+            Heightmap.Types.MOTION_BLOCKING_NO_LEAVES,
+            new BlockPos(target.getX(), 0, target.getZ())
+        );
+
+        if (surface.getY() > level.getMinBuildHeight()) {
+            return surface;
+        }
+
+        return target;
     }
 }

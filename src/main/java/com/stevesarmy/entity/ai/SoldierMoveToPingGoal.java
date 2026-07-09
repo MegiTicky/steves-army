@@ -179,6 +179,7 @@ public class SoldierMoveToPingGoal extends Goal {
         } else {
             target = targetPos;
         }
+        target = FormationPositionCalculator.adjustToSurface(soldier.level(), target);
 
         StevesArmyMod.LOGGER.info("[FormationTarget] MoveToPing soldier={} idx={}/{} fwd=({},{},{}) anchor={} offset={} target={}",
             soldier.getId(), memberIndex, squadSize,
