@@ -9,6 +9,7 @@ import com.stevesarmy.entity.ai.EnemyDefendGoal;
 import com.stevesarmy.entity.ai.SoldierCombatGoal;
 import com.stevesarmy.squad.SquadData;
 import com.stevesarmy.squad.SquadManager;
+import com.stevesarmy.squad.SquadMode;
 import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.resources.ResourceLocation;
@@ -35,6 +36,7 @@ public class EnemySoldierEntity extends SoldierEntity {
 
     public EnemySoldierEntity(EntityType<? extends SoldierEntity> type, Level level) {
         super(type, level);
+        this.setSquadMode(SquadMode.HOLD);
     }
 
     @Override
