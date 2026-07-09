@@ -732,7 +732,7 @@ private void tickCoverPeekCycle(CoverBehaviorManager coverManager) {
     public List<LivingEntity> getPotentialTargets() {
         long currentTick = soldier.tickCount;
         
-        if (cachedPotentialTargets != null && cachedPotentialTargetsTick == currentTick) {
+        if (cachedPotentialTargets != null && (currentTick - cachedPotentialTargetsTick < 5)) {
             return cachedPotentialTargets;
         }
         
@@ -746,25 +746,29 @@ private void tickCoverPeekCycle(CoverBehaviorManager coverManager) {
 
         double maxRange = Math.max(DetectionSystem.FOCUSED_RANGE, DetectionSystem.PERIPHERAL_RANGE);
 
-        List<Monster> nearbyMonsters = soldier.level().getEntitiesOfClass(
-            Monster.class,
-            soldier.getBoundingBox().inflate(maxRange)
-        );
+        if (StevesArmyConfig.shouldTargetMonsters()) {
+            List<Monster> nearbyMonsters = soldier.level().getEntitiesOfClass(
+                Monster.class,
+                soldier.getBoundingBox().inflate(maxRange)
+            );
 
-        for (Monster monster : nearbyMonsters) {
-            if (TargetAcquisition.isValidTarget(soldier, monster) && !soldier.isFriendlyTo(monster)) {
-                potentialTargets.add(monster);
+            for (Monster monster : nearbyMonsters) {
+                if (TargetAcquisition.isValidTarget(soldier, monster) && !soldier.isFriendlyTo(monster)) {
+                    potentialTargets.add(monster);
+                }
             }
         }
 
-        List<TargetEntity> nearbyTargets = soldier.level().getEntitiesOfClass(
-            TargetEntity.class,
-            soldier.getBoundingBox().inflate(maxRange)
-        );
+        if (StevesArmyConfig.shouldTargetTargetEntities()) {
+            List<TargetEntity> nearbyTargets = soldier.level().getEntitiesOfClass(
+                TargetEntity.class,
+                soldier.getBoundingBox().inflate(maxRange)
+            );
 
-        for (TargetEntity targetEntity : nearbyTargets) {
-            if (TargetAcquisition.isValidTarget(soldier, targetEntity) && !soldier.isFriendlyTo(targetEntity)) {
-                potentialTargets.add(targetEntity);
+            for (TargetEntity targetEntity : nearbyTargets) {
+                if (TargetAcquisition.isValidTarget(soldier, targetEntity) && !soldier.isFriendlyTo(targetEntity)) {
+                    potentialTargets.add(targetEntity);
+                }
             }
         }
 

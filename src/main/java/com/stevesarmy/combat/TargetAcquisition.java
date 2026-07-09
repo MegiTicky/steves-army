@@ -11,7 +11,13 @@ import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+
 public class TargetAcquisition {
+    
+    private static final Map<Long, Boolean> losCache = new ConcurrentHashMap<>();
+    private static long lastCacheClearTick = -1;
     
     public static boolean canSeeTarget(LivingEntity observer, LivingEntity target) {
         if (observer.level() != target.level()) return false;
@@ -41,31 +47,25 @@ public class TargetAcquisition {
         double angleRadians = Math.acos(Math.max(-1.0, Math.min(1.0, dot)));
         double angleDegrees = Math.toDegrees(angleRadians);
         
-        float bodyYaw = observer.getYRot();
-        float pitch = observer.getXRot();
-        
         double threshold = arcDegrees / 2.0;
-        boolean result = angleDegrees <= threshold;
-        
-        StevesArmyMod.LOGGER.info("[ArcCheck] {} arc: angle={}°, threshold={}°, result={}, headYaw={}°, bodyYaw={}°, pitch={}°, lookVec=({}, {}, {}), toTarget=({}, {}, {})",
-            arcName, 
-            String.format("%.1f", angleDegrees),
-            String.format("%.1f", threshold),
-            result,
-            String.format("%.1f", headYaw),
-            String.format("%.1f", bodyYaw),
-            String.format("%.1f", pitch),
-            String.format("%.2f", observerLook.x),
-            String.format("%.2f", observerLook.y),
-            String.format("%.2f", observerLook.z),
-            String.format("%.2f", toTarget.x),
-            String.format("%.2f", toTarget.y),
-            String.format("%.2f", toTarget.z));
-        
-        return result;
+        return angleDegrees <= threshold;
     }
     
     public static boolean hasLineOfSight(LivingEntity observer, LivingEntity target) {
+        if (observer.level() != target.level()) return false;
+        
+        long currentTick = observer.tickCount;
+        if (lastCacheClearTick != currentTick) {
+            losCache.clear();
+            lastCacheClearTick = currentTick;
+        }
+        
+        long key = ((long) observer.getId() << 32) | (target.getId() & 0xFFFFFFFFL);
+        
+        return losCache.computeIfAbsent(key, k -> computeHasLineOfSight(observer, target));
+    }
+    
+    private static boolean computeHasLineOfSight(LivingEntity observer, LivingEntity target) {
         Vec3 observerEye = observer.getEyePosition();
         Vec3 targetEye = target.getEyePosition();
         

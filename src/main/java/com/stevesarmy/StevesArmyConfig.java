@@ -22,6 +22,9 @@ public class StevesArmyConfig {
     public static final ForgeConfigSpec.DoubleValue THREAT_SMOOTH_BLEND_FACTOR;
     public static final ForgeConfigSpec.IntValue THREAT_SMOOTH_DECAY_TIME_MS;
     
+    public static final ForgeConfigSpec.BooleanValue TARGET_MONSTERS;
+    public static final ForgeConfigSpec.BooleanValue TARGET_TARGET_ENTITIES;
+    
     static {
         BUILDER.push("aim_quality");
         
@@ -128,6 +131,22 @@ public class StevesArmyConfig {
         
         BUILDER.pop();
         
+        BUILDER.push("targeting");
+        
+        TARGET_MONSTERS = BUILDER
+            .comment("Whether soldiers should target hostile mobs (zombies, skeletons, etc.).",
+                     "Disable for better performance in player vs player combat scenarios.",
+                     "Default: true")
+            .define("targetMonsters", true);
+        
+        TARGET_TARGET_ENTITIES = BUILDER
+            .comment("Whether soldiers should target TargetEntity (practice dummies).",
+                     "Disable for better performance if not using target entities.",
+                     "Default: true")
+            .define("targetTargetEntities", true);
+        
+        BUILDER.pop();
+        
         SPEC = BUILDER.build();
     }
     
@@ -185,5 +204,13 @@ public class StevesArmyConfig {
     
     public static int getThreatSmoothDecayTimeMs() {
         return THREAT_SMOOTH_DECAY_TIME_MS.get();
+    }
+    
+    public static boolean shouldTargetMonsters() {
+        return TARGET_MONSTERS.get();
+    }
+    
+    public static boolean shouldTargetTargetEntities() {
+        return TARGET_TARGET_ENTITIES.get();
     }
 }
