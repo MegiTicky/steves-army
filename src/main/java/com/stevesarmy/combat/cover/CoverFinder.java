@@ -34,6 +34,8 @@ public class CoverFinder {
     
     private static final float HALF_COVER_FIGHTABILITY_BONUS = 0.25f;
     private static final float FULL_COVER_FIGHTABILITY_BONUS = 0.15f;
+    
+    private static final double FOLLOW_MODE_MAX_OWNER_DISTANCE = 15.0;
 
     // Pre-calculate inside-out search pattern to eliminate directional bias
     private static final List<BlockPos> SEARCH_OFFSETS = new ArrayList<>();
@@ -242,10 +244,14 @@ public class CoverFinder {
         Direction threatDir = threatDirection != null && threatDirection.lengthSqr() > 0.001 
             ? getDirectionFromVector(threatDirection) : null;
         
+        Vec3 ownerPos = squadCtx != null ? squadCtx.ownerPosition() : null;
+        double maxOwnerDistSq = FOLLOW_MODE_MAX_OWNER_DISTANCE * FOLLOW_MODE_MAX_OWNER_DISTANCE;
+        
         List<ScoredCover> scored = coverPoints.stream()
             .filter(cp -> includeReserved || CoverReservationManager.isAvailable(cp.getPosition()))
             .filter(cp -> cp.getType() != CoverType.NONE || 
                          (threatDir != null && cp.getProtectedDirections().contains(threatDir)))
+            .filter(cp -> ownerPos == null || cp.getPosition().getCenter().distanceToSqr(ownerPos) <= maxOwnerDistSq)
             .map(cp -> new ScoredCover(cp, cp.getCombatScore()))
             .sorted(Comparator.comparingDouble((ScoredCover s) -> s.score).reversed())
             .collect(java.util.stream.Collectors.toList());

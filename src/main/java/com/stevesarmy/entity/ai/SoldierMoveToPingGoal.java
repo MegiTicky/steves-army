@@ -24,6 +24,7 @@ public class SoldierMoveToPingGoal extends Goal {
     private final double speedModifier;
     private final float closeDistance;
     private int timeToRecalcPath;
+    private boolean isFormationLeader;
 
     public SoldierMoveToPingGoal(SoldierEntity soldier) {
         this.soldier = soldier;
@@ -48,12 +49,20 @@ public class SoldierMoveToPingGoal extends Goal {
         if (!soldier.isAlive()) return false;
         if (!soldier.hasValidPingMoveTarget()) return false;
         
-        return soldier.distanceToSqr(targetPos.getX(), targetPos.getY(), targetPos.getZ()) > (closeDistance * closeDistance);
+        double distSq = soldier.distanceToSqr(targetPos.getX(), targetPos.getY(), targetPos.getZ());
+        if (distSq <= closeDistance * closeDistance) {
+            if (isFormationLeader) {
+                disbandFormation();
+            }
+            return false;
+        }
+        return true;
     }
 
     @Override
     public void start() {
         timeToRecalcPath = 0;
+        isFormationLeader = false;
         BlockPos target = getNavigationTarget();
         if (target != null) {
             boolean ok = soldier.getNavigation().moveTo(target.getX(), target.getY(), target.getZ(), speedModifier);
@@ -67,6 +76,7 @@ public class SoldierMoveToPingGoal extends Goal {
         
         soldier.clearPingMoveTarget();
         targetPos = null;
+        isFormationLeader = false;
         FormationDebugManager.setSoldierData(soldier.getId(), null);
     }
 
@@ -97,6 +107,23 @@ public class SoldierMoveToPingGoal extends Goal {
                 soldier.getNavigation().stop();
             }
         }
+    }
+
+    private void disbandFormation() {
+        UUID squadId = soldier.getSquadId();
+        if (squadId == null || !(soldier.level() instanceof ServerLevel serverLevel)) {
+            return;
+        }
+        
+        SquadManager mgr = SquadManager.get(serverLevel);
+        List<LivingEntity> members = mgr.getSquadMembers(serverLevel, squadId, null);
+        for (LivingEntity member : members) {
+            if (member instanceof SoldierEntity s && s != soldier) {
+                s.clearPingMoveTarget();
+                s.getNavigation().stop();
+            }
+        }
+        StevesArmyMod.LOGGER.info("[PingGoal] Leader arrived at target - disbanded formation for {} soldiers", members.size() - 1);
     }
 
     private BlockPos getNavigationTarget() {
@@ -138,10 +165,12 @@ public class SoldierMoveToPingGoal extends Goal {
             anchor = soldierLeader.blockPosition();
             hasLeader = true;
             leaderId = soldierLeader.getId();
+            isFormationLeader = false;
         } else {
             anchor = targetPos;
             hasLeader = false;
             leaderId = -1;
+            isFormationLeader = true;
         }
 
         BlockPos target;

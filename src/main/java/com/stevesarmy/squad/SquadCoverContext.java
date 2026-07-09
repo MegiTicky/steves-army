@@ -12,7 +12,8 @@ public record SquadCoverContext(
     int squadSize,
     int memberIndex,
     List<BlockPos> occupiedCovers,
-    List<Vec3> squadThreatDirections
+    List<Vec3> squadThreatDirections,
+    Vec3 ownerPosition
 ) {
     public boolean isTooClose(BlockPos pos, double minDist) {
         if (occupiedCovers.isEmpty()) return false;
@@ -39,5 +40,9 @@ public record SquadCoverContext(
 
     public List<Vec3> getSquadThreatDirections() {
         return squadThreatDirections != null ? squadThreatDirections : Collections.emptyList();
+    }
+
+    public Vec3 getOwnerPosition() {
+        return ownerPosition;
     }
 }

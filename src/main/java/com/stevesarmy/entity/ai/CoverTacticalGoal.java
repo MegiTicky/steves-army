@@ -48,6 +48,7 @@ public class CoverTacticalGoal extends Goal {
     private static final long MIN_PEEK_INTERVAL_MS = 2000;
     private static final long MAX_SEEKING_TIME_MS = 10000;
     private static final float LOW_HEALTH_THRESHOLD = 0.3f;
+    private static final float FOLLOW_COVER_DISTANCE = 15.0f;
     
     private static final double FOLLOW_COVER_SEARCH_RADIUS = 15.0D;
     private static final double FOLLOW_REGROUP_DISTANCE = 10.0D;
@@ -315,8 +316,25 @@ public class CoverTacticalGoal extends Goal {
     @Override
     public boolean canContinueToUse() {
         if (!soldier.isAlive()) return false;
-        boolean result = getCoverManager().getState() != CoverBehaviorManager.CoverState.NO_COVER;
-        StevesArmyMod.LOGGER.info("[CoverGoal] canContinueToUse={}, state={}", result, getCoverManager().getState());
+        
+        CoverBehaviorManager.CoverState state = getCoverManager().getState();
+        
+        if (state == CoverBehaviorManager.CoverState.IN_COVER && !getCoverManager().isSuppressed()) {
+            if (soldier.getSquadMode() == SquadMode.FOLLOW) {
+                LivingEntity owner = soldier.getOwner();
+                if (owner != null && soldier.distanceToSqr(owner) > 15 * 15) {
+                    getCoverManager().clearCover();
+                    getCoverManager().resetPeekState();
+                    getPositionController().clear();
+                    cooldown = COOLDOWN_TICKS;
+                    StevesArmyMod.LOGGER.info("[CoverGoal] canContinueToUse=false: FOLLOW mode, not suppressed, far from owner");
+                    return false;
+                }
+            }
+        }
+        
+        boolean result = state != CoverBehaviorManager.CoverState.NO_COVER;
+        StevesArmyMod.LOGGER.info("[CoverGoal] canContinueToUse={}, state={}", result, state);
         return result;
     }
     
@@ -828,6 +846,29 @@ public class CoverTacticalGoal extends Goal {
             boolean hasValid = getCoverManager().getCurrentCover() != null && isCoverStillValid();
             boolean result = !hasValid;
             StevesArmyMod.LOGGER.info("[CoverGoal] shouldSeekCover={} (HOLD mode, hasValidCover={})", result, hasValid);
+            return result;
+        }
+        
+        if (soldier.getSquadMode() == SquadMode.FOLLOW) {
+            boolean suppressed = getCoverManager().isSuppressed();
+            float healthRatio = soldier.getHealth() / soldier.getMaxHealth();
+            boolean lowHealth = healthRatio < LOW_HEALTH_THRESHOLD;
+            
+            LivingEntity owner = soldier.getOwner();
+            boolean closeToOwner = owner != null && 
+                soldier.distanceToSqr(owner) < FOLLOW_COVER_DISTANCE * FOLLOW_COVER_DISTANCE;
+            
+            boolean result;
+            if (closeToOwner) {
+                boolean hasThreat = threats.hasActiveThreat();
+                result = (suppressed || lowHealth) || hasThreat;
+                StevesArmyMod.LOGGER.info("[CoverGoal] shouldSeekCover={} (FOLLOW close, suppressed={}, lowHealth={} health={}, hasThreat={})",
+                    result, suppressed, lowHealth, String.format("%.2f", healthRatio), hasThreat);
+            } else {
+                result = suppressed || lowHealth;
+                StevesArmyMod.LOGGER.info("[CoverGoal] shouldSeekCover={} (FOLLOW far, suppressed={}, lowHealth={} health={})",
+                    result, suppressed, lowHealth, String.format("%.2f", healthRatio));
+            }
             return result;
         }
         
@@ -1581,7 +1622,7 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
         Level level = soldier.level();
         UUID squadId = soldier.getSquadId();
         if (squadId == null || !(level instanceof ServerLevel serverLevel)) {
-            return new SquadCoverContext(false, SquadFormation.NONE, 0, 0, List.of(), List.of());
+            return new SquadCoverContext(false, SquadFormation.NONE, 0, 0, List.of(), List.of(), null);
         }
 
         SquadManager mgr = SquadManager.get(serverLevel);
@@ -1610,6 +1651,14 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
             }
         }
 
-        return new SquadCoverContext(true, formation, squadSize, memberIndex, occupiedCovers, threatDirs);
+        Vec3 ownerPos = null;
+        if (soldier.getSquadMode() == SquadMode.FOLLOW) {
+            LivingEntity owner = soldier.getOwner();
+            if (owner != null) {
+                ownerPos = owner.position();
+            }
+        }
+
+        return new SquadCoverContext(true, formation, squadSize, memberIndex, occupiedCovers, threatDirs, ownerPos);
     }
 }

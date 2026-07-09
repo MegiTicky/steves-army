@@ -31,7 +31,6 @@ public class SoldierFollowOwnerGoal extends Goal {
     private LivingEntity owner;
     private Level level;
     private final double speedModifier;
-    private final float startDistance;
     private final float stopDistance;
     private final float followDistance;
     private int timeToRecalcPath;
@@ -40,7 +39,6 @@ public class SoldierFollowOwnerGoal extends Goal {
         this.soldier = soldier;
         this.level = soldier.level();
         this.speedModifier = 1.2D;
-        this.startDistance = 20.0F;
         this.stopDistance = 10.0F;
         this.followDistance = 15.0F;
         this.setFlags(EnumSet.of(Goal.Flag.MOVE));
@@ -55,12 +53,10 @@ public class SoldierFollowOwnerGoal extends Goal {
         CoverBehaviorManager coverManager = soldier.getCoverBehaviorManager();
         CoverBehaviorManager.CoverState coverState = coverManager.getState();
         if (coverState == CoverBehaviorManager.CoverState.SEEKING_COVER ||
-            coverState == CoverBehaviorManager.CoverState.REPOSITIONING ||
-            coverState == CoverBehaviorManager.CoverState.IN_COVER ||
-            coverState == CoverBehaviorManager.CoverState.SUPPRESSED_IN_COVER) {
+            coverState == CoverBehaviorManager.CoverState.REPOSITIONING) {
             return false;
         }
-
+        
         if (coverManager.isSuppressed()) {
             return false;
         }
@@ -72,9 +68,9 @@ public class SoldierFollowOwnerGoal extends Goal {
         if (owner.isSpectator()) {
             return false;
         }
-        if (soldier.distanceToSqr(owner) < (double)(stopDistance * stopDistance)) {
+        if (soldier.distanceToSqr(owner) < (double)(followDistance * followDistance)) {
             com.stevesarmy.StevesArmyMod.LOGGER.info("[FollowGoal] canUse=false: too close to owner (distSq={} < {})",
-                soldier.distanceToSqr(owner), stopDistance * stopDistance);
+                soldier.distanceToSqr(owner), followDistance * followDistance);
             return false;
         }
         
@@ -93,9 +89,7 @@ public class SoldierFollowOwnerGoal extends Goal {
         CoverBehaviorManager coverManager = soldier.getCoverBehaviorManager();
         CoverBehaviorManager.CoverState coverState = coverManager.getState();
         if (coverState == CoverBehaviorManager.CoverState.SEEKING_COVER ||
-            coverState == CoverBehaviorManager.CoverState.REPOSITIONING ||
-            coverState == CoverBehaviorManager.CoverState.IN_COVER ||
-            coverState == CoverBehaviorManager.CoverState.SUPPRESSED_IN_COVER) {
+            coverState == CoverBehaviorManager.CoverState.REPOSITIONING) {
             return false;
         }
 
