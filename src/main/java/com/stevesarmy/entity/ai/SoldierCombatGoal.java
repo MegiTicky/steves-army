@@ -65,7 +65,7 @@ public class SoldierCombatGoal extends Goal {
     private static final int CQB_PATH_BLOCKED_SWITCH_TICKS = 10;
     private int pathBlockedCounter = 0;
     private int debugSyncTickCounter = 0;
-    private static final int DEBUG_SYNC_INTERVAL = 5;
+    private static final int DEBUG_SYNC_INTERVAL = 20;
     private int targetReevaluateCounter = 0;
     
     private static final int PEEK_CYCLE_LOG_INTERVAL = 100;
@@ -449,7 +449,9 @@ public class SoldierCombatGoal extends Goal {
                 ? CQB_PATH_BLOCKED_SWITCH_TICKS : PATH_BLOCKED_SWITCH_TICKS;
             pathBlockedCounter++;
             if (pathBlockedCounter >= maxBlockedTicks) {
-                StevesArmyMod.LOGGER.info("Path blocked for {} ticks (CQB={}), switching target", pathBlockedCounter, soldier.isCQB() || soldier.hasCloseRangeTarget());
+                if (isDebugLogging()) {
+                    StevesArmyMod.LOGGER.info("Path blocked for {} ticks (CQB={}), switching target", pathBlockedCounter, soldier.isCQB() || soldier.hasCloseRangeTarget());
+                }
                 pathBlockedCounter = 0;
                 if (findNewTarget()) {
                     resetAim(target);
@@ -495,8 +497,10 @@ public class SoldierCombatGoal extends Goal {
                     threatTracker.reportThreatDirect(target);
                     detectionSystem.forceDetect(target);
                     resetAim(target);
-                    StevesArmyMod.LOGGER.info("Switched to better target: {} (higher hit probability)", 
-                        target.getName().getString());
+                    if (isDebugLogging()) {
+                        StevesArmyMod.LOGGER.info("Switched to better target: {} (higher hit probability)", 
+                            target.getName().getString());
+                    }
                     return;
                 }
             }
@@ -522,10 +526,12 @@ public class SoldierCombatGoal extends Goal {
                 float recoilMagnitude = Math.abs(recoil[0]) + Math.abs(recoil[1]);
                 float recoilLoss = recoilMagnitude * StevesArmyConfig.getAimQualityRecoilScale();
                 aimQuality = Math.max(0.0f, aimQuality - recoilLoss);
-                StevesArmyMod.LOGGER.info("[Recoil] pitch={}, yaw={}, magnitude={}, recoilLoss={}, aimQuality={}",
-                    String.format("%.3f", recoil[0]), String.format("%.3f", recoil[1]),
-                    String.format("%.3f", recoilMagnitude), String.format("%.3f", recoilLoss),
-                    String.format("%.3f", aimQuality));
+                if (isDebugLogging()) {
+                    StevesArmyMod.LOGGER.info("[Recoil] pitch={}, yaw={}, magnitude={}, recoilLoss={}, aimQuality={}",
+                        String.format("%.3f", recoil[0]), String.format("%.3f", recoil[1]),
+                        String.format("%.3f", recoilMagnitude), String.format("%.3f", recoilLoss),
+                        String.format("%.3f", aimQuality));
+                }
             }
         }
         

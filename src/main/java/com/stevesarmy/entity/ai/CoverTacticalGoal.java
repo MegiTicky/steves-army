@@ -264,7 +264,9 @@ public class CoverTacticalGoal extends Goal {
         if (!soldier.isAlive()) return false;
         
         if (soldier.hasValidPingMoveTarget()) {
-            StevesArmyMod.LOGGER.info("[CoverGoal] canUse=false: hasValidPingMoveTarget");
+            if (debugLoggingEnabled) {
+                StevesArmyMod.LOGGER.info("[CoverGoal] canUse=false: hasValidPingMoveTarget");
+            }
             return false;
         }
         
@@ -287,7 +289,9 @@ public class CoverTacticalGoal extends Goal {
                 if (cover != null) {
                     double distance = soldier.position().distanceTo(cover.getPosition().getCenter());
                     if (distance > COVER_ABANDON_DISTANCE) {
-                        StevesArmyMod.LOGGER.info("[CoverGoal] canUse=false: cover abandoned (dist={})", distance);
+                        if (debugLoggingEnabled) {
+                            StevesArmyMod.LOGGER.info("[CoverGoal] canUse=false: cover abandoned (dist={})", distance);
+                        }
                         getCoverManager().resetPeekState();
                         getPositionController().clear();
                         getCoverManager().clearCover();
@@ -306,10 +310,12 @@ public class CoverTacticalGoal extends Goal {
                 result = false;
                 break;
         }
-        StevesArmyMod.LOGGER.info("[CoverGoal] canUse={}, state={}, hasThreat={}, suppressed={}, health={}",
-            result, state, getThreats().hasActiveThreat(),
-            getCoverManager().isSuppressed(),
-            String.format("%.2f", soldier.getHealth() / soldier.getMaxHealth()));
+        if (debugLoggingEnabled) {
+            StevesArmyMod.LOGGER.info("[CoverGoal] canUse={}, state={}, hasThreat={}, suppressed={}, health={}",
+                result, state, getThreats().hasActiveThreat(),
+                getCoverManager().isSuppressed(),
+                String.format("%.2f", soldier.getHealth() / soldier.getMaxHealth()));
+        }
         return result;
     }
     
@@ -327,14 +333,18 @@ public class CoverTacticalGoal extends Goal {
                     getCoverManager().resetPeekState();
                     getPositionController().clear();
                     cooldown = COOLDOWN_TICKS;
-                    StevesArmyMod.LOGGER.info("[CoverGoal] canContinueToUse=false: FOLLOW mode, not suppressed, far from owner");
+                    if (debugLoggingEnabled) {
+                        StevesArmyMod.LOGGER.info("[CoverGoal] canContinueToUse=false: FOLLOW mode, not suppressed, far from owner");
+                    }
                     return false;
                 }
             }
         }
         
         boolean result = state != CoverBehaviorManager.CoverState.NO_COVER;
-        StevesArmyMod.LOGGER.info("[CoverGoal] canContinueToUse={}, state={}", result, state);
+        if (debugLoggingEnabled) {
+            StevesArmyMod.LOGGER.info("[CoverGoal] canContinueToUse={}, state={}", result, state);
+        }
         return result;
     }
     

@@ -51,8 +51,10 @@ public class SuppressionTracker {
         lastSuppressionTime = now;
         nearMissCount++;
 
-        StevesArmyMod.LOGGER.info("[Suppression] Soldier {} near miss: dist=" + String.format("%.1f", distance) + ", speedMult=" + String.format("%.2f", speedMultiplier) + ", burstMult=" + String.format("%.2f", burstMultiplier) + ", +" + String.format("%.2f", add) + " sup -> " + String.format("%.2f", suppressionLevel),
-            soldier.getId());
+        if (debugLog()) {
+            StevesArmyMod.LOGGER.info("[Suppression] Soldier {} near miss: dist=" + String.format("%.1f", distance) + ", speedMult=" + String.format("%.2f", speedMultiplier) + ", burstMult=" + String.format("%.2f", burstMultiplier) + ", +" + String.format("%.2f", add) + " sup -> " + String.format("%.2f", suppressionLevel),
+                soldier.getId());
+        }
     }
 
     public void onIncomingFire(LivingEntity shooter) {
@@ -66,8 +68,10 @@ public class SuppressionTracker {
         if (suppressionLevel > peakSuppression) peakSuppression = suppressionLevel;
         lastSuppressionTime = System.currentTimeMillis();
 
-        StevesArmyMod.LOGGER.info("[Suppression] incoming fire from {}: speedMult=" + String.format("%.2f", speedMultiplier) + ", +" + String.format("%.2f", add) + " sup -> " + String.format("%.2f", suppressionLevel),
-            shooter.getName().getString());
+        if (debugLog()) {
+            StevesArmyMod.LOGGER.info("[Suppression] incoming fire from {}: speedMult=" + String.format("%.2f", speedMultiplier) + ", +" + String.format("%.2f", add) + " sup -> " + String.format("%.2f", suppressionLevel),
+                shooter.getName().getString());
+        }
     }
 
     public void onTakeDamage() {
@@ -76,7 +80,9 @@ public class SuppressionTracker {
         if (suppressionLevel > peakSuppression) peakSuppression = suppressionLevel;
         lastSuppressionTime = System.currentTimeMillis();
 
-        StevesArmyMod.LOGGER.info("[Suppression] took damage: +" + String.format("%.2f", add) + " sup -> " + String.format("%.2f", suppressionLevel));
+        if (debugLog()) {
+            StevesArmyMod.LOGGER.info("[Suppression] took damage: +" + String.format("%.2f", add) + " sup -> " + String.format("%.2f", suppressionLevel));
+        }
     }
 
     public void tick(boolean inCover) {
@@ -100,7 +106,7 @@ public class SuppressionTracker {
     }
 
     public void reset() {
-        if (suppressionLevel > 0.01f) {
+        if (suppressionLevel > 0.01f && debugLog()) {
             StevesArmyMod.LOGGER.info("[Suppression] Soldier reset: " + String.format("%.2f", suppressionLevel) + " -> 0.0");
         }
         suppressionLevel = 0.0f;
