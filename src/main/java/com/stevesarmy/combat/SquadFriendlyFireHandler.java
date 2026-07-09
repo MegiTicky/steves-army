@@ -32,24 +32,23 @@ public class SquadFriendlyFireHandler {
                     return;
                 }
             }
-            return;
         }
         
-        if (!StevesArmyConfig.getSquadFriendlyFire()) return;
-        
-        if (attacker instanceof SoldierEntity attackerSoldier) {
-            if (attackerSoldier.isFriendlyTo(victim)) {
-                event.setCanceled(true);
-                debugLog(attacker, victim, "squad protection");
-                return;
+        if (StevesArmyConfig.getSquadFriendlyFire()) {
+            if (attacker instanceof SoldierEntity attackerSoldier) {
+                if (attackerSoldier.isFriendlyTo(victim)) {
+                    event.setCanceled(true);
+                    debugLog(attacker, victim, "squad protection");
+                    return;
+                }
             }
-        }
-        
-        if (victim instanceof SoldierEntity victimSoldier) {
-            if (victimSoldier.isFriendlyTo(attacker)) {
-                event.setCanceled(true);
-                debugLog(attacker, victim, "squad protection");
-                return;
+            
+            if (victim instanceof SoldierEntity victimSoldier) {
+                if (victimSoldier.isFriendlyTo(attacker)) {
+                    event.setCanceled(true);
+                    debugLog(attacker, victim, "squad protection");
+                    return;
+                }
             }
         }
     }

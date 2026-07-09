@@ -43,6 +43,11 @@ public class SoldierRenderer extends HumanoidMobRenderer<SoldierEntity, SoldierM
     }
 
     @Override
+    protected void scale(SoldierEntity entity, PoseStack poseStack, float partialTick) {
+        poseStack.scale(0.9375F, 0.9375F, 0.9375F);
+    }
+
+    @Override
     protected void setupRotations(SoldierEntity soldier, PoseStack poseStack, float ageInTicks, float bodyYaw, float partialTick) {
         float swim = soldier.getSwimAmount(partialTick);
         if (swim > 0.001F && soldier.isAlive()) {

@@ -436,6 +436,13 @@ public class SoldierEntity extends PathfinderMob implements Container {
     }
 
     @Override
+    public boolean isAlliedTo(Entity other) {
+        LivingEntity owner = getOwner();
+        if (owner != null && owner.isAlliedTo(other)) return true;
+        return super.isAlliedTo(other);
+    }
+
+    @Override
     public boolean canAttack(LivingEntity target) {
         if (target instanceof SoldierEntity soldier && soldier.getOwnerUUID().equals(this.getOwnerUUID())) {
             return false;
@@ -443,6 +450,15 @@ public class SoldierEntity extends PathfinderMob implements Container {
         LivingEntity owner = getOwner();
         if (owner != null && target == owner) {
             return false;
+        }
+        if (owner != null && target instanceof Player targetPlayer && owner.isAlliedTo(targetPlayer)) {
+            return false;
+        }
+        if (target instanceof SoldierEntity targetSoldier) {
+            LivingEntity targetOwner = targetSoldier.getOwner();
+            if (owner != null && targetOwner != null && owner.isAlliedTo(targetOwner)) {
+                return false;
+            }
         }
         return super.canAttack(target);
     }
@@ -456,14 +472,19 @@ public class SoldierEntity extends PathfinderMob implements Container {
         Optional<UUID> myOwner = getOwnerUUID();
         if (myOwner.isPresent()) {
             if (other instanceof Player otherPlayer) {
-                return otherPlayer.getUUID().equals(myOwner.get());
+                if (otherPlayer.getUUID().equals(myOwner.get())) return true;
+                if (owner != null && owner.isAlliedTo(otherPlayer)) return true;
             }
         }
         
         if (other instanceof SoldierEntity otherSoldier) {
             Optional<UUID> theirOwner = otherSoldier.getOwnerUUID();
-            return myOwner.isPresent() && theirOwner.isPresent() 
-                && myOwner.get().equals(theirOwner.get());
+            if (myOwner.isPresent() && theirOwner.isPresent() 
+                && myOwner.get().equals(theirOwner.get())) return true;
+            if (owner != null) {
+                LivingEntity theirOwnerEntity = otherSoldier.getOwner();
+                if (theirOwnerEntity != null && owner.isAlliedTo(theirOwnerEntity)) return true;
+            }
         }
         
         return false;
@@ -626,9 +647,19 @@ public class SoldierEntity extends PathfinderMob implements Container {
 
         // Enforce correct pose every tick on BOTH Client and Server to fight vanilla overrides
         if (entityData.get(LOW_CROUCHING)) {
-            if (this.getPose() != Pose.SWIMMING) {
-                this.setPose(Pose.SWIMMING);
-                this.refreshDimensions();
+            // If no longer suppressed, clear LOW_CROUCHING and stand up
+            if (!coverBehaviorManager.isSuppressed()) {
+                setLowCrouching(false);
+                if (this.getPose() != Pose.CROUCHING && this.getPose() != Pose.STANDING) {
+                    this.setPose(Pose.STANDING);
+                    this.refreshDimensions();
+                }
+            } else {
+                // Still suppressed → enforce SWIMMING
+                if (this.getPose() != Pose.SWIMMING) {
+                    this.setPose(Pose.SWIMMING);
+                    this.refreshDimensions();
+                }
             }
         } else {
             // Read synced data so the client knows what the server is doing
@@ -671,6 +702,9 @@ public class SoldierEntity extends PathfinderMob implements Container {
         if (entityData.get(LOW_CROUCHING)) {
             return EntityDimensions.scalable(0.6F, 0.6F);
         }
+        if (pose == Pose.CROUCHING) {
+            return EntityDimensions.scalable(0.6F, 1.5F);
+        }
         return super.getDimensions(pose);
     }
 
@@ -678,6 +712,9 @@ public class SoldierEntity extends PathfinderMob implements Container {
     protected float getStandingEyeHeight(Pose pose, EntityDimensions dimensions) {
         if (entityData.get(LOW_CROUCHING)) {
             return 0.4F;
+        }
+        if (pose == Pose.CROUCHING) {
+            return 1.27F;
         }
         return super.getStandingEyeHeight(pose, dimensions);
     }

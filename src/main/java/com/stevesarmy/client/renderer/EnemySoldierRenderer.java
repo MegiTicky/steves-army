@@ -4,11 +4,13 @@ import com.mojang.blaze3d.vertex.PoseStack;
 import com.stevesarmy.entity.EnemySoldierEntity;
 import net.minecraft.client.model.HumanoidModel;
 import net.minecraft.client.model.geom.ModelLayers;
+import net.minecraft.client.renderer.MultiBufferSource;
 import net.minecraft.client.renderer.entity.EntityRendererProvider;
 import net.minecraft.client.renderer.entity.HumanoidMobRenderer;
 import net.minecraft.client.renderer.entity.layers.HumanoidArmorLayer;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.util.Mth;
+import net.minecraft.world.phys.Vec3;
 import org.joml.Quaternionf;
 
 public class EnemySoldierRenderer extends HumanoidMobRenderer<EnemySoldierEntity, HumanoidModel<EnemySoldierEntity>> {
@@ -25,6 +27,23 @@ public class EnemySoldierRenderer extends HumanoidMobRenderer<EnemySoldierEntity
     @Override
     public ResourceLocation getTextureLocation(EnemySoldierEntity entity) {
         return TEXTURE;
+    }
+
+    @Override
+    public void render(EnemySoldierEntity soldier, float entityYaw, float partialTick, 
+                       PoseStack poseStack, MultiBufferSource bufferSource, int packedLight) {
+        this.model.crouching = soldier.isCrouching();
+        super.render(soldier, entityYaw, partialTick, poseStack, bufferSource, packedLight);
+    }
+
+    @Override
+    public Vec3 getRenderOffset(EnemySoldierEntity soldier, float partialTick) {
+        return soldier.isCrouching() ? new Vec3(0.0D, -0.125D, 0.0D) : super.getRenderOffset(soldier, partialTick);
+    }
+
+    @Override
+    protected void scale(EnemySoldierEntity entity, PoseStack poseStack, float partialTick) {
+        poseStack.scale(0.9375F, 0.9375F, 0.9375F);
     }
 
     @Override
