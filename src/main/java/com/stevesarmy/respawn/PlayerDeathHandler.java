@@ -1,6 +1,7 @@
 package com.stevesarmy.respawn;
 
 import com.stevesarmy.StevesArmyMod;
+import com.stevesarmy.compat.PlayerReviveCompat;
 import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.squad.SquadData;
 import com.stevesarmy.squad.SquadManager;
@@ -22,8 +23,16 @@ public class PlayerDeathHandler {
     
     private static final ConcurrentHashMap<UUID, RespawnData> pendingRespawns = new ConcurrentHashMap<>();
     
-    @SubscribeEvent(priority = EventPriority.HIGHEST)
+    @SubscribeEvent(priority = EventPriority.LOW)
     public static void onPlayerDeath(LivingDeathEvent event) {
+        StevesArmyMod.LOGGER.info("[Respawn DEBUG] LOW handler fired, isCanceled={}, entity={}", 
+            event.isCanceled(), event.getEntity().getName().getString());
+        
+        if (event.isCanceled()) {
+            StevesArmyMod.LOGGER.info("[Respawn DEBUG] LOW: Event cancelled, returning");
+            return;
+        }
+        
         if (event.getEntity() instanceof SoldierEntity soldier && !soldier.level().isClientSide()) {
             if (soldier.level() instanceof ServerLevel serverLevel) {
                 SquadManager.get(serverLevel).removeMemberFromSquad(soldier.getUUID());
@@ -40,6 +49,47 @@ public class PlayerDeathHandler {
             return;
         }
         
+        boolean isBleeding = PlayerReviveCompat.isPlayerBleeding(player);
+        StevesArmyMod.LOGGER.info("[Respawn DEBUG] LOW: isPlayerBleeding={}", isBleeding);
+        
+        if (isBleeding) {
+            StevesArmyMod.LOGGER.info("[Respawn] Player {} is downed (PlayerRevive), deferring respawn decision", player.getName().getString());
+            return;
+        }
+        
+        StevesArmyMod.LOGGER.info("[Respawn DEBUG] LOW: Proceeding with soldier respawn");
+        initiateSoldierRespawn(player);
+    }
+    
+    @SubscribeEvent(priority = EventPriority.LOWEST)
+    public static void onPlayerDelayedDeath(LivingDeathEvent event) {
+        StevesArmyMod.LOGGER.info("[Respawn DEBUG] LOWEST handler fired, isCanceled={}, entity={}", 
+            event.isCanceled(), event.getEntity().getName().getString());
+        
+        if (!(event.getEntity() instanceof ServerPlayer player)) {
+            return;
+        }
+        if (player.level().isClientSide()) {
+            return;
+        }
+        if (event.isCanceled()) {
+            StevesArmyMod.LOGGER.info("[Respawn DEBUG] LOWEST: Event cancelled, returning");
+            return;
+        }
+        
+        boolean isBleeding = PlayerReviveCompat.isPlayerBleeding(player);
+        StevesArmyMod.LOGGER.info("[Respawn DEBUG] LOWEST: isPlayerBleeding={}", isBleeding);
+        
+        if (!isBleeding) {
+            StevesArmyMod.LOGGER.info("[Respawn DEBUG] LOWEST: Player not bleeding, returning");
+            return;
+        }
+        
+        StevesArmyMod.LOGGER.info("[Respawn] Player {} bled out/gave up (PlayerRevive), proceeding with soldier respawn", player.getName().getString());
+        initiateSoldierRespawn(player);
+    }
+    
+    private static void initiateSoldierRespawn(ServerPlayer player) {
         ServerLevel level = player.serverLevel();
         SquadManager squadManager = SquadManager.get(level);
         
