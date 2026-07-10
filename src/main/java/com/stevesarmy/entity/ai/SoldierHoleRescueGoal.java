@@ -28,6 +28,18 @@ public class SoldierHoleRescueGoal extends Goal {
         if (!soldier.isAlive()) return false;
         if (soldier.level().isClientSide) return false;
         if (cooldownTicks > 0) return false;
+        
+        // Don't rescue if in cover - soldier is intentionally holding position
+        if (soldier.getCoverBehaviorManager().isInCover()) return false;
+        
+        // Don't rescue if has active target (in combat)
+        if (soldier.getTarget() != null && soldier.getTarget().isAlive()) return false;
+        
+        // Don't rescue if suppressing
+        if (soldier.hasValidPingSuppressPos()) return false;
+        
+        // Check if actually stuck in a hole
+        if (!isInHole()) return false;
 
         BlockPos current = soldier.blockPosition();
         if (current.equals(lastBlockPos)) {
@@ -57,6 +69,33 @@ public class SoldierHoleRescueGoal extends Goal {
         }
     }
 
+    private boolean isInHole() {
+        BlockPos pos = soldier.blockPosition();
+        Level level = soldier.level();
+        
+        // Check if surrounded by solid blocks on all horizontal sides
+        int solidWalls = 0;
+        for (Direction dir : Direction.Plane.HORIZONTAL) {
+            BlockState adjacent = level.getBlockState(pos.relative(dir));
+            if (adjacent.isSolid() && adjacent.isCollisionShapeFullBlock(level, pos.relative(dir))) {
+                solidWalls++;
+            }
+        }
+        
+        // If surrounded by 3+ solid walls, likely in a hole
+        if (solidWalls >= 3) return true;
+        
+        // Check if can't jump out (no space above or ceiling)
+        BlockState above = level.getBlockState(pos.above());
+        BlockState above2 = level.getBlockState(pos.above(2));
+        
+        boolean hasCeiling = !above.isAir() || !above2.isAir();
+        boolean feetBlocked = !level.getBlockState(pos.below()).isSolid();
+        
+        // In a hole if has walls + can't jump out
+        return solidWalls >= 2 && hasCeiling && feetBlocked;
+    }
+    
     private boolean hasSurfaceExit() {
         BlockPos surfaceLevel = soldier.blockPosition().above(2);
         Level level = soldier.level();
