@@ -14,7 +14,6 @@ import net.minecraft.network.chat.Component;
 import org.joml.Matrix4f;
 
 public class PingWheelRenderer {
-    private static final int SECTOR_SIZE = 60;
     private static final int INNER_RADIUS = 30;
     private static final int OUTER_RADIUS = 80;
     private static final int LABEL_RADIUS = 70;
@@ -43,25 +42,27 @@ public class PingWheelRenderer {
         RenderSystem.disableDepthTest();
         
         int numTypes = PingType.values().length;
+        int sectorSize = 360 / numTypes;
+        
         for (int i = 0; i < numTypes; i++) {
             PingType type = PingType.values()[i];
             boolean isHovered = type == hoveredType;
-            int startAngle = i * SECTOR_SIZE;
+            int startAngle = i * sectorSize;
             
             int color = type.getColor();
             int alpha = isHovered ? 180 : 80;
             int renderColor = (alpha << 24) | (color & 0x00FFFFFF);
             
-            drawSector(guiGraphics.pose(), centerX, centerY, INNER_RADIUS, OUTER_RADIUS, startAngle, SECTOR_SIZE, renderColor);
+            drawSector(guiGraphics.pose(), centerX, centerY, INNER_RADIUS, OUTER_RADIUS, startAngle, sectorSize, renderColor);
         }
         
         for (int i = 0; i < numTypes; i++) {
             PingType type = PingType.values()[i];
             boolean isHovered = type == hoveredType;
-            int startAngle = i * SECTOR_SIZE;
+            int startAngle = i * sectorSize;
             
             String label = Component.translatable(type.getTranslationKey()).getString();
-            double labelRad = Math.toRadians(startAngle + SECTOR_SIZE / 2 - 90);
+            double labelRad = Math.toRadians(startAngle + sectorSize / 2 - 90);
             int labelX = centerX + (int) (Math.cos(labelRad) * LABEL_RADIUS);
             int labelY = centerY + (int) (Math.sin(labelRad) * LABEL_RADIUS);
             

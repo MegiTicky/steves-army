@@ -11,6 +11,7 @@ import com.stevesarmy.combat.TargetAcquisition;
 import com.stevesarmy.combat.ThreatAwareness;
 import com.stevesarmy.combat.ThreatTracker;
 import com.stevesarmy.combat.cover.CoverBehaviorManager;
+import com.stevesarmy.combat.cover.CoverFinder;
 import com.stevesarmy.combat.cover.CoverPoint;
 import com.stevesarmy.combat.cover.CoverType;
 import com.stevesarmy.entity.SoldierEntity;
@@ -78,13 +79,19 @@ public class SoldierCombatGoal extends Goal {
     private UUID suppressionTargetUUID = null;
     private SquadThreatIntel.ThreatKnowledge pendingSuppressionThreat = null;
     private static final float SUPPRESSION_ADS_THRESHOLD = 0.5f;
-    private static final double SUPPRESSION_MAX_RANGE = 30.0;
+    private static final double SUPPRESSION_MAX_RANGE = 128.0;
     private static final long STALE_TIMEOUT_TICKS = 60;
     private static final int SUPPRESSION_MIN_DURATION_TICKS = 100;  // 5 seconds
     private static final int SUPPRESSION_MAX_DURATION_TICKS = 160;  // 8 seconds
     private static final double SUPPRESSION_LOS_TOLERANCE = 2.0;  // blocks
     private int suppressionDurationTicks = 0;
     private int suppressionRemainingTicks = 0;
+    
+    private boolean isPingSuppressing = false;
+    private int pingSuppressDurationTicks = 0;
+    private int pingSuppressRemainingTicks = 0;
+    private static final int PING_SUPPRESS_MIN_DURATION_TICKS = 80;   // 4 seconds
+    private static final int PING_SUPPRESS_MAX_DURATION_TICKS = 200; // 10 seconds
     
     private List<LivingEntity> cachedPotentialTargets = null;
     private long cachedPotentialTargetsTick = -1;
@@ -94,11 +101,13 @@ public class SoldierCombatGoal extends Goal {
     private UUID cachedAimPointTargetUUID = null;
 
     private static final int BURST_SHOTS_TARGET = 3;
-    private static final float BURST_INTERVAL_SECONDS = 0.8f;
+    private static final float BURST_INTERVAL_RIFLE_SECONDS = 0.8f;
+    private static final float BURST_INTERVAL_MG_SECONDS = 0.35f;
     private int burstShotsFired = 0;
     private int burstCooldownTicks = 0;
     private int ticksSinceLastBurstShot = 0;
     private boolean burstWaitingForBolt = false;
+    private int burstInitialDelayTicks = 0;
 
     public static void setDebugLoggingEnabled(boolean enabled) {
         combatDebugLogging = enabled;
@@ -180,6 +189,10 @@ public class SoldierCombatGoal extends Goal {
             if (GunIntegration.getCurrentAmmo(soldier) == 0) {
                 return true;
             }
+        }
+        
+        if (soldier.hasValidPingSuppressPos()) {
+            return true;
         }
         
         return false;
@@ -317,7 +330,18 @@ public class SoldierCombatGoal extends Goal {
             if (inCover) {
                 tickCoverPeekCycle(coverManager);
             }
-            updateDebugSync();
+            
+            if (hasGun && shouldSuppressPingTarget()) {
+                trySuppressPingFire();
+            } else {
+                isPingSuppressing = false;
+            }
+            
+            if (isPingSuppressing) {
+                updateDebugSync();
+            } else {
+                updateDebugSync();
+            }
         }
         
         debugSyncTickCounter++;
@@ -356,21 +380,8 @@ public class SoldierCombatGoal extends Goal {
     private void tickCombat(boolean hasGun) {
         boolean canSee = TargetAcquisition.hasLineOfSight(soldier, target);
         
-        if (canSee && isSuppressing) {
-            StevesArmyMod.LOGGER.info("[Suppression] Soldier {} gained LOS to primary target, releasing suppression",
-                soldier.getId());
-            SquadThreatIntel intel = getSquadIntel();
-            if (intel != null && suppressionTargetUUID != null) {
-                intel.clearThreatSuppression(suppressionTargetUUID);
-            }
-            suppressionTargetUUID = null;
-            suppressionTargetPos = null;
-            pendingSuppressionThreat = null;
-            isSuppressing = false;
-            resetBurstState();
-        }
-        
         if (canSee) {
+            cancelAllSuppression();
             threatTracker.reportThreatDirect(target);
             resetAim(target);
         }
@@ -394,13 +405,15 @@ public class SoldierCombatGoal extends Goal {
         if (hasGun) {
             boolean shouldShoot = canSee;
             if (shouldShoot) {
-                isSuppressing = false;
                 tickGunCombat();
             } else if (shouldSuppressTarget()) {
                 isSuppressing = true;
                 trySuppressireFire();
+            } else if (shouldSuppressPingTarget()) {
+                trySuppressPingFire();
             } else {
                 isSuppressing = false;
+                isPingSuppressing = false;
             }
         }
         
@@ -410,6 +423,27 @@ public class SoldierCombatGoal extends Goal {
                 soldier.getNavigation().moveTo(target, 1.0);
             }
         }
+    }
+    
+    private void cancelAllSuppression() {
+        if (isSuppressing) {
+            SquadThreatIntel intel = getSquadIntel();
+            if (intel != null && suppressionTargetUUID != null) {
+                intel.clearThreatSuppression(suppressionTargetUUID);
+            }
+            suppressionTargetUUID = null;
+            suppressionTargetPos = null;
+            pendingSuppressionThreat = null;
+            isSuppressing = false;
+        }
+        
+        if (isPingSuppressing || soldier.hasValidPingSuppressPos()) {
+            soldier.clearPingSuppressPos();
+            isPingSuppressing = false;
+            pingSuppressRemainingTicks = 0;
+        }
+        
+        resetBurstState();
     }
 
     private void tickGunCombat() {
@@ -1296,13 +1330,17 @@ private void tickCoverPeekCycle(CoverBehaviorManager coverManager) {
         
         return Math.max(1, baseTicks);
     }
+    
+    private float getBurstIntervalSeconds() {
+        return GunIntegration.isMachineGun(soldier) ? BURST_INTERVAL_MG_SECONDS : BURST_INTERVAL_RIFLE_SECONDS;
+    }
 
     private void resetBurstState() {
         burstShotsFired = 0;
         burstCooldownTicks = 0;
         ticksSinceLastBurstShot = 0;
         burstWaitingForBolt = false;
-        suppressionRemainingTicks = 0;
+        burstInitialDelayTicks = 0;
     }
 
     private void trySuppressireFire() {
@@ -1434,9 +1472,10 @@ private void tickCoverPeekCycle(CoverBehaviorManager coverManager) {
                 aimQuality = Math.max(0.0f, aimQuality - recoilMagnitude * StevesArmyConfig.getAimQualityRecoilScale());
                 
                 if (burstShotsFired >= BURST_SHOTS_TARGET) {
+                    float burstInterval = getBurstIntervalSeconds();
                     StevesArmyMod.LOGGER.info("[Suppression] Soldier {} burst complete, starting cooldown ({}s)", 
-                        soldier.getId(), BURST_INTERVAL_SECONDS);
-                    burstCooldownTicks = (int) (BURST_INTERVAL_SECONDS * 20);
+                        soldier.getId(), burstInterval);
+                    burstCooldownTicks = (int) (burstInterval * 20);
                     burstShotsFired = 0;
                 }
             }
@@ -1492,5 +1531,198 @@ private void tickCoverPeekCycle(CoverBehaviorManager coverManager) {
         
         ExposureCalculator.AimPointResult aimPoint = getOrComputeAimPoint();
         return aimPoint != null && aimPoint.canShoot();
+    }
+    
+    private boolean shouldSuppressPingTarget() {
+        if (!soldier.hasValidPingSuppressPos()) {
+            StevesArmyMod.LOGGER.info("[SuppressPing] Soldier {} shouldSuppressPingTarget: no valid ping suppress pos", soldier.getId());
+            return false;
+        }
+        
+        if (GunIntegration.isReloading(soldier) ||
+            GunIntegration.isBolting(soldier) ||
+            GunIntegration.isDrawing(soldier)) {
+            StevesArmyMod.LOGGER.info("[SuppressPing] Soldier {} shouldSuppressPingTarget: busy (reloading/bolting/drawing)", soldier.getId());
+            return false;
+        }
+        
+        if (!GunIntegration.isTaczLoaded() || !GunIntegration.hasGun(soldier)) {
+            StevesArmyMod.LOGGER.info("[SuppressPing] Soldier {} shouldSuppressPingTarget: no gun", soldier.getId());
+            return false;
+        }
+        
+        int totalAmmo = getTotalAmmo();
+        if (totalAmmo == 0) {
+            StevesArmyMod.LOGGER.info("[SuppressPing] Soldier {} shouldSuppressPingTarget: no ammo", soldier.getId());
+            return false;
+        }
+        
+        BlockPos suppressPos = soldier.getPingSuppressPos();
+        double dist = soldier.position().distanceTo(suppressPos.getCenter());
+        if (dist > SUPPRESSION_MAX_RANGE) {
+            StevesArmyMod.LOGGER.info("[SuppressPing] Soldier {} shouldSuppressPingTarget: too far (dist={}, max={})",
+                soldier.getId(), String.format("%.1f", dist), SUPPRESSION_MAX_RANGE);
+            return false;
+        }
+        
+        if (soldier.getSuppressionAimPoints().isEmpty()) {
+            CoverFinder finder = new CoverFinder(soldier.level());
+            List<Vec3> aimPoints = finder.findSuppressionAimPoints(
+                soldier, suppressPos, SoldierEntity.SUPPRESSION_ZONE_RADIUS);
+            soldier.setSuppressionAimPoints(aimPoints);
+            
+            StevesArmyMod.LOGGER.info("[SuppressPing] Soldier {} found {} aim points in zone",
+                soldier.getId(), aimPoints.size());
+            
+            if (aimPoints.isEmpty()) {
+                StevesArmyMod.LOGGER.info("[SuppressPing] Soldier {} no aim points found, will use horizontal spread fallback",
+                    soldier.getId());
+                return true;
+            }
+        }
+        
+        return true;
+    }
+    
+    private int getTotalAmmo() {
+        int magazineAmmo = GunIntegration.getCurrentAmmo(soldier);
+        int inventoryAmmo = 0;
+        
+        com.stevesarmy.inventory.SoldierInventory inv = soldier.getSoldierInventory();
+        if (inv != null) {
+            String ammoId = GunIntegration.getAmmoId(soldier);
+            if (ammoId != null && !ammoId.isEmpty()) {
+                for (int i = com.stevesarmy.inventory.SoldierInventory.SLOT_GENERAL_START; 
+                     i < com.stevesarmy.inventory.SoldierInventory.INVENTORY_SIZE; i++) {
+                    ItemStack stack = inv.getItem(i);
+                    if (!stack.isEmpty() && stack.getItem().getDescriptionId().contains(ammoId)) {
+                        inventoryAmmo += stack.getCount();
+                    }
+                }
+            }
+        }
+        
+        return magazineAmmo + inventoryAmmo;
+    }
+    
+    private void trySuppressPingFire() {
+        if (pingSuppressRemainingTicks <= 0 && soldier.hasValidPingSuppressPos()) {
+            isPingSuppressing = true;
+            pingSuppressDurationTicks = PING_SUPPRESS_MIN_DURATION_TICKS +
+                soldier.level().random.nextInt(PING_SUPPRESS_MAX_DURATION_TICKS - PING_SUPPRESS_MIN_DURATION_TICKS);
+            pingSuppressRemainingTicks = pingSuppressDurationTicks;
+            resetBurstState();
+            
+            // Add random initial delay to stagger burst timing across soldiers
+            burstInitialDelayTicks = soldier.level().random.nextInt(40); // 0-2 seconds
+            
+            boolean isMG = GunIntegration.isMachineGun(soldier);
+            StevesArmyMod.LOGGER.info("[SuppressPing] Soldier {} starting suppression at {} (duration={}s, isMG={}, initialDelay={}ticks)",
+                soldier.getId(), soldier.getPingSuppressPos(), pingSuppressDurationTicks / 20.0, isMG, burstInitialDelayTicks);
+        }
+        
+        pingSuppressRemainingTicks--;
+        if (pingSuppressRemainingTicks <= 0 || !soldier.hasValidPingSuppressPos()) {
+            StevesArmyMod.LOGGER.info("[SuppressPing] Soldier {} finished suppression", soldier.getId());
+            soldier.clearPingSuppressPos();
+            isPingSuppressing = false;
+            pingSuppressRemainingTicks = 0;
+            resetBurstState();
+            return;
+        }
+        
+        CoverBehaviorManager coverManager = soldier.getCoverBehaviorManager();
+        if (coverManager.isInCover()) {
+            PeekController.State peekState = soldier.getPeekController().getState();
+            if (peekState != PeekController.State.EXPOSED) {
+                if (isDebugLogging() && pingSuppressRemainingTicks % 20 == 0) {
+                    StevesArmyMod.LOGGER.info("[SuppressPing] Soldier {} waiting for peek (state={}, remaining={}ticks)",
+                        soldier.getId(), peekState, pingSuppressRemainingTicks);
+                }
+                return;
+            }
+        }
+        
+        Vec3 aimPoint = soldier.getNextSuppressionAimPoint();
+        if (aimPoint == null) {
+            aimPoint = soldier.getHorizontalSpreadFallbackTarget(soldier.getPingSuppressPos());
+        }
+        
+        float aimInaccuracy = GunIntegration.getAimInaccuracy(soldier);
+        Vec3 finalTarget = calculateSuppressionSpread(aimPoint, aimInaccuracy);
+        
+        soldier.getLookControl().setLookAt(finalTarget.x, finalTarget.y, finalTarget.z, 30.0F, 30.0F);
+        GunIntegration.aim(soldier, true);
+        wasAiming = true;
+        
+        float adsProgress = GunIntegration.getAimProgress(soldier);
+        if (adsProgress < SUPPRESSION_ADS_THRESHOLD) {
+            return;
+        }
+        
+        // Apply initial delay before first burst
+        if (burstInitialDelayTicks > 0) {
+            burstInitialDelayTicks--;
+            return;
+        }
+        
+        if (burstCooldownTicks > 0) {
+            burstCooldownTicks--;
+            return;
+        }
+        
+        if (burstWaitingForBolt && GunIntegration.isBolting(soldier)) {
+            return;
+        }
+        burstWaitingForBolt = false;
+        
+        int ticksBetweenShots = getTicksBetweenBurstShots();
+        if (burstShotsFired > 0 && burstShotsFired < BURST_SHOTS_TARGET) {
+            ticksSinceLastBurstShot++;
+            if (ticksSinceLastBurstShot < ticksBetweenShots) {
+                return;
+            }
+        }
+        
+        GunIntegration.ShootResult result = GunIntegration.shootAtPosition(soldier, finalTarget);
+        
+        StevesArmyMod.LOGGER.info("[SuppressPing] Soldier {} SHOT burst {}/{} result={}",
+            soldier.getId(), burstShotsFired + 1, BURST_SHOTS_TARGET, result);
+        
+        switch (result) {
+            case SUCCESS -> {
+                burstShotsFired++;
+                ticksSinceLastBurstShot = 0;
+                
+                if (soldier.getCoverBehaviorManager().isInCover()) {
+                    soldier.getCoverBehaviorManager().onPeekShot();
+                }
+                float[] recoil = AimAccuracyManager.getGunRecoil(soldier);
+                float recoilMagnitude = Math.abs(recoil[0]) + Math.abs(recoil[1]);
+                aimQuality = Math.max(0.0f, aimQuality - recoilMagnitude * StevesArmyConfig.getAimQualityRecoilScale());
+                
+                if (burstShotsFired >= BURST_SHOTS_TARGET) {
+                    float burstInterval = getBurstIntervalSeconds();
+                    StevesArmyMod.LOGGER.info("[SuppressPing] Soldier {} burst complete, starting cooldown ({}s)",
+                        soldier.getId(), burstInterval);
+                    burstCooldownTicks = (int) (burstInterval * 20);
+                    burstShotsFired = 0;
+                }
+            }
+            case NEED_BOLT -> {
+                GunIntegration.bolt(soldier);
+                burstWaitingForBolt = true;
+            }
+            case NO_AMMO -> {
+                GunIntegration.reload(soldier);
+            }
+            case IS_RELOADING, IS_BOLTING, IS_DRAWING -> {}
+            case NOT_DRAWN -> GunIntegration.draw(soldier);
+            default -> {}
+        }
+    }
+    
+    public void forceRestartPingSuppression() {
+        this.pingSuppressRemainingTicks = 0;
     }
 }

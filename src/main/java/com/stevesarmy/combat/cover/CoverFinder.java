@@ -967,4 +967,46 @@ return qualityScore + shootBonus - distancePenalty;
         player.createCommandSourceStack().sendSuccess(() -> 
             net.minecraft.network.chat.Component.literal("   Unknown reason - appears valid"), false);
     }
+    
+    public java.util.List<Vec3> findSuppressionAimPoints(
+            com.stevesarmy.entity.SoldierEntity soldier,
+            BlockPos pingCenter,
+            double radius) {
+        
+        java.util.List<Vec3> aimPoints = new java.util.ArrayList<>();
+        
+        java.util.List<CoverPoint> covers = findCoverPoints(pingCenter, (int) radius);
+        
+        if (covers.isEmpty()) {
+            return aimPoints;
+        }
+        
+        for (CoverPoint cover : covers) {
+            java.util.Set<Direction> protectedDirs = cover.getProtectedDirections();
+            
+            for (Direction peekDir : Direction.Plane.HORIZONTAL) {
+                if (protectedDirs.contains(peekDir)) continue;
+                
+                BlockPos peekPos = cover.getPosition().relative(peekDir);
+                if (!isValidPeekPosition(peekPos, level)) continue;
+                
+                Vec3 peekTarget = peekPos.getCenter().add(0, 1.0, 0);
+                
+                Vec3 soldierEye = soldier.getEyePosition();
+                ClipContext ctx = new ClipContext(
+                    soldierEye, peekTarget,
+                    ClipContext.Block.COLLIDER,
+                    ClipContext.Fluid.NONE,
+                    soldier
+                );
+                HitResult hit = level.clip(ctx);
+                
+                if (hit.getType() == HitResult.Type.MISS) {
+                    aimPoints.add(peekTarget);
+                }
+            }
+        }
+        
+        return aimPoints;
+    }
 }

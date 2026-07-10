@@ -179,6 +179,12 @@ public class PeekController {
         }
 
         Vec3 threatDir = soldier.getThreatAwareness().getPrimaryDirection(soldier.position());
+        
+        if ((threatDir == null || threatDir.lengthSqr() <= 0.001) && soldier.hasValidPingSuppressPos()) {
+            BlockPos suppressPos = soldier.getPingSuppressPos();
+            threatDir = Vec3.atCenterOf(suppressPos).subtract(soldier.position()).normalize();
+        }
+        
         if (threatDir == null || threatDir.lengthSqr() <= 0.001) {
             return;
         }

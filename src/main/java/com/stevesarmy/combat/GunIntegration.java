@@ -59,6 +59,8 @@ public class GunIntegration {
     public static int getRPM(LivingEntity entity) { return gunHandler.getRPM(entity); }
     public static float getBurstMinInterval(LivingEntity entity) { return gunHandler.getBurstMinInterval(entity); }
     public static float getAimInaccuracy(LivingEntity entity) { return gunHandler.getAimInaccuracy(entity); }
+    public static String getGunTabType(LivingEntity entity) { return gunHandler.getGunTabType(entity); }
+    public static boolean isMachineGun(LivingEntity entity) { return gunHandler.isMachineGun(entity); }
 
     public enum ShootResult {
         SUCCESS, NO_AMMO, COOLDOWN, NOT_GUN, NO_TARGET, OUT_OF_RANGE,
@@ -96,6 +98,8 @@ public class GunIntegration {
         int getRPM(LivingEntity entity);
         float getBurstMinInterval(LivingEntity entity);
         float getAimInaccuracy(LivingEntity entity);
+        String getGunTabType(LivingEntity entity);
+        boolean isMachineGun(LivingEntity entity);
     }
 
     private static class FallbackGunHandler implements GunHandler {
@@ -128,6 +132,8 @@ public class GunIntegration {
         @Override public int getRPM(LivingEntity entity) { return 600; }
         @Override public float getBurstMinInterval(LivingEntity entity) { return 0.8f; }
         @Override public float getAimInaccuracy(LivingEntity entity) { return 0.15f; }
+        @Override public String getGunTabType(LivingEntity entity) { return "rifle"; }
+        @Override public boolean isMachineGun(LivingEntity entity) { return false; }
     }
 
     private static class ReflectionGunHandler implements GunHandler {
@@ -902,6 +908,82 @@ public class GunIntegration {
                 StevesArmyMod.LOGGER.debug("[TaCZ] Failed to get aim inaccuracy: {}", e.getMessage());
             }
             return 0.15f;
+        }
+        
+        @Override
+        public String getGunTabType(LivingEntity entity) {
+            try {
+                ItemStack gunStack = entity.getMainHandItem();
+                Class<?> iGunClass = Class.forName("com.tacz.guns.api.item.IGun");
+                Method getIGunOrNull = iGunClass.getMethod("getIGunOrNull", ItemStack.class);
+                Object iGun = getIGunOrNull.invoke(null, gunStack);
+                if (iGun == null) return "rifle";
+                
+                Method getGunId = iGunClass.getMethod("getGunId", ItemStack.class);
+                Object gunId = getGunId.invoke(iGun, gunStack);
+                
+                Class<?> timelessApiClass = Class.forName("com.tacz.guns.api.TimelessAPI");
+                Method getCommonGunIndex = timelessApiClass.getMethod("getCommonGunIndex", ResourceLocation.class);
+                Object indexOpt = getCommonGunIndex.invoke(null, gunId);
+                
+                if (indexOpt instanceof Optional<?> opt && opt.isPresent()) {
+                    Object gunIndex = opt.get();
+                    
+                    // Try different possible method names for getting tab type
+                    try {
+                        Method getTypeMethod = gunIndex.getClass().getMethod("getType");
+                        Object type = getTypeMethod.invoke(gunIndex);
+                        if (type != null) {
+                            String typeName = type.toString().toLowerCase();
+                            StevesArmyMod.LOGGER.info("[TaCZ] Detected gun type via getType(): {} for gun {}", typeName, gunId);
+                            return typeName;
+                        }
+                    } catch (NoSuchMethodException e1) {
+                        // Try alternative method name
+                        try {
+                            Method getTabTypeMethod = gunIndex.getClass().getMethod("getTabType");
+                            Object tabType = getTabTypeMethod.invoke(gunIndex);
+                            if (tabType != null) {
+                                String typeName = tabType.toString().toLowerCase();
+                                StevesArmyMod.LOGGER.info("[TaCZ] Detected gun type via getTabType(): {} for gun {}", typeName, gunId);
+                                return typeName;
+                            }
+                        } catch (NoSuchMethodException e2) {
+                            StevesArmyMod.LOGGER.debug("[TaCZ] No getType() or getTabType() method found, using heuristic fallback");
+                            // Fallback to heuristic detection
+                            return detectMachineGunHeuristic(entity);
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                StevesArmyMod.LOGGER.debug("[TaCZ] Failed to get gun tab type: {}", e.getMessage());
+            }
+            return "rifle";
+        }
+        
+        private String detectMachineGunHeuristic(LivingEntity entity) {
+            int magSize = getMagazineSize(entity);
+            int rpm = getRPM(entity);
+            boolean isBolt = isManualBolt(entity);
+            
+            if (!isBolt && magSize >= 30 && rpm >= 500) {
+                StevesArmyMod.LOGGER.info("[TaCZ] Detected machine gun via heuristic: magSize={}, rpm={}", magSize, rpm);
+                return "machine_gun";
+            }
+            return "rifle";
+        }
+        
+        @Override
+        public boolean isMachineGun(LivingEntity entity) {
+            String tabType = getGunTabType(entity);
+            boolean isMG = "machine_gun".equals(tabType) || "mg".equals(tabType) || "lmg".equals(tabType) || 
+                          "mmg".equals(tabType) || "hmg".equals(tabType) || "smg".equals(tabType);
+            
+            if (isMG) {
+                StevesArmyMod.LOGGER.info("[TaCZ] Gun classified as machine gun: tabType={}", tabType);
+            }
+            
+            return isMG;
         }
     }
 }

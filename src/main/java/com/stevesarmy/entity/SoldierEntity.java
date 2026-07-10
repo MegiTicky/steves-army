@@ -141,6 +141,13 @@ public class SoldierEntity extends PathfinderMob implements Container {
     private long forcedTargetTimestamp = 0;
     private static final long FORCED_TARGET_MEMORY_MS = 10000;
     
+    private BlockPos pingSuppressPos = null;
+    private long pingSuppressTimestamp = 0;
+    private static final long PING_SUPPRESS_MEMORY_MS = 10000;
+    private java.util.List<Vec3> suppressionAimPoints = new java.util.ArrayList<>();
+    private Vec3 lastSuppressionAimPoint = null;
+    public static final double SUPPRESSION_ZONE_RADIUS = 15.0;
+    
     private boolean dispatchedBySend = false;
     private boolean inventorySyncingFromEntity = false;
     private boolean cqbMode = false;
@@ -803,6 +810,7 @@ public class SoldierEntity extends PathfinderMob implements Container {
                 clearPingMoveTarget();
                 clearPingThreatPos();
                 clearForcedTarget();
+                clearPingSuppressPos();
                 threatAwareness.clear();
                 com.stevesarmy.StevesArmyMod.LOGGER.info("Switched to FOLLOW mode, cleared all threat data");
             }
@@ -814,8 +822,21 @@ public class SoldierEntity extends PathfinderMob implements Container {
                 clearPingMoveTarget();
                 clearPingThreatPos();
                 clearForcedTarget();
+                clearPingSuppressPos();
                 threatAwareness.clear();
                 StevesArmyMod.LOGGER.info("Switched to HOLD mode, cleared all threat data");
+            }
+            case SUPPRESS_AREA -> {
+                pingSuppressPos = BlockPos.containing(position);
+                pingSuppressTimestamp = System.currentTimeMillis();
+                suppressionAimPoints.clear();
+                lastSuppressionAimPoint = null;
+                
+                if (this.combatGoal != null) {
+                    this.combatGoal.forceRestartPingSuppression();
+                }
+                
+                StevesArmyMod.LOGGER.info("Set suppress area: {}", pingSuppressPos);
             }
         }
     }
@@ -865,6 +886,62 @@ public class SoldierEntity extends PathfinderMob implements Container {
     public void clearForcedTarget() {
         this.forcedTargetPos = null;
         this.forcedTargetTimestamp = 0;
+    }
+    
+    public BlockPos getPingSuppressPos() {
+        return pingSuppressPos;
+    }
+    
+    public boolean hasValidPingSuppressPos() {
+        return pingSuppressPos != null &&
+               System.currentTimeMillis() - pingSuppressTimestamp < PING_SUPPRESS_MEMORY_MS;
+    }
+    
+    public void clearPingSuppressPos() {
+        pingSuppressPos = null;
+        pingSuppressTimestamp = 0;
+        suppressionAimPoints.clear();
+        lastSuppressionAimPoint = null;
+    }
+    
+    public java.util.List<Vec3> getSuppressionAimPoints() {
+        return suppressionAimPoints;
+    }
+    
+    public void setSuppressionAimPoints(java.util.List<Vec3> points) {
+        this.suppressionAimPoints = points;
+        this.lastSuppressionAimPoint = null;
+    }
+    
+    public Vec3 getNextSuppressionAimPoint() {
+        if (suppressionAimPoints.isEmpty()) return null;
+        if (suppressionAimPoints.size() == 1) return suppressionAimPoints.get(0);
+        
+        java.util.Random random = new java.util.Random();
+        Vec3 selected;
+        int attempts = 0;
+        
+        do {
+            int index = random.nextInt(suppressionAimPoints.size());
+            selected = suppressionAimPoints.get(index);
+            attempts++;
+        } while (selected.equals(lastSuppressionAimPoint) && attempts < 10);
+        
+        lastSuppressionAimPoint = selected;
+        return selected;
+    }
+    
+    public Vec3 getHorizontalSpreadFallbackTarget(BlockPos pingCenter) {
+        java.util.Random random = new java.util.Random();
+        double angle = random.nextDouble() * 2 * Math.PI;
+        double radius = random.nextDouble() * SUPPRESSION_ZONE_RADIUS;
+        
+        Vec3 center = pingCenter.getCenter();
+        return new Vec3(
+            center.x + Math.cos(angle) * radius,
+            center.y + 1.0,
+            center.z + Math.sin(angle) * radius
+        );
     }
     
     public SoldierCombatGoal getCombatGoal() {

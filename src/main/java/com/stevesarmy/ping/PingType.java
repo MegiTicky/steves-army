@@ -6,7 +6,8 @@ public enum PingType {
     THREAT_DIRECTION(0xFFFF8800, "threat_direction"),
     LOCATION(0xFF5555FF, "location"),
     FOLLOW(0xFF55FFFF, "follow"),
-    HOLD(0xFFFFAA00, "hold");
+    HOLD(0xFFFFAA00, "hold"),
+    SUPPRESS_AREA(0xFFFF0000, "suppress_area");
     
     private final int color;
     private final String translationKey;

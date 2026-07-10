@@ -126,7 +126,9 @@ public class PingWheelHandler {
         if (adjustedDegrees < 0) adjustedDegrees += 360;
         if (adjustedDegrees >= 360) adjustedDegrees -= 360;
         
-        int sector = ((int) (adjustedDegrees / 60)) % 6;
+        int numTypes = PingType.values().length;
+        double sectorSize = 360.0 / numTypes;
+        int sector = ((int) (adjustedDegrees / sectorSize)) % numTypes;
         PingType selectedType = PingType.values()[sector];
         
         StevesArmyMod.LOGGER.info("Angle: {} deg, adjusted: {} deg, sector: {}, type: {}", 
