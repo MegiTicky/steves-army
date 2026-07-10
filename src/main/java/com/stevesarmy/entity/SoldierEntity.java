@@ -939,7 +939,7 @@ public class SoldierEntity extends PathfinderMob implements Container {
         Vec3 center = pingCenter.getCenter();
         return new Vec3(
             center.x + Math.cos(angle) * radius,
-            center.y + 1.0,
+            center.y,
             center.z + Math.sin(angle) * radius
         );
     }

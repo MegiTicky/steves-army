@@ -990,7 +990,7 @@ return qualityScore + shootBonus - distancePenalty;
                 BlockPos peekPos = cover.getPosition().relative(peekDir);
                 if (!isValidPeekPosition(peekPos, level)) continue;
                 
-                Vec3 peekTarget = peekPos.getCenter().add(0, 1.0, 0);
+                Vec3 peekTarget = peekPos.getCenter();
                 
                 Vec3 soldierEye = soldier.getEyePosition();
                 ClipContext ctx = new ClipContext(
