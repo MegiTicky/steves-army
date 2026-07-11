@@ -100,9 +100,9 @@ public class SoldierInventoryMenu extends AbstractContainerMenu {
     }
 
     private void addGeneralSlots() {
-        for (int row = 0; row < 3; row++) {
-            for (int col = 0; col < 3; col++) {
-                int slotIndex = SoldierInventory.SLOT_GENERAL_START + col + row * 3;
+        for (int row = 0; row < 4; row++) {
+            for (int col = 0; col < 5; col++) {
+                int slotIndex = SoldierInventory.SLOT_GENERAL_START + col + row * 5;
                 this.addSlot(new Slot(soldierInventory, slotIndex, 82 + col * 18, 18 + row * 18));
             }
         }
@@ -127,12 +127,12 @@ public class SoldierInventoryMenu extends AbstractContainerMenu {
             ItemStack slotItem = slot.getItem();
             result = slotItem.copy();
 
-            if (index < 15) {
-                if (!this.moveItemStackTo(slotItem, 15, this.slots.size(), true)) {
+            if (index < SoldierInventory.INVENTORY_SIZE) {
+                if (!this.moveItemStackTo(slotItem, SoldierInventory.INVENTORY_SIZE, this.slots.size(), true)) {
                     return ItemStack.EMPTY;
                 }
             } else {
-                if (!this.moveItemStackTo(slotItem, 0, 15, false)) {
+                if (!this.moveItemStackTo(slotItem, 0, SoldierInventory.INVENTORY_SIZE, false)) {
                     return ItemStack.EMPTY;
                 }
             }

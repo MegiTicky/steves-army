@@ -16,7 +16,7 @@ import javax.annotation.Nullable;
 import java.util.function.Consumer;
 
 public class SoldierInventory implements Container {
-    public static final int INVENTORY_SIZE = 15;
+    public static final int INVENTORY_SIZE = 26;
     public static final int ARMOR_HEAD = 0;
     public static final int ARMOR_CHEST = 1;
     public static final int ARMOR_LEGS = 2;
