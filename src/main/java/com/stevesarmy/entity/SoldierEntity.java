@@ -239,6 +239,7 @@ public class SoldierEntity extends PathfinderMob implements Container {
         
         this.goalSelector.addGoal(0, new SoldierHoleRescueGoal(this));
         this.goalSelector.addGoal(0, new FloatGoal(this));
+        this.goalSelector.addGoal(1, new OpenDoorGoal(this, true));
         this.goalSelector.addGoal(1, new SoldierMoveToPingGoal(this));
         this.goalSelector.addGoal(2, new CoverTacticalGoal(this));
         this.goalSelector.addGoal(3, new SoldierFollowOwnerGoal(this));

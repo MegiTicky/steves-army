@@ -10,6 +10,7 @@ public class SoldierGroundNavigation extends GroundPathNavigation {
 
     public SoldierGroundNavigation(Mob mob, Level level) {
         super(mob, level);
+        this.setCanOpenDoors(true);
     }
 
     public Path createPathToBlock(BlockPos target, int accuracy) {
