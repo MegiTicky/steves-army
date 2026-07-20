@@ -19,6 +19,7 @@ import com.stevesarmy.entity.TargetEntity;
 import com.stevesarmy.inventory.SoldierInventory;
 import com.stevesarmy.network.NetworkHandler;
 import com.stevesarmy.network.PotentialTargetsDebugMessage;
+import com.stevesarmy.squad.FireDiscipline;
 import com.stevesarmy.squad.SquadData;
 import com.stevesarmy.squad.SquadManager;
 import com.stevesarmy.squad.SquadThreatIntel;
@@ -127,61 +128,38 @@ public class SoldierCombatGoal extends Goal {
     @Override
     public boolean canUse() {
         if (!soldier.isAlive()) return false;
-        
-        if (soldier.hasValidPingMoveTarget() && soldier.getTarget() == null) {
-            return false;
-        }
-        
-        if (soldier.hasValidPingThreatPos()) {
+
+        if (soldier.hasValidPingThreatPos() || soldier.hasValidPingSuppressPos()) {
             return true;
         }
-        
         if (soldier.getTarget() != null && soldier.getTarget().isAlive()) {
-            LivingEntity existingTarget = soldier.getTarget();
-            if (TargetAcquisition.hasLineOfSight(soldier, existingTarget)) {
-                return true;
-            }
+            return true;
         }
-        
         if (hasPotentialTargets()) {
             return true;
         }
-        
         if (soldier.getCoverBehaviorManager().isInCover()) {
             return true;
         }
-        
-        if (GunIntegration.isTaczLoaded() && GunIntegration.hasGun(soldier)) {
-            if (GunIntegration.getCurrentAmmo(soldier) == 0 && !GunIntegration.isReloading(soldier)) {
-                return true;
-            }
-        }
-        
+
         return false;
     }
 
     @Override
     public boolean canContinueToUse() {
         if (!soldier.isAlive()) return false;
-        
-        if (soldier.hasValidPingMoveTarget() && soldier.getTarget() == null) {
-            return false;
-        }
-        
+
         if (target != null && target.isAlive() && TargetAcquisition.isValidTarget(soldier, target)) {
             if (TargetAcquisition.hasLineOfSight(soldier, target)) {
                 return true;
             }
         }
-        
         if (hasPotentialTargets()) {
             return true;
         }
-        
         if (soldier.getCoverBehaviorManager().isInCover()) {
             return true;
         }
-        
         if (GunIntegration.isTaczLoaded() && GunIntegration.hasGun(soldier)) {
             if (GunIntegration.isReloading(soldier)) {
                 return true;
@@ -190,16 +168,26 @@ public class SoldierCombatGoal extends Goal {
                 return true;
             }
         }
-        
         if (soldier.hasValidPingSuppressPos()) {
             return true;
         }
-        
+
         return false;
     }
 
     @Override
     public void start() {
+        if (target == null) {
+            findNewTarget();
+            if (target == null) {
+                CoverBehaviorManager cover = soldier.getCoverBehaviorManager();
+                if (cover.isInCover()) {
+                    StevesArmyMod.LOGGER.info("[CombatGoal] START soldier={} clearing cover (no target after scan)", soldier.getId());
+                    cover.clearCover();
+                }
+            }
+        }
+
         if (target != null) {
             soldier.setTarget(target);
             threatTracker.reportThreatDirect(target);
@@ -293,10 +281,8 @@ public class SoldierCombatGoal extends Goal {
         
         if (target == null || !target.isAlive()) {
             if (inCover && target == null) {
-                if (++targetReevaluateCounter >= StevesArmyConfig.getTargetReevaluateInterval()) {
-                    targetReevaluateCounter = 0;
-                    findNewTarget();
-                }
+                targetReevaluateCounter = 0;
+                findNewTarget();
             } else {
                 findNewTarget();
             }
@@ -368,12 +354,18 @@ public class SoldierCombatGoal extends Goal {
             lastGunStack = currentGun.copy();
         }
         
-        boolean isBolting = GunIntegration.isBolting(soldier);
+boolean isBolting = GunIntegration.isBolting(soldier);
         boolean isReloading = GunIntegration.isReloading(soldier);
         boolean isDrawing = GunIntegration.isDrawing(soldier);
-        
+
         if (GunIntegration.getCurrentAmmo(soldier) == 0 && !isReloading && !isBolting && !isDrawing) {
             GunIntegration.reload(soldier);
+        } else if (soldier.getFireDiscipline() == FireDiscipline.CONSERVE && !isReloading && !isBolting && !isDrawing) {
+            int magSize = GunIntegration.getMagazineSize(soldier);
+            int currentAmmo = GunIntegration.getCurrentAmmo(soldier);
+            if (magSize > 0 && currentAmmo <= magSize / 2) {
+                GunIntegration.reload(soldier);
+            }
         }
     }
     
@@ -518,6 +510,12 @@ public class SoldierCombatGoal extends Goal {
         float thresholdScale = lastShotNeededBolt || GunIntegration.isBolting(soldier) 
             ? StevesArmyConfig.getAimQualitySlowGunThresholdScale() 
             : StevesArmyConfig.getAimQualityThresholdScale();
+        FireDiscipline discipline = soldier.getFireDiscipline();
+        if (discipline == FireDiscipline.CONSERVE) {
+            thresholdScale = Math.max(thresholdScale, 0.55f);
+        } else if (discipline == FireDiscipline.SUPPRESSIVE) {
+            thresholdScale = Math.max(thresholdScale, 0.70f);
+        }
         float shotThreshold = Math.max(0.15f, targetAimQ * thresholdScale);
         
         if (aimQuality < shotThreshold) {
@@ -865,7 +863,7 @@ private void tickCoverPeekCycle(CoverBehaviorManager coverManager) {
     private boolean findNewTargetInternal() {
         List<LivingEntity> potentialTargets = getPotentialTargets();
         ThreatAwareness threats = soldier.getThreatAwareness();
-        
+
         if (isDebugLogging()) {
             StevesArmyMod.LOGGER.info("[CombatGoal] findNewTarget: {} potential targets, inCover={}", 
                 potentialTargets.size(), soldier.getCoverBehaviorManager().isInCover());
@@ -1240,6 +1238,10 @@ private void tickCoverPeekCycle(CoverBehaviorManager coverManager) {
 
     private boolean shouldSuppressTarget() {
         pendingSuppressionThreat = null;
+
+        if (soldier.getFireDiscipline() == FireDiscipline.CONSERVE) {
+            return false;
+        }
         
         SquadThreatIntel intel = getSquadIntel();
         if (intel == null) {
@@ -1584,7 +1586,7 @@ private void tickCoverPeekCycle(CoverBehaviorManager coverManager) {
         return true;
     }
     
-    private int getTotalAmmo() {
+    public int getTotalAmmo() {
         int magazineAmmo = GunIntegration.getCurrentAmmo(soldier);
         int inventoryAmmo = 0;
         

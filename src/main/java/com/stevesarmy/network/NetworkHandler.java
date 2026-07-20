@@ -55,6 +55,14 @@ public class NetworkHandler {
             CQBToggleMessage::encode,
             CQBToggleMessage::decode,
             CQBToggleMessage::handle);
+        INSTANCE.registerMessage(id++, SquadStatusSyncPacket.class,
+            SquadStatusSyncPacket::encode,
+            SquadStatusSyncPacket::decode,
+            SquadStatusSyncPacket::handle);
+        INSTANCE.registerMessage(id++, SetSoldierConfigPacket.class,
+            SetSoldierConfigPacket::encode,
+            SetSoldierConfigPacket::decode,
+            SetSoldierConfigPacket::handle);
     }
 
     public static void sendTo(ServerPlayer player, Object message) {

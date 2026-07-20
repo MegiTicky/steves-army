@@ -27,19 +27,28 @@ public class KeyBindings {
         "key.categories.steves_army"
     );
     
-    public static final KeyMapping PING_WHEEL = new KeyMapping(
+public static final KeyMapping PING_WHEEL = new KeyMapping(
         "key.steves_army.ping_wheel",
         KeyConflictContext.IN_GAME,
         InputConstants.Type.MOUSE,
         GLFW.GLFW_MOUSE_BUTTON_MIDDLE,
         "key.categories.steves_army"
     );
-    
+
+    public static final KeyMapping SQUAD_COMMAND = new KeyMapping(
+        "key.steves_army.squad_command",
+        KeyConflictContext.IN_GAME,
+        InputConstants.Type.KEYSYM,
+        GLFW.GLFW_KEY_K,
+        "key.categories.steves_army"
+    );
+
     @SubscribeEvent
     public static void registerKeyMappings(RegisterKeyMappingsEvent event) {
         event.register(FORMATION_WHEEL);
         event.register(DEBUG);
         event.register(PING_WHEEL);
+        event.register(SQUAD_COMMAND);
     }
     
     public static boolean isPingWheelKeyDown() {

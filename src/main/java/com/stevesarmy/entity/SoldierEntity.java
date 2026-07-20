@@ -20,6 +20,7 @@ import com.stevesarmy.inventory.SoldierInventory;
 import com.stevesarmy.inventory.SoldierInventoryHandler;
 import com.stevesarmy.network.NetworkHandler;
 import com.stevesarmy.network.OpenSoldierInventoryMessage;
+import com.stevesarmy.squad.FireDiscipline;
 import com.stevesarmy.squad.SquadManager;
 import com.stevesarmy.squad.SquadMode;
 import com.stevesarmy.squad.SquadFormation;
@@ -114,6 +115,9 @@ public class SoldierEntity extends PathfinderMob implements Container {
         SynchedEntityData.defineId(SoldierEntity.class, EntityDataSerializers.FLOAT);
     private static final EntityDataAccessor<Float> THREAT_DIR_Z =
         SynchedEntityData.defineId(SoldierEntity.class, EntityDataSerializers.FLOAT);
+
+    private static final EntityDataAccessor<Integer> FIRE_DISCIPLINE =
+        SynchedEntityData.defineId(SoldierEntity.class, EntityDataSerializers.INT);
 
     @Nullable
     private UUID squadId;
@@ -231,6 +235,7 @@ public class SoldierEntity extends PathfinderMob implements Container {
         this.entityData.define(THREAT_DIR_X, 0f);
         this.entityData.define(THREAT_DIR_Y, 0f);
         this.entityData.define(THREAT_DIR_Z, 0f);
+        this.entityData.define(FIRE_DISCIPLINE, FireDiscipline.STANDARD.ordinal());
     }
 
     @Override
@@ -263,6 +268,7 @@ public class SoldierEntity extends PathfinderMob implements Container {
         }
         tag.putLong("HoldPos", getHoldPosition().asLong());
         tag.put("Inventory", inventory.save());
+        tag.putInt("FireDiscipline", getFireDiscipline().ordinal());
     }
 
     @Override
@@ -282,6 +288,9 @@ public class SoldierEntity extends PathfinderMob implements Container {
             inventory.load(tag.getCompound("Inventory"));
         }
         inventory.syncArmorToEntity(this);
+        if (tag.contains("FireDiscipline")) {
+            setFireDiscipline(FireDiscipline.values()[tag.getInt("FireDiscipline") % FireDiscipline.values().length]);
+        }
     }
 
     @Override
@@ -401,7 +410,13 @@ public class SoldierEntity extends PathfinderMob implements Container {
         }
     }
 
-    
+    public FireDiscipline getFireDiscipline() {
+        return FireDiscipline.values()[this.entityData.get(FIRE_DISCIPLINE) % FireDiscipline.values().length];
+    }
+
+    public void setFireDiscipline(FireDiscipline discipline) {
+        this.entityData.set(FIRE_DISCIPLINE, discipline.ordinal());
+    }
 
     public BlockPos getHoldPosition() {
         return this.entityData.get(HOLD_POSITION);
