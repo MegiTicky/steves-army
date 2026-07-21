@@ -4,6 +4,8 @@ import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.entity.EnemySoldierEntity;
 import com.stevesarmy.entity.SoldierEntity;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.effect.MobEffectInstance;
+import net.minecraft.world.effect.MobEffects;
 import net.minecraft.world.level.Level;
 import net.minecraftforge.event.entity.EntityJoinLevelEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
@@ -23,10 +25,12 @@ public class TeamEventHandler {
         try {
             if (entity instanceof EnemySoldierEntity enemy) {
                 TeamManager.assignToEnemyTeam(enemy);
-                enemy.setGlowing(true);
+                enemy.addEffect(new MobEffectInstance(MobEffects.GLOWING, Integer.MAX_VALUE, 0, false, false));
+                StevesArmyMod.LOGGER.info("TeamEventHandler: assigned enemy {} to enemy team, added GLOWING effect", enemy.getName().getString());
             } else if (entity instanceof SoldierEntity soldier) {
                 TeamManager.assignToFriendlyTeam(soldier);
-                soldier.setGlowing(true);
+                soldier.addEffect(new MobEffectInstance(MobEffects.GLOWING, Integer.MAX_VALUE, 0, false, false));
+                StevesArmyMod.LOGGER.info("TeamEventHandler: assigned soldier {} to friendly team, added GLOWING effect", soldier.getName().getString());
             }
         } catch (Exception e) {
             StevesArmyMod.LOGGER.error("Failed to assign team for entity {}: {}", entity, e.getMessage());

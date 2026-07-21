@@ -723,7 +723,6 @@ public class SoldierEntity extends PathfinderMob implements Container {
     @Override
     public void remove(RemovalReason reason) {
         if (!this.level().isClientSide) {
-            this.setGlowing(false);
             TeamManager.removeFromTeam(this);
             com.stevesarmy.combat.cover.CoverReservationManager.releaseAll(this);
             if (this.level() instanceof ServerLevel serverLevel) {
@@ -731,10 +730,6 @@ public class SoldierEntity extends PathfinderMob implements Container {
             }
         }
         super.remove(reason);
-    }
-
-    public void setGlowing(boolean glowing) {
-        this.setSharedFlag(6, glowing);
     }
     
     @Override
