@@ -1,20 +1,14 @@
 package com.stevesarmy.client.renderer;
 
 import com.mojang.blaze3d.vertex.PoseStack;
-import com.stevesarmy.client.ClientSquadData;
 import com.stevesarmy.client.model.SoldierModel;
 import com.stevesarmy.entity.SoldierEntity;
-import com.stevesarmy.network.SquadStatusSyncPacket;
-import com.stevesarmy.squad.FireTeam;
-import net.minecraft.client.Minecraft;
-import net.minecraft.client.gui.Font;
 import net.minecraft.client.model.HumanoidModel;
 import net.minecraft.client.model.geom.ModelLayers;
 import net.minecraft.client.renderer.MultiBufferSource;
 import net.minecraft.client.renderer.entity.EntityRendererProvider;
 import net.minecraft.client.renderer.entity.HumanoidMobRenderer;
 import net.minecraft.client.renderer.entity.layers.HumanoidArmorLayer;
-import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.util.Mth;
 import net.minecraft.world.phys.Vec3;
@@ -67,42 +61,5 @@ public class SoldierRenderer extends HumanoidMobRenderer<SoldierEntity, SoldierM
             return;
         }
         super.setupRotations(soldier, poseStack, ageInTicks, bodyYaw, partialTick);
-    }
-
-    @Override
-    protected void renderNameTag(SoldierEntity entity, Component displayName,
-                                  PoseStack poseStack, MultiBufferSource bufferSource, int packedLight) {
-        super.renderNameTag(entity, displayName, poseStack, bufferSource, packedLight);
-
-        SquadStatusSyncPacket.SoldierStatusEntry entry = ClientSquadData.INSTANCE.getEntry(entity.getUUID());
-        if (entry == null) return;
-
-        FireTeam team = entry.getFireTeam();
-        if (team == FireTeam.ALL) return;
-
-        String badge = "[" + team.getShortName() + "]";
-        int color = switch (team) {
-            case ALPHA -> 0xFFFF5555;
-            case BRAVO -> 0xFF5555FF;
-            case CHARLIE -> 0xFF55FF55;
-            case DELTA -> 0xFFFFFF55;
-            default -> 0xFFFFFFFF;
-        };
-
-        Minecraft mc = Minecraft.getInstance();
-        Font font = mc.font;
-        int halfWidth = font.width(badge) / 2;
-
-        poseStack.pushPose();
-        poseStack.translate(0.0, entity.getEyeHeight() + 0.5, 0.0);
-        poseStack.mulPose(this.entityRenderDispatcher.cameraOrientation());
-        poseStack.scale(-0.025F, -0.025F, 0.025F);
-
-        font.drawInBatch(Component.literal(badge), -halfWidth, 0, color, false,
-            poseStack.last().pose(), bufferSource, Font.DisplayMode.SEE_THROUGH, 0x22000000, 0xF000F0);
-        font.drawInBatch(Component.literal(badge), -halfWidth, 0, color, false,
-            poseStack.last().pose(), bufferSource, Font.DisplayMode.NORMAL, 0, 0xF000F0);
-
-        poseStack.popPose();
     }
 }

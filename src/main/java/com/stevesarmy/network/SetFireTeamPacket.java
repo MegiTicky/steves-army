@@ -6,6 +6,7 @@ import com.stevesarmy.squad.FireTeamAssignment;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.entity.Entity;
 import net.minecraftforge.network.NetworkEvent;
 
 import java.util.List;
@@ -81,6 +82,10 @@ public class SetFireTeamPacket {
                 }
                 case ASSIGN_SOLDIER -> {
                     fta.assignToTeam(soldierId, targetTeam);
+                    Entity entity = serverLevel.getEntity(soldierId);
+                    if (entity instanceof SoldierEntity s && s.isOwnedBy(player)) {
+                        s.setFireTeam(targetTeam);
+                    }
                 }
                 case REBALANCE -> {
                     List<UUID> ownedIds = serverLevel.getEntitiesOfClass(
@@ -89,6 +94,12 @@ public class SetFireTeamPacket {
                         s -> s.isOwnedBy(player)
                     ).stream().map(s -> s.getUUID()).collect(Collectors.toList());
                     fta.rebalance(ownedIds);
+                    for (UUID id : ownedIds) {
+                        Entity entity = serverLevel.getEntity(id);
+                        if (entity instanceof SoldierEntity soldier) {
+                            soldier.setFireTeam(fta.getTeamFor(id));
+                        }
+                    }
                 }
             }
         });

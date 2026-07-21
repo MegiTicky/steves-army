@@ -31,6 +31,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
+import net.minecraft.network.chat.Component;
 import net.minecraft.network.syncher.EntityDataAccessor;
 import net.minecraft.network.syncher.EntityDataSerializers;
 import net.minecraft.network.syncher.SynchedEntityData;
@@ -121,6 +122,9 @@ public class SoldierEntity extends PathfinderMob implements Container {
     private static final EntityDataAccessor<Integer> FIRE_DISCIPLINE =
         SynchedEntityData.defineId(SoldierEntity.class, EntityDataSerializers.INT);
 
+    private static final EntityDataAccessor<Integer> FIRE_TEAM =
+        SynchedEntityData.defineId(SoldierEntity.class, EntityDataSerializers.INT);
+
     @Nullable
     private UUID squadId;
     private SquadFormation squadFormation = SquadFormation.NONE;
@@ -157,7 +161,6 @@ public class SoldierEntity extends PathfinderMob implements Container {
     private boolean dispatchedBySend = false;
     private boolean inventorySyncingFromEntity = false;
     private boolean cqbMode = false;
-    private FireTeam fireTeam = FireTeam.ALPHA;
 
     public static final double CQB_RANGE = 5.0;
 
@@ -168,10 +171,6 @@ public class SoldierEntity extends PathfinderMob implements Container {
     public boolean isCQB() {
         return cqbMode;
     }
-
-    public FireTeam getFireTeam() { return fireTeam; }
-
-    public void setFireTeam(FireTeam team) { this.fireTeam = team; }
 
     public void setCQB(boolean cqbMode) {
         this.cqbMode = cqbMode;
@@ -243,6 +242,7 @@ public class SoldierEntity extends PathfinderMob implements Container {
         this.entityData.define(THREAT_DIR_Y, 0f);
         this.entityData.define(THREAT_DIR_Z, 0f);
         this.entityData.define(FIRE_DISCIPLINE, FireDiscipline.STANDARD.ordinal());
+        this.entityData.define(FIRE_TEAM, FireTeam.ALPHA.ordinal());
     }
 
     @Override
@@ -427,6 +427,23 @@ public class SoldierEntity extends PathfinderMob implements Container {
 
     public void setFireDiscipline(FireDiscipline discipline) {
         this.entityData.set(FIRE_DISCIPLINE, discipline.ordinal());
+    }
+
+    public FireTeam getFireTeam() {
+        return FireTeam.values()[this.entityData.get(FIRE_TEAM) % FireTeam.values().length];
+    }
+
+    public void setFireTeam(FireTeam team) {
+        this.entityData.set(FIRE_TEAM, team.ordinal());
+    }
+
+    @Override
+    public Component getDisplayName() {
+        FireTeam team = getFireTeam();
+        if (team == FireTeam.ALL) {
+            return super.getDisplayName();
+        }
+        return Component.literal("[" + team.getShortName() + "] ").append(super.getDisplayName());
     }
 
     public BlockPos getHoldPosition() {

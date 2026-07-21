@@ -36,6 +36,13 @@ public class TeamEventHandler {
                 });
                 TeamManager.assignToFriendlyTeam(soldier, ownerUUID);
                 soldier.addEffect(new MobEffectInstance(MobEffects.GLOWING, Integer.MAX_VALUE, 0, false, false));
+
+                // Initialize fire team from existing assignment data
+                if (level instanceof ServerLevel serverLevel) {
+                    FireTeam savedTeam = FireTeamAssignment.get(serverLevel, ownerUUID).getTeamFor(soldier.getUUID());
+                    soldier.setFireTeam(savedTeam);
+                }
+
                 StevesArmyMod.LOGGER.info("TeamEventHandler: assigned soldier {} to friendly team for owner {}, added GLOWING effect", soldier.getName().getString(), ownerUUID);
             }
         } catch (Exception e) {
