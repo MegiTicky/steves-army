@@ -1,0 +1,33 @@
+package com.stevesarmy.mixins;
+
+import com.stevesarmy.entity.EnemySoldierEntity;
+import com.stevesarmy.entity.SoldierEntity;
+import net.minecraft.client.Minecraft;
+import net.minecraft.world.entity.Entity;
+import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.injection.At;
+import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
+
+@Mixin(Minecraft.class)
+public class MinecraftGlowMixin {
+
+    @Inject(method = "m_91314_", at = @At("RETURN"), cancellable = true)
+    private void onShouldEntityAppearGlowing(Entity entity, CallbackInfoReturnable<Boolean> cir) {
+        if (!(entity instanceof SoldierEntity)) return;
+        if (!cir.getReturnValueZ()) return;
+
+        if (entity instanceof EnemySoldierEntity) {
+            return;
+        }
+
+        Minecraft mc = (Minecraft) (Object) this;
+        var player = mc.player;
+        if (player == null) {
+            cir.setReturnValue(false);
+            return;
+        }
+
+        cir.setReturnValue(((SoldierEntity) entity).isOwnedBy(player));
+    }
+}
