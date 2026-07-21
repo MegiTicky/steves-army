@@ -442,6 +442,10 @@ public class SoldierEntity extends PathfinderMob implements Container {
 
     public void setFireTeam(FireTeam team) {
         this.entityData.set(FIRE_TEAM, team.ordinal());
+        if (!this.level().isClientSide) {
+            getOwnerUUID().ifPresent(owner -> 
+                TeamManager.assignToFireTeamTeam(this, owner, team));
+        }
     }
 
     @Override
