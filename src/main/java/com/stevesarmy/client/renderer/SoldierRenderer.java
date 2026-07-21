@@ -1,14 +1,17 @@
 package com.stevesarmy.client.renderer;
 
 import com.mojang.blaze3d.vertex.PoseStack;
+import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.client.model.SoldierModel;
 import com.stevesarmy.entity.SoldierEntity;
+import com.stevesarmy.squad.FireTeam;
 import net.minecraft.client.model.HumanoidModel;
 import net.minecraft.client.model.geom.ModelLayers;
 import net.minecraft.client.renderer.MultiBufferSource;
 import net.minecraft.client.renderer.entity.EntityRendererProvider;
 import net.minecraft.client.renderer.entity.HumanoidMobRenderer;
 import net.minecraft.client.renderer.entity.layers.HumanoidArmorLayer;
+import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.util.Mth;
 import net.minecraft.world.phys.Vec3;
@@ -61,5 +64,15 @@ public class SoldierRenderer extends HumanoidMobRenderer<SoldierEntity, SoldierM
             return;
         }
         super.setupRotations(soldier, poseStack, ageInTicks, bodyYaw, partialTick);
+    }
+
+    @Override
+    protected boolean shouldShowName(SoldierEntity entity) {
+        FireTeam team = entity.getFireTeam();
+        Component displayName = entity.getDisplayName();
+        double distSq = this.entityRenderDispatcher.distanceToSqr(entity);
+        StevesArmyMod.LOGGER.info("shouldShowName: {} fireTeam={} displayName='{}' distSq={}",
+            entity.getName().getString(), team, displayName.getString(), distSq);
+        return true;
     }
 }
