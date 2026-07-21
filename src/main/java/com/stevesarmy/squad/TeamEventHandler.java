@@ -45,7 +45,7 @@ public class TeamEventHandler {
                 }
 
                 if (!soldier.hasCustomName()) {
-                    soldier.setCustomName(Component.literal(SoldierNameGenerator.generate(soldier.getRandom())));
+                    soldier.setCustomName(Component.literal(SoldierNameGenerator.generateForOwner(soldier.getRandom(), ownerUUID)));
                 }
 
                 if (level instanceof ServerLevel serverLevel && serverLevel.getServer() != null) {
