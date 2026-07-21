@@ -28,6 +28,8 @@ public class TeamEventHandler {
             if (entity instanceof EnemySoldierEntity enemy) {
                 TeamManager.assignToEnemyTeam(enemy);
                 enemy.addEffect(new MobEffectInstance(MobEffects.GLOWING, Integer.MAX_VALUE, 0, false, false));
+                enemy.setCustomName(enemy.getDisplayName());
+                enemy.setCustomNameVisible(true);
                 StevesArmyMod.LOGGER.info("TeamEventHandler: assigned enemy {} to enemy team, added GLOWING effect", enemy.getName().getString());
             } else if (entity instanceof SoldierEntity soldier) {
                 UUID ownerUUID = soldier.getOwnerUUID().orElseGet(() -> {
@@ -42,6 +44,9 @@ public class TeamEventHandler {
                     FireTeam savedTeam = FireTeamAssignment.get(serverLevel, ownerUUID).getTeamFor(soldier.getUUID());
                     soldier.setFireTeam(savedTeam);
                 }
+
+                soldier.setCustomName(soldier.getDisplayName());
+                soldier.setCustomNameVisible(true);
 
                 StevesArmyMod.LOGGER.info("TeamEventHandler: assigned soldier {} to friendly team for owner {}, added GLOWING effect", soldier.getName().getString(), ownerUUID);
             }

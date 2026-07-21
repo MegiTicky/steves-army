@@ -1,17 +1,14 @@
 package com.stevesarmy.client.renderer;
 
 import com.mojang.blaze3d.vertex.PoseStack;
-import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.client.model.SoldierModel;
 import com.stevesarmy.entity.SoldierEntity;
-import com.stevesarmy.squad.FireTeam;
 import net.minecraft.client.model.HumanoidModel;
 import net.minecraft.client.model.geom.ModelLayers;
 import net.minecraft.client.renderer.MultiBufferSource;
 import net.minecraft.client.renderer.entity.EntityRendererProvider;
 import net.minecraft.client.renderer.entity.HumanoidMobRenderer;
 import net.minecraft.client.renderer.entity.layers.HumanoidArmorLayer;
-import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.util.Mth;
 import net.minecraft.world.phys.Vec3;
@@ -22,7 +19,7 @@ public class SoldierRenderer extends HumanoidMobRenderer<SoldierEntity, SoldierM
 
     public SoldierRenderer(EntityRendererProvider.Context context) {
         super(context, new SoldierModel(context.bakeLayer(ModelLayers.PLAYER)), 0.5F);
-        this.addLayer(new HumanoidArmorLayer<>(this, 
+        this.addLayer(new HumanoidArmorLayer<>(this,
             new HumanoidModel<>(context.bakeLayer(ModelLayers.PLAYER_INNER_ARMOR)),
             new HumanoidModel<>(context.bakeLayer(ModelLayers.PLAYER_OUTER_ARMOR)),
             context.getModelManager()));
@@ -34,7 +31,7 @@ public class SoldierRenderer extends HumanoidMobRenderer<SoldierEntity, SoldierM
     }
 
     @Override
-    public void render(SoldierEntity soldier, float entityYaw, float partialTick, 
+    public void render(SoldierEntity soldier, float entityYaw, float partialTick,
                        PoseStack poseStack, MultiBufferSource bufferSource, int packedLight) {
         this.model.crouching = soldier.isCrouching();
         super.render(soldier, entityYaw, partialTick, poseStack, bufferSource, packedLight);
@@ -64,15 +61,5 @@ public class SoldierRenderer extends HumanoidMobRenderer<SoldierEntity, SoldierM
             return;
         }
         super.setupRotations(soldier, poseStack, ageInTicks, bodyYaw, partialTick);
-    }
-
-    @Override
-    protected boolean shouldShowName(SoldierEntity entity) {
-        FireTeam team = entity.getFireTeam();
-        Component displayName = entity.getDisplayName();
-        double distSq = this.entityRenderDispatcher.distanceToSqr(entity);
-        StevesArmyMod.LOGGER.info("shouldShowName: {} fireTeam={} displayName='{}' distSq={}",
-            entity.getName().getString(), team, displayName.getString(), distSq);
-        return true;
     }
 }

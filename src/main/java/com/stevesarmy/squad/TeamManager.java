@@ -50,6 +50,7 @@ public class TeamManager {
             team.setColor(color);
             team.setAllowFriendlyFire(false);
             team.setSeeFriendlyInvisibles(true);
+            team.setNameTagVisibility(PlayerTeam.Visibility.HIDE_FOR_OTHER_TEAMS);
             StevesArmyMod.LOGGER.info("Created scoreboard team: {} with color {}", name, color.getName());
         }
         return team;
