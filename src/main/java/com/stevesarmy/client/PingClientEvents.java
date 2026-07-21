@@ -132,6 +132,11 @@ public class PingClientEvents {
         Entity entity = event.getEntity();
         if (!(entity instanceof SoldierEntity) && !(entity instanceof EnemySoldierEntity)) return;
 
+        if (entity instanceof EnemySoldierEntity) {
+            event.setResult(Event.Result.DENY);
+            return;
+        }
+
         Minecraft mc = Minecraft.getInstance();
         Player viewer = mc.player;
         if (viewer == null) return;

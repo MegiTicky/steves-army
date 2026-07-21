@@ -3,6 +3,8 @@ package com.stevesarmy.squad;
 import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.entity.EnemySoldierEntity;
 import com.stevesarmy.entity.SoldierEntity;
+import com.stevesarmy.util.SoldierNameGenerator;
+import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.effect.MobEffectInstance;
@@ -28,8 +30,7 @@ public class TeamEventHandler {
         try {
             if (entity instanceof EnemySoldierEntity enemy) {
                 TeamManager.assignToEnemyTeam(enemy);
-                enemy.addEffect(new MobEffectInstance(MobEffects.GLOWING, Integer.MAX_VALUE, 0, false, false));
-                StevesArmyMod.LOGGER.info("TeamEventHandler: assigned enemy {} to enemy team, added GLOWING effect", enemy.getName().getString());
+                StevesArmyMod.LOGGER.info("TeamEventHandler: assigned enemy {} to enemy team", enemy.getName().getString());
             } else if (entity instanceof SoldierEntity soldier) {
                 UUID ownerUUID = soldier.getOwnerUUID().orElseGet(() -> {
                     StevesArmyMod.LOGGER.warn("TeamEventHandler: soldier {} has no owner UUID, using random fallback", soldier.getName().getString());
@@ -41,6 +42,10 @@ public class TeamEventHandler {
                 if (level instanceof ServerLevel serverLevel) {
                     FireTeam savedTeam = FireTeamAssignment.get(serverLevel, ownerUUID).getTeamFor(soldier.getUUID());
                     soldier.setFireTeam(savedTeam);
+                }
+
+                if (!soldier.hasCustomName()) {
+                    soldier.setCustomName(Component.literal(SoldierNameGenerator.generate(soldier.getRandom())));
                 }
 
                 if (level instanceof ServerLevel serverLevel && serverLevel.getServer() != null) {
