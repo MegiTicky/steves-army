@@ -10,9 +10,12 @@ import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
+import org.lwjgl.glfw.GLFW;
 
 @Mod.EventBusSubscriber(modid = "steves_army", value = Dist.CLIENT)
 public class KeyInputHandler {
+
+    private static boolean ctrlLastTick = false;
 
     @SubscribeEvent
     public static void onClientTick(TickEvent.ClientTickEvent event) {
@@ -35,16 +38,25 @@ public class KeyInputHandler {
             Minecraft mc = Minecraft.getInstance();
             if (mc.player == null) return;
 
-            FireTeam current = FireTeamScopeState.INSTANCE.getCurrentScope();
-            int teamCount = FireTeamScopeState.INSTANCE.getTeamCount();
-            FireTeam next;
-            if (current == FireTeam.ALL || current.ordinal() >= teamCount) {
-                next = FireTeam.values()[1];
+            long window = mc.getWindow().getWindow();
+            boolean ctrlHeld = GLFW.glfwGetKey(window, GLFW.GLFW_KEY_LEFT_CONTROL) == GLFW.GLFW_PRESS
+                || GLFW.glfwGetKey(window, GLFW.GLFW_KEY_RIGHT_CONTROL) == GLFW.GLFW_PRESS;
+
+            if (ctrlHeld) {
+                FireTeamScopeState.INSTANCE.setCurrentScope(FireTeam.ALL);
+                mc.player.displayClientMessage(Component.literal("[ALL]"), true);
             } else {
-                next = FireTeam.values()[current.ordinal() + 1];
+                FireTeam current = FireTeamScopeState.INSTANCE.getCurrentScope();
+                int teamCount = FireTeamScopeState.INSTANCE.getTeamCount();
+                FireTeam next;
+                if (current == FireTeam.ALL || current.ordinal() >= teamCount) {
+                    next = FireTeam.values()[1];
+                } else {
+                    next = FireTeam.values()[current.ordinal() + 1];
+                }
+                FireTeamScopeState.INSTANCE.setCurrentScope(next);
+                mc.player.displayClientMessage(Component.literal("[" + next.getShortName() + "]"), true);
             }
-            FireTeamScopeState.INSTANCE.setCurrentScope(next);
-            mc.player.displayClientMessage(Component.literal("[" + next.getShortName() + "]"), true);
         }
     }
 }
