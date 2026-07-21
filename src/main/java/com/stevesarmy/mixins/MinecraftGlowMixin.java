@@ -14,7 +14,7 @@ public class MinecraftGlowMixin {
 
     @Inject(method = "m_91314_", at = @At("RETURN"), cancellable = true)
     private void onShouldEntityAppearGlowing(Entity entity, CallbackInfoReturnable<Boolean> cir) {
-        if (!(entity instanceof SoldierEntity soldier)) return;
+        if (!(entity instanceof SoldierEntity)) return;
         if (!cir.getReturnValueZ()) return;
 
         if (entity instanceof EnemySoldierEntity) {
@@ -28,6 +28,6 @@ public class MinecraftGlowMixin {
             return;
         }
 
-        cir.setReturnValue(soldier.isOwnedBy(player));
+        cir.setReturnValue(((SoldierEntity) entity).isOwnedBy(player));
     }
 }

@@ -143,12 +143,12 @@ public class SoldierEntity extends PathfinderMob implements Container {
     
     private BlockPos pingMoveTarget = null;
     private long pingMoveTimestamp = 0;
-private static final long PING_MOVE_MEMORY_MS = 15000;
+    private static final long PING_MOVE_MEMORY_MS = 15000;
 
     private BlockPos attackTargetPos = null;
     private long attackTargetTimestamp = 0;
     private static final long ATTACK_MEMORY_MS = 60000;
-
+    
     private BlockPos pingThreatPos = null;
     private long pingThreatTimestamp = 0;
     private static final long PING_THREAT_MEMORY_MS = 20000;
@@ -442,10 +442,6 @@ private static final long PING_MOVE_MEMORY_MS = 15000;
 
     public void setFireTeam(FireTeam team) {
         this.entityData.set(FIRE_TEAM, team.ordinal());
-        if (!this.level().isClientSide) {
-            getOwnerUUID().ifPresent(owner ->
-                TeamManager.assignToFireTeamTeam(this, owner, team));
-        }
     }
 
     @Override
@@ -927,7 +923,7 @@ private static final long PING_MOVE_MEMORY_MS = 15000;
                System.currentTimeMillis() - pingMoveTimestamp < PING_MOVE_MEMORY_MS;
     }
     
-    public void clearPingMoveTarget() {
+public void clearPingMoveTarget() {
         pingMoveTarget = null;
         pingMoveTimestamp = 0;
     }

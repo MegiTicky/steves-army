@@ -150,9 +150,6 @@ public class PingClientEvents {
             } else if (entityTeam.getName().startsWith("steves_army_friendly_")
                     && viewerTeam.getName().startsWith("steves_army_friendly_")) {
                 event.setResult(Event.Result.ALLOW);
-            } else if (entityTeam.getName().startsWith("steves_army_ft_")
-                    && viewerTeam.getName().startsWith("steves_army_friendly_")) {
-                event.setResult(Event.Result.ALLOW);
             } else {
                 event.setResult(Event.Result.DENY);
             }
@@ -297,6 +294,7 @@ public class PingClientEvents {
             CombatDebugRenderer.render(event.getPoseStack(), event.getCamera(), event.getPartialTick());
             CoverDebugRenderer.render(event.getPoseStack(), event.getCamera());
             FormationDebugRenderer.render(event.getPoseStack(), event.getCamera());
+            FireTeamOutlineRenderer.render(event.getPoseStack(), event.getCamera(), event.getPartialTick());
         }
     }
     

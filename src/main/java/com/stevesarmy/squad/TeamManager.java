@@ -11,14 +11,13 @@ import java.util.UUID;
 
 public class TeamManager {
     private static final String FRIENDLY_TEAM_PREFIX = "steves_army_friendly_";
-    private static final String FIRE_TEAM_TEAM_PREFIX = "steves_army_ft_";
     private static final String ENEMY_TEAM_NAME = "steves_army_enemy";
 
     public static void assignToFriendlyTeam(Entity entity, UUID ownerUUID) {
         if (entity.level().isClientSide) return;
         Scoreboard scoreboard = entity.level().getScoreboard();
         String teamName = FRIENDLY_TEAM_PREFIX + ownerUUID;
-        PlayerTeam team = getOrCreateTeam(scoreboard, teamName, ChatFormatting.WHITE);
+        PlayerTeam team = getOrCreateTeam(scoreboard, teamName, ChatFormatting.BLUE);
         addToTeam(scoreboard, entity, team);
     }
 
@@ -26,19 +25,6 @@ public class TeamManager {
         if (entity.level().isClientSide) return;
         Scoreboard scoreboard = entity.level().getScoreboard();
         PlayerTeam team = getOrCreateTeam(scoreboard, ENEMY_TEAM_NAME, ChatFormatting.RED);
-        addToTeam(scoreboard, entity, team);
-    }
-
-    public static void assignToFireTeamTeam(Entity entity, UUID ownerUUID, FireTeam fireTeam) {
-        if (entity.level().isClientSide) return;
-        if (fireTeam == FireTeam.ALL) {
-            assignToFriendlyTeam(entity, ownerUUID);
-            return;
-        }
-        Scoreboard scoreboard = entity.level().getScoreboard();
-        String teamName = FIRE_TEAM_TEAM_PREFIX + ownerUUID + "_" + fireTeam.name().toLowerCase();
-        ChatFormatting color = fireTeam == FireTeam.ALPHA ? ChatFormatting.WHITE : ChatFormatting.BLUE;
-        PlayerTeam team = getOrCreateTeam(scoreboard, teamName, color);
         addToTeam(scoreboard, entity, team);
     }
 
@@ -69,9 +55,7 @@ public class TeamManager {
     }
 
     public static boolean isOnFriendlyTeam(Entity entity) {
-        if (entity.getTeam() == null) return false;
-        String name = entity.getTeam().getName();
-        return name.startsWith(FRIENDLY_TEAM_PREFIX) || name.startsWith(FIRE_TEAM_TEAM_PREFIX);
+        return entity.getTeam() != null && entity.getTeam().getName().startsWith(FRIENDLY_TEAM_PREFIX);
     }
 
     public static boolean isOnEnemyTeam(Entity entity) {

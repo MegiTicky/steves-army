@@ -36,12 +36,12 @@ public class TeamEventHandler {
                     StevesArmyMod.LOGGER.warn("TeamEventHandler: soldier {} has no owner UUID, using random fallback", soldier.getName().getString());
                     return UUID.randomUUID();
                 });
+                TeamManager.assignToFriendlyTeam(soldier, ownerUUID);
                 soldier.addEffect(new MobEffectInstance(MobEffects.GLOWING, Integer.MAX_VALUE, 0, false, false));
 
                 if (level instanceof ServerLevel serverLevel) {
                     FireTeam savedTeam = FireTeamAssignment.get(serverLevel, ownerUUID).getTeamFor(soldier.getUUID());
                     soldier.setFireTeam(savedTeam);
-                    TeamManager.assignToFireTeamTeam(soldier, ownerUUID, savedTeam);
                 }
 
                 if (!soldier.hasCustomName()) {
