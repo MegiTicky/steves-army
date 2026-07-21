@@ -3,7 +3,9 @@ package com.stevesarmy.client;
 import com.stevesarmy.client.screen.SquadCommandScreen;
 import com.stevesarmy.network.DebugMessage;
 import com.stevesarmy.network.NetworkHandler;
+import com.stevesarmy.squad.FireTeam;
 import net.minecraft.client.Minecraft;
+import net.minecraft.network.chat.Component;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
@@ -27,6 +29,22 @@ public class KeyInputHandler {
             } else {
                 mc.setScreen(new SquadCommandScreen());
             }
+        }
+
+        if (KeyBindings.CYCLE_FIRE_TEAM.consumeClick()) {
+            Minecraft mc = Minecraft.getInstance();
+            if (mc.player == null) return;
+
+            FireTeam current = FireTeamScopeState.INSTANCE.getCurrentScope();
+            int teamCount = FireTeamScopeState.INSTANCE.getTeamCount();
+            FireTeam next;
+            if (current == FireTeam.ALL || current.ordinal() >= teamCount) {
+                next = FireTeam.values()[1];
+            } else {
+                next = FireTeam.values()[current.ordinal() + 1];
+            }
+            FireTeamScopeState.INSTANCE.setCurrentScope(next);
+            mc.player.displayClientMessage(Component.literal("[" + next.getShortName() + "]"), true);
         }
     }
 }

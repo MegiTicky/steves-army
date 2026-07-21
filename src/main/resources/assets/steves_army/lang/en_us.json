@@ -4,6 +4,7 @@
     "key.steves_army.debug": "Debug Soldiers",
     "key.steves_army.ping_wheel": "Ping Wheel (Hold)",
     "key.steves_army.fire_team_wheel": "Fire Team Wheel (Hold)",
+    "key.steves_army.cycle_fire_team": "Cycle Fire Team",
     "key.categories.steves_army": "Steve's Army",
     "entity.steves_army.soldier": "Soldier",
     "entity.steves_army.enemy_soldier": "Enemy Soldier",

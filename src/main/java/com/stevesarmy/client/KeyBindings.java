@@ -51,6 +51,14 @@ public static final KeyMapping PING_WHEEL = new KeyMapping(
         "key.categories.steves_army"
     );
 
+    public static final KeyMapping CYCLE_FIRE_TEAM = new KeyMapping(
+        "key.steves_army.cycle_fire_team",
+        KeyConflictContext.IN_GAME,
+        InputConstants.Type.KEYSYM,
+        GLFW.GLFW_KEY_GRAVE_ACCENT,
+        "key.categories.steves_army"
+    );
+
     @SubscribeEvent
     public static void registerKeyMappings(RegisterKeyMappingsEvent event) {
         event.register(FORMATION_WHEEL);
@@ -58,6 +66,7 @@ public static final KeyMapping PING_WHEEL = new KeyMapping(
         event.register(PING_WHEEL);
         event.register(SQUAD_COMMAND);
         event.register(FIRE_TEAM_WHEEL);
+        event.register(CYCLE_FIRE_TEAM);
     }
     
     public static boolean isPingWheelKeyDown() {
