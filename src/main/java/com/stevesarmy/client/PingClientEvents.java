@@ -6,6 +6,7 @@ import com.stevesarmy.combat.CombatDebugData;
 import com.stevesarmy.combat.DetectionSystem;
 import com.stevesarmy.combat.TargetAcquisition;
 import com.stevesarmy.combat.cover.CoverDebugManager;
+import com.stevesarmy.entity.EnemySoldierEntity;
 import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.network.PotentialTargetsDebugMessage;
 import com.stevesarmy.ping.PingManager;
@@ -13,11 +14,15 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.scores.Team;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.client.event.RenderGuiOverlayEvent;
 import net.minecraftforge.client.event.RenderLevelStageEvent;
+import net.minecraftforge.client.event.RenderNameTagEvent;
 import net.minecraftforge.client.gui.overlay.VanillaGuiOverlay;
 import net.minecraftforge.event.TickEvent;
+import net.minecraftforge.eventbus.api.Event;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.event.level.LevelEvent;
 import net.minecraftforge.fml.common.Mod;
@@ -119,6 +124,25 @@ public class PingClientEvents {
     public static void onWorldUnload(LevelEvent.Unload event) {
         if (event.getLevel().isClientSide()) {
             soldierDebugDataMap.clear();
+        }
+    }
+
+    @SubscribeEvent
+    public static void onRenderNameTag(RenderNameTagEvent event) {
+        Entity entity = event.getEntity();
+        if (!(entity instanceof SoldierEntity) && !(entity instanceof EnemySoldierEntity)) return;
+
+        Minecraft mc = Minecraft.getInstance();
+        Player viewer = mc.player;
+        if (viewer == null) return;
+
+        Team entityTeam = entity.getTeam();
+        Team viewerTeam = viewer.getTeam();
+
+        if (entityTeam != null && viewerTeam != null && entityTeam.isAlliedTo(viewerTeam)) {
+            event.setResult(Event.Result.ALLOW);
+        } else {
+            event.setResult(Event.Result.DENY);
         }
     }
     

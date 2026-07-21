@@ -85,7 +85,6 @@ public class SetFireTeamPacket {
                     Entity entity = serverLevel.getEntity(soldierId);
                     if (entity instanceof SoldierEntity s && s.isOwnedBy(player)) {
                         s.setFireTeam(targetTeam);
-                        s.setCustomName(s.getDisplayName());
                     }
                 }
                 case REBALANCE -> {
@@ -98,9 +97,7 @@ public class SetFireTeamPacket {
                     for (UUID id : ownedIds) {
                         Entity entity = serverLevel.getEntity(id);
                         if (entity instanceof SoldierEntity soldier) {
-                            FireTeam t = fta.getTeamFor(id);
-                            soldier.setFireTeam(t);
-                            soldier.setCustomName(soldier.getDisplayName());
+                            soldier.setFireTeam(fta.getTeamFor(id));
                         }
                     }
                 }
