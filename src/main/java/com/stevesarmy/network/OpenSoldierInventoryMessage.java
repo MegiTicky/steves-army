@@ -35,6 +35,7 @@ public class OpenSoldierInventoryMessage {
 
             Entity entity = player.level().getEntity(msg.soldierId);
             if (entity instanceof SoldierEntity soldier && soldier.isOwnedBy(player)) {
+                if (player.distanceToSqr(soldier) > 400.0) return;
                 SoldierInventoryMenuProvider provider = new SoldierInventoryMenuProvider(soldier);
                 NetworkHooks.openScreen(player, provider, provider::writeExtraData);
             }

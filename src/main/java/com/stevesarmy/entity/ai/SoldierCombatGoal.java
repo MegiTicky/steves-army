@@ -101,6 +101,10 @@ public class SoldierCombatGoal extends Goal {
     private int cachedAimPointTick = -1;
     private UUID cachedAimPointTargetUUID = null;
 
+    private int getBurstTarget() {
+        return soldier.getFireDiscipline() == FireDiscipline.SUPPRESSIVE ? 6 : BURST_SHOTS_TARGET;
+    }
+
     private static final int BURST_SHOTS_TARGET = 3;
     private static final float BURST_INTERVAL_RIFLE_SECONDS = 0.8f;
     private static final float BURST_INTERVAL_MG_SECONDS = 0.35f;
@@ -360,12 +364,6 @@ boolean isBolting = GunIntegration.isBolting(soldier);
 
         if (GunIntegration.getCurrentAmmo(soldier) == 0 && !isReloading && !isBolting && !isDrawing) {
             GunIntegration.reload(soldier);
-        } else if (soldier.getFireDiscipline() == FireDiscipline.CONSERVE && !isReloading && !isBolting && !isDrawing) {
-            int magSize = GunIntegration.getMagazineSize(soldier);
-            int currentAmmo = GunIntegration.getCurrentAmmo(soldier);
-            if (magSize > 0 && currentAmmo <= magSize / 2) {
-                GunIntegration.reload(soldier);
-            }
         }
     }
     
@@ -500,7 +498,11 @@ boolean isBolting = GunIntegration.isBolting(soldier);
         wasAiming = true;
         
         float adsProgress = GunIntegration.getAimProgress(soldier);
-        if (adsProgress < ADS_THRESHOLD) {
+        float adsThreshold = ADS_THRESHOLD;
+        if (soldier.getFireDiscipline() == FireDiscipline.SUPPRESSIVE) {
+            adsThreshold = 0.40f;
+        }
+        if (adsProgress < adsThreshold) {
             return;
         }
         
@@ -514,7 +516,7 @@ boolean isBolting = GunIntegration.isBolting(soldier);
         if (discipline == FireDiscipline.CONSERVE) {
             thresholdScale = Math.max(thresholdScale, 0.55f);
         } else if (discipline == FireDiscipline.SUPPRESSIVE) {
-            thresholdScale = Math.max(thresholdScale, 0.70f);
+            thresholdScale = Math.min(thresholdScale, 0.20f);
         }
         float shotThreshold = Math.max(0.15f, targetAimQ * thresholdScale);
         
@@ -1110,6 +1112,12 @@ private void tickCoverPeekCycle(CoverBehaviorManager coverManager) {
             float lockedSuppressiveMin = lastShotNeededBolt || GunIntegration.isBolting(soldier) 
                 ? StevesArmyConfig.getAimQualitySlowGunThresholdScale() 
                 : StevesArmyConfig.getAimQualityThresholdScale();
+            FireDiscipline debugDisc = soldier.getFireDiscipline();
+            if (debugDisc == FireDiscipline.CONSERVE) {
+                lockedSuppressiveMin = Math.max(lockedSuppressiveMin, 0.55f);
+            } else if (debugDisc == FireDiscipline.SUPPRESSIVE) {
+                lockedSuppressiveMin = Math.min(lockedSuppressiveMin, 0.20f);
+            }
             float lockedAdsProgress = target != null ? GunIntegration.getAimProgress(soldier) : 0;
             String lockedAimPointType = target != null && currentAimPoint != null ? 
                 currentAimPoint.type.displayName : "";
@@ -1446,8 +1454,9 @@ private void tickCoverPeekCycle(CoverBehaviorManager coverManager) {
         }
         burstWaitingForBolt = false;
         
+        int burstTarget = getBurstTarget();
         int ticksBetweenShots = getTicksBetweenBurstShots();
-        if (burstShotsFired > 0 && burstShotsFired < BURST_SHOTS_TARGET) {
+        if (burstShotsFired > 0 && burstShotsFired < burstTarget) {
             ticksSinceLastBurstShot++;
             if (ticksSinceLastBurstShot < ticksBetweenShots) {
                 return;
@@ -1459,7 +1468,7 @@ private void tickCoverPeekCycle(CoverBehaviorManager coverManager) {
         GunIntegration.ShootResult result = GunIntegration.shootAtPosition(soldier, spreadPos);
         
         StevesArmyMod.LOGGER.info("[Suppression] Soldier {} SHOT burst {}/{} result={}", 
-            soldier.getId(), burstShotsFired + 1, BURST_SHOTS_TARGET, result);
+            soldier.getId(), burstShotsFired + 1, burstTarget, result);
         
         switch (result) {
             case SUCCESS -> {
@@ -1473,7 +1482,7 @@ private void tickCoverPeekCycle(CoverBehaviorManager coverManager) {
                 float recoilMagnitude = Math.abs(recoil[0]) + Math.abs(recoil[1]);
                 aimQuality = Math.max(0.0f, aimQuality - recoilMagnitude * StevesArmyConfig.getAimQualityRecoilScale());
                 
-                if (burstShotsFired >= BURST_SHOTS_TARGET) {
+                if (burstShotsFired >= burstTarget) {
                     float burstInterval = getBurstIntervalSeconds();
                     StevesArmyMod.LOGGER.info("[Suppression] Soldier {} burst complete, starting cooldown ({}s)", 
                         soldier.getId(), burstInterval);
@@ -1678,8 +1687,9 @@ private void tickCoverPeekCycle(CoverBehaviorManager coverManager) {
         }
         burstWaitingForBolt = false;
         
+        int burstTarget = getBurstTarget();
         int ticksBetweenShots = getTicksBetweenBurstShots();
-        if (burstShotsFired > 0 && burstShotsFired < BURST_SHOTS_TARGET) {
+        if (burstShotsFired > 0 && burstShotsFired < burstTarget) {
             ticksSinceLastBurstShot++;
             if (ticksSinceLastBurstShot < ticksBetweenShots) {
                 return;
@@ -1689,7 +1699,7 @@ private void tickCoverPeekCycle(CoverBehaviorManager coverManager) {
         GunIntegration.ShootResult result = GunIntegration.shootAtPosition(soldier, finalTarget);
         
         StevesArmyMod.LOGGER.info("[SuppressPing] Soldier {} SHOT burst {}/{} result={}",
-            soldier.getId(), burstShotsFired + 1, BURST_SHOTS_TARGET, result);
+            soldier.getId(), burstShotsFired + 1, burstTarget, result);
         
         switch (result) {
             case SUCCESS -> {
@@ -1703,7 +1713,7 @@ private void tickCoverPeekCycle(CoverBehaviorManager coverManager) {
                 float recoilMagnitude = Math.abs(recoil[0]) + Math.abs(recoil[1]);
                 aimQuality = Math.max(0.0f, aimQuality - recoilMagnitude * StevesArmyConfig.getAimQualityRecoilScale());
                 
-                if (burstShotsFired >= BURST_SHOTS_TARGET) {
+                if (burstShotsFired >= burstTarget) {
                     float burstInterval = getBurstIntervalSeconds();
                     StevesArmyMod.LOGGER.info("[SuppressPing] Soldier {} burst complete, starting cooldown ({}s)",
                         soldier.getId(), burstInterval);
