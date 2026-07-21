@@ -25,6 +25,7 @@ import com.stevesarmy.squad.FireTeam;
 import com.stevesarmy.squad.SquadManager;
 import com.stevesarmy.squad.SquadMode;
 import com.stevesarmy.squad.SquadFormation;
+import com.stevesarmy.squad.TeamManager;
 import com.stevesarmy.util.FormationPositionCalculator;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -721,14 +722,19 @@ public class SoldierEntity extends PathfinderMob implements Container {
     
     @Override
     public void remove(RemovalReason reason) {
-        super.remove(reason);
-        
         if (!this.level().isClientSide) {
+            this.setGlowing(false);
+            TeamManager.removeFromTeam(this);
             com.stevesarmy.combat.cover.CoverReservationManager.releaseAll(this);
             if (this.level() instanceof ServerLevel serverLevel) {
                 com.stevesarmy.squad.SquadManager.get(serverLevel).removeMemberFromSquad(this.getUUID());
             }
         }
+        super.remove(reason);
+    }
+
+    public void setGlowing(boolean glowing) {
+        this.setSharedFlag(6, glowing);
     }
     
     @Override

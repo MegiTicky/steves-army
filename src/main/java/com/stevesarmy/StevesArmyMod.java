@@ -9,6 +9,7 @@ import com.stevesarmy.registry.ModEntities;
 import com.stevesarmy.registry.ModItems;
 import com.stevesarmy.registry.ModCreativeTab;
 import com.stevesarmy.registry.ModMenuTypes;
+import com.stevesarmy.squad.TeamEventHandler;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.event.RegisterCommandsEvent;
 import net.minecraftforge.eventbus.api.IEventBus;
@@ -39,6 +40,7 @@ public class StevesArmyMod {
         modEventBus.addListener(this::commonSetup);
 
         MinecraftForge.EVENT_BUS.register(this);
+        MinecraftForge.EVENT_BUS.register(TeamEventHandler.class);
         MinecraftForge.EVENT_BUS.addListener(this::registerCommands);
     }
 
