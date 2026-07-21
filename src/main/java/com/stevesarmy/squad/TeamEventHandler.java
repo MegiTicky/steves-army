@@ -11,6 +11,8 @@ import net.minecraftforge.event.entity.EntityJoinLevelEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
 
+import java.util.UUID;
+
 @Mod.EventBusSubscriber(modid = StevesArmyMod.MODID)
 public class TeamEventHandler {
 
@@ -28,9 +30,13 @@ public class TeamEventHandler {
                 enemy.addEffect(new MobEffectInstance(MobEffects.GLOWING, Integer.MAX_VALUE, 0, false, false));
                 StevesArmyMod.LOGGER.info("TeamEventHandler: assigned enemy {} to enemy team, added GLOWING effect", enemy.getName().getString());
             } else if (entity instanceof SoldierEntity soldier) {
-                TeamManager.assignToFriendlyTeam(soldier);
+                UUID ownerUUID = soldier.getOwnerUUID().orElseGet(() -> {
+                    StevesArmyMod.LOGGER.warn("TeamEventHandler: soldier {} has no owner UUID, using random fallback", soldier.getName().getString());
+                    return UUID.randomUUID();
+                });
+                TeamManager.assignToFriendlyTeam(soldier, ownerUUID);
                 soldier.addEffect(new MobEffectInstance(MobEffects.GLOWING, Integer.MAX_VALUE, 0, false, false));
-                StevesArmyMod.LOGGER.info("TeamEventHandler: assigned soldier {} to friendly team, added GLOWING effect", soldier.getName().getString());
+                StevesArmyMod.LOGGER.info("TeamEventHandler: assigned soldier {} to friendly team for owner {}, added GLOWING effect", soldier.getName().getString(), ownerUUID);
             }
         } catch (Exception e) {
             StevesArmyMod.LOGGER.error("Failed to assign team for entity {}: {}", entity, e.getMessage());

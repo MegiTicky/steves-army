@@ -443,6 +443,12 @@ boolean isBolting = GunIntegration.isBolting(soldier);
         boolean isBolting = GunIntegration.isBolting(soldier);
         boolean isReloading = GunIntegration.isReloading(soldier);
         
+        StevesArmyMod.LOGGER.info("[DAMAGE_DEBUG] tickGunCombat: soldier={}({}) target={}({}) isDrawing={} isBolting={} isReloading={}",
+            soldier.getName().getString(), soldier.getId(),
+            target != null ? target.getName().getString() + "(" + target.getId() + ")" : "null",
+            target != null ? target.getClass().getSimpleName() : "null",
+            isDrawing, isBolting, isReloading);
+        
         if (wasReloading && !isReloading) {
             GunIntegration.initialData(soldier);
             GunIntegration.draw(soldier);
@@ -460,9 +466,14 @@ boolean isBolting = GunIntegration.isBolting(soldier);
         }
 
         ExposureCalculator.AimPointResult aimPoint = getOrComputeAimPoint();
-        if (aimPoint == null) return;
+        if (aimPoint == null) {
+            StevesArmyMod.LOGGER.info("[DAMAGE_DEBUG] tickGunCombat: aimPoint is null, can't shoot");
+            return;
+        }
         
         if (!aimPoint.canShoot()) {
+            StevesArmyMod.LOGGER.info("[DAMAGE_DEBUG] tickGunCombat: canShoot=false (pointVisible={} bulletPathClear={}) aimType={}", 
+                aimPoint.pointVisible, aimPoint.bulletPathClear, aimPoint.type.displayName);
             if (shouldSuppressTarget()) {
                 isSuppressing = true;
                 trySuppressireFire();
@@ -543,6 +554,15 @@ boolean isBolting = GunIntegration.isBolting(soldier);
         
         GunIntegration.ShootResult result;
         
+        StevesArmyMod.LOGGER.info("[DAMAGE_DEBUG] tickGunCombat: ABOUT TO SHOOT at target={}({}) aimPoint=({},{},{}) aimType={} aimQuality={} hitChance={}",
+            target.getName().getString(), target.getId(),
+            String.format("%.2f", aimPoint.position.x),
+            String.format("%.2f", aimPoint.position.y),
+            String.format("%.2f", aimPoint.position.z),
+            aimPoint.type.displayName,
+            String.format("%.3f", aimQuality),
+            String.format("%.3f", soldier.level().getRandom().nextFloat()));
+        
         if (soldier.level().getRandom().nextFloat() < aimQuality) {
             result = GunIntegration.shootWithDeviation(soldier, aimPoint, 0.0f, 0.0f);
         } else {
@@ -568,6 +588,8 @@ boolean isBolting = GunIntegration.isBolting(soldier);
                 }
             }
         }
+        
+        StevesArmyMod.LOGGER.info("[DAMAGE_DEBUG] tickGunCombat: ShootResult={}", result);
         
         switch (result) {
             case SUCCESS -> lastShotNeededBolt = false;

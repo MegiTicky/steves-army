@@ -756,7 +756,11 @@ public class SoldierEntity extends PathfinderMob implements Container {
     
     @Override
     public boolean hurt(DamageSource source, float amount) {
+        StevesArmyMod.LOGGER.info("[DAMAGE_DEBUG] SoldierEntity.hurt() called: entity={} id={} source={} amount={} sourceEntity={}",
+            this.getName().getString(), this.getId(), source.getMsgId(), amount,
+            source.getEntity() != null ? source.getEntity().getName().getString() + "(" + source.getEntity().getClass().getSimpleName() + ")" : "null");
         boolean result = super.hurt(source, amount);
+        StevesArmyMod.LOGGER.info("[DAMAGE_DEBUG] SoldierEntity.hurt() result: {} (super.hurt returned {})", result ? "damage applied" : "damage blocked", result);
         
         if (result && !this.level().isClientSide && coverBehaviorManager != null) {
             CoverBehaviorManager.CoverState preState = coverBehaviorManager.getState();

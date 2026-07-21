@@ -160,6 +160,13 @@ public class GunIntegration {
                 StevesArmyMod.LOGGER.info("[TaCZ] shoot() - No target");
                 return ShootResult.NO_TARGET;
             }
+            
+            StevesArmyMod.LOGGER.info("[DAMAGE_DEBUG] shoot(): shooter={}({}) id={} target={}({}) id={} targetPos=({},{},{})",
+                shooter.getName().getString(), shooter.getClass().getSimpleName(), shooter.getId(),
+                target.getName().getString(), target.getClass().getSimpleName(), target.getId(),
+                String.format("%.2f", target.getX()),
+                String.format("%.2f", target.getEyeY()),
+                String.format("%.2f", target.getZ()));
 
             try {
                 ItemStack gunStack = shooter.getMainHandItem();
@@ -213,6 +220,16 @@ public class GunIntegration {
                 StevesArmyMod.LOGGER.info("[TaCZ] shootWithDeviation() - No gun");
                 return ShootResult.NOT_GUN;
             }
+            
+            StevesArmyMod.LOGGER.info("[DAMAGE_DEBUG] shootWithDeviation: shooter={}({}) id={} aimPoint={}({},{},{}) canShoot={} bulletPathClear={} pitchDev={} yawDev={}",
+                shooter.getName().getString(), shooter.getClass().getSimpleName(), shooter.getId(),
+                aimPoint.type.displayName,
+                String.format("%.2f", aimPoint.position.x),
+                String.format("%.2f", aimPoint.position.y),
+                String.format("%.2f", aimPoint.position.z),
+                aimPoint.canShoot(), aimPoint.bulletPathClear,
+                String.format("%.3f", pitchDeviation),
+                String.format("%.3f", yawDeviation));
             
             if (!aimPoint.canShoot()) {
                 StevesArmyMod.LOGGER.info("[TaCZ] shootWithDeviation() - Path blocked, aimPoint={}, bulletPathClear={}", 

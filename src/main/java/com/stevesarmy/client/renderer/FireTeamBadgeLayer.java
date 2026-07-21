@@ -1,6 +1,7 @@
 package com.stevesarmy.client.renderer;
 
 import com.mojang.blaze3d.vertex.PoseStack;
+import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.client.ClientSquadData;
 import com.stevesarmy.entity.EnemySoldierEntity;
 import com.stevesarmy.entity.SoldierEntity;
@@ -19,6 +20,7 @@ public class FireTeamBadgeLayer<T extends LivingEntity, M extends HumanoidModel<
 
     public FireTeamBadgeLayer(LivingEntityRenderer<T, M> renderer) {
         super(renderer);
+        StevesArmyMod.LOGGER.info("FireTeamBadgeLayer: constructed for renderer {}", renderer.getClass().getSimpleName());
     }
 
     @Override
@@ -30,7 +32,10 @@ public class FireTeamBadgeLayer<T extends LivingEntity, M extends HumanoidModel<
         if (entity.isInvisible()) return;
 
         SquadStatusSyncPacket.SoldierStatusEntry entry = ClientSquadData.INSTANCE.getEntry(entity.getUUID());
-        if (entry == null) return;
+        if (entry == null) {
+            StevesArmyMod.LOGGER.debug("FireTeamBadgeLayer: no entry for {} UUID={}", entity.getName().getString(), entity.getUUID());
+            return;
+        }
 
         FireTeam team = entry.getFireTeam();
         if (team == FireTeam.ALL) return;
@@ -48,13 +53,19 @@ public class FireTeamBadgeLayer<T extends LivingEntity, M extends HumanoidModel<
         Font font = mc.font;
         int halfWidth = font.width(badge) / 2;
 
+        // Match vanilla name tag rendering pattern
         poseStack.pushPose();
-        poseStack.translate(0.0, entity.getBbHeight() + 0.65, 0.0);
+        poseStack.translate(0.0, entity.getEyeHeight() + 0.5, 0.0);
         poseStack.mulPose(mc.getEntityRenderDispatcher().cameraOrientation());
-        poseStack.scale(-0.05F, -0.05F, 0.05F);
+        poseStack.scale(-0.025F, 0.025F, 0.025F);
 
-        font.drawInBatch(Component.literal(badge), -halfWidth, 0, color, true,
-            poseStack.last().pose(), bufferSource, Font.DisplayMode.SEE_THROUGH, 0x66000000, packedLight);
+        // First pass: SEE_THROUGH with dark background (visible through walls)
+        font.drawInBatch(Component.literal(badge), -halfWidth, 0, color, false,
+            poseStack.last().pose(), bufferSource, Font.DisplayMode.SEE_THROUGH, 0x22000000, 0xF000F0);
+
+        // Second pass: NORMAL without background (opaque text on top, no depth fighting)
+        font.drawInBatch(Component.literal(badge), -halfWidth, 0, color, false,
+            poseStack.last().pose(), bufferSource, Font.DisplayMode.NORMAL, 0, 0xF000F0);
 
         poseStack.popPose();
     }

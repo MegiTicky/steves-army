@@ -18,15 +18,36 @@ public class SquadFriendlyFireHandler {
         LivingEntity victim = event.getEntity();
         Entity attackerEntity = event.getSource().getEntity();
         
-        if (!(attackerEntity instanceof LivingEntity attacker)) return;
-        if (victim == attacker) return;
+        StevesArmyMod.LOGGER.info("[DAMAGE_DEBUG] onLivingHurt: victim={}({}) type={} attackerEntity={}({}) source={}",
+            victim.getName().getString(), victim.getClass().getSimpleName(), net.minecraftforge.registries.ForgeRegistries.ENTITY_TYPES.getKey(victim.getType()),
+            attackerEntity != null ? attackerEntity.getName().getString() : "null",
+            attackerEntity != null ? attackerEntity.getClass().getSimpleName() : "null",
+            event.getSource().getMsgId());
+        
+        if (!(attackerEntity instanceof LivingEntity attacker)) {
+            StevesArmyMod.LOGGER.info("[DAMAGE_DEBUG] onLivingHurt: attacker not LivingEntity, passing through");
+            return;
+        }
+        if (victim == attacker) {
+            StevesArmyMod.LOGGER.info("[DAMAGE_DEBUG] onLivingHurt: self-damage, skipping");
+            return;
+        }
         
         Team attackerTeam = attacker.getTeam();
         Team victimTeam = victim.getTeam();
         
+        StevesArmyMod.LOGGER.info("[DAMAGE_DEBUG] onLivingHurt: attackerTeam={} victimTeam={}",
+            attackerTeam != null ? attackerTeam.getName() : "null",
+            victimTeam != null ? victimTeam.getName() : "null");
+        
         if (attackerTeam != null && victimTeam != null) {
-            if (attackerTeam.equals(victimTeam) || attackerTeam.isAlliedTo(victimTeam)) {
-                if (!attackerTeam.isAllowFriendlyFire()) {
+            boolean sameTeam = attackerTeam.equals(victimTeam);
+            boolean allied = attackerTeam.isAlliedTo(victimTeam);
+            boolean ff = attackerTeam.isAllowFriendlyFire();
+            StevesArmyMod.LOGGER.info("[DAMAGE_DEBUG] onLivingHurt: sameTeam={} allied={} allowFF={}", sameTeam, allied, ff);
+            if (sameTeam || allied) {
+                if (!ff) {
+                    StevesArmyMod.LOGGER.info("[DAMAGE_DEBUG] onLivingHurt: CANCELLED by team friendlyfire check");
                     event.setCanceled(true);
                     debugLog(attacker, victim, "team friendlyfire off");
                     return;
@@ -36,7 +57,10 @@ public class SquadFriendlyFireHandler {
         
         if (StevesArmyConfig.getSquadFriendlyFire()) {
             if (attacker instanceof SoldierEntity attackerSoldier) {
-                if (attackerSoldier.isFriendlyTo(victim)) {
+                boolean friendly = attackerSoldier.isFriendlyTo(victim);
+                StevesArmyMod.LOGGER.info("[DAMAGE_DEBUG] onLivingHurt: attacker is Soldier, isFriendlyTo(victim)={}", friendly);
+                if (friendly) {
+                    StevesArmyMod.LOGGER.info("[DAMAGE_DEBUG] onLivingHurt: CANCELLED by squad protection (attacker check)");
                     event.setCanceled(true);
                     debugLog(attacker, victim, "squad protection");
                     return;
@@ -44,13 +68,18 @@ public class SquadFriendlyFireHandler {
             }
             
             if (victim instanceof SoldierEntity victimSoldier) {
-                if (victimSoldier.isFriendlyTo(attacker)) {
+                boolean friendly = victimSoldier.isFriendlyTo(attacker);
+                StevesArmyMod.LOGGER.info("[DAMAGE_DEBUG] onLivingHurt: victim is Soldier, isFriendlyTo(attacker)={}", friendly);
+                if (friendly) {
+                    StevesArmyMod.LOGGER.info("[DAMAGE_DEBUG] onLivingHurt: CANCELLED by squad protection (victim check)");
                     event.setCanceled(true);
                     debugLog(attacker, victim, "squad protection");
                     return;
                 }
             }
         }
+        
+        StevesArmyMod.LOGGER.info("[DAMAGE_DEBUG] onLivingHurt: DAMAGE PASSED THROUGH, amount={}", event.getAmount());
     }
     
     private static void debugLog(LivingEntity attacker, LivingEntity victim, String reason) {

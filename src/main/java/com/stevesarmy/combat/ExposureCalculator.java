@@ -1,5 +1,6 @@
 package com.stevesarmy.combat;
 
+import com.stevesarmy.StevesArmyMod;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.level.ClipContext;
@@ -80,6 +81,7 @@ public class ExposureCalculator {
 
     public static AimPointResult getBestAimPoint(LivingEntity observer, LivingEntity target, BlockPos skipBlock) {
         if (observer.level() != target.level()) {
+            StevesArmyMod.LOGGER.info("[DAMAGE_DEBUG] getBestAimPoint: different levels, returning FALLBACK");
             return new AimPointResult(target.getEyePosition(), AimPointType.FALLBACK, false, false);
         }
         
@@ -100,9 +102,17 @@ public class ExposureCalculator {
         }
         
         if (bestVisible != null) {
+            StevesArmyMod.LOGGER.info("[DAMAGE_DEBUG] getBestAimPoint: FOUND aimpoint type={} pos=({},{},{})",
+                bestVisible.type.displayName,
+                String.format("%.2f", bestVisible.position.x),
+                String.format("%.2f", bestVisible.position.y),
+                String.format("%.2f", bestVisible.position.z));
             return new AimPointResult(bestVisible.position, bestVisible.type, true, true);
         }
         
+        StevesArmyMod.LOGGER.info("[DAMAGE_DEBUG] getBestAimPoint: NO visible aimpoint, returning FALLBACK. observer=({},{},{}) target=({},{},{})",
+            String.format("%.2f", observer.getX()), String.format("%.2f", observer.getEyeY()), String.format("%.2f", observer.getZ()),
+            String.format("%.2f", target.getX()), String.format("%.2f", target.getY()), String.format("%.2f", target.getZ()));
         return new AimPointResult(target.getEyePosition(), AimPointType.FALLBACK, false, false);
     }
     
