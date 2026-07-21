@@ -150,6 +150,9 @@ public class PingClientEvents {
             } else if (entityTeam.getName().startsWith("steves_army_friendly_")
                     && viewerTeam.getName().startsWith("steves_army_friendly_")) {
                 event.setResult(Event.Result.ALLOW);
+            } else if (entityTeam.getName().startsWith("steves_army_ft_")
+                    && viewerTeam.getName().startsWith("steves_army_friendly_")) {
+                event.setResult(Event.Result.ALLOW);
             } else {
                 event.setResult(Event.Result.DENY);
             }

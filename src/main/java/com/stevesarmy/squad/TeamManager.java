@@ -22,6 +22,13 @@ public class TeamManager {
         addToTeam(scoreboard, entity, team);
     }
 
+    public static void assignToEnemyTeam(Entity entity) {
+        if (entity.level().isClientSide) return;
+        Scoreboard scoreboard = entity.level().getScoreboard();
+        PlayerTeam team = getOrCreateTeam(scoreboard, ENEMY_TEAM_NAME, ChatFormatting.RED);
+        addToTeam(scoreboard, entity, team);
+    }
+
     public static void assignToFireTeamTeam(Entity entity, UUID ownerUUID, FireTeam fireTeam) {
         if (entity.level().isClientSide) return;
         if (fireTeam == FireTeam.ALL) {
@@ -32,13 +39,6 @@ public class TeamManager {
         String teamName = FIRE_TEAM_TEAM_PREFIX + ownerUUID + "_" + fireTeam.name().toLowerCase();
         ChatFormatting color = fireTeam == FireTeam.ALPHA ? ChatFormatting.WHITE : ChatFormatting.BLUE;
         PlayerTeam team = getOrCreateTeam(scoreboard, teamName, color);
-        addToTeam(scoreboard, entity, team);
-    }
-
-    public static void assignToEnemyTeam(Entity entity) {
-        if (entity.level().isClientSide) return;
-        Scoreboard scoreboard = entity.level().getScoreboard();
-        PlayerTeam team = getOrCreateTeam(scoreboard, ENEMY_TEAM_NAME, ChatFormatting.RED);
         addToTeam(scoreboard, entity, team);
     }
 
@@ -69,7 +69,9 @@ public class TeamManager {
     }
 
     public static boolean isOnFriendlyTeam(Entity entity) {
-        return entity.getTeam() != null && entity.getTeam().getName().startsWith(FRIENDLY_TEAM_PREFIX);
+        if (entity.getTeam() == null) return false;
+        String name = entity.getTeam().getName();
+        return name.startsWith(FRIENDLY_TEAM_PREFIX) || name.startsWith(FIRE_TEAM_TEAM_PREFIX);
     }
 
     public static boolean isOnEnemyTeam(Entity entity) {
