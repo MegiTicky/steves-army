@@ -22,6 +22,7 @@ public class EnemySoldierRenderer extends HumanoidMobRenderer<EnemySoldierEntity
             new HumanoidModel<>(context.bakeLayer(ModelLayers.PLAYER_INNER_ARMOR)),
             new HumanoidModel<>(context.bakeLayer(ModelLayers.PLAYER_OUTER_ARMOR)),
             context.getModelManager()));
+        this.addLayer(new SoldierGlowLayer<>(this));
     }
 
     @Override

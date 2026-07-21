@@ -24,6 +24,7 @@ public class SoldierRenderer extends HumanoidMobRenderer<SoldierEntity, SoldierM
             new HumanoidModel<>(context.bakeLayer(ModelLayers.PLAYER_OUTER_ARMOR)),
             context.getModelManager()));
         this.addLayer(new FireTeamBadgeLayer<>(this));
+        this.addLayer(new SoldierGlowLayer<>(this));
     }
 
     @Override

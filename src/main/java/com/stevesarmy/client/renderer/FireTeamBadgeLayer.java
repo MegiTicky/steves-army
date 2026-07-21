@@ -49,9 +49,9 @@ public class FireTeamBadgeLayer<T extends LivingEntity, M extends HumanoidModel<
         int halfWidth = font.width(badge) / 2;
 
         poseStack.pushPose();
-        poseStack.translate(0.0, entity.getBbHeight() + 0.55, 0.0);
+        poseStack.translate(0.0, entity.getBbHeight() + 0.65, 0.0);
         poseStack.mulPose(mc.getEntityRenderDispatcher().cameraOrientation());
-        poseStack.scale(-0.025F, -0.025F, 0.025F);
+        poseStack.scale(-0.05F, -0.05F, 0.05F);
 
         font.drawInBatch(Component.literal(badge), -halfWidth, 0, color, true,
             poseStack.last().pose(), bufferSource, Font.DisplayMode.SEE_THROUGH, 0x66000000, packedLight);
