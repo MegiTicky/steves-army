@@ -4,7 +4,6 @@ import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.entity.EnemySoldierEntity;
 import com.stevesarmy.entity.SoldierEntity;
 import net.minecraft.server.level.ServerLevel;
-import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.Level;
 import net.minecraftforge.event.entity.EntityJoinLevelEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
@@ -26,10 +25,8 @@ public class TeamEventHandler {
                 TeamManager.assignToEnemyTeam(enemy);
                 enemy.setGlowing(true);
             } else if (entity instanceof SoldierEntity soldier) {
-                if (soldier.getOwner() instanceof Player) {
-                    TeamManager.assignToFriendlyTeam(soldier);
-                    soldier.setGlowing(true);
-                }
+                TeamManager.assignToFriendlyTeam(soldier);
+                soldier.setGlowing(true);
             }
         } catch (Exception e) {
             StevesArmyMod.LOGGER.error("Failed to assign team for entity {}: {}", entity, e.getMessage());
