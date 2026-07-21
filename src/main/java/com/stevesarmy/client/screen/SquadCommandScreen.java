@@ -27,8 +27,8 @@ public class SquadCommandScreen extends Screen {
 
     private static final int COL_HEALTH_WIDTH = 40;
     private static final int COL_FT_WIDTH = 24;
-    private static final int COL_NAME_WIDTH = 60;
-    private static final int COL_GUN_WIDTH = 60;
+    private static final int COL_NAME_WIDTH = 80;
+    private static final int COL_GUN_WIDTH = 80;
     private static final int COL_AMMO_WIDTH = 32;
     private static final int COL_DIST_WIDTH = 28;
     private static final int COL_DISC_WIDTH = 24;
