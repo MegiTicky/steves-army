@@ -1,6 +1,7 @@
 package com.stevesarmy.client.renderer;
 
 import com.mojang.blaze3d.vertex.PoseStack;
+import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.entity.EnemySoldierEntity;
 import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.squad.TeamManager;
@@ -15,7 +16,7 @@ import net.minecraft.world.entity.LivingEntity;
 
 public class SoldierGlowLayer<T extends LivingEntity, M extends HumanoidModel<T>> extends RenderLayer<T, M> {
 
-    private static final ResourceLocation GLOW_TEXTURE = new ResourceLocation("minecraft", "textures/entity/creeper/creeper_armor.png");
+    private static final ResourceLocation PLAYER_TEXTURE = new ResourceLocation("minecraft", "textures/entity/player/wide/steve.png");
 
     public SoldierGlowLayer(LivingEntityRenderer<T, M> renderer) {
         super(renderer);
@@ -32,14 +33,18 @@ public class SoldierGlowLayer<T extends LivingEntity, M extends HumanoidModel<T>
         float r, g, b, a;
 
         if (entity instanceof EnemySoldierEntity) {
-            r = 1.0f; g = 0.2f; b = 0.2f; a = 0.35f;
+            r = 1.0f; g = 0.2f; b = 0.2f; a = 0.25f;
+            StevesArmyMod.LOGGER.debug("GlowLayer: enemy soldier {} ({}) - red tint", entity.getName().getString(), entity.getUUID());
         } else if (TeamManager.isOnFriendlyTeam(entity)) {
-            r = 0.2f; g = 0.4f; b = 1.0f; a = 0.35f;
+            r = 0.2f; g = 0.4f; b = 1.0f; a = 0.25f;
+            StevesArmyMod.LOGGER.debug("GlowLayer: friendly soldier {} ({}) - blue tint, team={}",
+                entity.getName().getString(), entity.getUUID(), entity.getTeam() != null ? entity.getTeam().getName() : "null");
         } else {
+            StevesArmyMod.LOGGER.debug("GlowLayer: soldier {} ({}) - no team, skipping", entity.getName().getString(), entity.getUUID());
             return;
         }
 
-        RenderType renderType = RenderType.entityCutoutNoCull(GLOW_TEXTURE);
+        RenderType renderType = RenderType.entityTranslucent(PLAYER_TEXTURE);
         this.getParentModel().renderToBuffer(poseStack, bufferSource.getBuffer(renderType),
             packedLight, OverlayTexture.NO_OVERLAY, r, g, b, a);
     }
