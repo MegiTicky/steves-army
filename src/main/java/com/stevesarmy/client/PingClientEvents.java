@@ -139,8 +139,15 @@ public class PingClientEvents {
         Team entityTeam = entity.getTeam();
         Team viewerTeam = viewer.getTeam();
 
-        if (entityTeam != null && viewerTeam != null && entityTeam.isAlliedTo(viewerTeam)) {
-            event.setResult(Event.Result.ALLOW);
+        if (entityTeam != null && viewerTeam != null) {
+            if (entityTeam.isAlliedTo(viewerTeam)) {
+                event.setResult(Event.Result.ALLOW);
+            } else if (entityTeam.getName().startsWith("steves_army_friendly_")
+                    && viewerTeam.getName().startsWith("steves_army_friendly_")) {
+                event.setResult(Event.Result.ALLOW);
+            } else {
+                event.setResult(Event.Result.DENY);
+            }
         } else {
             event.setResult(Event.Result.DENY);
         }
