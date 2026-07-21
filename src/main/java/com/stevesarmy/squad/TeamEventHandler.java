@@ -4,6 +4,7 @@ import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.entity.EnemySoldierEntity;
 import com.stevesarmy.entity.SoldierEntity;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.effect.MobEffectInstance;
 import net.minecraft.world.effect.MobEffects;
 import net.minecraft.world.level.Level;
@@ -39,7 +40,6 @@ public class TeamEventHandler {
                 TeamManager.assignToFriendlyTeam(soldier, ownerUUID);
                 soldier.addEffect(new MobEffectInstance(MobEffects.GLOWING, Integer.MAX_VALUE, 0, false, false));
 
-                // Initialize fire team from existing assignment data
                 if (level instanceof ServerLevel serverLevel) {
                     FireTeam savedTeam = FireTeamAssignment.get(serverLevel, ownerUUID).getTeamFor(soldier.getUUID());
                     soldier.setFireTeam(savedTeam);
@@ -48,10 +48,24 @@ public class TeamEventHandler {
                 soldier.setCustomName(soldier.getDisplayName());
                 soldier.setCustomNameVisible(true);
 
+                if (level instanceof ServerLevel serverLevel && serverLevel.getServer() != null) {
+                    ServerPlayer ownerPlayer = serverLevel.getServer().getPlayerList().getPlayer(ownerUUID);
+                    if (ownerPlayer != null) {
+                        TeamManager.addPlayerToFriendlyTeam(ownerPlayer, ownerUUID);
+                    }
+                }
+
                 StevesArmyMod.LOGGER.info("TeamEventHandler: assigned soldier {} to friendly team for owner {}, added GLOWING effect", soldier.getName().getString(), ownerUUID);
+            } else if (entity instanceof ServerPlayer player) {
+                onPlayerLogin(player);
             }
         } catch (Exception e) {
             StevesArmyMod.LOGGER.error("Failed to assign team for entity {}: {}", entity, e.getMessage());
         }
+    }
+
+    private static void onPlayerLogin(ServerPlayer player) {
+        UUID playerUUID = player.getUUID();
+        TeamManager.addPlayerToFriendlyTeam(player, playerUUID);
     }
 }

@@ -2,6 +2,7 @@ package com.stevesarmy.squad;
 
 import com.stevesarmy.StevesArmyMod;
 import net.minecraft.ChatFormatting;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.scores.PlayerTeam;
 import net.minecraft.world.scores.Scoreboard;
@@ -25,6 +26,24 @@ public class TeamManager {
         Scoreboard scoreboard = entity.level().getScoreboard();
         PlayerTeam team = getOrCreateTeam(scoreboard, ENEMY_TEAM_NAME, ChatFormatting.RED);
         addToTeam(scoreboard, entity, team);
+    }
+
+    public static void addPlayerToFriendlyTeam(ServerPlayer player, UUID ownerUUID) {
+        if (player.level().isClientSide) return;
+        Scoreboard scoreboard = player.level().getScoreboard();
+        String teamName = FRIENDLY_TEAM_PREFIX + ownerUUID;
+        PlayerTeam team = scoreboard.getPlayerTeam(teamName);
+        if (team != null) {
+            addPlayerToTeam(scoreboard, player, team);
+        }
+    }
+
+    public static void removePlayerFromTeam(ServerPlayer player) {
+        if (player.level().isClientSide) return;
+        Scoreboard scoreboard = player.level().getScoreboard();
+        if (player.getTeam() instanceof PlayerTeam playerTeam) {
+            scoreboard.removePlayerFromTeam(player.getScoreboardName(), playerTeam);
+        }
     }
 
     public static void removeFromTeam(Entity entity) {
@@ -62,5 +81,13 @@ public class TeamManager {
             scoreboard.removePlayerFromTeam(entity.getStringUUID(), currentTeam);
         }
         scoreboard.addPlayerToTeam(entity.getStringUUID(), team);
+    }
+
+    private static void addPlayerToTeam(Scoreboard scoreboard, ServerPlayer player, PlayerTeam team) {
+        if (player.getTeam() instanceof PlayerTeam currentTeam) {
+            if (currentTeam == team) return;
+            scoreboard.removePlayerFromTeam(player.getScoreboardName(), currentTeam);
+        }
+        scoreboard.addPlayerToTeam(player.getScoreboardName(), team);
     }
 }
