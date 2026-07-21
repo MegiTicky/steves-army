@@ -1,14 +1,17 @@
 package com.stevesarmy.client.screen;
 
 import com.stevesarmy.client.ClientSquadData;
+import com.stevesarmy.client.FireTeamScopeState;
 import com.stevesarmy.client.screen.widget.OpenInventoryButton;
 import com.stevesarmy.client.screen.widget.SquadControlWidget;
 import com.stevesarmy.client.screen.widget.SquadModeWidget;
 import com.stevesarmy.network.NetworkHandler;
 import com.stevesarmy.network.OpenSoldierInventoryMessage;
+import com.stevesarmy.network.SetFireTeamPacket;
 import com.stevesarmy.network.SetSoldierConfigPacket;
 import com.stevesarmy.network.SquadStatusSyncPacket;
 import com.stevesarmy.squad.FireDiscipline;
+import com.stevesarmy.squad.FireTeam;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
@@ -24,6 +27,7 @@ public class SquadCommandScreen extends Screen {
     private static final int ROW_START_Y = 22;
 
     private List<SoldierRow> rows = new ArrayList<>();
+    private int teamCount = 2;
 
     private static class SoldierRow {
         final UUID entityId;
@@ -34,6 +38,7 @@ public class SquadCommandScreen extends Screen {
         int totalAmmo;
         String gunName;
         FireDiscipline discipline;
+        FireTeam fireTeam;
         int modeWidgetX;
         int invButtonX;
 
@@ -49,6 +54,7 @@ public class SquadCommandScreen extends Screen {
             this.totalAmmo = entry.totalAmmo;
             this.gunName = entry.gunName;
             this.discipline = entry.getFireDiscipline();
+            this.fireTeam = entry.getFireTeam();
             this.modeWidget = new SquadModeWidget(entry.getSquadMode(), mode -> {
                 NetworkHandler.INSTANCE.sendToServer(new SetSoldierConfigPacket(entityId, SetSoldierConfigPacket.ConfigType.SQUAD_MODE, mode.ordinal()));
             });
@@ -64,6 +70,7 @@ public class SquadCommandScreen extends Screen {
             this.totalAmmo = entry.totalAmmo;
             this.gunName = entry.gunName;
             this.discipline = entry.getFireDiscipline();
+            this.fireTeam = entry.getFireTeam();
             this.modeWidget.setMode(entry.getSquadMode());
         }
     }
@@ -123,6 +130,18 @@ public class SquadCommandScreen extends Screen {
             drawHealthBar(graphics, x, y, row.health, row.maxHealth);
             x += 40 + 4;
 
+            // Fire team badge
+            String ftLabel = row.fireTeam.getShortName();
+            int ftColor = switch (row.fireTeam) {
+                case ALPHA -> 0xFFFF5555;
+                case BRAVO -> 0xFF5555FF;
+                case CHARLIE -> 0xFF55FF55;
+                case DELTA -> 0xFFFFFF55;
+                default -> 0xFFFFFFFF;
+            };
+            graphics.drawString(font, Component.literal("[" + ftLabel + "]"), x, y + 2, ftColor, false);
+            x += font.width("[" + ftLabel + "]") + 2;
+
             graphics.drawString(font, Component.literal(row.name), x, y + 2, 0xFFCCCCCC, false);
             x += font.width(row.name) + 2;
 
@@ -170,6 +189,32 @@ public class SquadCommandScreen extends Screen {
         dx += btnWidth + 4;
         drawButton(graphics, "Suppress", dx, btnY, btnWidth, btnHeight, mouseX, mouseY,
             () -> sendSquadWideConfig(SetSoldierConfigPacket.ConfigType.FIRE_DISCIPLINE, FireDiscipline.SUPPRESSIVE.ordinal()));
+
+        btnY += btnHeight + 6;
+        graphics.drawString(font, Component.literal("-- Fire Teams --"), contentX, btnY, 0xFFAAAAAA, false);
+        btnY += 12;
+
+        graphics.drawString(font, Component.literal("Teams: " + teamCount), contentX, btnY + 2, 0xFFCCCCCC, false);
+        dx = contentX + font.width("Teams: " + teamCount) + 4;
+        drawButton(graphics, "-", dx, btnY, 14, btnHeight, mouseX, mouseY, () -> {
+            if (teamCount > 1) {
+                teamCount--;
+                NetworkHandler.INSTANCE.sendToServer(SetFireTeamPacket.setTeamCount(teamCount));
+                FireTeamScopeState.INSTANCE.setTeamCount(teamCount);
+            }
+        });
+        dx += 18;
+        drawButton(graphics, "+", dx, btnY, 14, btnHeight, mouseX, mouseY, () -> {
+            if (teamCount < 4) {
+                teamCount++;
+                NetworkHandler.INSTANCE.sendToServer(SetFireTeamPacket.setTeamCount(teamCount));
+                FireTeamScopeState.INSTANCE.setTeamCount(teamCount);
+            }
+        });
+        dx += 22;
+        drawButton(graphics, "Rebalance", dx, btnY, 60, btnHeight, mouseX, mouseY, () -> {
+            NetworkHandler.INSTANCE.sendToServer(SetFireTeamPacket.rebalance());
+        });
 
         super.render(graphics, mouseX, mouseY, partialTick);
     }

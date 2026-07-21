@@ -39,7 +39,20 @@ public class PingWheelHandler {
         }
         
         boolean isKeyDown = KeyBindings.isPingWheelKeyDown();
-        
+
+        // Skip if Ctrl is held (fire team wheel takes priority)
+        long window = mc.getWindow().getWindow();
+        boolean ctrlHeld = GLFW.glfwGetKey(window, GLFW.GLFW_KEY_LEFT_CONTROL) == GLFW.GLFW_PRESS
+            || GLFW.glfwGetKey(window, GLFW.GLFW_KEY_RIGHT_CONTROL) == GLFW.GLFW_PRESS;
+        if (ctrlHeld && isKeyDown) {
+            if (isWheelActive) {
+                releaseMouse(mc);
+            }
+            isWheelActive = false;
+            wasKeyDown = false;
+            return;
+        }
+
         if (isKeyDown && !wasKeyDown) {
             isWheelActive = true;
             pressStartTime = System.currentTimeMillis();
@@ -170,7 +183,7 @@ public class PingWheelHandler {
         
         StevesArmyMod.LOGGER.info("Ping position: {} type: {}", pingPos, type);
         
-        PingMessage message = new PingMessage(type, pingPos, dimension);
+        PingMessage message = new PingMessage(type, pingPos, dimension, FireTeamScopeState.INSTANCE.getCurrentScope());
         NetworkHandler.INSTANCE.sendToServer(message);
     }
     

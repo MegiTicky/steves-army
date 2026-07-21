@@ -66,6 +66,12 @@ public class PingOverlayRenderer {
         String typeText = ping.getType().name();
         int typeWidth = mc.font.width(typeText);
         guiGraphics.drawString(mc.font, typeText, -typeWidth / 2, -halfSize - 4, color, true);
+
+        String scopeText = ping.getScopeLabel();
+        if (scopeText != null && !scopeText.isEmpty()) {
+            int scopeWidth = mc.font.width(scopeText);
+            guiGraphics.drawString(mc.font, scopeText, -scopeWidth / 2, -halfSize + 8, 0xFFAAAAAA, true);
+        }
         
         RenderSystem.enableDepthTest();
         RenderSystem.disableBlend();

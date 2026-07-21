@@ -63,6 +63,10 @@ public class NetworkHandler {
             SetSoldierConfigPacket::encode,
             SetSoldierConfigPacket::decode,
             SetSoldierConfigPacket::handle);
+        INSTANCE.registerMessage(id++, SetFireTeamPacket.class,
+            SetFireTeamPacket::encode,
+            SetFireTeamPacket::decode,
+            SetFireTeamPacket::handle);
     }
 
     public static void sendTo(ServerPlayer player, Object message) {

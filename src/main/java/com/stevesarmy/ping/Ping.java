@@ -14,12 +14,17 @@ public class Ping {
     private final int dimension;
     private final int teamColor;
     private final long timestamp;
+    private final String scopeLabel;
     
     private ScreenPos screenPos;
     private double distance;
     private float scale;
     
     public Ping(UUID authorId, String authorName, PingType type, Vec3 position, int dimension, int teamColor) {
+        this(authorId, authorName, type, position, dimension, teamColor, "");
+    }
+
+    public Ping(UUID authorId, String authorName, PingType type, Vec3 position, int dimension, int teamColor, String scopeLabel) {
         this.pingId = UUID.randomUUID();
         this.authorId = authorId;
         this.authorName = authorName;
@@ -28,6 +33,7 @@ public class Ping {
         this.dimension = dimension;
         this.teamColor = teamColor;
         this.timestamp = System.currentTimeMillis();
+        this.scopeLabel = scopeLabel;
     }
     
     public UUID getPingId() { return pingId; }
@@ -38,6 +44,7 @@ public class Ping {
     public int getDimension() { return dimension; }
     public int getTeamColor() { return teamColor; }
     public long getTimestamp() { return timestamp; }
+    public String getScopeLabel() { return scopeLabel; }
     
     public ScreenPos getScreenPos() { return screenPos; }
     public double getDistance() { return distance; }

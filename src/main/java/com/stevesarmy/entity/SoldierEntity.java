@@ -21,6 +21,7 @@ import com.stevesarmy.inventory.SoldierInventoryHandler;
 import com.stevesarmy.network.NetworkHandler;
 import com.stevesarmy.network.OpenSoldierInventoryMessage;
 import com.stevesarmy.squad.FireDiscipline;
+import com.stevesarmy.squad.FireTeam;
 import com.stevesarmy.squad.SquadManager;
 import com.stevesarmy.squad.SquadMode;
 import com.stevesarmy.squad.SquadFormation;
@@ -155,7 +156,8 @@ public class SoldierEntity extends PathfinderMob implements Container {
     private boolean dispatchedBySend = false;
     private boolean inventorySyncingFromEntity = false;
     private boolean cqbMode = false;
-    
+    private FireTeam fireTeam = FireTeam.ALPHA;
+
     public static final double CQB_RANGE = 5.0;
 
     public boolean isDispatchedBySend() {
@@ -165,6 +167,10 @@ public class SoldierEntity extends PathfinderMob implements Container {
     public boolean isCQB() {
         return cqbMode;
     }
+
+    public FireTeam getFireTeam() { return fireTeam; }
+
+    public void setFireTeam(FireTeam team) { this.fireTeam = team; }
 
     public void setCQB(boolean cqbMode) {
         this.cqbMode = cqbMode;
@@ -269,6 +275,7 @@ public class SoldierEntity extends PathfinderMob implements Container {
         tag.putLong("HoldPos", getHoldPosition().asLong());
         tag.put("Inventory", inventory.save());
         tag.putInt("FireDiscipline", getFireDiscipline().ordinal());
+        tag.putInt("FireTeam", getFireTeam().ordinal());
     }
 
     @Override
@@ -290,6 +297,9 @@ public class SoldierEntity extends PathfinderMob implements Container {
         inventory.syncArmorToEntity(this);
         if (tag.contains("FireDiscipline")) {
             setFireDiscipline(FireDiscipline.values()[tag.getInt("FireDiscipline") % FireDiscipline.values().length]);
+        }
+        if (tag.contains("FireTeam")) {
+            setFireTeam(FireTeam.values()[tag.getInt("FireTeam") % FireTeam.values().length]);
         }
     }
 

@@ -4,6 +4,8 @@ import com.stevesarmy.client.ClientSquadData;
 import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.inventory.SoldierInventory;
 import com.stevesarmy.squad.FireDiscipline;
+import com.stevesarmy.squad.FireTeam;
+import com.stevesarmy.squad.FireTeamAssignment;
 import com.stevesarmy.squad.SquadMode;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.server.level.ServerLevel;
@@ -41,9 +43,10 @@ public class SquadStatusSyncPacket {
             String gunName = buf.readUtf(64);
             int squadModeOrdinal = buf.readVarInt();
             int fireDisciplineOrdinal = buf.readVarInt();
+            int fireTeamOrdinal = buf.readVarInt();
             int coverState = buf.readVarInt();
             entries.add(new SoldierStatusEntry(entityId, entityIntId, name, health, maxHealth, totalAmmo, gunName,
-                squadModeOrdinal, fireDisciplineOrdinal, coverState));
+                squadModeOrdinal, fireDisciplineOrdinal, fireTeamOrdinal, coverState));
         }
         return new SquadStatusSyncPacket(entries);
     }
@@ -60,6 +63,7 @@ public class SquadStatusSyncPacket {
             buf.writeUtf(entry.gunName, 64);
             buf.writeVarInt(entry.squadModeOrdinal);
             buf.writeVarInt(entry.fireDisciplineOrdinal);
+            buf.writeVarInt(entry.fireTeamOrdinal);
             buf.writeVarInt(entry.coverState);
         }
     }
@@ -106,6 +110,7 @@ public class SquadStatusSyncPacket {
                     gunName,
                     soldier.getSquadMode().ordinal(),
                     soldier.getFireDiscipline().ordinal(),
+                    FireTeamAssignment.get(serverLevel, player.getUUID()).getTeamFor(soldier.getUUID()).ordinal(),
                     soldier.getSyncedCoverState()
                 ));
             }
@@ -123,11 +128,12 @@ public class SquadStatusSyncPacket {
         public final String gunName;
         public final int squadModeOrdinal;
         public final int fireDisciplineOrdinal;
+        public final int fireTeamOrdinal;
         public final int coverState;
 
         public SoldierStatusEntry(UUID entityId, int entityIntId, String name, float health, float maxHealth,
                                    int totalAmmo, String gunName, int squadModeOrdinal,
-                                   int fireDisciplineOrdinal,
+                                   int fireDisciplineOrdinal, int fireTeamOrdinal,
                                    int coverState) {
             this.entityId = entityId;
             this.entityIntId = entityIntId;
@@ -138,10 +144,12 @@ public class SquadStatusSyncPacket {
             this.gunName = gunName;
             this.squadModeOrdinal = squadModeOrdinal;
             this.fireDisciplineOrdinal = fireDisciplineOrdinal;
+            this.fireTeamOrdinal = fireTeamOrdinal;
             this.coverState = coverState;
         }
 
         public SquadMode getSquadMode() { return SquadMode.values()[squadModeOrdinal % SquadMode.values().length]; }
         public FireDiscipline getFireDiscipline() { return FireDiscipline.values()[fireDisciplineOrdinal % FireDiscipline.values().length]; }
+        public FireTeam getFireTeam() { return FireTeam.values()[fireTeamOrdinal % FireTeam.values().length]; }
     }
 }
