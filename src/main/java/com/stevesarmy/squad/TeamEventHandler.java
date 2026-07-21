@@ -3,7 +3,9 @@ package com.stevesarmy.squad;
 import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.entity.EnemySoldierEntity;
 import com.stevesarmy.entity.SoldierEntity;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.level.Level;
 import net.minecraftforge.event.entity.EntityJoinLevelEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
@@ -13,20 +15,24 @@ public class TeamEventHandler {
 
     @SubscribeEvent
     public static void onEntityJoin(EntityJoinLevelEvent event) {
-        if (event.getLevel().isClientSide()) return;
+        Level level = event.getLevel();
+        if (level.isClientSide()) return;
+        if (!(level instanceof ServerLevel)) return;
 
         var entity = event.getEntity();
 
-        if (entity instanceof EnemySoldierEntity enemy) {
-            TeamManager.assignToEnemyTeam(enemy);
-            enemy.setGlowing(true);
-        } else if (entity instanceof SoldierEntity soldier) {
-            if (soldier.getOwner() instanceof Player owner) {
-                TeamManager.assignToFriendlyTeam(soldier, owner);
-                soldier.setGlowing(true);
+        try {
+            if (entity instanceof EnemySoldierEntity enemy) {
+                TeamManager.assignToEnemyTeam(enemy);
+                enemy.setGlowing(true);
+            } else if (entity instanceof SoldierEntity soldier) {
+                if (soldier.getOwner() instanceof Player) {
+                    TeamManager.assignToFriendlyTeam(soldier);
+                    soldier.setGlowing(true);
+                }
             }
-        } else if (entity instanceof Player player) {
-            TeamManager.assignToFriendlyTeam(player, player);
+        } catch (Exception e) {
+            StevesArmyMod.LOGGER.error("Failed to assign team for entity {}: {}", entity, e.getMessage());
         }
     }
 }

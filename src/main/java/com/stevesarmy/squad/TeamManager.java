@@ -3,7 +3,6 @@ package com.stevesarmy.squad;
 import com.stevesarmy.StevesArmyMod;
 import net.minecraft.ChatFormatting;
 import net.minecraft.world.entity.Entity;
-import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.scores.PlayerTeam;
 import net.minecraft.world.scores.Scoreboard;
 
@@ -11,7 +10,7 @@ public class TeamManager {
     private static final String FRIENDLY_TEAM_NAME = "steves_army_friendly";
     private static final String ENEMY_TEAM_NAME = "steves_army_enemy";
 
-    public static void assignToFriendlyTeam(Entity entity, Player owner) {
+    public static void assignToFriendlyTeam(Entity entity) {
         if (entity.level().isClientSide) return;
         Scoreboard scoreboard = entity.level().getScoreboard();
         PlayerTeam team = getOrCreateTeam(scoreboard, FRIENDLY_TEAM_NAME, ChatFormatting.BLUE);
