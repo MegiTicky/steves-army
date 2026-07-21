@@ -40,7 +40,8 @@ public class SquadFriendlyFireHandler {
             attackerTeam != null ? attackerTeam.getName() : "null",
             victimTeam != null ? victimTeam.getName() : "null");
         
-        if (attackerTeam != null && victimTeam != null) {
+        if (attackerTeam != null && victimTeam != null
+            && !(attacker instanceof SoldierEntity) && !(victim instanceof SoldierEntity)) {
             boolean sameTeam = attackerTeam.equals(victimTeam);
             boolean allied = attackerTeam.isAlliedTo(victimTeam);
             boolean ff = attackerTeam.isAllowFriendlyFire();

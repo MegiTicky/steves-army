@@ -54,6 +54,7 @@ import net.minecraft.world.level.LevelAccessor;
 import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
+import net.minecraft.world.scores.Team;
 import net.minecraftforge.common.capabilities.Capability;
 import net.minecraftforge.common.capabilities.ForgeCapabilities;
 import net.minecraftforge.common.util.LazyOptional;
@@ -534,7 +535,16 @@ public class SoldierEntity extends PathfinderMob implements Container {
                 && myOwner.get().equals(theirOwner.get())) return true;
             if (owner != null) {
                 LivingEntity theirOwnerEntity = otherSoldier.getOwner();
-                if (theirOwnerEntity != null && owner.isAlliedTo(theirOwnerEntity)) return true;
+                if (theirOwnerEntity != null) {
+                    if (owner.isAlliedTo(theirOwnerEntity)) return true;
+                    Team ownerTeam = owner.getTeam();
+                    Team theirTeam = theirOwnerEntity.getTeam();
+                    if (ownerTeam != null && theirTeam != null
+                        && ownerTeam.getName().startsWith("steves_army_friendly_")
+                        && theirTeam.getName().startsWith("steves_army_friendly_")) {
+                        return true;
+                    }
+                }
             }
         }
         
