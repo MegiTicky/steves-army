@@ -222,7 +222,24 @@ public class CoverTacticalGoal extends Goal {
         int searchRadius = SEARCH_RADIUS;
         BlockPos searchCenter = soldier.blockPosition();
 
-        if (soldier.getSquadMode() == SquadMode.HOLD) {
+        if (soldier.hasValidAttackTarget()) {
+            BlockPos attackPos = soldier.getAttackTargetPos();
+            Vec3 toTarget = new Vec3(
+                attackPos.getX() - soldier.getX(),
+                0,
+                attackPos.getZ() - soldier.getZ()
+            );
+            double distToTarget = toTarget.length();
+            if (distToTarget > 1.0) {
+                toTarget = toTarget.normalize();
+                double ahead = Math.min(distToTarget * 0.5, 10.0);
+                searchCenter = soldier.blockPosition().offset(
+                    (int)(toTarget.x * ahead),
+                    0,
+                    (int)(toTarget.z * ahead)
+                );
+            }
+        } else if (soldier.getSquadMode() == SquadMode.HOLD) {
             BlockPos holdPos = soldier.getHoldPosition();
             if (holdPos != null && !holdPos.equals(BlockPos.ZERO)) {
                 searchCenter = holdPos;
@@ -263,7 +280,7 @@ public class CoverTacticalGoal extends Goal {
         
         if (!soldier.isAlive()) return false;
         
-        if (soldier.hasValidPingMoveTarget()) {
+        if (soldier.hasValidPingMoveTarget() && !soldier.hasValidAttackTarget()) {
             if (debugLoggingEnabled) {
                 StevesArmyMod.LOGGER.info("[CoverGoal] canUse=false: hasValidPingMoveTarget");
             }
@@ -338,6 +355,17 @@ public class CoverTacticalGoal extends Goal {
                     }
                     return false;
                 }
+            }
+
+            if (shouldExitCoverForAttack()) {
+                getCoverManager().clearCover();
+                getCoverManager().resetPeekState();
+                getPositionController().clear();
+                cooldown = COOLDOWN_TICKS;
+                if (debugLoggingEnabled) {
+                    StevesArmyMod.LOGGER.info("[CoverGoal] canContinueToUse=false: ATTACK mode, exiting cover to advance");
+                }
+                return false;
             }
         }
         
@@ -771,6 +799,13 @@ public class CoverTacticalGoal extends Goal {
             return;
         }
 
+        if (shouldExitCoverForAttack()) {
+            getCoverManager().resetPeekState();
+            getPositionController().clear();
+            getCoverManager().clearCover();
+            return;
+        }
+
         // Delegate peek to PeekController
         if (currentCover != null) {
             getPeekController().tick(soldier, currentCover, getPositionController());
@@ -845,11 +880,20 @@ public class CoverTacticalGoal extends Goal {
         if (shouldExitCoverForFollow() && !getCoverManager().isSuppressed()) {
             getCoverManager().clearCover();
         }
+
+        if (shouldExitCoverForAttack() && !getCoverManager().isSuppressed()) {
+            getCoverManager().clearCover();
+        }
     }
     
-    private boolean shouldSeekCover() {
+private boolean shouldSeekCover() {
         ThreatAwareness threats = getThreats();
-        
+
+        if (soldier.hasValidAttackTarget()) {
+            StevesArmyMod.LOGGER.info("[CoverGoal] shouldSeekCover=true (ATTACK mode)");
+            return true;
+        }
+
         if (soldier.isCQB() || soldier.hasCloseRangeTarget()) {
             StevesArmyMod.LOGGER.info("[CoverGoal] shouldSeekCover=false (CQB mode={}, closeRangeTarget={})",
                 soldier.isCQB(), soldier.hasCloseRangeTarget());
@@ -1016,24 +1060,40 @@ public class CoverTacticalGoal extends Goal {
         }
     }
     
-    private boolean shouldExitCoverForFollow() {
+private boolean shouldExitCoverForFollow() {
         if (soldier.getSquadMode() != SquadMode.FOLLOW) return false;
-        
+
         if (getCoverManager().isSuppressed()) return false;
-        
+
         float healthPercent = soldier.getHealth() / soldier.getMaxHealth();
         if (healthPercent < LOW_HEALTH_THRESHOLD) return false;
-        
+
         if (getCoverManager().getTimeInCover() < MIN_COVER_DWELL_TIME_MS) return false;
-        
+
         LivingEntity owner = soldier.getOwner();
         if (owner instanceof Player) {
             double distanceToOwner = soldier.distanceTo(owner);
             if (distanceToOwner > FOLLOW_REGROUP_DISTANCE) return true;
         }
-        
+
         if (getThreats().hasActiveThreat()) return false;
-        
+
+        return true;
+    }
+
+    private boolean shouldExitCoverForAttack() {
+        if (!soldier.hasValidAttackTarget()) return false;
+
+        if (getCoverManager().isSuppressed()) return false;
+
+        float healthPercent = soldier.getHealth() / soldier.getMaxHealth();
+        if (healthPercent < LOW_HEALTH_THRESHOLD) return false;
+
+        if (getCoverManager().getTimeInCover() < MIN_COVER_DWELL_TIME_MS) return false;
+
+        PeekController peekCtrl = getPeekController();
+        if (peekCtrl.isExposed() || peekCtrl.isMovingToPeek() || peekCtrl.isReturning()) return false;
+
         return true;
     }
     

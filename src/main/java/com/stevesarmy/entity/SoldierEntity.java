@@ -8,6 +8,7 @@ import com.stevesarmy.combat.ThreatAwareness;
 import com.stevesarmy.combat.cover.CoverBehaviorManager;
 import com.stevesarmy.combat.cover.CoverType;
 import com.stevesarmy.combat.cover.IncomingFireHandler;
+import com.stevesarmy.entity.ai.SoldierAttackGoal;
 import com.stevesarmy.entity.ai.SoldierCombatGoal;
 import com.stevesarmy.entity.ai.SoldierFollowOwnerGoal;
 import com.stevesarmy.entity.ai.SoldierHoleRescueGoal;
@@ -143,6 +144,10 @@ public class SoldierEntity extends PathfinderMob implements Container {
     private BlockPos pingMoveTarget = null;
     private long pingMoveTimestamp = 0;
     private static final long PING_MOVE_MEMORY_MS = 15000;
+
+    private BlockPos attackTargetPos = null;
+    private long attackTargetTimestamp = 0;
+    private static final long ATTACK_MEMORY_MS = 60000;
     
     private BlockPos pingThreatPos = null;
     private long pingThreatTimestamp = 0;
@@ -254,6 +259,7 @@ public class SoldierEntity extends PathfinderMob implements Container {
         this.goalSelector.addGoal(0, new FloatGoal(this));
         this.goalSelector.addGoal(1, new OpenDoorGoal(this, true));
         this.goalSelector.addGoal(1, new SoldierMoveToPingGoal(this));
+        this.goalSelector.addGoal(1, new SoldierAttackGoal(this));
         this.goalSelector.addGoal(2, new CoverTacticalGoal(this));
         this.goalSelector.addGoal(3, new SoldierFollowOwnerGoal(this));
         this.goalSelector.addGoal(3, new SoldierHoldPositionGoal(this));
@@ -896,6 +902,15 @@ public class SoldierEntity extends PathfinderMob implements Container {
                 
                 StevesArmyMod.LOGGER.info("Set suppress area: {}", pingSuppressPos);
             }
+            case ATTACK -> {
+                attackTargetPos = BlockPos.containing(position);
+                attackTargetTimestamp = System.currentTimeMillis();
+                setSquadMode(com.stevesarmy.squad.SquadMode.HOLD);
+                setHoldPosition(attackTargetPos);
+                forcedTargetPos = attackTargetPos;
+                forcedTargetTimestamp = System.currentTimeMillis();
+                StevesArmyMod.LOGGER.info("ATTACK: set attack position at {}", attackTargetPos);
+            }
         }
     }
     
@@ -908,11 +923,30 @@ public class SoldierEntity extends PathfinderMob implements Container {
                System.currentTimeMillis() - pingMoveTimestamp < PING_MOVE_MEMORY_MS;
     }
     
-    public void clearPingMoveTarget() {
+public void clearPingMoveTarget() {
         pingMoveTarget = null;
         pingMoveTimestamp = 0;
     }
-    
+
+    public BlockPos getAttackTargetPos() {
+        return attackTargetPos;
+    }
+
+    public boolean hasValidAttackTarget() {
+        return attackTargetPos != null &&
+               System.currentTimeMillis() - attackTargetTimestamp < ATTACK_MEMORY_MS;
+    }
+
+    public void setAttackTarget(BlockPos pos) {
+        this.attackTargetPos = pos;
+        this.attackTargetTimestamp = System.currentTimeMillis();
+    }
+
+    public void clearAttackTarget() {
+        this.attackTargetPos = null;
+        this.attackTargetTimestamp = 0;
+    }
+
     public BlockPos getPingThreatPos() {
         return pingThreatPos;
     }

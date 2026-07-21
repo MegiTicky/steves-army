@@ -17,7 +17,7 @@ public class TeamManager {
         if (entity.level().isClientSide) return;
         Scoreboard scoreboard = entity.level().getScoreboard();
         String teamName = FRIENDLY_TEAM_PREFIX + ownerUUID;
-        PlayerTeam team = getOrCreateTeam(scoreboard, teamName, ChatFormatting.BLUE);
+        PlayerTeam team = getOrCreateTeam(scoreboard, teamName, ChatFormatting.WHITE);
         addToTeam(scoreboard, entity, team);
     }
 
