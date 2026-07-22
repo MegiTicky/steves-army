@@ -164,7 +164,6 @@ public class PingClientEvents {
         
         PingManager.tick();
         PingWheelHandler.tick();
-        FormationWheelHandler.tick();
         FireTeamWheelHandler.tick();
         
         if (CombatDebugRenderer.getDebugMode() != CombatDebugRenderer.DEBUG_MODE_OFF) {
@@ -293,7 +292,7 @@ public class PingClientEvents {
         if (event.getStage() == RenderLevelStageEvent.Stage.AFTER_TRANSLUCENT_BLOCKS) {
             CombatDebugRenderer.render(event.getPoseStack(), event.getCamera(), event.getPartialTick());
             CoverDebugRenderer.render(event.getPoseStack(), event.getCamera());
-            FormationDebugRenderer.render(event.getPoseStack(), event.getCamera());
+            SpacingDebugRenderer.render(event.getPoseStack(), event.getCamera());
         }
     }
     
@@ -305,10 +304,6 @@ public class PingClientEvents {
             
             if (PingWheelHandler.isWheelActive()) {
                 PingWheelRenderer.render(event.getGuiGraphics());
-            }
-            
-            if (FormationWheelHandler.isWheelActive()) {
-                FormationWheelRenderer.render(event.getGuiGraphics());
             }
 
             if (FireTeamWheelHandler.isWheelActive()) {

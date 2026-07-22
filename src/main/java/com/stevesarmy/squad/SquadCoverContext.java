@@ -8,7 +8,6 @@ import java.util.List;
 
 public record SquadCoverContext(
     boolean inSquad,
-    SquadFormation formation,
     int squadSize,
     int memberIndex,
     List<BlockPos> occupiedCovers,
@@ -28,10 +27,6 @@ public record SquadCoverContext(
 
     public boolean isSameCover(BlockPos pos) {
         return occupiedCovers.contains(pos);
-    }
-
-    public SquadFormation getFormation() {
-        return formation;
     }
 
     public List<BlockPos> getOccupiedCovers() {

@@ -3,19 +3,12 @@ package com.stevesarmy.entity.ai;
 import com.stevesarmy.combat.cover.CoverBehaviorManager;
 import com.stevesarmy.combat.cover.CoverPoint;
 import com.stevesarmy.entity.SoldierEntity;
-import com.stevesarmy.squad.SquadFormation;
-import com.stevesarmy.squad.SquadManager;
 import com.stevesarmy.squad.SquadMode;
-import com.stevesarmy.util.FormationPositionCalculator;
+import com.stevesarmy.util.SpacingHelper;
 import net.minecraft.core.BlockPos;
-import net.minecraft.server.level.ServerLevel;
-import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.ai.goal.Goal;
-import net.minecraft.world.phys.Vec3;
 
 import java.util.EnumSet;
-import java.util.List;
-import java.util.UUID;
 
 public class SoldierHoldPositionGoal extends Goal {
     private static final float HOLD_RADIUS_SQ = 100.0f;
@@ -91,12 +84,8 @@ public class SoldierHoldPositionGoal extends Goal {
 
     @Override
     public void start() {
-        BlockPos target = getFormationTarget();
-        if (target != null) {
-            soldier.getNavigation().moveTo(target.getX(), target.getY(), target.getZ(), speedModifier);
-        } else if (holdPos != null) {
-            soldier.getNavigation().moveTo(holdPos.getX(), holdPos.getY(), holdPos.getZ(), speedModifier);
-        }
+        soldier.clearFormationOffset();
+        navigateToTarget(holdPos);
     }
 
     @Override
@@ -128,41 +117,15 @@ public class SoldierHoldPositionGoal extends Goal {
 
         double distToHold = soldier.distanceToSqr(holdPos.getX(), holdPos.getY(), holdPos.getZ());
         if (distToHold > HOLD_RADIUS_SQ) {
-            BlockPos target = getFormationTarget();
-            if (target != null) {
-                soldier.getNavigation().moveTo(target.getX(), target.getY(), target.getZ(), speedModifier);
-            } else {
-                soldier.getNavigation().moveTo(holdPos.getX(), holdPos.getY(), holdPos.getZ(), speedModifier);
-            }
+            navigateToTarget(holdPos);
         } else {
             soldier.getNavigation().stop();
         }
     }
 
-    private BlockPos getFormationTarget() {
-        SquadFormation formation = soldier.getSquadFormation();
-        if (formation == SquadFormation.NONE || formation == SquadFormation.CQB || holdPos == null) {
-            return null;
-        }
-
-        UUID squadId = soldier.getSquadId();
-        if (squadId == null || !(soldier.level() instanceof ServerLevel serverLevel)) {
-            return null;
-        }
-
-        SquadManager mgr = SquadManager.get(serverLevel);
-        List<LivingEntity> members = mgr.getSquadMembers(serverLevel, squadId, null);
-        List<SoldierEntity> fireTeam = FormationPositionCalculator.getFireTeamSoldiers(members, soldier);
-
-        if (fireTeam.isEmpty()) {
-            return null;
-        }
-
-        int mySlot = FormationPositionCalculator.assignFormationSlots(fireTeam, soldier);
-        int teamSize = fireTeam.size();
-
-        Vec3 fwd = soldier.getFormationForwardDirection(holdPos);
-        return FormationPositionCalculator.getFormationTarget(
-            fwd, formation, mySlot, teamSize, holdPos, soldier.level());
+    private void navigateToTarget(BlockPos target) {
+        if (target == null) return;
+        BlockPos spaced = SpacingHelper.applySpacing(target, soldier);
+        soldier.getNavigation().moveTo(spaced.getX(), spaced.getY(), spaced.getZ(), speedModifier);
     }
 }

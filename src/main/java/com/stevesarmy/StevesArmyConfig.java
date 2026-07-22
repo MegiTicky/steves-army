@@ -24,6 +24,8 @@ public class StevesArmyConfig {
     
     public static final ForgeConfigSpec.BooleanValue TARGET_MONSTERS;
     public static final ForgeConfigSpec.BooleanValue TARGET_TARGET_ENTITIES;
+
+    public static final ForgeConfigSpec.DoubleValue SPACING_DISTANCE;
     
     static {
         BUILDER.push("aim_quality");
@@ -145,8 +147,18 @@ public class StevesArmyConfig {
                      "Default: true")
             .define("targetTargetEntities", true);
         
+BUILDER.pop();
+
+        BUILDER.push("spacing");
+
+        SPACING_DISTANCE = BUILDER
+            .comment("Minimum distance soldiers try to keep from each other while moving (blocks).",
+                     "Soldiers will offset their path to avoid clustering.",
+                     "Default: 3.0 blocks")
+            .defineInRange("spacingDistance", 3.0, 1.0, 10.0);
+
         BUILDER.pop();
-        
+
         SPEC = BUILDER.build();
     }
     
@@ -212,5 +224,9 @@ public class StevesArmyConfig {
     
     public static boolean shouldTargetTargetEntities() {
         return TARGET_TARGET_ENTITIES.get();
+    }
+
+    public static double getSpacingDistance() {
+        return SPACING_DISTANCE.get();
     }
 }

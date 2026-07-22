@@ -16,8 +16,6 @@ import java.util.concurrent.ConcurrentHashMap;
 
 import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.squad.SquadCoverContext;
-import com.stevesarmy.squad.SquadFormation;
-import com.stevesarmy.util.FormationPositionCalculator;
 
 public class CoverFinder {
     private static final int DEFAULT_SEARCH_RADIUS = 12;
@@ -29,8 +27,7 @@ public class CoverFinder {
     private static final double DISTANCE_WEIGHT = 0.10;
     private static final double FIRING_QUALITY_WEIGHT = 0.20;
     private static final double PEEK_ANGLE_WEIGHT = 0.15;
-    private static final double SQUAD_DISPERSION_WEIGHT = 0.12;
-    private static final double FORMATION_POSITION_WEIGHT = 0.08;
+    private static final double SQUAD_DISPERSION_WEIGHT = 0.20;
     
     private static final float HALF_COVER_FIGHTABILITY_BONUS = 0.25f;
     private static final float FULL_COVER_FIGHTABILITY_BONUS = 0.15f;
@@ -360,7 +357,6 @@ return weightedScore;
             peekAngleScore = 0.0f;
         }
 
-        float formationScore = calculateFormationPositionScore(coverPoint, soldier, threatDirection, squadCtx);
         float dispersionScore = calculateSquadDispersionScore(coverPoint, squadCtx);
 
         float weightedScore = (float)(primaryProtection * PRIMARY_PROTECTION_WEIGHT +
@@ -368,26 +364,9 @@ return weightedScore;
                        distanceScore * DISTANCE_WEIGHT +
                        firingQuality * FIRING_QUALITY_WEIGHT +
                        peekAngleScore * PEEK_ANGLE_WEIGHT +
-                       dispersionScore * SQUAD_DISPERSION_WEIGHT +
-                       formationScore * FORMATION_POSITION_WEIGHT) + fightability - blindPenalty;
+                       dispersionScore * SQUAD_DISPERSION_WEIGHT) + fightability - blindPenalty;
 
         return weightedScore;
-    }
-
-    private float calculateFormationPositionScore(CoverPoint coverPoint, LivingEntity soldier,
-                                                   Vec3 threatDirection, SquadCoverContext ctx) {
-        if (ctx == null || !ctx.inSquad() || ctx.formation() == SquadFormation.NONE || threatDirection == null) {
-            return 0.5f;
-        }
-
-        Vec3 dir = threatDirection.normalize();
-        BlockPos idealOffset = FormationPositionCalculator.getFormationOffset(
-                dir, ctx.formation(), ctx.memberIndex(), ctx.squadSize());
-        BlockPos idealPos = soldier.blockPosition().offset(idealOffset);
-
-        double distToIdeal = coverPoint.getPosition().distSqr(idealPos);
-        double maxDist = 100;
-        return (float)(1.0 - Math.min(distToIdeal / maxDist, 1.0));
     }
 
     private float calculateSquadDispersionScore(CoverPoint coverPoint, SquadCoverContext ctx) {

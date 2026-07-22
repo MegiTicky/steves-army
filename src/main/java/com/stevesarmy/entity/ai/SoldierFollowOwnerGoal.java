@@ -1,15 +1,10 @@
 package com.stevesarmy.entity.ai;
 
 import com.stevesarmy.combat.cover.CoverBehaviorManager;
-import com.stevesarmy.combat.cover.FormationDebugManager;
 import com.stevesarmy.entity.SoldierEntity;
-
-import com.stevesarmy.squad.SquadFormation;
-import com.stevesarmy.squad.SquadManager;
 import com.stevesarmy.squad.SquadMode;
-import com.stevesarmy.util.FormationPositionCalculator;
+import com.stevesarmy.util.SpacingHelper;
 import net.minecraft.core.BlockPos;
-import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.ai.goal.Goal;
 import net.minecraft.world.entity.ai.navigation.PathNavigation;
@@ -18,11 +13,8 @@ import net.minecraft.world.level.block.LeavesBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.pathfinder.BlockPathTypes;
 import net.minecraft.world.level.pathfinder.WalkNodeEvaluator;
-import net.minecraft.world.phys.Vec3;
 
 import java.util.EnumSet;
-import java.util.List;
-import java.util.UUID;
 
 public class SoldierFollowOwnerGoal extends Goal {
     private final SoldierEntity soldier;
@@ -32,8 +24,6 @@ public class SoldierFollowOwnerGoal extends Goal {
     private final float stopDistance;
     private final float followDistance;
     private int timeToRecalcPath;
-    private BlockPos lastAnchor;
-    private static final double RE_ANCHOR_THRESHOLD_SQ = 64.0; // 8 blocks
 
     public SoldierFollowOwnerGoal(SoldierEntity soldier) {
         this.soldier = soldier;
@@ -108,15 +98,13 @@ public class SoldierFollowOwnerGoal extends Goal {
     @Override
     public void start() {
         timeToRecalcPath = 0;
-        lastAnchor = null;
+        soldier.clearFormationOffset();
     }
 
     @Override
     public void stop() {
         owner = null;
-        lastAnchor = null;
         soldier.getNavigation().stop();
-        FormationDebugManager.setSoldierData(soldier.getId(), null);
     }
 
     @Override
@@ -127,13 +115,7 @@ public class SoldierFollowOwnerGoal extends Goal {
                 if (soldier.distanceToSqr(owner) >= (double)(followDistance * followDistance)) {
                     pathToOwner();
                 } else {
-                    BlockPos formationTarget = getFormationTarget(owner.blockPosition());
-                    if (formationTarget != null) {
-                        soldier.getNavigation().moveTo(
-                            formationTarget.getX(), formationTarget.getY(), formationTarget.getZ(), speedModifier);
-                    } else {
-                        soldier.getNavigation().moveTo(owner, speedModifier);
-                    }
+                    navigateToTarget(owner.blockPosition());
                 }
             }
         }
@@ -143,20 +125,16 @@ public class SoldierFollowOwnerGoal extends Goal {
         BlockPos ownerPos = owner.blockPosition();
         PathNavigation nav = soldier.getNavigation();
 
-        BlockPos formationTarget = getFormationTarget(ownerPos);
-        if (formationTarget != null) {
-            for (int i = 0; i < 10; i++) {
-                if (canPathTo(formationTarget)) {
-                    nav.moveTo(formationTarget.getX(), formationTarget.getY(), formationTarget.getZ(), speedModifier);
-                    return;
-                }
-                formationTarget = formationTarget.offset(
-                    soldier.getRandom().nextIntBetweenInclusive(-1, 1),
-                    0,
-                    soldier.getRandom().nextIntBetweenInclusive(-1, 1));
+        BlockPos spaced = SpacingHelper.applySpacing(ownerPos, soldier);
+        for (int i = 0; i < 10; i++) {
+            if (canPathTo(spaced)) {
+                nav.moveTo(spaced.getX(), spaced.getY(), spaced.getZ(), speedModifier);
+                return;
             }
-            nav.moveTo(owner, speedModifier);
-            return;
+            spaced = spaced.offset(
+                soldier.getRandom().nextIntBetweenInclusive(-1, 1),
+                0,
+                soldier.getRandom().nextIntBetweenInclusive(-1, 1));
         }
 
         for (int i = 0; i < 10; i++) {
@@ -175,46 +153,9 @@ public class SoldierFollowOwnerGoal extends Goal {
         nav.moveTo(owner, speedModifier);
     }
 
-    private BlockPos getFormationTarget(BlockPos anchor) {
-        SquadFormation formation = soldier.getSquadFormation();
-        if (formation == SquadFormation.NONE || formation == SquadFormation.CQB) {
-            return null;
-        }
-
-        // Re-anchor only when player moved significantly
-        BlockPos effectiveAnchor = lastAnchor != null ? lastAnchor : anchor;
-        if (lastAnchor == null || anchor.distSqr(lastAnchor) > RE_ANCHOR_THRESHOLD_SQ) {
-            effectiveAnchor = anchor;
-            lastAnchor = anchor;
-            // Reset formation slots when re-anchoring to prevent stale positions
-            soldier.setFormationSlotIndex(-1);
-        }
-
-        UUID squadId = soldier.getSquadId();
-        if (squadId == null || !(level instanceof ServerLevel serverLevel)) {
-            return null;
-        }
-
-        SquadManager mgr = SquadManager.get(serverLevel);
-        List<LivingEntity> members = mgr.getSquadMembers(serverLevel, squadId, null);
-        List<SoldierEntity> fireTeam = FormationPositionCalculator.getFireTeamSoldiers(members, soldier);
-
-        if (fireTeam.isEmpty()) {
-            return null;
-        }
-
-        int mySlot = FormationPositionCalculator.assignFormationSlots(fireTeam, soldier);
-        int teamSize = fireTeam.size();
-
-        Vec3 fwd = soldier.getFormationForwardDirection(effectiveAnchor);
-        BlockPos target = FormationPositionCalculator.getFormationTarget(
-            fwd, formation, mySlot, teamSize, effectiveAnchor, level);
-
-        BlockPos offset = FormationPositionCalculator.getFormationOffset(fwd, formation, mySlot, teamSize);
-        FormationDebugManager.setSoldierData(soldier.getId(), new FormationDebugManager.FormationSoldierData(
-            target, fwd, effectiveAnchor, offset, mySlot, teamSize, formation.name(), false, -1));
-
-        return target;
+    private void navigateToTarget(BlockPos target) {
+        BlockPos spaced = SpacingHelper.applySpacing(target, soldier);
+        soldier.getNavigation().moveTo(spaced.getX(), spaced.getY(), spaced.getZ(), speedModifier);
     }
 
     private boolean canPathTo(BlockPos pos) {

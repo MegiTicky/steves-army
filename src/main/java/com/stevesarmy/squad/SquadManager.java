@@ -73,22 +73,6 @@ public class SquadManager extends SavedData {
         }
     }
 
-    public void setSquadFormation(UUID squadId, SquadFormation formation) {
-        SquadData squad = squadsById.get(squadId);
-        if (squad != null) {
-            squad.setFormation(formation);
-            this.setDirty();
-        }
-    }
-
-    public void setSquadFormationByLeader(UUID leaderId, SquadFormation formation) {
-        SquadData squad = squadsByLeader.get(leaderId);
-        if (squad != null) {
-            squad.setFormation(formation);
-            this.setDirty();
-        }
-    }
-
     public boolean isSquadCQB(UUID squadId) {
         SquadData squad = squadsById.get(squadId);
         return squad != null && squad.isCQB();

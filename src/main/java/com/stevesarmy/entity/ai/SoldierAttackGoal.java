@@ -1,24 +1,18 @@
 package com.stevesarmy.entity.ai;
 
-import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.combat.cover.CoverBehaviorManager;
 import com.stevesarmy.entity.SoldierEntity;
-import com.stevesarmy.squad.SquadFormation;
-import com.stevesarmy.squad.SquadManager;
-import com.stevesarmy.util.FormationPositionCalculator;
+import com.stevesarmy.util.SpacingHelper;
 import net.minecraft.core.BlockPos;
-import net.minecraft.server.level.ServerLevel;
-import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.ai.goal.Goal;
-import net.minecraft.world.phys.Vec3;
 
 import java.util.EnumSet;
-import java.util.List;
-import java.util.UUID;
 
 public class SoldierAttackGoal extends Goal {
     private final SoldierEntity soldier;
-    private BlockPos targetPos;
+    private BlockPos rawTarget;
+    private BlockPos navigationTarget;
+    private int commandGeneration;
     private final double speedModifier;
     private final float closeDistance;
     private int timeToRecalcPath;
@@ -35,93 +29,97 @@ public class SoldierAttackGoal extends Goal {
         if (!soldier.isAlive()) return false;
         if (!soldier.hasValidAttackTarget()) return false;
 
-        this.targetPos = soldier.getAttackTargetPos();
-        return targetPos != null;
+        this.rawTarget = soldier.getAttackTargetPos();
+        this.commandGeneration = soldier.getAttackGeneration();
+        return rawTarget != null;
     }
 
     @Override
     public boolean canContinueToUse() {
         if (!soldier.isAlive()) return false;
         if (!soldier.hasValidAttackTarget()) return false;
+        if (navigationTarget == null) return false;
 
-        double distSq = soldier.distanceToSqr(targetPos.getX(), targetPos.getY(), targetPos.getZ());
+        double distSq = soldier.distanceToSqr(
+            navigationTarget.getX() + 0.5,
+            navigationTarget.getY() + 0.5,
+            navigationTarget.getZ() + 0.5);
         return distSq > closeDistance * closeDistance;
     }
 
     @Override
     public void start() {
         timeToRecalcPath = 0;
-        BlockPos target = getNavigationTarget();
-        if (target != null) {
-            soldier.getNavigation().moveTo(target.getX(), target.getY(), target.getZ(), speedModifier);
-        }
+        soldier.cancelCoverMovement();
+        soldier.clearFormationOffset();
+        computeNavigationTarget();
+        submitNavigation();
     }
 
     @Override
     public void stop() {
         soldier.getNavigation().stop();
-        soldier.clearAttackTarget();
-        targetPos = null;
+        soldier.clearAttackTargetIfGeneration(commandGeneration);
+        rawTarget = null;
+        navigationTarget = null;
     }
 
     @Override
     public void tick() {
+        if (navigationTarget == null) return;
+
         soldier.getLookControl().setLookAt(
-            targetPos.getX() + 0.5,
-            targetPos.getY() + 1.0,
-            targetPos.getZ() + 0.5,
+            navigationTarget.getX() + 0.5,
+            navigationTarget.getY() + 1.0,
+            navigationTarget.getZ() + 0.5,
             30.0F, 30.0F
         );
 
         if (--timeToRecalcPath <= 0) {
             timeToRecalcPath = 10;
 
-            double distance = soldier.distanceToSqr(targetPos.getX(), targetPos.getY(), targetPos.getZ());
+            if (soldier.hasValidAttackTarget() && soldier.getAttackGeneration() != commandGeneration) {
+                this.rawTarget = soldier.getAttackTargetPos();
+                this.commandGeneration = soldier.getAttackGeneration();
+                soldier.clearFormationOffset();
+                computeNavigationTarget();
+            }
+
+            if (navigationTarget == null) return;
+
+            double distance = soldier.distanceToSqr(
+                navigationTarget.getX() + 0.5,
+                navigationTarget.getY() + 0.5,
+                navigationTarget.getZ() + 0.5);
             if (distance > closeDistance * closeDistance) {
                 CoverBehaviorManager.CoverState coverState = soldier.getCoverBehaviorManager().getState();
                 boolean coverIsMoving = coverState == CoverBehaviorManager.CoverState.SEEKING_COVER ||
                                         coverState == CoverBehaviorManager.CoverState.REPOSITIONING;
                 if (!coverIsMoving) {
-                    BlockPos target = getNavigationTarget();
-                    if (target != null) {
-                        soldier.getNavigation().moveTo(target.getX(), target.getY(), target.getZ(), speedModifier);
-                    }
+                    submitNavigation();
                 }
 
                 if (soldier.horizontalCollision || soldier.minorHorizontalCollision) {
                     soldier.getJumpControl().jump();
                 }
             } else {
-                soldier.clearAttackTarget();
                 soldier.getNavigation().stop();
+                soldier.clearAttackTargetIfGeneration(commandGeneration);
             }
         }
     }
 
-    private BlockPos getNavigationTarget() {
-        SquadFormation formation = soldier.getSquadFormation();
-        if (formation == SquadFormation.NONE || formation == SquadFormation.CQB || targetPos == null) {
-            return targetPos;
+    private void computeNavigationTarget() {
+        if (rawTarget == null) {
+            navigationTarget = null;
+            return;
         }
+        navigationTarget = SpacingHelper.applySpacing(rawTarget, soldier);
+    }
 
-        UUID squadId = soldier.getSquadId();
-        if (squadId == null || !(soldier.level() instanceof ServerLevel serverLevel)) {
-            return targetPos;
-        }
-
-        SquadManager mgr = SquadManager.get(serverLevel);
-        List<LivingEntity> members = mgr.getSquadMembers(serverLevel, squadId, null);
-        List<SoldierEntity> fireTeam = FormationPositionCalculator.getFireTeamSoldiers(members, soldier);
-
-        if (fireTeam.isEmpty()) {
-            return targetPos;
-        }
-
-        int mySlot = FormationPositionCalculator.assignFormationSlots(fireTeam, soldier);
-        int teamSize = fireTeam.size();
-
-        Vec3 fwd = soldier.getFormationForwardDirection(targetPos);
-        return FormationPositionCalculator.getFormationTarget(
-            fwd, formation, mySlot, teamSize, targetPos, soldier.level());
+    private void submitNavigation() {
+        if (navigationTarget == null) return;
+        soldier.getNavigation().moveTo(
+            navigationTarget.getX(), navigationTarget.getY(), navigationTarget.getZ(), speedModifier);
     }
 }

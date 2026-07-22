@@ -16,12 +16,14 @@ import com.stevesarmy.combat.cover.CoverFinder;
 import com.stevesarmy.combat.cover.CoverPoint;
 import com.stevesarmy.combat.cover.CoverQualityEvaluator;
 import com.stevesarmy.combat.cover.CoverReservationManager;
-import com.stevesarmy.combat.cover.FormationDebugManager;
 import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.entity.TargetEntity;
 import com.stevesarmy.entity.ai.CoverPositionController;
 import com.stevesarmy.entity.ai.CoverTacticalGoal;
 import com.stevesarmy.entity.ai.PeekController;
+import com.stevesarmy.network.NetworkHandler;
+import com.stevesarmy.network.SpacingDebugPacket;
+import com.stevesarmy.network.SpacingDebugPacket.SpacingDebugEntry;
 import com.stevesarmy.squad.SquadData;
 import com.stevesarmy.squad.SquadManager;
 import com.stevesarmy.squad.SquadThreatIntel;
@@ -32,6 +34,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.phys.Vec3;
@@ -89,8 +92,8 @@ public class CombatDebugCommand {
                     .executes(CombatDebugCommand::showUntargeted)
                     .then(Commands.argument("count", IntegerArgumentType.integer(0, 10))
                         .executes(CombatDebugCommand::setUntargeted)))
-                .then(Commands.literal("formation")
-                    .executes(CombatDebugCommand::toggleFormationVisualization))
+                .then(Commands.literal("spacing")
+                    .executes(CombatDebugCommand::toggleSpacingVisualization))
                 .then(Commands.literal("status")
                     .executes(CombatDebugCommand::renderStatus))
             )
@@ -209,7 +212,6 @@ public class CombatDebugCommand {
         CoverDebugManager.setShowPeekCandidates(true);
         CoverDebugManager.setVisualizationEnabled(true);
         CoverTacticalGoal.setDebugLogging(true);
-        FormationDebugManager.setVisualizationEnabled(true);
 
         context.getSource().sendSuccess(() -> Component.literal(
             "=== Steve's Army Debug: ALL ON ===\n" +
@@ -217,7 +219,6 @@ public class CombatDebugCommand {
             "  Soldier cover visualization: ON\n" +
             "  Peek candidate visualization: ON\n" +
             "  Cover behavior logging: ON\n" +
-            "  Formation visualization: ON\n" +
             "Use /stevesarmy_debug render mode minimal for compact display\n" +
             "Use /stevesarmy_debug log cover off to disable console logs"
         ), true);
@@ -230,9 +231,8 @@ public class CombatDebugCommand {
         CoverDebugManager.setShowPeekCandidates(false);
         CoverDebugManager.setVisualizationEnabled(false);
         CoverTacticalGoal.setDebugLogging(false);
-        CoverDebugManager.setShowRays(false);
+CoverDebugManager.setShowRays(false);
         CoverDebugManager.setShowSolidBlocks(false);
-        FormationDebugManager.setVisualizationEnabled(false);
 
         context.getSource().sendSuccess(() -> Component.literal(
             "=== Steve's Army Debug: ALL OFF ===\n" +
@@ -241,8 +241,7 @@ public class CombatDebugCommand {
             "  Peek candidate visualization: OFF\n" +
             "  Cover point visualization: OFF\n" +
 "  Raycast visualization: OFF\n" +
-            "  Solid block visualization: OFF\n" +
-            "  Formation visualization: OFF"
+            "  Solid block visualization: OFF"
         ), true);
         return 1;
     }
@@ -314,12 +313,39 @@ public class CombatDebugCommand {
         return 1;
     }
 
-    private static int toggleFormationVisualization(CommandContext<CommandSourceStack> context) {
-        boolean enabled = !FormationDebugManager.isVisualizationEnabled();
-        FormationDebugManager.setVisualizationEnabled(enabled);
+    private static int toggleSpacingVisualization(CommandContext<CommandSourceStack> context) {
+        boolean enabled = !com.stevesarmy.client.SpacingDebugRenderer.isEnabled();
+        com.stevesarmy.client.SpacingDebugRenderer.setEnabled(enabled);
         context.getSource().sendSuccess(() -> Component.literal(
-            "Formation visualization: " + (enabled ? "ON" : "OFF")
+            "Spacing offset visualization: " + (enabled ? "ON" : "OFF")
         ), true);
+
+        // Send packet to client with current spacing data
+        ServerPlayer player = context.getSource().getPlayer();
+        if (player != null) {
+            ServerLevel level = player.serverLevel();
+            List<SoldierEntity> soldiers = level.getEntitiesOfClass(
+                SoldierEntity.class,
+                player.getBoundingBox().inflate(100),
+                s -> s.isOwnedBy(player)
+            );
+            List<SpacingDebugEntry> entries = new ArrayList<>();
+            for (SoldierEntity s : soldiers) {
+                entries.add(new SpacingDebugEntry(
+                    s.getUUID(),
+                    s.getPingMoveTarget() != null ? s.getPingMoveTarget() : BlockPos.ZERO,
+                    s.getFormationOffset() != null
+                        ? (s.getPingMoveTarget() != null
+                            ? s.getPingMoveTarget().offset(s.getFormationOffset())
+                            : BlockPos.ZERO)
+                        : BlockPos.ZERO,
+                    s.getFormationOffset(),
+                    s.getPingMoveGeneration()
+                ));
+            }
+            NetworkHandler.sendTo(player, new SpacingDebugPacket(enabled, entries));
+        }
+
         return 1;
     }
 
@@ -981,7 +1007,6 @@ public class CombatDebugCommand {
             "  Cover points: " + (CoverDebugManager.isVisualizationEnabled() ? "ON" : "OFF") + "\n" +
             "  Rays: " + (CoverDebugManager.isShowRays() ? "ON" : "OFF") + "\n" +
             "  Solid blocks: " + (CoverDebugManager.isShowSolidBlocks() ? "ON" : "OFF") + "\n" +
-            "  Formation viz: " + (FormationDebugManager.isVisualizationEnabled() ? "ON" : "OFF") + "\n" +
             "  Untargeted: " + CombatDebugRenderer.getMaxUntargeted()
         ), false);
         return 1;

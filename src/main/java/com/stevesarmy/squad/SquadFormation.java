@@ -2,10 +2,6 @@ package com.stevesarmy.squad;
 
 public enum SquadFormation {
     NONE(0xFFFFFF, "None"),
-    LINE(0x55FF55, "Line"),
-    WEDGE(0x55AAFF, "Wedge"),
-    COLUMN(0xFFAA55, "Column"),
-    DIAMOND(0xFF55FF, "Diamond"),
     CQB(0xFF4444, "CQB");
 
     private final int color;

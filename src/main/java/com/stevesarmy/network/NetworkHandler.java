@@ -43,10 +43,6 @@ public class NetworkHandler {
             PotentialTargetsDebugMessage::encode,
             PotentialTargetsDebugMessage::new,
             PotentialTargetsDebugMessage::handle);
-        INSTANCE.registerMessage(id++, FormationMessage.class,
-            FormationMessage::encode,
-            FormationMessage::new,
-            FormationMessage::handle);
         INSTANCE.registerMessage(id++, SyncSoldierInventoryPacket.class,
             SyncSoldierInventoryPacket::encode,
             SyncSoldierInventoryPacket::decode,
@@ -67,6 +63,10 @@ public class NetworkHandler {
             SetFireTeamPacket::encode,
             SetFireTeamPacket::decode,
             SetFireTeamPacket::handle);
+        INSTANCE.registerMessage(id++, SpacingDebugPacket.class,
+            SpacingDebugPacket::encode,
+            SpacingDebugPacket::new,
+            SpacingDebugPacket::handle);
     }
 
     public static void sendTo(ServerPlayer player, Object message) {

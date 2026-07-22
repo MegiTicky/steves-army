@@ -27,7 +27,7 @@ import com.stevesarmy.squad.SquadManager;
 import com.stevesarmy.squad.SquadMode;
 import com.stevesarmy.squad.SquadFormation;
 import com.stevesarmy.squad.TeamManager;
-import com.stevesarmy.util.FormationPositionCalculator;
+import com.stevesarmy.util.SpacingHelper;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.nbt.CompoundTag;
@@ -131,6 +131,8 @@ public class SoldierEntity extends PathfinderMob implements Container {
     private UUID squadId;
     private SquadFormation squadFormation = SquadFormation.NONE;
     @Nullable
+    private BlockPos formationOffset;
+    @Nullable
     private LivingEntity cachedOwner;
     private final SoldierInventory inventory;
     private final SoldierInventoryHandler inventoryHandler;
@@ -141,15 +143,16 @@ public class SoldierEntity extends PathfinderMob implements Container {
     private PeekController peekController;
     private final ThreatAwareness threatAwareness;
     
-    private int formationSlotIndex = -1;
-
     private BlockPos pingMoveTarget = null;
     private long pingMoveTimestamp = 0;
     private static final long PING_MOVE_MEMORY_MS = 15000;
 
+    private int pingMoveGeneration = 0;
+
     private BlockPos attackTargetPos = null;
     private long attackTargetTimestamp = 0;
     private static final long ATTACK_MEMORY_MS = 60000;
+    private int attackGeneration = 0;
     
     private BlockPos pingThreatPos = null;
     private long pingThreatTimestamp = 0;
@@ -286,7 +289,6 @@ public class SoldierEntity extends PathfinderMob implements Container {
         tag.put("Inventory", inventory.save());
         tag.putInt("FireDiscipline", getFireDiscipline().ordinal());
         tag.putInt("FireTeam", getFireTeam().ordinal());
-        tag.putInt("FormationSlot", formationSlotIndex);
     }
 
     @Override
@@ -310,11 +312,6 @@ public class SoldierEntity extends PathfinderMob implements Container {
         }
         if (tag.contains("FireTeam")) {
             setFireTeam(FireTeam.values()[tag.getInt("FireTeam") % FireTeam.values().length]);
-        }
-        if (tag.contains("FormationSlot")) {
-            formationSlotIndex = tag.getInt("FormationSlot");
-        } else {
-            formationSlotIndex = -1;
         }
     }
 
@@ -483,15 +480,19 @@ public class SoldierEntity extends PathfinderMob implements Container {
 
     public void setSquadFormation(SquadFormation formation) {
         this.squadFormation = formation;
-        this.formationSlotIndex = -1;
     }
 
-    public int getFormationSlotIndex() {
-        return formationSlotIndex;
+    @Nullable
+    public BlockPos getFormationOffset() {
+        return formationOffset;
     }
 
-    public void setFormationSlotIndex(int slot) {
-        this.formationSlotIndex = slot;
+    public void setFormationOffset(@Nullable BlockPos offset) {
+        this.formationOffset = offset;
+    }
+
+    public void clearFormationOffset() {
+        this.formationOffset = null;
     }
 
     @Override
@@ -866,6 +867,7 @@ public class SoldierEntity extends PathfinderMob implements Container {
                 StevesArmyMod.LOGGER.info("SEND: set hold position at {} (dispatched)", pos);
             }
             case GO_TO -> {
+                pingMoveGeneration++;
                 pingMoveTarget = BlockPos.containing(position);
                 pingMoveTimestamp = System.currentTimeMillis();
                 setSquadMode(com.stevesarmy.squad.SquadMode.HOLD);
@@ -930,18 +932,29 @@ public class SoldierEntity extends PathfinderMob implements Container {
         }
     }
     
-    public BlockPos getPingMoveTarget() {
+public BlockPos getPingMoveTarget() {
         return pingMoveTarget;
     }
-    
+
+    public int getPingMoveGeneration() {
+        return pingMoveGeneration;
+    }
+
     public boolean hasValidPingMoveTarget() {
-        return pingMoveTarget != null && 
+        return pingMoveTarget != null &&
                System.currentTimeMillis() - pingMoveTimestamp < PING_MOVE_MEMORY_MS;
     }
-    
-public void clearPingMoveTarget() {
+
+    public void clearPingMoveTarget() {
         pingMoveTarget = null;
         pingMoveTimestamp = 0;
+    }
+
+    public void clearPingMoveTargetIfGeneration(int expectedGeneration) {
+        if (pingMoveGeneration == expectedGeneration) {
+            pingMoveTarget = null;
+            pingMoveTimestamp = 0;
+        }
     }
 
     public BlockPos getAttackTargetPos() {
@@ -953,7 +966,12 @@ public void clearPingMoveTarget() {
                System.currentTimeMillis() - attackTargetTimestamp < ATTACK_MEMORY_MS;
     }
 
+    public int getAttackGeneration() {
+        return attackGeneration;
+    }
+
     public void setAttackTarget(BlockPos pos) {
+        attackGeneration++;
         this.attackTargetPos = pos;
         this.attackTargetTimestamp = System.currentTimeMillis();
     }
@@ -961,6 +979,13 @@ public void clearPingMoveTarget() {
     public void clearAttackTarget() {
         this.attackTargetPos = null;
         this.attackTargetTimestamp = 0;
+    }
+
+    public void clearAttackTargetIfGeneration(int expectedGeneration) {
+        if (attackGeneration == expectedGeneration) {
+            this.attackTargetPos = null;
+            this.attackTargetTimestamp = 0;
+        }
     }
 
     public BlockPos getPingThreatPos() {
@@ -1196,59 +1221,6 @@ public void clearPingMoveTarget() {
      * Uses the goal/movement direction first (squad-consistent via owner's position),
      * then owner's look direction, then threat direction, then fallback.
      */
-    public Vec3 getFormationForwardDirection(@Nullable BlockPos goalPos) {
-        if (goalPos != null) {
-            LivingEntity owner = getOwner();
-            if (owner != null) {
-                if (!goalPos.equals(owner.blockPosition())) {
-                    Vec3 fromOwner = Vec3.atCenterOf(goalPos).subtract(owner.position()).normalize();
-                    if (fromOwner.lengthSqr() > 0.001) {
-                        StevesArmyMod.LOGGER.info("[Formation] Soldier {} forward=OWNER_TO_GOAL owner=({},{},{}) goal=({},{},{}) dir=({}, {}, {})",
-                            getId(),
-                            owner.blockPosition().getX(), owner.blockPosition().getY(), owner.blockPosition().getZ(),
-                            goalPos.getX(), goalPos.getY(), goalPos.getZ(),
-                            String.format("%.2f", fromOwner.x), String.format("%.2f", fromOwner.y), String.format("%.2f", fromOwner.z));
-                        return fromOwner;
-                    }
-                }
-                Vec3 look = owner.getLookAngle();
-                if (look != null && look.lengthSqr() > 0.001) {
-                    StevesArmyMod.LOGGER.info("[Formation] Soldier {} forward=OWNER_LOOK dir=({}, {}, {})",
-                        getId(), String.format("%.2f", look.x), String.format("%.2f", look.y), String.format("%.2f", look.z));
-                    return look;
-                }
-            }
-            Vec3 toGoal = Vec3.atCenterOf(goalPos).subtract(position()).normalize();
-            if (toGoal.lengthSqr() > 0.001) {
-                StevesArmyMod.LOGGER.info("[Formation] Soldier {} forward=SELF_TO_GOAL goal=({},{},{}) self=({},{},{}) dir=({}, {}, {})",
-                    getId(),
-                    goalPos.getX(), goalPos.getY(), goalPos.getZ(),
-                    blockPosition().getX(), blockPosition().getY(), blockPosition().getZ(),
-                    String.format("%.2f", toGoal.x), String.format("%.2f", toGoal.y), String.format("%.2f", toGoal.z));
-                return toGoal;
-            }
-        }
-        LivingEntity owner = getOwner();
-        Vec3 threatDir = owner != null
-            ? threatAwareness.getPrimaryDirection(owner.position())
-            : threatAwareness.getPrimaryDirection(position());
-        if (threatDir != null && threatDir.lengthSqr() > 0.001) {
-            StevesArmyMod.LOGGER.info("[Formation] Soldier {} forward=THREAT dir=({}, {}, {})",
-                getId(), String.format("%.2f", threatDir.x), String.format("%.2f", threatDir.y), String.format("%.2f", threatDir.z));
-            return threatDir;
-        }
-        if (owner != null) {
-            Vec3 look = owner.getLookAngle();
-            if (look != null && look.lengthSqr() > 0.001) {
-                StevesArmyMod.LOGGER.info("[Formation] Soldier {} forward=OWNER_LOOK dir=({}, {}, {})",
-                    getId(), String.format("%.2f", look.x), String.format("%.2f", look.y), String.format("%.2f", look.z));
-                return look;
-            }
-        }
-        StevesArmyMod.LOGGER.info("[Formation] Soldier {} forward=FALLBACK_NORTH", getId());
-        return new Vec3(0, 0, -1);
-    }
-
     public ThreatAwareness getThreatAwareness() {
         return threatAwareness;
     }
@@ -1274,5 +1246,11 @@ public void clearPingMoveTarget() {
             return null;
         }
         return new Vec3(x, y, z);
+    }
+
+    public void cancelCoverMovement() {
+        if (moveControl instanceof com.stevesarmy.entity.ai.CoverPositionController ctrl) {
+            ctrl.clear();
+        }
     }
 }

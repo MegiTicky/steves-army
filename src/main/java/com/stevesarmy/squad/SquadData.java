@@ -11,7 +11,6 @@ public class SquadData {
     private UUID leaderId;
     private final List<UUID> memberIds = new ArrayList<>();
     private SquadMode mode = SquadMode.FOLLOW;
-    private SquadFormation formation = SquadFormation.NONE;
     private boolean cqbMode = false;
     private SquadThreatIntel threatIntel = new SquadThreatIntel();
 
@@ -64,14 +63,6 @@ public class SquadData {
         this.mode = mode;
     }
 
-    public SquadFormation getFormation() {
-        return formation;
-    }
-
-    public void setFormation(SquadFormation formation) {
-        this.formation = formation;
-    }
-
     public boolean isCQB() {
         return cqbMode;
     }
@@ -93,7 +84,6 @@ public class SquadData {
         tag.putUUID("SquadId", squadId);
         tag.putUUID("LeaderId", leaderId);
         tag.putString("Mode", mode.name());
-        tag.putString("Formation", formation.name());
         tag.putBoolean("CQB", cqbMode);
         
         tag.put("ThreatIntel", threatIntel.toNBT());
@@ -113,11 +103,6 @@ public class SquadData {
         SquadData data = new SquadData(tag.getUUID("LeaderId"));
         data.squadId = tag.getUUID("SquadId");
         data.mode = SquadMode.valueOf(tag.getString("Mode"));
-        if (tag.contains("Formation")) {
-            data.formation = SquadFormation.valueOf(tag.getString("Formation"));
-        } else {
-            data.formation = SquadFormation.NONE;
-        }
         if (tag.contains("CQB")) {
             data.cqbMode = tag.getBoolean("CQB");
         }

@@ -5,7 +5,6 @@ import com.stevesarmy.combat.ThreatAwareness;
 import com.stevesarmy.combat.cover.*;
 import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.squad.SquadCoverContext;
-import com.stevesarmy.squad.SquadFormation;
 import com.stevesarmy.squad.SquadManager;
 import com.stevesarmy.squad.SquadMode;
 import net.minecraft.core.BlockPos;
@@ -1701,15 +1700,12 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
         Level level = soldier.level();
         UUID squadId = soldier.getSquadId();
         if (squadId == null || !(level instanceof ServerLevel serverLevel)) {
-            return new SquadCoverContext(false, SquadFormation.NONE, 0, 0, List.of(), List.of(), null);
+            return new SquadCoverContext(false, 0, 0, List.of(), List.of(), null);
         }
 
         SquadManager mgr = SquadManager.get(serverLevel);
-        SquadFormation formation = soldier.getSquadFormation();
 
         List<LivingEntity> members = mgr.getSquadMembers(serverLevel, squadId, soldier.getUUID());
-        int squadSize = mgr.getSquadSize(squadId);
-        int memberIndex = mgr.getMemberIndex(squadId, soldier.getUUID());
 
         List<BlockPos> occupiedCovers = new ArrayList<>();
         List<Vec3> threatDirs = new ArrayList<>();
@@ -1738,6 +1734,6 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
             }
         }
 
-        return new SquadCoverContext(true, formation, squadSize, memberIndex, occupiedCovers, threatDirs, ownerPos);
+        return new SquadCoverContext(true, 0, 0, occupiedCovers, threatDirs, ownerPos);
     }
 }
