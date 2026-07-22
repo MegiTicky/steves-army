@@ -812,8 +812,12 @@ public class CoverTacticalGoal extends Goal {
             return;
         }
 
-        // Shot-in-cover trigger (fires even if suppressed by the shot)
+// Shot-in-cover trigger (fires even if suppressed by the shot)
+        // But only act on it when recovered — while suppressed, stay in cover
         if (getCoverManager().isShotInCoverRepositionRequested()) {
+            if (getCoverManager().isSuppressed()) {
+                return; // keep request pending, stay in cover
+            }
             if (debugLoggingEnabled) {
                 StevesArmyMod.LOGGER.info("[CoverGoal] Soldier {} shot while hiding in cover, repositioning",
                     soldier.getId());
@@ -827,7 +831,11 @@ public class CoverTacticalGoal extends Goal {
         }
 
         // Handle non-peekable cover reposition request before suppression check
+        // But only act on it when recovered — while suppressed, stay in cover
         if (getCoverManager().isRepositionRequested()) {
+            if (getCoverManager().isSuppressed()) {
+                return; // keep request pending, stay in cover
+            }
             if (debugLoggingEnabled) {
                 StevesArmyMod.LOGGER.info("[CoverGoal] Soldier {} reposition requested, acting on it",
                     soldier.getId());
@@ -871,29 +879,15 @@ public class CoverTacticalGoal extends Goal {
     private void tickSuppressedInCover() {
         CoverPoint currentCover = getCoverManager().getCurrentCover();
 
-        // Shot-in-cover trigger (fires even while suppressed/pinned)
+        // Shot-in-cover trigger — keep the request pending while suppressed
+        // act on it after recovery (when transition to IN_COVER)
         if (getCoverManager().isShotInCoverRepositionRequested()) {
-            if (debugLoggingEnabled) {
-                StevesArmyMod.LOGGER.info("[CoverGoal] Soldier {} shot while hiding in cover, repositioning",
-                    soldier.getId());
-            }
-            if (currentCover != null) {
-                blacklistCover(currentCover.getPosition(), BlacklistReason.SHOT_IN_COVER);
-            }
-            getCoverManager().clearShotInCoverRepositionRequest();
-            startRepositioning();
-            return;
+            // Request stays pending; do nothing
         }
 
-        // Handle non-peekable cover reposition request
+        // Handle non-peekable cover reposition request — also keep pending while suppressed
         if (getCoverManager().isRepositionRequested()) {
-            if (debugLoggingEnabled) {
-                StevesArmyMod.LOGGER.info("[CoverGoal] Soldier {} reposition requested while suppressed, acting on it",
-                    soldier.getId());
-            }
-            getCoverManager().clearRepositionRequest();
-            startRepositioning();
-            return;
+            // Request stays pending; do nothing
         }
 
         // Force duck-back if soldier was exposed or moving to peek when suppressed
@@ -1558,9 +1552,18 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
                     break;
                 }
 
+                // Reconcile: if cover state indicates we're moving again (e.g., deferred
+                // reposition request activated after recovery), don't try to advance here
+                if (coverState == CoverBehaviorManager.CoverState.SEEKING_COVER ||
+                    coverState == CoverBehaviorManager.CoverState.REPOSITIONING) {
+                    attackPhase = AttackPhase.MOVING_TO_COVER;
+                    break;
+                }
+
                 long dwellTime = System.currentTimeMillis() - attackCoverArrivalTime;
                 boolean suppressed = getCoverManager().isSuppressed();
                 boolean pinned = getCoverManager().isPinned();
+                boolean recovered = getCoverManager().getSuppressionTracker().isRecovered();
                 PeekController peekCtrl = getPeekController();
                 boolean peeking = peekCtrl.isExposed() || peekCtrl.isMovingToPeek() || peekCtrl.isReturning();
 
@@ -1572,12 +1575,18 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
                     }
                 }
 
-                // Advance only when healthy, unsuppressed, not peeking, and dwell met
+                // Advance only when fully recovered from suppression, not peeking, and dwell met
                 long minDwell = ATTACK_MIN_DWELL_MS;
                 long maxDwell = ATTACK_MAX_DWELL_MS + (attackAdvanceStaggerTicks * 50L);
                 boolean dwellMet = dwellTime >= minDwell;
-                boolean maxDwellReached = dwellTime >= maxDwell && !suppressed && !pinned && !peeking;
-                boolean canAdvance = dwellMet && !suppressed && !pinned && !peeking;
+                boolean maxDwellReached = dwellTime >= maxDwell && recovered && !peeking;
+                boolean canAdvance = dwellMet && recovered && !peeking;
+
+                if (debugLoggingEnabled && dwellMet && (!recovered || peeking)) {
+                    StevesArmyMod.LOGGER.info("[AttackPhase] Soldier {} dwell met but blocked: recovered={}, peeking={}, suppression={:.2f}",
+                        soldier.getId(), recovered, peeking,
+                        getCoverManager().getSuppressionTracker().getSuppressionLevel());
+                }
 
                 if (maxDwellReached || (canAdvance && attackHasPeekedThisCover)) {
                     if (selectForwardCover()) {
@@ -1594,8 +1603,8 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
                     }
                 }
 
-                // Handle non-peekable cover reposition
-                if (getCoverManager().isRepositionRequested() && !suppressed) {
+                // Handle non-peekable cover reposition (only when recovered)
+                if (getCoverManager().isRepositionRequested() && recovered) {
                     getCoverManager().clearRepositionRequest();
                     attackPhase = AttackPhase.SELECTING_COVER;
                 }

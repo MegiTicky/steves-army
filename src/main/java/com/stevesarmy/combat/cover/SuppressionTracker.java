@@ -19,6 +19,7 @@ public class SuppressionTracker {
     private static final float DIRECT_FIRE_SUPPRESSION = 0.3f;
     private static final float SUPPRESSED_THRESHOLD = 0.5f;
     private static final long MIN_PEEK_TIME_MS = 2500;
+    private static final long MIN_RECOVERY_TIME_MS = 2500;
     private static final float MAX_SUPPRESSION = 1.0f;
     private static final float BASE_SPEED = 1.0f;
     private static final float MAX_SPEED_MULTIPLIER = 3.0f;
@@ -138,6 +139,12 @@ public class SuppressionTracker {
         }
         long timeSinceLastSuppression = System.currentTimeMillis() - lastSuppressionTime;
         return timeSinceLastSuppression > MIN_PEEK_TIME_MS;
+    }
+
+    public boolean isRecovered() {
+        if (isSuppressed()) return false;
+        long timeSinceLastSuppression = System.currentTimeMillis() - lastSuppressionTime;
+        return timeSinceLastSuppression > MIN_RECOVERY_TIME_MS;
     }
 
     public long getTimeSinceLastSuppression() {

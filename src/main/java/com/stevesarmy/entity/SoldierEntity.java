@@ -330,40 +330,14 @@ public class SoldierEntity extends PathfinderMob implements Container {
     @Override
     public ItemStack getPickedResult(HitResult target) {
         inventory.syncFromEntity(this);
-        
-        com.stevesarmy.item.SoldierSpawnEggItem egg = 
-            (com.stevesarmy.item.SoldierSpawnEggItem) com.stevesarmy.registry.ModItems.SOLDIER_SPAWN_EGG.get();
+
+        var egg = (com.stevesarmy.item.SoldierSpawnEggItem) com.stevesarmy.registry.ModItems.SOLDIER_SPAWN_EGG.get();
         ItemStack stack = new ItemStack(egg);
         CompoundTag tag = new CompoundTag();
-        this.addAdditionalSaveData(tag);
-        
-        StevesArmyMod.LOGGER.info("[SoldierEntity] === getPickedResult ===");
-        StevesArmyMod.LOGGER.info("[SoldierEntity] Saving soldier UUID: {}", this.getUUID());
-        StevesArmyMod.LOGGER.info("[SoldierEntity] Saved tag: {}", tag.toString());
-        
-        if (tag.contains("Inventory")) {
-            CompoundTag invTag = tag.getCompound("Inventory");
-            StevesArmyMod.LOGGER.info("[SoldierEntity] Inventory tag: {}", invTag.toString());
-            if (invTag.contains("Items")) {
-                ListTag items = invTag.getList("Items", 10);
-                StevesArmyMod.LOGGER.info("[SoldierEntity] Inventory items count: {}", items.size());
-                for (int i = 0; i < items.size(); i++) {
-                    StevesArmyMod.LOGGER.info("[SoldierEntity]   Item {}: {}", i, items.getCompound(i).toString());
-                }
-            }
-        }
-        
-        StevesArmyMod.LOGGER.info("[SoldierEntity] Current soldier inventory:");
-        for (int i = 0; i < inventory.getContainerSize(); i++) {
-            ItemStack item = inventory.getItem(i);
-            if (!item.isEmpty()) {
-                StevesArmyMod.LOGGER.info("[SoldierEntity]   Slot {}: {} x{}", i, item.getItem().toString(), item.getCount());
-            }
-        }
-        
+        tag.put("Inventory", inventory.save());
+
         stack.getOrCreateTag().put("EntityTag", tag);
-        StevesArmyMod.LOGGER.info("[SoldierEntity] Final stack tag: {}", stack.getTag().toString());
-        
+
         return stack;
     }
 

@@ -129,12 +129,11 @@ public class EnemySoldierEntity extends SoldierEntity {
     @Override
     public ItemStack getPickedResult(HitResult target) {
         getSoldierInventory().syncFromEntity(this);
-        
-        com.stevesarmy.item.EnemySoldierSpawnEggItem egg = 
-            (com.stevesarmy.item.EnemySoldierSpawnEggItem) com.stevesarmy.registry.ModItems.ENEMY_SOLDIER_SPAWN_EGG.get();
+
+        var egg = (com.stevesarmy.item.EnemySoldierSpawnEggItem) com.stevesarmy.registry.ModItems.ENEMY_SOLDIER_SPAWN_EGG.get();
         ItemStack stack = new ItemStack(egg);
         CompoundTag tag = new CompoundTag();
-        this.addAdditionalSaveData(tag);
+        tag.put("Inventory", getSoldierInventory().save());
         stack.getOrCreateTag().put("EntityTag", tag);
         return stack;
     }
