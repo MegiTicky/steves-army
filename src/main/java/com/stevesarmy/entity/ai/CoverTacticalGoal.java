@@ -802,8 +802,8 @@ public class CoverTacticalGoal extends Goal {
             }
         }
 
-        // Flank detection
-        if (shouldRepositionFromFlank()) {
+// Flank detection (skip during ATTACK — attack phase owns movement decisions)
+        if (!soldier.hasValidAttackTarget() && shouldRepositionFromFlank()) {
             if (debugLoggingEnabled) {
                 StevesArmyMod.LOGGER.info("[CoverGoal] Soldier {} flanked, repositioning", soldier.getId());
             }
@@ -907,8 +907,8 @@ public class CoverTacticalGoal extends Goal {
             peekCtrl.tick(soldier, currentCover, getPositionController());
         }
 
-        // Flank detection (pinned soldiers bypass threshold)
-        if (shouldRepositionFromFlank()) {
+        // Flank detection (skip during ATTACK — attack phase owns movement decisions)
+        if (!soldier.hasValidAttackTarget() && shouldRepositionFromFlank()) {
             if (debugLoggingEnabled) {
                 StevesArmyMod.LOGGER.info("[CoverGoal] Soldier {} flanked while suppressed, repositioning", soldier.getId());
             }
