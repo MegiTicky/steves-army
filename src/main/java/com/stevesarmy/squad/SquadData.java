@@ -1,5 +1,6 @@
 package com.stevesarmy.squad;
 
+import com.stevesarmy.StevesArmyMod;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.Tag;
@@ -12,6 +13,7 @@ public class SquadData {
     private final List<UUID> memberIds = new ArrayList<>();
     private SquadMode mode = SquadMode.FOLLOW;
     private boolean cqbMode = false;
+    private SquadFormation formation = SquadFormation.NONE;
     private SquadThreatIntel threatIntel = new SquadThreatIntel();
 
     public SquadData(UUID leaderId) {
@@ -71,6 +73,14 @@ public class SquadData {
         this.cqbMode = cqbMode;
     }
 
+    public SquadFormation getFormation() {
+        return formation;
+    }
+
+    public void setFormation(SquadFormation formation) {
+        this.formation = formation;
+    }
+
     public SquadThreatIntel getThreatIntel() {
         return threatIntel;
     }
@@ -85,6 +95,7 @@ public class SquadData {
         tag.putUUID("LeaderId", leaderId);
         tag.putString("Mode", mode.name());
         tag.putBoolean("CQB", cqbMode);
+        tag.putString("Formation", formation.name());
         
         tag.put("ThreatIntel", threatIntel.toNBT());
         
@@ -105,6 +116,9 @@ public class SquadData {
         data.mode = SquadMode.valueOf(tag.getString("Mode"));
         if (tag.contains("CQB")) {
             data.cqbMode = tag.getBoolean("CQB");
+        }
+        if (tag.contains("Formation")) {
+            data.formation = SquadFormation.valueOf(tag.getString("Formation"));
         }
         
         if (tag.contains("ThreatIntel")) {

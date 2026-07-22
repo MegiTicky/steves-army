@@ -16,25 +16,28 @@ public class SquadLaneAssignment {
     private final Vec3 perpendicular;
     private final Map<UUID, LaneSlot> slots = new HashMap<>();
     private final List<UUID> orderedUuids;
+    private final SquadFormation formation;
 
     public static class LaneSlot {
         public final int laneIndex;
         public final int totalLanes;
         public final double laneOffset;
+        public final double forwardOffset;
 
-        LaneSlot(int laneIndex, int totalLanes, double laneOffset) {
+        LaneSlot(int laneIndex, int totalLanes, double laneOffset, double forwardOffset) {
             this.laneIndex = laneIndex;
             this.totalLanes = totalLanes;
             this.laneOffset = laneOffset;
+            this.forwardOffset = forwardOffset;
         }
     }
 
-    public SquadLaneAssignment(UUID squadId, BlockPos rawTarget, List<SoldierEntity> team) {
+    public SquadLaneAssignment(UUID squadId, BlockPos rawTarget, List<SoldierEntity> team, SquadFormation formation) {
         this.squadId = squadId;
         this.rawTarget = rawTarget;
         this.timestamp = System.currentTimeMillis();
+        this.formation = formation;
 
-        // Sort team by UUID for deterministic ordering
         List<SoldierEntity> sorted = new ArrayList<>(team);
         sorted.sort(Comparator.comparing(e -> e.getUUID()));
         this.orderedUuids = new ArrayList<>();
@@ -42,7 +45,6 @@ public class SquadLaneAssignment {
             orderedUuids.add(s.getUUID());
         }
 
-        // Compute shared centroid and forward/perpendicular frame
         Vec3 centroid = Vec3.ZERO;
         for (SoldierEntity s : sorted) {
             centroid = centroid.add(s.position());
@@ -51,7 +53,6 @@ public class SquadLaneAssignment {
 
         Vec3 toTarget = Vec3.atCenterOf(rawTarget).subtract(centroid);
         if (toTarget.horizontalDistanceSqr() < 0.01) {
-            // Fallback to world Z as forward
             this.forward = new Vec3(0, 0, -1);
             this.perpendicular = new Vec3(1, 0, 0);
         } else {
@@ -59,20 +60,39 @@ public class SquadLaneAssignment {
             this.perpendicular = new Vec3(-toTarget.z, 0, toTarget.x).normalize();
         }
 
-        // Assign centered lane offsets
         int n = sorted.size();
         double spacing = StevesArmyConfig.getSpacingDistance();
+        boolean noSpacing = formation == SquadFormation.NONE;
         for (int i = 0; i < n; i++) {
-            double offset;
-            if (n == 1) {
-                offset = 0;
+            double laneOffset;
+            double forwardOffset;
+            if (n == 1 || noSpacing) {
+                laneOffset = 0;
+                forwardOffset = 0;
             } else {
-                // Center around 0: -2d, -1d, 0, +1d, +2d for 5 soldiers
-                // For 4: -1.5d, -0.5d, +0.5d, +1.5d
                 double halfSpan = (n - 1) / 2.0;
-                offset = (i - halfSpan) * spacing;
+                double centered = (i - halfSpan);
+
+                switch (formation) {
+                    case LINE -> {
+                        laneOffset = centered * spacing;
+                        forwardOffset = 0;
+                    }
+                    case WEDGE -> {
+                        laneOffset = centered * spacing;
+                        forwardOffset = -Math.abs(centered) * spacing * 0.5;
+                    }
+                    case COLUMN -> {
+                        laneOffset = 0;
+                        forwardOffset = centered * spacing;
+                    }
+                    default -> {
+                        laneOffset = centered * spacing;
+                        forwardOffset = 0;
+                    }
+                }
             }
-            slots.put(sorted.get(i).getUUID(), new LaneSlot(i, n, offset));
+            slots.put(sorted.get(i).getUUID(), new LaneSlot(i, n, laneOffset, forwardOffset));
         }
     }
 
@@ -86,28 +106,24 @@ public class SquadLaneAssignment {
     public UUID getSquadId() { return squadId; }
     public long getTimestamp() { return timestamp; }
     public List<UUID> getOrderedUuids() { return orderedUuids; }
+    public SquadFormation getFormation() { return formation; }
 
     public boolean isExpired() {
-        return System.currentTimeMillis() - timestamp > 30000; // 30 second validity
+        return System.currentTimeMillis() - timestamp > 30000;
     }
 
     /**
-     * Compute the lane-aligned navigation target — a fixed offset from rawTarget.
-     * No look-ahead; the offset applies at the destination only.
+     * Compute the formation-aligned navigation target — a fixed offset from rawTarget.
      */
     public BlockPos getLaneTarget(UUID soldierUuid, Vec3 soldierPos) {
         LaneSlot slot = slots.get(soldierUuid);
         if (slot == null) return rawTarget;
         return rawTarget.offset(
-            (int) Math.round(perpendicular.x * slot.laneOffset),
+            (int) Math.round(perpendicular.x * slot.laneOffset + forward.x * slot.forwardOffset),
             0,
-            (int) Math.round(perpendicular.z * slot.laneOffset));
+            (int) Math.round(perpendicular.z * slot.laneOffset + forward.z * slot.forwardOffset));
     }
 
-    /**
-     * Compute the final lane-aligned position at the destination.
-     * Identical to getLaneTarget — both return the fixed lane position.
-     */
     public BlockPos getFinalLanePosition(UUID soldierUuid) {
         return getLaneTarget(soldierUuid, null);
     }

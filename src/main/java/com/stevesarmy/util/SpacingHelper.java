@@ -3,6 +3,7 @@ package com.stevesarmy.util;
 import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.squad.FireTeam;
+import com.stevesarmy.squad.SquadFormation;
 import com.stevesarmy.squad.SquadLaneAssignment;
 import com.stevesarmy.squad.SquadManager;
 import net.minecraft.core.BlockPos;
@@ -25,13 +26,10 @@ public class SpacingHelper {
         SquadLaneAssignment.LaneSlot slot = assignment.getSlot(soldier.getUUID());
         if (slot == null) return target;
 
-        // Use look-ahead lane target during travel
         BlockPos laneTarget = assignment.getLaneTarget(soldier.getUUID(), soldier.position());
-        StevesArmyMod.LOGGER.info("[Spacing] Soldier {} lane={}/{} fwd=({:.2f},{:.2f}) perp=({:.2f},{:.2f}) offset={:.1f} target={}",
+        StevesArmyMod.LOGGER.info("[Spacing] Soldier {} lane={}/{} offset=({:.1f},{:.1f}) formation={} target={}",
             soldier.getId(), slot.laneIndex, slot.totalLanes,
-            assignment.getForward().x, assignment.getForward().z,
-            assignment.getPerpendicular().x, assignment.getPerpendicular().z,
-            slot.laneOffset, laneTarget);
+            slot.laneOffset, slot.forwardOffset, assignment.getFormation(), laneTarget);
 
         return laneTarget;
     }
@@ -69,10 +67,11 @@ public class SpacingHelper {
         Set<SoldierEntity> unique = new LinkedHashSet<>(team);
         team = new ArrayList<>(unique);
 
-        SquadLaneAssignment assignment = new SquadLaneAssignment(squadId, target, team);
+        SquadFormation formation = soldier.getSquadFormation();
+        SquadLaneAssignment assignment = new SquadLaneAssignment(squadId, target, team, formation);
         assignments.put(squadId, assignment);
-        StevesArmyMod.LOGGER.info("[Spacing] Created lane assignment: squad={} target={} soldiers={}",
-            squadId, target, team.size());
+        StevesArmyMod.LOGGER.info("[Spacing] Created lane assignment: squad={} target={} soldiers={} formation={}",
+            squadId, target, team.size(), formation);
         return assignment;
     }
 
@@ -88,10 +87,11 @@ public class SpacingHelper {
             .filter(s -> s.position().distanceToSqr(targetCenter) < 2500)
             .collect(java.util.stream.Collectors.toList());
         if (deduped.isEmpty()) return null;
-        SquadLaneAssignment assignment = new SquadLaneAssignment(squadId, target, deduped);
+        SquadFormation formation = deduped.get(0).getSquadFormation();
+        SquadLaneAssignment assignment = new SquadLaneAssignment(squadId, target, deduped, formation);
         assignments.put(squadId, assignment);
-        StevesArmyMod.LOGGER.info("[Spacing] Created lane assignment via createAssignment: squad={} target={} soldiers={}",
-            squadId, target, deduped.size());
+        StevesArmyMod.LOGGER.info("[Spacing] Created lane assignment via createAssignment: squad={} target={} soldiers={} formation={}",
+            squadId, target, deduped.size(), formation);
         return assignment;
     }
 

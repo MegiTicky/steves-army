@@ -67,6 +67,10 @@ public class NetworkHandler {
             SpacingDebugPacket::encode,
             SpacingDebugPacket::new,
             SpacingDebugPacket::handle);
+        INSTANCE.registerMessage(id++, FormationMessage.class,
+            FormationMessage::encode,
+            FormationMessage::new,
+            FormationMessage::handle);
     }
 
     public static void sendTo(ServerPlayer player, Object message) {

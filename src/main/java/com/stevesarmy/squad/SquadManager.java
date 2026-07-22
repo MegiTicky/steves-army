@@ -94,6 +94,19 @@ public class SquadManager extends SavedData {
         }
     }
 
+    public SquadFormation getSquadFormation(UUID squadId) {
+        SquadData squad = squadsById.get(squadId);
+        return squad != null ? squad.getFormation() : SquadFormation.NONE;
+    }
+
+    public void setSquadFormation(UUID leaderId, SquadFormation formation) {
+        SquadData squad = squadsByLeader.get(leaderId);
+        if (squad != null) {
+            squad.setFormation(formation);
+            this.setDirty();
+        }
+    }
+
     public int getSquadSize(UUID squadId) {
         SquadData squad = squadsById.get(squadId);
         return squad != null ? squad.getMemberCount() + 1 : 0;

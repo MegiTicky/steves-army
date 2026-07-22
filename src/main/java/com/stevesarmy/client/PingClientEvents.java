@@ -164,6 +164,7 @@ public class PingClientEvents {
         
         PingManager.tick();
         PingWheelHandler.tick();
+        FormationWheelHandler.tick();
         FireTeamWheelHandler.tick();
         
         if (CombatDebugRenderer.getDebugMode() != CombatDebugRenderer.DEBUG_MODE_OFF) {
@@ -308,6 +309,10 @@ public class PingClientEvents {
 
             if (FireTeamWheelHandler.isWheelActive()) {
                 FireTeamWheelRenderer.render(event.getGuiGraphics());
+            }
+
+            if (FormationWheelHandler.isWheelActive()) {
+                FormationWheelRenderer.render(event.getGuiGraphics());
             }
             
             PingOverlayRenderer.render(event.getGuiGraphics(), lastWorldRenderContext);
