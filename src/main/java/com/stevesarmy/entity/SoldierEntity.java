@@ -141,6 +141,8 @@ public class SoldierEntity extends PathfinderMob implements Container {
     private PeekController peekController;
     private final ThreatAwareness threatAwareness;
     
+    private int formationSlotIndex = -1;
+
     private BlockPos pingMoveTarget = null;
     private long pingMoveTimestamp = 0;
     private static final long PING_MOVE_MEMORY_MS = 15000;
@@ -284,12 +286,12 @@ public class SoldierEntity extends PathfinderMob implements Container {
         tag.put("Inventory", inventory.save());
         tag.putInt("FireDiscipline", getFireDiscipline().ordinal());
         tag.putInt("FireTeam", getFireTeam().ordinal());
+        tag.putInt("FormationSlot", formationSlotIndex);
     }
 
     @Override
     public void readAdditionalSaveData(CompoundTag tag) {
         super.readAdditionalSaveData(tag);
-        
         if (tag.hasUUID("Owner")) {
             setOwnerUUID(tag.getUUID("Owner"));
         }
@@ -308,6 +310,11 @@ public class SoldierEntity extends PathfinderMob implements Container {
         }
         if (tag.contains("FireTeam")) {
             setFireTeam(FireTeam.values()[tag.getInt("FireTeam") % FireTeam.values().length]);
+        }
+        if (tag.contains("FormationSlot")) {
+            formationSlotIndex = tag.getInt("FormationSlot");
+        } else {
+            formationSlotIndex = -1;
         }
     }
 
@@ -476,6 +483,15 @@ public class SoldierEntity extends PathfinderMob implements Container {
 
     public void setSquadFormation(SquadFormation formation) {
         this.squadFormation = formation;
+        this.formationSlotIndex = -1;
+    }
+
+    public int getFormationSlotIndex() {
+        return formationSlotIndex;
+    }
+
+    public void setFormationSlotIndex(int slot) {
+        this.formationSlotIndex = slot;
     }
 
     @Override

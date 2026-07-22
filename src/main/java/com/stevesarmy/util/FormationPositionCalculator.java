@@ -1,5 +1,7 @@
 package com.stevesarmy.util;
 
+import com.stevesarmy.entity.SoldierEntity;
+import com.stevesarmy.squad.FireTeam;
 import com.stevesarmy.squad.SquadFormation;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.Level;
@@ -9,6 +11,10 @@ import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.level.pathfinder.BlockPathTypes;
 import net.minecraft.world.level.pathfinder.WalkNodeEvaluator;
 import net.minecraft.world.phys.Vec3;
+
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.List;
 
 public class FormationPositionCalculator {
 
@@ -141,5 +147,81 @@ public class FormationPositionCalculator {
         }
 
         return target;
+    }
+
+    /**
+     * Assigns formation slot indices to all soldiers in a fire team.
+     * Each soldier keeps its previous slot if valid, otherwise gets the first free slot.
+     * Returns the slot index assigned to the given soldier.
+     */
+    public static int assignFormationSlots(List<SoldierEntity> soldiers, SoldierEntity self) {
+        if (soldiers.isEmpty()) return -1;
+        soldiers.sort(Comparator.comparing(e -> e.getUUID()));
+
+        int n = soldiers.size();
+        boolean[] taken = new boolean[n];
+
+        // First pass: reclaim previous slots
+        for (SoldierEntity s : soldiers) {
+            int slot = s.getFormationSlotIndex();
+            if (slot >= 0 && slot < n && !taken[slot]) {
+                taken[slot] = true;
+            } else {
+                s.setFormationSlotIndex(-1);
+            }
+        }
+
+        // Second pass: assign free slots
+        int nextSlot = 0;
+        for (SoldierEntity s : soldiers) {
+            if (s.getFormationSlotIndex() < 0) {
+                while (nextSlot < n && taken[nextSlot]) {
+                    nextSlot++;
+                }
+                if (nextSlot < n) {
+                    s.setFormationSlotIndex(nextSlot);
+                    taken[nextSlot] = true;
+                }
+            }
+        }
+
+        return self.getFormationSlotIndex();
+    }
+
+    /**
+     * Computes the formation target for a soldier given the anchor position.
+     * If no formation is active, returns the anchor itself.
+     */
+    public static BlockPos getFormationTarget(
+            Vec3 formationForward,
+            SquadFormation formation,
+            int slotIndex,
+            int teamSize,
+            BlockPos anchor,
+            Level level) {
+        if (formation == SquadFormation.NONE || formation == SquadFormation.CQB || slotIndex < 0) {
+            return anchor;
+        }
+        BlockPos offset = getFormationOffset(formationForward, formation, slotIndex, teamSize);
+        BlockPos target = anchor.offset(offset);
+        return adjustToSurface(level, target);
+    }
+
+    /**
+     * Collects alive soldiers from the same fire team, filtered by squad.
+     */
+    public static List<SoldierEntity> getFireTeamSoldiers(
+            List<? extends net.minecraft.world.entity.LivingEntity> allMembers,
+            SoldierEntity soldier) {
+        FireTeam myTeam = soldier.getFireTeam();
+        List<SoldierEntity> result = new ArrayList<>();
+        for (net.minecraft.world.entity.LivingEntity member : allMembers) {
+            if (member instanceof SoldierEntity s && s.isAlive()) {
+                if (myTeam == FireTeam.ALL || s.getFireTeam() == myTeam) {
+                    result.add(s);
+                }
+            }
+        }
+        return result;
     }
 }

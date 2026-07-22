@@ -3,7 +3,6 @@ package com.stevesarmy.entity.ai;
 import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.combat.cover.CoverBehaviorManager;
 import com.stevesarmy.entity.SoldierEntity;
-import com.stevesarmy.squad.FireTeam;
 import com.stevesarmy.squad.SquadFormation;
 import com.stevesarmy.squad.SquadManager;
 import com.stevesarmy.util.FormationPositionCalculator;
@@ -13,8 +12,6 @@ import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.ai.goal.Goal;
 import net.minecraft.world.phys.Vec3;
 
-import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.UUID;
@@ -25,7 +22,6 @@ public class SoldierAttackGoal extends Goal {
     private final double speedModifier;
     private final float closeDistance;
     private int timeToRecalcPath;
-    private boolean isFormationLeader;
 
     public SoldierAttackGoal(SoldierEntity soldier) {
         this.soldier = soldier;
@@ -49,20 +45,15 @@ public class SoldierAttackGoal extends Goal {
         if (!soldier.hasValidAttackTarget()) return false;
 
         double distSq = soldier.distanceToSqr(targetPos.getX(), targetPos.getY(), targetPos.getZ());
-        if (distSq <= closeDistance * closeDistance) {
-            return false;
-        }
-        return true;
+        return distSq > closeDistance * closeDistance;
     }
 
     @Override
     public void start() {
         timeToRecalcPath = 0;
-        isFormationLeader = false;
         BlockPos target = getNavigationTarget();
         if (target != null) {
             soldier.getNavigation().moveTo(target.getX(), target.getY(), target.getZ(), speedModifier);
-            StevesArmyMod.LOGGER.info("[AttackGoal] start: nav.moveTo target={}", target);
         }
     }
 
@@ -71,7 +62,6 @@ public class SoldierAttackGoal extends Goal {
         soldier.getNavigation().stop();
         soldier.clearAttackTarget();
         targetPos = null;
-        isFormationLeader = false;
     }
 
     @Override
@@ -120,44 +110,18 @@ public class SoldierAttackGoal extends Goal {
         }
 
         SquadManager mgr = SquadManager.get(serverLevel);
-
         List<LivingEntity> members = mgr.getSquadMembers(serverLevel, squadId, null);
-        List<SoldierEntity> aliveSoldiers = new ArrayList<>();
-        FireTeam myTeam = soldier.getFireTeam();
-        for (LivingEntity member : members) {
-            if (member instanceof SoldierEntity s && s.isAlive()) {
-                if (myTeam == FireTeam.ALL || s.getFireTeam() == myTeam) {
-                    aliveSoldiers.add(s);
-                }
-            }
+        List<SoldierEntity> fireTeam = FormationPositionCalculator.getFireTeamSoldiers(members, soldier);
+
+        if (fireTeam.isEmpty()) {
+            return targetPos;
         }
-        aliveSoldiers.sort(Comparator.comparing(e -> e.getUUID()));
 
-        int squadSize = aliveSoldiers.size();
-        int memberIndex = aliveSoldiers.indexOf(soldier);
-
-        SoldierEntity soldierLeader = aliveSoldiers.isEmpty() ? null : aliveSoldiers.get(0);
+        int mySlot = FormationPositionCalculator.assignFormationSlots(fireTeam, soldier);
+        int teamSize = fireTeam.size();
 
         Vec3 fwd = soldier.getFormationForwardDirection(targetPos);
-        BlockPos offset = FormationPositionCalculator.getFormationOffset(fwd, formation, memberIndex, squadSize);
-
-        BlockPos anchor;
-        if (soldierLeader != null && soldierLeader != soldier) {
-            anchor = soldierLeader.blockPosition();
-            isFormationLeader = false;
-        } else {
-            anchor = targetPos;
-            isFormationLeader = true;
-        }
-
-        BlockPos target;
-        if (isFormationLeader) {
-            target = targetPos;
-        } else {
-            target = anchor.offset(offset);
-        }
-        target = FormationPositionCalculator.adjustToSurface(soldier.level(), target);
-
-        return target;
+        return FormationPositionCalculator.getFormationTarget(
+            fwd, formation, mySlot, teamSize, targetPos, soldier.level());
     }
 }

@@ -1,10 +1,8 @@
 package com.stevesarmy.entity.ai;
 
-import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.combat.cover.CoverBehaviorManager;
 import com.stevesarmy.combat.cover.CoverPoint;
 import com.stevesarmy.entity.SoldierEntity;
-import com.stevesarmy.squad.FireTeam;
 import com.stevesarmy.squad.SquadFormation;
 import com.stevesarmy.squad.SquadManager;
 import com.stevesarmy.squad.SquadMode;
@@ -15,8 +13,6 @@ import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.ai.goal.Goal;
 import net.minecraft.world.phys.Vec3;
 
-import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.UUID;
@@ -156,29 +152,17 @@ public class SoldierHoldPositionGoal extends Goal {
 
         SquadManager mgr = SquadManager.get(serverLevel);
         List<LivingEntity> members = mgr.getSquadMembers(serverLevel, squadId, null);
-        List<SoldierEntity> aliveSoldiers = new ArrayList<>();
-        FireTeam myTeam = soldier.getFireTeam();
-        for (LivingEntity member : members) {
-            if (member instanceof SoldierEntity s && s.isAlive()) {
-                if (myTeam == FireTeam.ALL || s.getFireTeam() == myTeam) {
-                    aliveSoldiers.add(s);
-                }
-            }
-        }
-        aliveSoldiers.sort(Comparator.comparing(e -> e.getUUID()));
+        List<SoldierEntity> fireTeam = FormationPositionCalculator.getFireTeamSoldiers(members, soldier);
 
-        int squadSize = aliveSoldiers.size();
-        int memberIndex = aliveSoldiers.indexOf(soldier);
+        if (fireTeam.isEmpty()) {
+            return null;
+        }
+
+        int mySlot = FormationPositionCalculator.assignFormationSlots(fireTeam, soldier);
+        int teamSize = fireTeam.size();
 
         Vec3 fwd = soldier.getFormationForwardDirection(holdPos);
-        BlockPos offset = FormationPositionCalculator.getFormationOffset(fwd, formation, memberIndex, squadSize);
-        BlockPos target = holdPos.offset(offset);
-
-        StevesArmyMod.LOGGER.info("[FormationTarget] HoldPosGoal soldier={} idx={}/{} formation={} fwd=({},{},{}) anchor={} offset={} target={}",
-            soldier.getId(), memberIndex, squadSize, formation,
-            String.format("%.2f", fwd.x), String.format("%.2f", fwd.y), String.format("%.2f", fwd.z),
-            holdPos, offset, target);
-
-        return target;
+        return FormationPositionCalculator.getFormationTarget(
+            fwd, formation, mySlot, teamSize, holdPos, soldier.level());
     }
 }

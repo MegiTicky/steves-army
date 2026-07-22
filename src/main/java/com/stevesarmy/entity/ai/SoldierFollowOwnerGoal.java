@@ -4,7 +4,6 @@ import com.stevesarmy.combat.cover.CoverBehaviorManager;
 import com.stevesarmy.combat.cover.FormationDebugManager;
 import com.stevesarmy.entity.SoldierEntity;
 
-import com.stevesarmy.squad.FireTeam;
 import com.stevesarmy.squad.SquadFormation;
 import com.stevesarmy.squad.SquadManager;
 import com.stevesarmy.squad.SquadMode;
@@ -21,14 +20,11 @@ import net.minecraft.world.level.pathfinder.BlockPathTypes;
 import net.minecraft.world.level.pathfinder.WalkNodeEvaluator;
 import net.minecraft.world.phys.Vec3;
 
-import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.UUID;
 
 public class SoldierFollowOwnerGoal extends Goal {
-    private static final com.stevesarmy.StevesArmyMod LOGGER = null;
     private final SoldierEntity soldier;
     private LivingEntity owner;
     private Level level;
@@ -36,6 +32,8 @@ public class SoldierFollowOwnerGoal extends Goal {
     private final float stopDistance;
     private final float followDistance;
     private int timeToRecalcPath;
+    private BlockPos lastAnchor;
+    private static final double RE_ANCHOR_THRESHOLD_SQ = 64.0; // 8 blocks
 
     public SoldierFollowOwnerGoal(SoldierEntity soldier) {
         this.soldier = soldier;
@@ -58,7 +56,7 @@ public class SoldierFollowOwnerGoal extends Goal {
             coverState == CoverBehaviorManager.CoverState.REPOSITIONING) {
             return false;
         }
-        
+
         if (coverManager.isSuppressed()) {
             return false;
         }
@@ -71,14 +69,10 @@ public class SoldierFollowOwnerGoal extends Goal {
             return false;
         }
         if (soldier.distanceToSqr(owner) < (double)(followDistance * followDistance)) {
-            com.stevesarmy.StevesArmyMod.LOGGER.info("[FollowGoal] canUse=false: too close to owner (distSq={} < {})",
-                soldier.distanceToSqr(owner), followDistance * followDistance);
             return false;
         }
-        
+
         this.owner = owner;
-        com.stevesarmy.StevesArmyMod.LOGGER.info("[FollowGoal] canUse=true, soldier={}, coverState={}, distSq={})",
-            soldier.getId(), coverState, soldier.distanceToSqr(owner));
         return true;
     }
 
@@ -98,7 +92,7 @@ public class SoldierFollowOwnerGoal extends Goal {
         if (coverManager.isSuppressed()) {
             return false;
         }
-        
+
         if (owner == null || !owner.isAlive()) {
             return false;
         }
@@ -114,11 +108,13 @@ public class SoldierFollowOwnerGoal extends Goal {
     @Override
     public void start() {
         timeToRecalcPath = 0;
+        lastAnchor = null;
     }
 
     @Override
     public void stop() {
         owner = null;
+        lastAnchor = null;
         soldier.getNavigation().stop();
         FormationDebugManager.setSoldierData(soldier.getId(), null);
     }
@@ -126,21 +122,17 @@ public class SoldierFollowOwnerGoal extends Goal {
     @Override
     public void tick() {
         if (--timeToRecalcPath <= 0) {
-            timeToRecalcPath = adjustTicks(10);
+            timeToRecalcPath = 10;
             if (!soldier.isLeashed() && !soldier.isPassenger()) {
                 if (soldier.distanceToSqr(owner) >= (double)(followDistance * followDistance)) {
-                    com.stevesarmy.StevesArmyMod.LOGGER.info("[FollowGoal] tick: pathToOwner (distSq={} >= {})",
-                        soldier.distanceToSqr(owner), followDistance * followDistance);
                     pathToOwner();
                 } else {
                     BlockPos formationTarget = getFormationTarget(owner.blockPosition());
                     if (formationTarget != null) {
-                        boolean ok = soldier.getNavigation().moveTo(
+                        soldier.getNavigation().moveTo(
                             formationTarget.getX(), formationTarget.getY(), formationTarget.getZ(), speedModifier);
-                        com.stevesarmy.StevesArmyMod.LOGGER.info("[FollowGoal] tick: moveToFormation {} result={}", formationTarget, ok);
                     } else {
-                        boolean ok = soldier.getNavigation().moveTo(owner, speedModifier);
-                        com.stevesarmy.StevesArmyMod.LOGGER.info("[FollowGoal] tick: moveToOwner result={}", ok);
+                        soldier.getNavigation().moveTo(owner, speedModifier);
                     }
                 }
             }
@@ -150,7 +142,7 @@ public class SoldierFollowOwnerGoal extends Goal {
     private void pathToOwner() {
         BlockPos ownerPos = owner.blockPosition();
         PathNavigation nav = soldier.getNavigation();
-        
+
         BlockPos formationTarget = getFormationTarget(ownerPos);
         if (formationTarget != null) {
             for (int i = 0; i < 10; i++) {
@@ -173,13 +165,13 @@ public class SoldierFollowOwnerGoal extends Goal {
                 ownerPos.getY(),
                 ownerPos.getZ() + soldier.getRandom().nextIntBetweenInclusive(-3, 3)
             );
-            
+
             if (canPathTo(targetPos)) {
                 nav.moveTo(targetPos.getX(), targetPos.getY(), targetPos.getZ(), speedModifier);
                 return;
             }
         }
-        
+
         nav.moveTo(owner, speedModifier);
     }
 
@@ -189,6 +181,15 @@ public class SoldierFollowOwnerGoal extends Goal {
             return null;
         }
 
+        // Re-anchor only when player moved significantly
+        BlockPos effectiveAnchor = lastAnchor != null ? lastAnchor : anchor;
+        if (lastAnchor == null || anchor.distSqr(lastAnchor) > RE_ANCHOR_THRESHOLD_SQ) {
+            effectiveAnchor = anchor;
+            lastAnchor = anchor;
+            // Reset formation slots when re-anchoring to prevent stale positions
+            soldier.setFormationSlotIndex(-1);
+        }
+
         UUID squadId = soldier.getSquadId();
         if (squadId == null || !(level instanceof ServerLevel serverLevel)) {
             return null;
@@ -196,34 +197,22 @@ public class SoldierFollowOwnerGoal extends Goal {
 
         SquadManager mgr = SquadManager.get(serverLevel);
         List<LivingEntity> members = mgr.getSquadMembers(serverLevel, squadId, null);
-        List<SoldierEntity> aliveSoldiers = new ArrayList<>();
-        FireTeam myTeam = soldier.getFireTeam();
-        for (LivingEntity member : members) {
-            if (member instanceof SoldierEntity s && s.isAlive()) {
-                if (myTeam == FireTeam.ALL || s.getFireTeam() == myTeam) {
-                    aliveSoldiers.add(s);
-                }
-            }
+        List<SoldierEntity> fireTeam = FormationPositionCalculator.getFireTeamSoldiers(members, soldier);
+
+        if (fireTeam.isEmpty()) {
+            return null;
         }
-        aliveSoldiers.sort(Comparator.comparing(e -> e.getUUID()));
 
-        int squadSize = aliveSoldiers.size();
-        int memberIndex = aliveSoldiers.indexOf(soldier);
+        int mySlot = FormationPositionCalculator.assignFormationSlots(fireTeam, soldier);
+        int teamSize = fireTeam.size();
 
-        Vec3 fwd = soldier.getFormationForwardDirection(anchor);
-        BlockPos offset = FormationPositionCalculator.getFormationOffset(fwd, formation, memberIndex, squadSize);
-        BlockPos target = anchor.offset(offset);
-        target = FormationPositionCalculator.adjustToSurface(level, target);
+        Vec3 fwd = soldier.getFormationForwardDirection(effectiveAnchor);
+        BlockPos target = FormationPositionCalculator.getFormationTarget(
+            fwd, formation, mySlot, teamSize, effectiveAnchor, level);
 
-        com.stevesarmy.StevesArmyMod.LOGGER.info("[FormationTarget] FollowGoal soldier={} idx={}/{} formation={} fwd=({},{},{}) anchor={} offset={} target={}",
-            soldier.getId(), memberIndex, squadSize, formation,
-            String.format("%.2f", fwd.x), String.format("%.2f", fwd.y), String.format("%.2f", fwd.z),
-            anchor, offset, target);
-
-        boolean isLeader = memberIndex == 0;
-        int leaderId = isLeader ? -1 : aliveSoldiers.get(0).getId();
+        BlockPos offset = FormationPositionCalculator.getFormationOffset(fwd, formation, mySlot, teamSize);
         FormationDebugManager.setSoldierData(soldier.getId(), new FormationDebugManager.FormationSoldierData(
-            target, fwd, anchor, offset, memberIndex, squadSize, formation.name(), !isLeader, leaderId));
+            target, fwd, effectiveAnchor, offset, mySlot, teamSize, formation.name(), false, -1));
 
         return target;
     }
@@ -232,15 +221,8 @@ public class SoldierFollowOwnerGoal extends Goal {
         BlockPathTypes pathType = WalkNodeEvaluator.getBlockPathTypeStatic(level, pos.mutable());
         if (pathType == BlockPathTypes.WALKABLE || pathType == BlockPathTypes.OPEN) {
             BlockState state = level.getBlockState(pos.below());
-            if (state.getBlock() instanceof LeavesBlock) {
-                return false;
-            }
-            return true;
+            return !(state.getBlock() instanceof LeavesBlock);
         }
         return false;
-    }
-
-    private int adjustTicks(int ticks) {
-        return ticks;
     }
 }
