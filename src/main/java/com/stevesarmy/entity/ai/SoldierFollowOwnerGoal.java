@@ -4,6 +4,7 @@ import com.stevesarmy.combat.cover.CoverBehaviorManager;
 import com.stevesarmy.combat.cover.FormationDebugManager;
 import com.stevesarmy.entity.SoldierEntity;
 
+import com.stevesarmy.squad.FireTeam;
 import com.stevesarmy.squad.SquadFormation;
 import com.stevesarmy.squad.SquadManager;
 import com.stevesarmy.squad.SquadMode;
@@ -196,9 +197,12 @@ public class SoldierFollowOwnerGoal extends Goal {
         SquadManager mgr = SquadManager.get(serverLevel);
         List<LivingEntity> members = mgr.getSquadMembers(serverLevel, squadId, null);
         List<SoldierEntity> aliveSoldiers = new ArrayList<>();
+        FireTeam myTeam = soldier.getFireTeam();
         for (LivingEntity member : members) {
             if (member instanceof SoldierEntity s && s.isAlive()) {
-                aliveSoldiers.add(s);
+                if (myTeam == FireTeam.ALL || s.getFireTeam() == myTeam) {
+                    aliveSoldiers.add(s);
+                }
             }
         }
         aliveSoldiers.sort(Comparator.comparing(e -> e.getUUID()));

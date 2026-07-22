@@ -294,7 +294,6 @@ public class PingClientEvents {
             CombatDebugRenderer.render(event.getPoseStack(), event.getCamera(), event.getPartialTick());
             CoverDebugRenderer.render(event.getPoseStack(), event.getCamera());
             FormationDebugRenderer.render(event.getPoseStack(), event.getCamera());
-            FireTeamOutlineRenderer.render(event.getPoseStack(), event.getCamera(), event.getPartialTick());
         }
     }
     
