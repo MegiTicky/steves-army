@@ -30,10 +30,10 @@ public class CoverFinder {
     private static final double PEEK_ANGLE_WEIGHT = 0.15;
     private static final double SQUAD_DISPERSION_WEIGHT = 0.20;
 
-    // Attack-mode weights (replace DISTANCE_WEIGHT + reduce SQUAD_DISPERSION_WEIGHT)
-    private static final double ATTACK_LOCAL_DISTANCE_WEIGHT = 0.04;
-    private static final double ATTACK_OBJECTIVE_PROGRESS_WEIGHT = 0.12;
-    private static final double ATTACK_SQUAD_DISPERSION_WEIGHT = 0.14;
+    // Attack-mode weights (replace DISTANCE_WEIGHT; progress should dominate dispersion so
+    // trailing soldiers prefer advancing toward the objective over spreading out)
+    private static final double ATTACK_OBJECTIVE_PROGRESS_WEIGHT = 0.18;
+    private static final double ATTACK_SQUAD_DISPERSION_WEIGHT = 0.08;
     
     private static final float HALF_COVER_FIGHTABILITY_BONUS = 0.25f;
     private static final float FULL_COVER_FIGHTABILITY_BONUS = 0.15f;
