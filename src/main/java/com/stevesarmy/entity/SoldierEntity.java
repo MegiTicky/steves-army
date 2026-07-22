@@ -21,12 +21,9 @@ import com.stevesarmy.inventory.SoldierInventory;
 import com.stevesarmy.inventory.SoldierInventoryHandler;
 import com.stevesarmy.network.NetworkHandler;
 import com.stevesarmy.network.OpenSoldierInventoryMessage;
-import com.stevesarmy.network.SpacingDebugPacket;
-import com.stevesarmy.network.SpacingDebugPacket.SpacingDebugEntry;
 import com.stevesarmy.squad.FireDiscipline;
 import com.stevesarmy.squad.FireTeam;
 import com.stevesarmy.squad.FireTeamAssignment;
-import com.stevesarmy.squad.SquadLaneAssignment;
 import com.stevesarmy.squad.SquadManager;
 import com.stevesarmy.squad.SquadMode;
 import com.stevesarmy.squad.SquadFormation;
@@ -881,7 +878,6 @@ public class SoldierEntity extends PathfinderMob implements Container {
                 coverBehaviorManager.clearCover();
                 cancelCoverMovement();
                 StevesArmyMod.LOGGER.info("Set move target: {}", pingMoveTarget);
-                sendSpacingDebugToOwner();
             }
             case THREAT_DIRECTION -> {
                 BlockPos pos = BlockPos.containing(position);
@@ -939,7 +935,6 @@ public class SoldierEntity extends PathfinderMob implements Container {
                 forcedTargetTimestamp = System.currentTimeMillis();
                 cancelCoverMovement();
                 StevesArmyMod.LOGGER.info("ATTACK: set attack position at {}", attackTargetPos);
-                sendSpacingDebugToOwner();
             }
         }
     }
@@ -1276,30 +1271,5 @@ public BlockPos getPingMoveTarget() {
         if (moveControl instanceof com.stevesarmy.entity.ai.CoverPositionController ctrl) {
             ctrl.clear();
         }
-    }
-
-    public void sendSpacingDebugToOwner() {
-        if (!(level() instanceof ServerLevel serverLevel)) return;
-        LivingEntity owner = getOwner();
-        if (!(owner instanceof ServerPlayer player)) return;
-        if (!com.stevesarmy.client.SpacingDebugRenderer.isEnabled()) return;
-
-        BlockPos pingTarget = getPingMoveTarget();
-        boolean hasPing = pingTarget != null && hasValidPingMoveTarget();
-
-        List<SpacingDebugEntry> entries = new ArrayList<>();
-        if (hasPing) {
-            SquadLaneAssignment assignment = com.stevesarmy.util.SpacingHelper.getAssignment(squadId);
-            if (assignment != null && assignment.getSlot(getUUID()) != null) {
-                entries.add(SpacingDebugEntry.fromAssignment(this, assignment));
-            } else {
-                entries.add(new SpacingDebugEntry(getUUID(), true, pingTarget, pingTarget, null,
-                    getPingMoveGeneration(), 0, 1, 0, -1, 1, 0));
-            }
-        } else {
-            entries.add(new SpacingDebugEntry(getUUID(), false, BlockPos.ZERO, BlockPos.ZERO, null,
-                0, 0, 0, 0, 0, 0, 0));
-        }
-        NetworkHandler.sendTo(player, new SpacingDebugPacket(true, entries));
     }
 }

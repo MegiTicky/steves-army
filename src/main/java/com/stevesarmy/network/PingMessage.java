@@ -2,10 +2,14 @@ package com.stevesarmy.network;
 
 import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.entity.SoldierEntity;
+import com.stevesarmy.network.SpacingDebugPacket;
+import com.stevesarmy.network.SpacingDebugPacket.SpacingDebugEntry;
 import com.stevesarmy.ping.PingType;
 import com.stevesarmy.squad.FireTeam;
 import com.stevesarmy.squad.FireTeamAssignment;
+import com.stevesarmy.squad.SquadLaneAssignment;
 import com.stevesarmy.squad.SquadManager;
+import com.stevesarmy.util.SpacingHelper;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.server.level.ServerLevel;
@@ -153,6 +157,21 @@ public class PingMessage {
 
             for (SoldierEntity soldier : owned) {
                 soldier.receivePing(type, position);
+            }
+
+            // Eagerly create lane assignment and send debug packet for GO_TO and ATTACK
+            if ((type == PingType.GO_TO || type == PingType.ATTACK) && !owned.isEmpty()) {
+                BlockPos targetPos = BlockPos.containing(position);
+                SquadLaneAssignment assignment = SpacingHelper.createAssignment(targetPos, owned);
+                if (assignment != null && com.stevesarmy.client.SpacingDebugRenderer.isEnabled()) {
+                    List<SpacingDebugEntry> debugEntries = new ArrayList<>();
+                    for (SoldierEntity s : owned) {
+                        if (assignment.getSlot(s.getUUID()) != null) {
+                            debugEntries.add(SpacingDebugEntry.fromAssignment(s, assignment));
+                        }
+                    }
+                    NetworkHandler.sendTo(sender, new SpacingDebugPacket(true, debugEntries));
+                }
             }
         });
         ctx.get().setPacketHandled(true);

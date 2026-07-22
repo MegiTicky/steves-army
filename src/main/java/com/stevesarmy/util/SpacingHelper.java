@@ -42,13 +42,11 @@ public class SpacingHelper {
         UUID squadId = soldier.getSquadId();
         if (squadId == null) return null;
 
-        // Check existing assignment for this squad + target
         SquadLaneAssignment existing = assignments.get(squadId);
         if (existing != null && !existing.isExpired() && existing.getRawTarget().equals(target)) {
             return existing;
         }
 
-        // Create new assignment
         FireTeam myTeam = soldier.getFireTeam();
         SquadManager mgr = SquadManager.get(serverLevel);
         List<LivingEntity> members = mgr.getSquadMembers(serverLevel, squadId, null);
@@ -63,7 +61,6 @@ public class SpacingHelper {
         }
         team.add(soldier);
 
-        // Deduplicate
         Set<SoldierEntity> unique = new LinkedHashSet<>(team);
         team = new ArrayList<>(unique);
 
@@ -71,6 +68,19 @@ public class SpacingHelper {
         assignments.put(squadId, assignment);
         StevesArmyMod.LOGGER.info("[Spacing] Created lane assignment: squad={} target={} soldiers={}",
             squadId, target, team.size());
+        return assignment;
+    }
+
+    public static SquadLaneAssignment createAssignment(BlockPos target, List<SoldierEntity> team) {
+        if (team.isEmpty()) return null;
+        UUID squadId = team.get(0).getSquadId();
+        if (squadId == null) return null;
+        Set<SoldierEntity> unique = new LinkedHashSet<>(team);
+        List<SoldierEntity> deduped = new ArrayList<>(unique);
+        SquadLaneAssignment assignment = new SquadLaneAssignment(squadId, target, deduped);
+        assignments.put(squadId, assignment);
+        StevesArmyMod.LOGGER.info("[Spacing] Created lane assignment via createAssignment: squad={} target={} soldiers={}",
+            squadId, target, deduped.size());
         return assignment;
     }
 
