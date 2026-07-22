@@ -183,13 +183,6 @@ public class SoldierCombatGoal extends Goal {
     public void start() {
         if (target == null) {
             findNewTarget();
-            if (target == null) {
-                CoverBehaviorManager cover = soldier.getCoverBehaviorManager();
-                if (cover.isInCover()) {
-                    StevesArmyMod.LOGGER.info("[CombatGoal] START soldier={} clearing cover (no target after scan)", soldier.getId());
-                    cover.clearCover();
-                }
-            }
         }
 
         if (target != null) {
@@ -393,7 +386,10 @@ boolean isBolting = GunIntegration.isBolting(soldier);
         }
         
         if (hasGun) {
-            boolean shouldShoot = canSee;
+            // Enforce EXPOSED-only firing while in cover
+            boolean inCover = coverManager.isInCover();
+            boolean canFireFromCover = !inCover || peekState == PeekController.State.EXPOSED;
+            boolean shouldShoot = canSee && canFireFromCover;
             if (shouldShoot) {
                 tickGunCombat();
             } else if (shouldSuppressTarget()) {

@@ -245,8 +245,8 @@ public class CoverBehaviorManager {
                 state);
         }
 
-        if (currentCover != null) {
-            CoverReservationManager.release(currentCover.getPosition(), null);
+if (currentCover != null) {
+            CoverReservationManager.release(currentCover.getPosition(), soldier);
             this.lastCover = currentCover;
             syncLastCover();
         }
@@ -260,9 +260,9 @@ public class CoverBehaviorManager {
         this.peekCountSameCover = 0;
         this.state = CoverState.NO_COVER;
         syncState();
-        
+
         soldier.getPeekController().reset();
-        suppressionTracker.reset();
+        // Preserve suppression during cover transitions - don't reset
         soldier.setLowCrouching(false);
         soldier.refreshDimensions();
         soldier.setPose(net.minecraft.world.entity.Pose.STANDING);
@@ -276,7 +276,7 @@ public class CoverBehaviorManager {
                 targetCover != null ? targetCover.getPosition().toString() : "null");
         }
         if (targetCover != null) {
-            CoverReservationManager.release(targetCover.getPosition(), null);
+            CoverReservationManager.release(targetCover.getPosition(), soldier);
         }
         this.targetCover = null;
         syncTargetCover();

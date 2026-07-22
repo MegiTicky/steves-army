@@ -261,6 +261,40 @@ public class CoverFinder {
         return scored;
     }
 
+    /**
+     * Score all cover points using soldier for scoring but searching from a custom center.
+     * Used by attack-mode to search forward of the soldier.
+     */
+    public List<ScoredCover> evaluateAndScoreAllFromCenter(BlockPos searchCenter, LivingEntity soldier,
+                                                             Vec3 threatDirection, List<LivingEntity> allThreats,
+                                                             int radius, SquadCoverContext squadCtx) {
+        List<CoverPoint> coverPoints = findCoverPoints(searchCenter, radius);
+        if (coverPoints.isEmpty()) return Collections.emptyList();
+
+        LivingEntity primaryThreat = allThreats != null && !allThreats.isEmpty() ? allThreats.get(0) : null;
+        CoverQualityEvaluator evaluator = new CoverQualityEvaluator(level);
+
+        for (CoverPoint coverPoint : coverPoints) {
+            if (!CoverReservationManager.isAvailableFor(coverPoint.getPosition(), soldier)) {
+                continue;
+            }
+            if (threatDirection != null && threatDirection.lengthSqr() > 0.001) {
+                evaluator.evaluateWithCone(coverPoint, threatDirection);
+            }
+            float score = calculateThreatAwareScore(coverPoint, soldier, threatDirection, allThreats, primaryThreat, squadCtx);
+            coverPoint.setQuality(score);
+            coverPoint.setCombatScore(score);
+        }
+
+        List<ScoredCover> scored = coverPoints.stream()
+            .filter(cp -> cp.getType() != CoverType.NONE || 
+                         (threatDirection != null && cp.getProtectedDirections().contains(getDirectionFromVector(threatDirection))))
+            .map(cp -> new ScoredCover(cp, cp.getCombatScore()))
+            .sorted(Comparator.comparingDouble((ScoredCover s) -> s.score).reversed())
+            .collect(java.util.stream.Collectors.toList());
+        return scored;
+    }
+
     public static class ScoredCover {
         public final CoverPoint cover;
         public final float score;

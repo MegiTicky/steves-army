@@ -175,11 +175,20 @@ public class SoldierEntity extends PathfinderMob implements Container {
     private boolean dispatchedBySend = false;
     private boolean inventorySyncingFromEntity = false;
     private boolean cqbMode = false;
+    private boolean attackFinalApproach = false;
 
     public static final double CQB_RANGE = 5.0;
 
     public boolean isDispatchedBySend() {
         return dispatchedBySend;
+    }
+
+    public boolean isAttackFinalApproach() {
+        return attackFinalApproach;
+    }
+
+    public void setAttackFinalApproach(boolean val) {
+        this.attackFinalApproach = val;
     }
 
     public boolean isCQB() {
@@ -927,14 +936,10 @@ public class SoldierEntity extends PathfinderMob implements Container {
                 StevesArmyMod.LOGGER.info("Set suppress area: {}", pingSuppressPos);
             }
             case ATTACK -> {
-                attackTargetPos = BlockPos.containing(position);
-                attackTargetTimestamp = System.currentTimeMillis();
+                setAttackTarget(BlockPos.containing(position));
                 setSquadMode(com.stevesarmy.squad.SquadMode.HOLD);
                 setHoldPosition(attackTargetPos);
-                forcedTargetPos = attackTargetPos;
-                forcedTargetTimestamp = System.currentTimeMillis();
-                cancelCoverMovement();
-                StevesArmyMod.LOGGER.info("ATTACK: set attack position at {}", attackTargetPos);
+                StevesArmyMod.LOGGER.info("ATTACK: set attack position at {} (gen {})", attackTargetPos, attackGeneration);
             }
         }
     }
@@ -987,11 +992,23 @@ public BlockPos getPingMoveTarget() {
         attackGeneration++;
         this.attackTargetPos = pos;
         this.attackTargetTimestamp = System.currentTimeMillis();
+        // Seed objective direction into threat awareness for cover scoring
+        Vec3 toObjective = new Vec3(
+            pos.getX() - this.getX(), 0, pos.getZ() - this.getZ());
+        if (toObjective.lengthSqr() > 0.01) {
+            toObjective = toObjective.normalize();
+        }
+        if (!this.level().isClientSide) {
+            this.threatAwareness.onPingDirection(pos);
+            this.forcedTargetPos = pos;
+            this.forcedTargetTimestamp = System.currentTimeMillis();
+        }
     }
 
     public void clearAttackTarget() {
         this.attackTargetPos = null;
         this.attackTargetTimestamp = 0;
+        this.attackFinalApproach = false;
         if (squadId != null) {
             com.stevesarmy.util.SpacingHelper.clearAssignment(squadId);
         }
@@ -1001,6 +1018,7 @@ public BlockPos getPingMoveTarget() {
         if (attackGeneration == expectedGeneration) {
             this.attackTargetPos = null;
             this.attackTargetTimestamp = 0;
+            this.attackFinalApproach = false;
             if (squadId != null) {
                 com.stevesarmy.util.SpacingHelper.clearAssignment(squadId);
             }

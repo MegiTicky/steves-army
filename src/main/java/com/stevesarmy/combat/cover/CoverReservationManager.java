@@ -45,12 +45,26 @@ public class CoverReservationManager {
     }
     
     public static void release(BlockPos coverPos, LivingEntity soldier) {
-        if (coverPos == null || soldier == null) {
+        if (coverPos == null) {
             return;
         }
         
-        UUID soldierUUID = soldier.getUUID();
         BlockPos key = coverPos.immutable();
+
+        if (soldier == null) {
+            // Release all reservations at this position
+            synchronized (coverReservations) {
+                Set<UUID> reservations = coverReservations.remove(key);
+                if (reservations != null) {
+                    for (UUID uuid : reservations) {
+                        reservationTimestamps.remove(uuid);
+                    }
+                }
+            }
+            return;
+        }
+
+        UUID soldierUUID = soldier.getUUID();
         
         synchronized (coverReservations) {
             Set<UUID> reservations = coverReservations.get(key);
@@ -90,6 +104,10 @@ public class CoverReservationManager {
     }
     
     public static boolean isAvailable(BlockPos coverPos) {
+        return isAvailableFor(coverPos, null);
+    }
+
+    public static boolean isAvailableFor(BlockPos coverPos, LivingEntity soldier) {
         if (coverPos == null) {
             return false;
         }
@@ -103,7 +121,16 @@ public class CoverReservationManager {
         
         cleanupExpiredReservations(reservations);
         
-        return reservations.size() < MAX_RESERVATIONS_PER_COVER;
+        if (reservations.size() < MAX_RESERVATIONS_PER_COVER) {
+            return true;
+        }
+        
+        // If soldier already has this cover reserved, it's available for them
+        if (soldier != null && reservations.contains(soldier.getUUID())) {
+            return true;
+        }
+        
+        return false;
     }
     
     public static int getReservationCount(BlockPos coverPos) {

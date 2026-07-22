@@ -1,6 +1,5 @@
 package com.stevesarmy.entity.ai;
 
-import com.stevesarmy.combat.cover.CoverBehaviorManager;
 import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.util.SpacingHelper;
 import net.minecraft.core.BlockPos;
@@ -11,15 +10,12 @@ import java.util.EnumSet;
 public class SoldierAttackGoal extends Goal {
     private final SoldierEntity soldier;
     private BlockPos rawTarget;
-    private BlockPos navigationTarget;
     private int commandGeneration;
-    private final double speedModifier;
     private final float closeDistance;
-    private int timeToRecalcPath;
+    private boolean isFinalApproach;
 
     public SoldierAttackGoal(SoldierEntity soldier) {
         this.soldier = soldier;
-        this.speedModifier = 1.0D;
         this.closeDistance = 4.0F;
         this.setFlags(EnumSet.of(Goal.Flag.MOVE, Goal.Flag.LOOK));
     }
@@ -30,7 +26,12 @@ public class SoldierAttackGoal extends Goal {
         if (!soldier.hasValidAttackTarget()) return false;
         rawTarget = soldier.getAttackTargetPos();
         commandGeneration = soldier.getAttackGeneration();
-        return rawTarget != null;
+        // Only activate if cover goal signaled final approach fallback
+        // OR if we're already within final approach distance
+        isFinalApproach = soldier.isAttackFinalApproach()
+            || (rawTarget != null && soldier.distanceToSqr(
+                rawTarget.getX() + 0.5, rawTarget.getY() + 0.5, rawTarget.getZ() + 0.5) <= 12 * 12);
+        return rawTarget != null && isFinalApproach;
     }
 
     @Override
@@ -38,6 +39,7 @@ public class SoldierAttackGoal extends Goal {
         if (!soldier.isAlive()) return false;
         if (!soldier.hasValidAttackTarget()) return false;
         if (rawTarget == null) return false;
+        if (soldier.getAttackGeneration() != commandGeneration) return false;
         double distSq = soldier.distanceToSqr(
             rawTarget.getX() + 0.5, rawTarget.getY() + 0.5, rawTarget.getZ() + 0.5);
         return distSq > closeDistance * closeDistance;
@@ -45,71 +47,51 @@ public class SoldierAttackGoal extends Goal {
 
     @Override
     public void start() {
-        timeToRecalcPath = 0;
-        soldier.cancelCoverMovement();
-        soldier.clearFormationOffset();
-        computeNavigationTarget();
-        submitNavigation();
+        soldier.setAttackFinalApproach(true);
+        navigateToTarget();
     }
 
     @Override
     public void stop() {
         soldier.getNavigation().stop();
-        soldier.clearAttackTargetIfGeneration(commandGeneration);
+        soldier.setAttackFinalApproach(false);
+        // Only clear command if objective reached
+        if (rawTarget != null) {
+            double distSq = soldier.distanceToSqr(
+                rawTarget.getX() + 0.5, rawTarget.getY() + 0.5, rawTarget.getZ() + 0.5);
+            if (distSq <= closeDistance * closeDistance) {
+                soldier.clearAttackTargetIfGeneration(commandGeneration);
+            }
+        }
         rawTarget = null;
-        navigationTarget = null;
     }
 
     @Override
     public void tick() {
         if (rawTarget == null) return;
-
         double cx = rawTarget.getX() + 0.5;
         double cy = rawTarget.getY() + 0.5;
         double cz = rawTarget.getZ() + 0.5;
         soldier.getLookControl().setLookAt(cx, cy + 0.5, cz, 30.0F, 30.0F);
 
-        if (--timeToRecalcPath <= 0) {
-            timeToRecalcPath = 10;
-
-            if (soldier.hasValidAttackTarget() && soldier.getAttackGeneration() != commandGeneration) {
-                rawTarget = soldier.getAttackTargetPos();
-                commandGeneration = soldier.getAttackGeneration();
-                soldier.clearFormationOffset();
-                computeNavigationTarget();
+        double distance = soldier.distanceToSqr(cx, cy, cz);
+        if (distance > closeDistance * closeDistance) {
+            if (soldier.getNavigation().isDone()) {
+                navigateToTarget();
             }
-
-            if (rawTarget == null) return;
-
-            double distance = soldier.distanceToSqr(cx, cy, cz);
-            if (distance > closeDistance * closeDistance) {
-                CoverBehaviorManager.CoverState coverState = soldier.getCoverBehaviorManager().getState();
-                boolean coverIsMoving = coverState == CoverBehaviorManager.CoverState.SEEKING_COVER ||
-                                        coverState == CoverBehaviorManager.CoverState.REPOSITIONING;
-                if (!coverIsMoving) {
-                    submitNavigation();
-                }
-                if (soldier.horizontalCollision || soldier.minorHorizontalCollision) {
-                    soldier.getJumpControl().jump();
-                }
-            } else {
-                soldier.getNavigation().stop();
-                soldier.clearAttackTargetIfGeneration(commandGeneration);
+            if (soldier.horizontalCollision || soldier.minorHorizontalCollision) {
+                soldier.getJumpControl().jump();
             }
+        } else {
+            soldier.getNavigation().stop();
+            soldier.clearAttackTargetIfGeneration(commandGeneration);
         }
     }
 
-    private void computeNavigationTarget() {
-        if (rawTarget == null) {
-            navigationTarget = null;
-            return;
+    private void navigateToTarget() {
+        BlockPos spaced = SpacingHelper.applySpacing(rawTarget, soldier);
+        if (spaced != null) {
+            soldier.getNavigation().moveTo(spaced.getX(), spaced.getY(), spaced.getZ(), 1.2D);
         }
-        navigationTarget = SpacingHelper.applySpacing(rawTarget, soldier);
-    }
-
-    private void submitNavigation() {
-        if (navigationTarget == null) return;
-        soldier.getNavigation().moveTo(
-            navigationTarget.getX(), navigationTarget.getY(), navigationTarget.getZ(), speedModifier);
     }
 }

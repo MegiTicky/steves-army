@@ -21,6 +21,16 @@ import net.minecraft.world.phys.Vec3;
 import java.util.*;
 
 public class CoverTacticalGoal extends Goal {
+    // Attack phase enum - what the soldier is trying to do
+    public enum AttackPhase {
+        NONE,
+        SELECTING_COVER,
+        MOVING_TO_COVER,
+        OCCUPYING_COVER,
+        DIRECT_BOUND,
+        COMPLETE
+    }
+
     private final SoldierEntity soldier;
     private final PathNavigation navigation;
     
@@ -65,6 +75,25 @@ public class CoverTacticalGoal extends Goal {
     private static final long FLANK_REPOSITION_COOLDOWN_MS = 5000;
     private static final double MID_MOVE_ANGLE_THRESHOLD = 1.05;
 
+    // Attack-mode constants
+    private static final int ATTACK_FORWARD_BIAS_BLOCKS = 6;
+    private static final double ATTACK_MIN_FORWARD_PROGRESS = 2.0;
+    private static final double ATTACK_DIRECT_BOUND_LENGTH = 6.0;
+    private static final long ATTACK_MIN_DWELL_MS = 4000;
+    private static final long ATTACK_MAX_DWELL_MS = 8000;
+    private static final double ATTACK_OBJECTIVE_RADIUS = 4.0;
+
+    // Attack phase state
+    private AttackPhase attackPhase = AttackPhase.NONE;
+    private int attackCommandGeneration = -1;
+    private long attackPhaseStartTime = 0;
+    private long attackCoverArrivalTime = 0;
+    private BlockPos attackDirectBoundTarget = null;
+    private boolean attackDwellEligible = false;
+    private long attackDwellDelay = 0;
+    private int attackAdvanceStaggerTicks = 0;
+    private boolean attackHasPeekedThisCover = false;
+
     private long lastFlankRepositionTime = 0;
 
     private final Set<BlockPos> failedCoverPositions = new HashSet<>();
@@ -81,6 +110,10 @@ public class CoverTacticalGoal extends Goal {
     private BlockPos debugSearchCenter = null;
 
     private static boolean debugLoggingEnabled = false;
+
+    public AttackPhase getAttackPhase() {
+        return attackPhase;
+    }
     
     public enum BlacklistReason {
         PATH_FAILED("PATH FAILED"),
@@ -280,6 +313,11 @@ public class CoverTacticalGoal extends Goal {
         
         if (!soldier.isAlive()) return false;
         
+        // ATTACK mode: always try to use cover (cover-to-cover advance)
+        if (soldier.hasValidAttackTarget()) {
+            return true;
+        }
+        
         if (soldier.hasValidPingMoveTarget() && !soldier.hasValidAttackTarget()) {
             if (debugLoggingEnabled) {
                 StevesArmyMod.LOGGER.info("[CoverGoal] canUse=false: hasValidPingMoveTarget");
@@ -356,20 +394,10 @@ public class CoverTacticalGoal extends Goal {
                     return false;
                 }
             }
-
-            if (shouldExitCoverForAttack()) {
-                getCoverManager().clearCover();
-                getCoverManager().resetPeekState();
-                getPositionController().clear();
-                cooldown = COOLDOWN_TICKS;
-                if (debugLoggingEnabled) {
-                    StevesArmyMod.LOGGER.info("[CoverGoal] canContinueToUse=false: ATTACK mode, exiting cover to advance");
-                }
-                return false;
-            }
         }
         
-        boolean result = state != CoverBehaviorManager.CoverState.NO_COVER;
+        boolean result = state != CoverBehaviorManager.CoverState.NO_COVER || 
+                         soldier.hasValidAttackTarget();
         if (debugLoggingEnabled) {
             StevesArmyMod.LOGGER.info("[CoverGoal] canContinueToUse={}, state={}", result, state);
         }
@@ -382,6 +410,11 @@ public class CoverTacticalGoal extends Goal {
         reevaluateCounter = 0;
         
         CoverBehaviorManager.CoverState state = getCoverManager().getState();
+        
+        // Initialize attack phase if we have a valid attack target
+        if (soldier.hasValidAttackTarget()) {
+            initAttackPhase();
+        }
         
         if (state == CoverBehaviorManager.CoverState.NO_COVER) {
             getCoverManager().setState(CoverBehaviorManager.CoverState.SEEKING_COVER);
@@ -404,6 +437,11 @@ public class CoverTacticalGoal extends Goal {
     @Override
     public void stop() {
         CoverBehaviorManager.CoverState state = getCoverManager().getState();
+        
+        // Don't clear cover if we're in ATTACK mode - preserve state across interruptions
+        if (soldier.hasValidAttackTarget()) {
+            return;
+        }
         
         if (state == CoverBehaviorManager.CoverState.IN_COVER ||
             state == CoverBehaviorManager.CoverState.SUPPRESSED_IN_COVER) {
@@ -464,15 +502,34 @@ public class CoverTacticalGoal extends Goal {
                 tickRepositioning();
                 break;
             case IN_COVER:
-                setFlags(EnumSet.noneOf(Flag.class));
+                // Keep MOVE flags during ATTACK mode so cover goal owns movement
+                if (soldier.hasValidAttackTarget()) {
+                    setFlags(EnumSet.of(Flag.MOVE, Flag.LOOK));
+                } else {
+                    setFlags(EnumSet.noneOf(Flag.class));
+                }
                 tickInCover();
                 break;
             case SUPPRESSED_IN_COVER:
-                setFlags(EnumSet.noneOf(Flag.class));
+                if (soldier.hasValidAttackTarget()) {
+                    setFlags(EnumSet.of(Flag.MOVE, Flag.LOOK));
+                } else {
+                    setFlags(EnumSet.noneOf(Flag.class));
+                }
                 tickSuppressedInCover();
                 break;
             case NO_COVER:
+                // Attack mode: trigger immediate cover search
+                if (soldier.hasValidAttackTarget() && attackPhase == AttackPhase.NONE) {
+                    setFlags(EnumSet.of(Flag.MOVE, Flag.LOOK));
+                    initAttackPhase();
+                }
                 break;
+        }
+        
+        // Attack mode: run phase logic after state handling
+        if (soldier.hasValidAttackTarget()) {
+            tickAttackPhase();
         }
         
         populateCoverDebugData();
@@ -799,7 +856,7 @@ public class CoverTacticalGoal extends Goal {
             return;
         }
 
-        if (shouldExitCoverForAttack()) {
+        if (shouldExitCoverForFollow()) {
             getCoverManager().resetPeekState();
             getPositionController().clear();
             getCoverManager().clearCover();
@@ -878,10 +935,6 @@ public class CoverTacticalGoal extends Goal {
         }
         
         if (shouldExitCoverForFollow() && !getCoverManager().isSuppressed()) {
-            getCoverManager().clearCover();
-        }
-
-        if (shouldExitCoverForAttack() && !getCoverManager().isSuppressed()) {
             getCoverManager().clearCover();
         }
     }
@@ -1095,23 +1148,7 @@ private boolean shouldExitCoverForFollow() {
         return true;
     }
 
-    private boolean shouldExitCoverForAttack() {
-        if (!soldier.hasValidAttackTarget()) return false;
-
-        if (getCoverManager().isSuppressed()) return false;
-
-        float healthPercent = soldier.getHealth() / soldier.getMaxHealth();
-        if (healthPercent < LOW_HEALTH_THRESHOLD) return false;
-
-        if (getCoverManager().getTimeInCover() < MIN_COVER_DWELL_TIME_MS) return false;
-
-        PeekController peekCtrl = getPeekController();
-        if (peekCtrl.isExposed() || peekCtrl.isMovingToPeek() || peekCtrl.isReturning()) return false;
-
-        return true;
-    }
-    
-    private void startRepositioning() {
+private void startRepositioning() {
         getCoverManager().resetPeekState();
         getCoverManager().setPeekPosition(null);
         getPositionController().clear();
@@ -1377,6 +1414,272 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
         }
     }
     
+    // --- Attack Phase Methods ---
+
+    private void initAttackPhase() {
+        int gen = soldier.getAttackGeneration();
+        if (attackCommandGeneration != gen) {
+            attackCommandGeneration = gen;
+            attackPhase = AttackPhase.SELECTING_COVER;
+            attackPhaseStartTime = System.currentTimeMillis();
+            attackCoverArrivalTime = 0;
+            attackDirectBoundTarget = null;
+            attackDwellEligible = false;
+            attackHasPeekedThisCover = false;
+            // Stagger: deterministic delay based on UUID
+            attackAdvanceStaggerTicks = Math.abs(soldier.getUUID().hashCode() % 60); // 0-3 seconds
+            if (debugLoggingEnabled) {
+                StevesArmyMod.LOGGER.info("[AttackPhase] Soldier {} init attack gen {} stagger={}",
+                    soldier.getId(), gen, attackAdvanceStaggerTicks);
+            }
+        }
+    }
+
+    private void tickAttackPhase() {
+        if (!soldier.hasValidAttackTarget()) {
+            attackPhase = AttackPhase.NONE;
+            return;
+        }
+
+        BlockPos objective = soldier.getAttackTargetPos();
+        double distToObjective = soldier.distanceToSqr(
+            objective.getX() + 0.5, objective.getY() + 0.5, objective.getZ() + 0.5);
+        double objRadiusSq = ATTACK_OBJECTIVE_RADIUS * ATTACK_OBJECTIVE_RADIUS;
+
+        // Objective reached
+        if (distToObjective <= objRadiusSq) {
+            if (attackPhase != AttackPhase.COMPLETE) {
+                attackPhase = AttackPhase.COMPLETE;
+                soldier.setAttackFinalApproach(true);
+                if (debugLoggingEnabled) {
+                    StevesArmyMod.LOGGER.info("[AttackPhase] Soldier {} objective reached, completing", soldier.getId());
+                }
+            }
+            return;
+        }
+
+        CoverBehaviorManager.CoverState coverState = getCoverManager().getState();
+
+        switch (attackPhase) {
+            case SELECTING_COVER: {
+                attackPhase = AttackPhase.MOVING_TO_COVER;
+                findAndMoveToCover();
+                break;
+            }
+
+            case MOVING_TO_COVER: {
+                // If we arrived in cover, transition to occupying
+                if (coverState == CoverBehaviorManager.CoverState.IN_COVER ||
+                    coverState == CoverBehaviorManager.CoverState.SUPPRESSED_IN_COVER) {
+                    attackPhase = AttackPhase.OCCUPYING_COVER;
+                    attackCoverArrivalTime = System.currentTimeMillis();
+                    attackDwellEligible = false;
+                    attackHasPeekedThisCover = false;
+                    if (debugLoggingEnabled) {
+                        StevesArmyMod.LOGGER.info("[AttackPhase] Soldier {} reached cover, occupying", soldier.getId());
+                    }
+                }
+                // If still seeking/repositioning, the cover system handles movement
+                break;
+            }
+
+            case OCCUPYING_COVER: {
+                if (coverState == CoverBehaviorManager.CoverState.NO_COVER) {
+                    // Lost cover somehow, re-select
+                    attackPhase = AttackPhase.SELECTING_COVER;
+                    break;
+                }
+
+                long dwellTime = System.currentTimeMillis() - attackCoverArrivalTime;
+                boolean suppressed = getCoverManager().isSuppressed();
+                boolean pinned = getCoverManager().isPinned();
+                PeekController peekCtrl = getPeekController();
+                boolean peeking = peekCtrl.isExposed() || peekCtrl.isMovingToPeek() || peekCtrl.isReturning();
+
+                // Check if we've completed a peek cycle
+                if (!attackHasPeekedThisCover && !peeking && peekCtrl.getState() == PeekController.State.HIDING
+                    && getCoverManager().getTimeSinceLastPeek() > 500) {
+                    // We've returned from a peek
+                    if (peekCtrl.getPeekCountSameCover() > 0) {
+                        attackHasPeekedThisCover = true;
+                    }
+                }
+
+                // Check if time to advance
+                long minDwell = suppressed ? Long.MAX_VALUE : ATTACK_MIN_DWELL_MS;
+                long maxDwell = ATTACK_MAX_DWELL_MS + (attackAdvanceStaggerTicks * 50L);
+                boolean dwellMet = dwellTime >= minDwell;
+                boolean maxDwellReached = dwellTime >= maxDwell;
+                boolean canAdvance = dwellMet && !suppressed && !pinned && !peeking;
+
+                if (maxDwellReached || (canAdvance && attackHasPeekedThisCover)) {
+                    // Try to find next forward cover
+                    if (selectForwardCover()) {
+                        attackPhase = AttackPhase.MOVING_TO_COVER;
+                        if (debugLoggingEnabled) {
+                            StevesArmyMod.LOGGER.info("[AttackPhase] Soldier {} advancing to next cover", soldier.getId());
+                        }
+                    } else {
+                        // No forward cover: use direct bound
+                        startDirectBound();
+                        attackPhase = AttackPhase.DIRECT_BOUND;
+                        if (debugLoggingEnabled) {
+                            StevesArmyMod.LOGGER.info("[AttackPhase] Soldier {} no forward cover, direct bound", soldier.getId());
+                        }
+                    }
+                }
+
+                // Handle non-peekable cover reposition
+                if (getCoverManager().isRepositionRequested() && !suppressed) {
+                    getCoverManager().clearRepositionRequest();
+                    attackPhase = AttackPhase.SELECTING_COVER;
+                }
+                break;
+            }
+
+            case DIRECT_BOUND: {
+                // Check if we arrived at the bound target or found cover
+                if (attackDirectBoundTarget != null) {
+                    double distToBound = soldier.distanceToSqr(
+                        attackDirectBoundTarget.getX() + 0.5,
+                        attackDirectBoundTarget.getY() + 0.5,
+                        attackDirectBoundTarget.getZ() + 0.5);
+                    if (distToBound <= 9.0) { // 3 blocks
+                        attackDirectBoundTarget = null;
+                        attackPhase = AttackPhase.SELECTING_COVER;
+                        if (debugLoggingEnabled) {
+                            StevesArmyMod.LOGGER.info("[AttackPhase] Soldier {} direct bound complete, re-selecting cover", soldier.getId());
+                        }
+                    }
+                }
+                // While bounding, if suitable cover appears naturally, let the cover system preempt
+                if (coverState == CoverBehaviorManager.CoverState.IN_COVER ||
+                    coverState == CoverBehaviorManager.CoverState.SUPPRESSED_IN_COVER) {
+                    attackPhase = AttackPhase.OCCUPYING_COVER;
+                    attackCoverArrivalTime = System.currentTimeMillis();
+                }
+                break;
+            }
+
+            case COMPLETE: {
+                // Attack goal handles final approach
+                break;
+            }
+
+            case NONE: {
+                initAttackPhase();
+                break;
+            }
+        }
+    }
+
+    /**
+     * Select forward cover biased toward the objective.
+     * Returns true if cover was found and navigation started.
+     */
+    private boolean selectForwardCover() {
+        if (!soldier.hasValidAttackTarget()) return false;
+        BlockPos objective = soldier.getAttackTargetPos();
+
+        // Compute forward-biased search center
+        Vec3 toTarget = new Vec3(
+            objective.getX() - soldier.getX(),
+            0,
+            objective.getZ() - soldier.getZ());
+        double distToTarget = toTarget.length();
+        if (distToTarget < 1.0) return false;
+
+        toTarget = toTarget.normalize();
+        double ahead = Math.min(distToTarget * 0.3, ATTACK_FORWARD_BIAS_BLOCKS);
+        BlockPos searchCenter = soldier.blockPosition().offset(
+            (int)(toTarget.x * ahead), 0, (int)(toTarget.z * ahead));
+
+        Level level = soldier.level();
+        CoverFinder finder = new CoverFinder(level);
+        Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
+        List<LivingEntity> threats = getThreatList();
+        SquadCoverContext squadCtx = buildSquadCoverContext();
+
+        List<CoverFinder.ScoredCover> scored = finder.evaluateAndScoreAllFromCenter(
+            searchCenter, soldier, threatDirection, threats, SEARCH_RADIUS, squadCtx);
+
+        CoverPoint currentCover = getCoverManager().getCurrentCover();
+        Vec3 soldierPos = soldier.position();
+        Vec3 objectiveDir = new Vec3(
+            objective.getX() - soldierPos.x, 0, objective.getZ() - soldierPos.z).normalize();
+
+        // Filter: require forward progress and reject current/blacklisted/reserved covers
+        for (CoverFinder.ScoredCover sc : scored) {
+            CoverPoint cover = sc.cover;
+
+            // Skip current cover
+            if (currentCover != null && cover.getPosition().equals(currentCover.getPosition())) continue;
+
+            // Skip blacklisted
+            if (failedCoverPositions.contains(cover.getPosition())) continue;
+
+            // Skip if not available for this soldier
+            if (!CoverReservationManager.isAvailableFor(cover.getPosition(), soldier)) continue;
+
+            // Hard forward progress filter
+            Vec3 candidateDisp = cover.getPosition().getCenter().subtract(soldierPos);
+            double forwardProgress = candidateDisp.x * objectiveDir.x + candidateDisp.z * objectiveDir.z;
+            if (forwardProgress < ATTACK_MIN_FORWARD_PROGRESS) continue;
+
+            // Don't go beyond the objective
+            double distToObj = cover.getPosition().distSqr(objective);
+            if (distToObj <= ATTACK_OBJECTIVE_RADIUS * ATTACK_OBJECTIVE_RADIUS) continue;
+
+            // Try to reserve and path to this cover
+            if (CoverReservationManager.reserve(cover.getPosition(), soldier)) {
+                getCoverManager().setTargetCover(cover);
+                moveToCover(cover);
+                if (debugLoggingEnabled) {
+                    StevesArmyMod.LOGGER.info("[AttackForward] Soldier {} selected forward cover {} progress={}",
+                        soldier.getId(), cover.getPosition(), String.format("%.1f", forwardProgress));
+                }
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Start a short direct bound toward the objective when no cover is available.
+     */
+    private void startDirectBound() {
+        if (!soldier.hasValidAttackTarget()) return;
+        BlockPos objective = soldier.getAttackTargetPos();
+
+        Vec3 toTarget = new Vec3(
+            objective.getX() - soldier.getX(),
+            0,
+            objective.getZ() - soldier.getZ());
+        double dist = toTarget.length();
+        if (dist < 1.0) return;
+
+        Vec3 dir = toTarget.normalize();
+        double boundLen = Math.min(ATTACK_DIRECT_BOUND_LENGTH, dist - ATTACK_OBJECTIVE_RADIUS);
+        attackDirectBoundTarget = soldier.blockPosition().offset(
+            (int)(dir.x * boundLen), 0, (int)(dir.z * boundLen));
+
+        // Also clear any stale cover state so debug shows NO_COVER
+        getCoverManager().clearCover();
+
+        // Navigate to the bound point
+        soldier.getNavigation().moveTo(
+            attackDirectBoundTarget.getX() + 0.5,
+            attackDirectBoundTarget.getY(),
+            attackDirectBoundTarget.getZ() + 0.5,
+            1.2D);
+
+        if (debugLoggingEnabled) {
+            StevesArmyMod.LOGGER.info("[AttackDirectBound] Soldier {} bounding to {} (dist={})",
+                soldier.getId(), attackDirectBoundTarget, String.format("%.1f", boundLen));
+        }
+    }
+
     private CoverPositionController getPositionController() {
         return (CoverPositionController) soldier.getMoveControl();
     }
