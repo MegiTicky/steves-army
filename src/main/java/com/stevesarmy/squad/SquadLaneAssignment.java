@@ -92,43 +92,23 @@ public class SquadLaneAssignment {
     }
 
     /**
-     * Compute a lane-aligned navigation target at a look-ahead distance along the forward axis.
-     * This keeps soldiers in their lane during travel rather than only at the final destination.
+     * Compute the lane-aligned navigation target — a fixed offset from rawTarget.
+     * No look-ahead; the offset applies at the destination only.
      */
     public BlockPos getLaneTarget(UUID soldierUuid, Vec3 soldierPos) {
-        LaneSlot slot = slots.get(soldierUuid);
-        if (slot == null) return rawTarget;
-
-        Vec3 targetCenter = Vec3.atCenterOf(rawTarget);
-        Vec3 toTarget = targetCenter.subtract(soldierPos);
-
-        double distToTarget = toTarget.horizontalDistance();
-        if (distToTarget < 4.0) {
-            // Near arrival: go straight to lane-final position
-            return rawTarget.offset(
-                (int) Math.round(perpendicular.x * slot.laneOffset),
-                0,
-                (int) Math.round(perpendicular.z * slot.laneOffset));
-        }
-
-        // Look-ahead point: advance along forward axis, offset perpendicular
-        double lookAhead = Math.min(distToTarget * 0.5, 12.0);
-        Vec3 laneTarget = soldierPos
-            .add(forward.scale(lookAhead))
-            .add(perpendicular.scale(slot.laneOffset));
-
-        return BlockPos.containing(laneTarget);
-    }
-
-    /**
-     * Compute the final lane-aligned position at the destination.
-     */
-    public BlockPos getFinalLanePosition(UUID soldierUuid) {
         LaneSlot slot = slots.get(soldierUuid);
         if (slot == null) return rawTarget;
         return rawTarget.offset(
             (int) Math.round(perpendicular.x * slot.laneOffset),
             0,
             (int) Math.round(perpendicular.z * slot.laneOffset));
+    }
+
+    /**
+     * Compute the final lane-aligned position at the destination.
+     * Identical to getLaneTarget — both return the fixed lane position.
+     */
+    public BlockPos getFinalLanePosition(UUID soldierUuid) {
+        return getLaneTarget(soldierUuid, null);
     }
 }

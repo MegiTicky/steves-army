@@ -1,7 +1,6 @@
 package com.stevesarmy.entity.ai;
 
 import com.stevesarmy.entity.SoldierEntity;
-import com.stevesarmy.squad.SquadLaneAssignment;
 import com.stevesarmy.util.SpacingHelper;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.entity.ai.goal.Goal;
@@ -12,7 +11,6 @@ public class SoldierMoveToPingGoal extends Goal {
     private final SoldierEntity soldier;
     private BlockPos rawTarget;
     private BlockPos navigationTarget;
-    private BlockPos finalLaneTarget;
     private int commandGeneration;
     private final double speedModifier;
     private final float closeDistance;
@@ -30,7 +28,6 @@ public class SoldierMoveToPingGoal extends Goal {
         if (!soldier.isAlive()) return false;
         if (soldier.hasValidAttackTarget()) return false;
         if (!soldier.hasValidPingMoveTarget()) return false;
-
         captureCommand();
         return rawTarget != null;
     }
@@ -39,12 +36,9 @@ public class SoldierMoveToPingGoal extends Goal {
     public boolean canContinueToUse() {
         if (!soldier.isAlive()) return false;
         if (!soldier.hasValidPingMoveTarget()) return false;
-        if (finalLaneTarget == null) return false;
-
+        if (rawTarget == null) return false;
         double distSq = soldier.distanceToSqr(
-            finalLaneTarget.getX() + 0.5,
-            finalLaneTarget.getY() + 0.5,
-            finalLaneTarget.getZ() + 0.5);
+            rawTarget.getX() + 0.5, rawTarget.getY() + 0.5, rawTarget.getZ() + 0.5);
         return distSq > closeDistance * closeDistance;
     }
 
@@ -63,41 +57,32 @@ public class SoldierMoveToPingGoal extends Goal {
         soldier.clearPingMoveTargetIfGeneration(commandGeneration);
         rawTarget = null;
         navigationTarget = null;
-        finalLaneTarget = null;
     }
 
     @Override
     public void tick() {
-        if (navigationTarget == null) return;
+        if (rawTarget == null) return;
 
-        soldier.getLookControl().setLookAt(
-            navigationTarget.getX() + 0.5,
-            navigationTarget.getY() + 1.0,
-            navigationTarget.getZ() + 0.5,
-            30.0F, 30.0F
-        );
+        double cx = rawTarget.getX() + 0.5;
+        double cy = rawTarget.getY() + 0.5;
+        double cz = rawTarget.getZ() + 0.5;
+        soldier.getLookControl().setLookAt(cx, cy + 0.5, cz, 30.0F, 30.0F);
 
         if (--timeToRecalcPath <= 0) {
             timeToRecalcPath = 10;
 
-            // Detect a replacement command while running
             if (soldier.hasValidPingMoveTarget() && soldier.getPingMoveGeneration() != commandGeneration) {
                 captureCommand();
                 soldier.clearFormationOffset();
                 computeNavigationTarget();
             }
 
-            if (finalLaneTarget == null) return;
+            if (rawTarget == null) return;
 
-            double distance = soldier.distanceToSqr(
-                finalLaneTarget.getX() + 0.5,
-                finalLaneTarget.getY() + 0.5,
-                finalLaneTarget.getZ() + 0.5);
+            double distance = soldier.distanceToSqr(cx, cy, cz);
             if (distance > closeDistance * closeDistance) {
-                // Recompute navigation target with look-ahead for lane separation during travel
-                navigationTarget = SpacingHelper.applySpacing(rawTarget, soldier);
+                // Resubmit navigation — same fixed nav target, but pathfinder benefits from refresh
                 submitNavigation();
-
                 if (soldier.horizontalCollision || soldier.minorHorizontalCollision) {
                     soldier.getJumpControl().jump();
                 }
@@ -109,22 +94,14 @@ public class SoldierMoveToPingGoal extends Goal {
     }
 
     private void captureCommand() {
-        this.rawTarget = soldier.getPingMoveTarget();
-        this.commandGeneration = soldier.getPingMoveGeneration();
+        rawTarget = soldier.getPingMoveTarget();
+        commandGeneration = soldier.getPingMoveGeneration();
     }
 
     private void computeNavigationTarget() {
         if (rawTarget == null) {
             navigationTarget = null;
-            finalLaneTarget = null;
             return;
-        }
-        // Store the final lane position for arrival detection
-        SquadLaneAssignment assignment = SpacingHelper.getOrCreateAssignment(rawTarget, soldier);
-        if (assignment != null) {
-            finalLaneTarget = assignment.getFinalLanePosition(soldier.getUUID());
-        } else {
-            finalLaneTarget = rawTarget;
         }
         navigationTarget = SpacingHelper.applySpacing(rawTarget, soldier);
     }

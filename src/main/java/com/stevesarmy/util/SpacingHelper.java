@@ -52,14 +52,19 @@ public class SpacingHelper {
         List<LivingEntity> members = mgr.getSquadMembers(serverLevel, squadId, null);
 
         List<SoldierEntity> team = new ArrayList<>();
+        Vec3 targetCenter = Vec3.atCenterOf(target);
         for (LivingEntity member : members) {
             if (member instanceof SoldierEntity s && s.isAlive()) {
                 if (myTeam == FireTeam.ALL || s.getFireTeam() == myTeam) {
-                    team.add(s);
+                    if (s.position().distanceToSqr(targetCenter) < 2500) {
+                        team.add(s);
+                    }
                 }
             }
         }
-        team.add(soldier);
+        if (soldier.position().distanceToSqr(targetCenter) < 2500) {
+            team.add(soldier);
+        }
 
         Set<SoldierEntity> unique = new LinkedHashSet<>(team);
         team = new ArrayList<>(unique);
@@ -77,6 +82,12 @@ public class SpacingHelper {
         if (squadId == null) return null;
         Set<SoldierEntity> unique = new LinkedHashSet<>(team);
         List<SoldierEntity> deduped = new ArrayList<>(unique);
+        // Filter to soldiers within 50 blocks of target
+        Vec3 targetCenter = Vec3.atCenterOf(target);
+        deduped = deduped.stream()
+            .filter(s -> s.position().distanceToSqr(targetCenter) < 2500)
+            .collect(java.util.stream.Collectors.toList());
+        if (deduped.isEmpty()) return null;
         SquadLaneAssignment assignment = new SquadLaneAssignment(squadId, target, deduped);
         assignments.put(squadId, assignment);
         StevesArmyMod.LOGGER.info("[Spacing] Created lane assignment via createAssignment: squad={} target={} soldiers={}",

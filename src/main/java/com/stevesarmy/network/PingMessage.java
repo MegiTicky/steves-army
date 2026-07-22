@@ -197,12 +197,12 @@ public class PingMessage {
                 result.add(s);
             }
         }
-        // Add any owned soldiers not in squad that are within 100 blocks as a fallback
-        List<SoldierEntity> resultFinal = result;
+        // Add any owned soldiers not in squad that are within 100 blocks as a fallback (UUID dedup)
+        java.util.Set<UUID> resultUuids = result.stream().map(s -> s.getUUID()).collect(java.util.stream.Collectors.toSet());
         List<SoldierEntity> nearbyFallback = level.getEntitiesOfClass(
             SoldierEntity.class,
             sender.getBoundingBox().inflate(100),
-            s -> s.isOwnedBy(sender) && !resultFinal.contains(s)
+            s -> s.isOwnedBy(sender) && !resultUuids.contains(s.getUUID())
         );
         result.addAll(nearbyFallback);
 
