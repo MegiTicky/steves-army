@@ -44,6 +44,7 @@ public class CoverTacticalGoal extends Goal {
     private static final long MIN_COVER_DWELL_TIME_DAMAGE_MS = 2000;
     private static final long MIN_SUPPRESSED_DWELL_TIME_MS = 6000;
     private static final float HYSTERESIS_THRESHOLD = 0.20f;
+    private static final float BACKWARD_HYSTERESIS_THRESHOLD = 0.35f;
     private static final long MIN_PEEK_INTERVAL_MS = 2000;
     private static final long MAX_SEEKING_TIME_MS = 10000;
     private static final float LOW_HEALTH_THRESHOLD = 0.3f;
@@ -1049,6 +1050,20 @@ private boolean shouldSeekCover() {
 
                 float penalty = getCoverManager().getCoverQualityPenalty();
                 float hysteresis = penalty > 0 ? 1.0f : 1.0f + HYSTERESIS_THRESHOLD;
+
+                // In attack mode, penalize backward cover switching
+                if (soldier.hasValidAttackTarget() && penalty <= 0) {
+                    BlockPos attackPos = soldier.getAttackTargetPos();
+                    Vec3 soldierPos = soldier.position();
+                    Vec3 toObjective = new Vec3(
+                        attackPos.getX() - soldierPos.x, 0, attackPos.getZ() - soldierPos.z);
+                    Vec3 toCandidate = newCover.getPosition().getCenter().subtract(soldierPos);
+                    boolean isBackward = toObjective.dot(toCandidate) < 0;
+                    if (isBackward) {
+                        hysteresis = 1.0f + BACKWARD_HYSTERESIS_THRESHOLD;
+                    }
+                }
+
                 float currentScore = currentCover.getQuality() * hysteresis - penalty;
                 float newScore = newCover.getQuality();
 
@@ -1151,8 +1166,21 @@ private boolean shouldExitCoverForFollow() {
         
         int searchRadius = SEARCH_RADIUS;
         BlockPos searchCenter = soldier.blockPosition();
-        
-        if (soldier.getSquadMode() == SquadMode.HOLD) {
+
+        if (soldier.hasValidAttackTarget()) {
+            BlockPos attackPos = soldier.getAttackTargetPos();
+            Vec3 toTarget = new Vec3(
+                attackPos.getX() - soldier.getX(),
+                0,
+                attackPos.getZ() - soldier.getZ());
+            double distToTarget = toTarget.length();
+            if (distToTarget > 1.0) {
+                toTarget = toTarget.normalize();
+                double ahead = Math.min(distToTarget * 0.25, 6.0);
+                searchCenter = soldier.blockPosition().offset(
+                    (int)(toTarget.x * ahead), 0, (int)(toTarget.z * ahead));
+            }
+        } else if (soldier.getSquadMode() == SquadMode.HOLD) {
             BlockPos holdPos = soldier.getHoldPosition();
             if (holdPos != null && !holdPos.equals(BlockPos.ZERO)) {
                 searchCenter = holdPos;

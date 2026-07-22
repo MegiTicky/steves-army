@@ -19,7 +19,7 @@ public class SoldierAttackGoal extends Goal {
 
     public SoldierAttackGoal(SoldierEntity soldier) {
         this.soldier = soldier;
-        this.speedModifier = 0.8D;
+        this.speedModifier = 1.0D;
         this.closeDistance = 4.0F;
         this.setFlags(EnumSet.of(Goal.Flag.MOVE, Goal.Flag.LOOK));
     }

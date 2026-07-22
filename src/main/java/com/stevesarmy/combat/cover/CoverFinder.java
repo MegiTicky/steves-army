@@ -15,6 +15,7 @@ import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
 import com.stevesarmy.StevesArmyMod;
+import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.squad.SquadCoverContext;
 
 public class CoverFinder {
@@ -28,6 +29,11 @@ public class CoverFinder {
     private static final double FIRING_QUALITY_WEIGHT = 0.20;
     private static final double PEEK_ANGLE_WEIGHT = 0.15;
     private static final double SQUAD_DISPERSION_WEIGHT = 0.20;
+
+    // Attack-mode weights (replace DISTANCE_WEIGHT + reduce SQUAD_DISPERSION_WEIGHT)
+    private static final double ATTACK_LOCAL_DISTANCE_WEIGHT = 0.04;
+    private static final double ATTACK_OBJECTIVE_PROGRESS_WEIGHT = 0.12;
+    private static final double ATTACK_SQUAD_DISPERSION_WEIGHT = 0.14;
     
     private static final float HALF_COVER_FIGHTABILITY_BONUS = 0.25f;
     private static final float FULL_COVER_FIGHTABILITY_BONUS = 0.15f;
@@ -274,14 +280,18 @@ public class CoverFinder {
             primaryThreat != null ? primaryThreat.blockPosition() : "null");
         
         float primaryProtection = calculatePrimaryProtection(coverPoint, threatDirection);
-        
         float flankingProtection = calculateFlankingProtection(coverPoint, allThreats);
-        
-        float distanceScore = calculateDistanceScore(coverPoint, soldier);
-        
         float firingQuality = calculateFiringQuality(coverPoint, threatDirection);
-        
         float peekAngleScore = calculatePeekAngleScore(coverPoint, threatDirection, primaryThreat);
+        
+        boolean isAttackMode = (soldier instanceof SoldierEntity se && se.hasValidAttackTarget());
+        float distanceScore;
+        if (isAttackMode) {
+            SoldierEntity se = (SoldierEntity) soldier;
+            distanceScore = calculateObjectiveProgressScore(coverPoint, soldier, se.getAttackTargetPos());
+        } else {
+            distanceScore = calculateDistanceScore(coverPoint, soldier);
+        }
         
         float fightability = 0.0f;
         if (coverPoint.canShootFrom()) {
@@ -305,18 +315,27 @@ public class CoverFinder {
             peekAngleScore = 0.0f;
         }
         
-        float weightedScore = (float)(primaryProtection * PRIMARY_PROTECTION_WEIGHT +
-                       flankingProtection * FLANKING_PROTECTION_WEIGHT +
-                       distanceScore * DISTANCE_WEIGHT +
-                       firingQuality * FIRING_QUALITY_WEIGHT +
-                       peekAngleScore * PEEK_ANGLE_WEIGHT) + fightability - blindPenalty;
+        float weightedScore;
+        if (isAttackMode) {
+            weightedScore = (float)(primaryProtection * PRIMARY_PROTECTION_WEIGHT +
+                           flankingProtection * FLANKING_PROTECTION_WEIGHT +
+                           distanceScore * ATTACK_OBJECTIVE_PROGRESS_WEIGHT +
+                           firingQuality * FIRING_QUALITY_WEIGHT +
+                           peekAngleScore * PEEK_ANGLE_WEIGHT) + fightability - blindPenalty;
+        } else {
+            weightedScore = (float)(primaryProtection * PRIMARY_PROTECTION_WEIGHT +
+                           flankingProtection * FLANKING_PROTECTION_WEIGHT +
+                           distanceScore * DISTANCE_WEIGHT +
+                           firingQuality * FIRING_QUALITY_WEIGHT +
+                           peekAngleScore * PEEK_ANGLE_WEIGHT) + fightability - blindPenalty;
+        }
         
         StevesArmyMod.LOGGER.info("[CoverScore] {} type={} q={} prim={} flank={} dist={} firing={} peek={} fight={} blindPen={} TOTAL={}",
             coverPoint.getPosition(), coverPoint.getType(),
             String.format("%.2f", coverPoint.getQuality()),
             String.format("%.2f", primaryProtection * PRIMARY_PROTECTION_WEIGHT),
             String.format("%.2f", flankingProtection * FLANKING_PROTECTION_WEIGHT),
-            String.format("%.2f", distanceScore * DISTANCE_WEIGHT),
+            String.format("%.2f", distanceScore * (isAttackMode ? ATTACK_OBJECTIVE_PROGRESS_WEIGHT : DISTANCE_WEIGHT)),
             String.format("%.2f", firingQuality * FIRING_QUALITY_WEIGHT),
             String.format("%.2f", peekAngleScore * PEEK_ANGLE_WEIGHT),
             String.format("%.2f", fightability),
@@ -331,9 +350,20 @@ return weightedScore;
                                             LivingEntity primaryThreat, SquadCoverContext squadCtx) {
         float primaryProtection = calculatePrimaryProtection(coverPoint, threatDirection);
         float flankingProtection = calculateFlankingProtection(coverPoint, allThreats);
-        float distanceScore = calculateDistanceScore(coverPoint, soldier);
         float firingQuality = calculateFiringQuality(coverPoint, threatDirection);
         float peekAngleScore = calculatePeekAngleScore(coverPoint, threatDirection, primaryThreat);
+
+        boolean isAttackMode = (soldier instanceof SoldierEntity se && se.hasValidAttackTarget());
+        float distanceScore;
+        float dispersionScore;
+        if (isAttackMode) {
+            SoldierEntity se = (SoldierEntity) soldier;
+            distanceScore = calculateObjectiveProgressScore(coverPoint, soldier, se.getAttackTargetPos());
+            dispersionScore = calculateSquadDispersionScore(coverPoint, squadCtx);
+        } else {
+            distanceScore = calculateDistanceScore(coverPoint, soldier);
+            dispersionScore = calculateSquadDispersionScore(coverPoint, squadCtx);
+        }
 
         float fightability = 0.0f;
         if (coverPoint.canShootFrom()) {
@@ -357,14 +387,22 @@ return weightedScore;
             peekAngleScore = 0.0f;
         }
 
-        float dispersionScore = calculateSquadDispersionScore(coverPoint, squadCtx);
-
-        float weightedScore = (float)(primaryProtection * PRIMARY_PROTECTION_WEIGHT +
-                       flankingProtection * FLANKING_PROTECTION_WEIGHT +
-                       distanceScore * DISTANCE_WEIGHT +
-                       firingQuality * FIRING_QUALITY_WEIGHT +
-                       peekAngleScore * PEEK_ANGLE_WEIGHT +
-                       dispersionScore * SQUAD_DISPERSION_WEIGHT) + fightability - blindPenalty;
+        float weightedScore;
+        if (isAttackMode) {
+            weightedScore = (float)(primaryProtection * PRIMARY_PROTECTION_WEIGHT +
+                           flankingProtection * FLANKING_PROTECTION_WEIGHT +
+                           distanceScore * ATTACK_OBJECTIVE_PROGRESS_WEIGHT +
+                           firingQuality * FIRING_QUALITY_WEIGHT +
+                           peekAngleScore * PEEK_ANGLE_WEIGHT +
+                           dispersionScore * ATTACK_SQUAD_DISPERSION_WEIGHT) + fightability - blindPenalty;
+        } else {
+            weightedScore = (float)(primaryProtection * PRIMARY_PROTECTION_WEIGHT +
+                           flankingProtection * FLANKING_PROTECTION_WEIGHT +
+                           distanceScore * DISTANCE_WEIGHT +
+                           firingQuality * FIRING_QUALITY_WEIGHT +
+                           peekAngleScore * PEEK_ANGLE_WEIGHT +
+                           dispersionScore * SQUAD_DISPERSION_WEIGHT) + fightability - blindPenalty;
+        }
 
         return weightedScore;
     }
@@ -453,6 +491,22 @@ return weightedScore;
         double distance = coverPoint.distanceTo(soldier);
         double maxDistance = DEFAULT_SEARCH_RADIUS * 2.0;
         return (float) (1.0 - Math.min(distance / maxDistance, 1.0));
+    }
+
+    private float calculateObjectiveProgressScore(CoverPoint coverPoint, LivingEntity soldier, BlockPos attackTarget) {
+        Vec3 soldierPos = soldier.position();
+        Vec3 toObjective = new Vec3(
+            attackTarget.getX() - soldierPos.x,
+            0,
+            attackTarget.getZ() - soldierPos.z);
+        double distToObjective = toObjective.length();
+        if (distToObjective < 0.01) return 0.5f;
+
+        Vec3 objectiveDir = toObjective.normalize();
+        Vec3 candidateDisplacement = coverPoint.getPosition().getCenter().subtract(soldierPos);
+        double forwardProgress = candidateDisplacement.x * objectiveDir.x + candidateDisplacement.z * objectiveDir.z;
+        double maxProgress = DEFAULT_SEARCH_RADIUS * 2.0;
+        return (float) Math.max(0.0, Math.min(1.0, 0.5 + forwardProgress / maxProgress));
     }
     
     private float calculateFiringQuality(CoverPoint coverPoint, Vec3 threatDirection) {
