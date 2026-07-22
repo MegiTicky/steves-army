@@ -737,7 +737,6 @@ public class SoldierEntity extends PathfinderMob implements Container {
         super.tick();
         
         if (!this.level().isClientSide) {
-            IncomingFireHandler.tick();
             threatAwareness.tick();
         }
 

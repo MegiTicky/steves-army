@@ -685,7 +685,7 @@ public class CoverTacticalGoal extends Goal {
         }
         
         if (currentCover != null && targetCover.getPosition().equals(currentCover.getPosition())) {
-            getCoverManager().clearTargetCover();
+            getCoverManager().promoteTargetToCurrentCover();
             getCoverManager().setState(CoverBehaviorManager.CoverState.IN_COVER);
             return;
         }
@@ -693,11 +693,7 @@ public class CoverTacticalGoal extends Goal {
         double distance = soldier.position().distanceTo(targetCover.getPosition().getCenter());
         
         if (distance < COVER_REACHED_DISTANCE) {
-            if (currentCover != null) {
-                getCoverManager().setLastCover(currentCover);
-            }
-            getCoverManager().setCurrentCover(targetCover);
-            getCoverManager().clearTargetCover();
+            getCoverManager().promoteTargetToCurrentCover();
             getCoverManager().setState(CoverBehaviorManager.CoverState.IN_COVER);
             noProgressTicks = 0;
             lastSeekingPosition = null;
@@ -1168,6 +1164,11 @@ private void startRepositioning() {
         
         if (currentCover != null && newCover.getPosition().equals(currentCover.getPosition())) return false;
         
+        // Release old target cover reservation (we're choosing a new target)
+        CoverPoint oldTarget = getCoverManager().getTargetCover();
+        if (oldTarget != null) {
+            CoverReservationManager.release(oldTarget.getPosition(), soldier);
+        }
         getCoverManager().clearTargetCover();
         getCoverManager().resetPeekState();
         getCoverManager().setPeekPosition(null);
@@ -1473,6 +1474,30 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
             }
 
             case MOVING_TO_COVER: {
+                CoverPoint targetCover = getCoverManager().getTargetCover();
+                
+                // Recovery: target cover was lost (e.g., blacklisted during navigation)
+                if (targetCover == null) {
+                    attackPhase = AttackPhase.SELECTING_COVER;
+                    if (debugLoggingEnabled) {
+                        StevesArmyMod.LOGGER.info("[AttackPhase] Soldier {} MOVING_TO_COVER lost target, re-selecting",
+                            soldier.getId());
+                    }
+                    break;
+                }
+                
+                // Recovery: navigation finished but we haven't arrived (stuck or path failed)
+                if (soldier.getNavigation().isDone() && 
+                    soldier.position().distanceTo(targetCover.getPosition().getCenter()) > COVER_REACHED_DISTANCE) {
+                    attackPhase = AttackPhase.SELECTING_COVER;
+                    if (debugLoggingEnabled) {
+                        StevesArmyMod.LOGGER.info("[AttackPhase] Soldier {} MOVING_TO_COVER navigation done but not arrived (dist={}), re-selecting",
+                            soldier.getId(),
+                            String.format("%.2f", soldier.position().distanceTo(targetCover.getPosition().getCenter())));
+                    }
+                    break;
+                }
+                
                 // Only transition to occupying when we actually reached the expected cover
                 boolean arrivedAtExpected = false;
                 if (attackExpectedCover != null && currentCover != null) {
@@ -1600,7 +1625,7 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
         if (distToTarget < 1.0) return false;
 
         toTarget = toTarget.normalize();
-        double ahead = Math.min(distToTarget * 0.3, ATTACK_FORWARD_BIAS_BLOCKS);
+        double ahead = Math.min(distToTarget * 0.25, ATTACK_FORWARD_BIAS_BLOCKS);
         BlockPos searchCenter = soldier.blockPosition().offset(
             (int)(toTarget.x * ahead), 0, (int)(toTarget.z * ahead));
 
@@ -1774,13 +1799,8 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
     }
     
     private void onCoverReached(CoverPoint cover) {
-        CoverPoint previousCover = getCoverManager().getCurrentCover();
-        if (previousCover != null) {
-            getCoverManager().setLastCover(previousCover);
-        }
-        
-        getCoverManager().setCurrentCover(cover);
-        getCoverManager().clearTargetCover();
+        // Promote target to current without releasing the reservation
+        getCoverManager().promoteTargetToCurrentCover();
         
         navigation.stop();
         
@@ -1821,6 +1841,11 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
         failedCoverPositions.add(pos);
         lastFailedCover = pos;
         blacklistReasons.put(pos, new BlacklistEntry(reason, System.currentTimeMillis()));
+        // Release the old target cover reservation explicitly (clearTargetCover no longer releases)
+        CoverPoint oldTarget = getCoverManager().getTargetCover();
+        if (oldTarget != null) {
+            CoverReservationManager.release(oldTarget.getPosition(), soldier);
+        }
         getCoverManager().clearTargetCover();
         if (debugLoggingEnabled) {
             StevesArmyMod.LOGGER.info("[CoverGoal] Soldier {} blacklisted cover at {} reason={}",

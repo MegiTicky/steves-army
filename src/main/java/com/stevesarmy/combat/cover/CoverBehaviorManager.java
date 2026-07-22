@@ -250,6 +250,11 @@ if (currentCover != null) {
             this.lastCover = currentCover;
             syncLastCover();
         }
+        if (targetCover != null) {
+            CoverReservationManager.release(targetCover.getPosition(), soldier);
+            this.targetCover = null;
+            syncTargetCover();
+        }
         this.savedCoverPosition = currentCover != null ? currentCover.getPosition() : null;
         this.currentCover = null;
         syncCurrentCover();
@@ -275,9 +280,28 @@ if (currentCover != null) {
                 soldier.getId(),
                 targetCover != null ? targetCover.getPosition().toString() : "null");
         }
-        if (targetCover != null) {
-            CoverReservationManager.release(targetCover.getPosition(), soldier);
+        this.targetCover = null;
+        syncTargetCover();
+    }
+    
+    /**
+     * Promote the target cover to current cover without releasing the reservation.
+     * This prevents other soldiers from stealing the cover we just arrived at.
+     */
+    public void promoteTargetToCurrentCover() {
+        if (targetCover == null) return;
+        if (debugLog()) {
+            StevesArmyMod.LOGGER.info("[CoverBehaviorManager] Soldier {} promoteTargetToCurrentCover: {} -> {}",
+                soldier.getId(),
+                currentCover != null ? currentCover.getPosition().toString() : "null",
+                targetCover.getPosition().toString());
         }
+        if (currentCover != null) {
+            this.lastCover = currentCover;
+            syncLastCover();
+        }
+        this.currentCover = targetCover;
+        syncCurrentCover();
         this.targetCover = null;
         syncTargetCover();
     }

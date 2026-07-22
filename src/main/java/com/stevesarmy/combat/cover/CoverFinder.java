@@ -289,6 +289,7 @@ public class CoverFinder {
         List<ScoredCover> scored = coverPoints.stream()
             .filter(cp -> cp.getType() != CoverType.NONE || 
                          (threatDirection != null && cp.getProtectedDirections().contains(getDirectionFromVector(threatDirection))))
+            .filter(cp -> CoverReservationManager.isAvailableFor(cp.getPosition(), soldier))
             .map(cp -> new ScoredCover(cp, cp.getCombatScore()))
             .sorted(Comparator.comparingDouble((ScoredCover s) -> s.score).reversed())
             .collect(java.util.stream.Collectors.toList());

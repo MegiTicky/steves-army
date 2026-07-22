@@ -18,6 +18,7 @@ import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.event.entity.EntityJoinLevelEvent;
 import net.minecraftforge.event.entity.living.LivingDeathEvent;
 import net.minecraftforge.event.entity.living.LivingHurtEvent;
+import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
 
@@ -54,6 +55,14 @@ public class IncomingFireHandler {
     public static void onEntityJoin(EntityJoinLevelEvent event) {
         if (event.getEntity().getType() == EntityKineticBullet.TYPE) {
             trackedBullets.put(event.getEntity(), null);
+        }
+    }
+
+    @SubscribeEvent
+    public static void onServerTick(TickEvent.ServerTickEvent event) {
+        if (event.phase == TickEvent.Phase.END) {
+            tick();
+            CoverReservationManager.tick();
         }
     }
 

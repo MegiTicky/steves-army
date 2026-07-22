@@ -11,7 +11,7 @@ public class CoverReservationManager {
     private static final Map<BlockPos, Set<UUID>> coverReservations = new ConcurrentHashMap<>();
     private static final int MAX_RESERVATIONS_PER_COVER = 1;
     private static final long RESERVATION_TIMEOUT_MS = 30000;
-    private static final Map<UUID, Long> reservationTimestamps = new ConcurrentHashMap<>();
+    private static final Map<UUID, Map<BlockPos, Long>> reservationTimestamps = new ConcurrentHashMap<>();
     
     public static boolean reserve(BlockPos coverPos, LivingEntity soldier) {
         if (coverPos == null || soldier == null) {
@@ -25,7 +25,7 @@ public class CoverReservationManager {
             Set<UUID> reservations = coverReservations.computeIfAbsent(key, k -> ConcurrentHashMap.newKeySet());
             
             if (reservations.contains(soldierUUID)) {
-                reservationTimestamps.put(soldierUUID, System.currentTimeMillis());
+                setTimestamp(soldierUUID, key, System.currentTimeMillis());
                 return true;
             }
             
@@ -38,7 +38,7 @@ public class CoverReservationManager {
             
             boolean added = reservations.add(soldierUUID);
             if (added) {
-                reservationTimestamps.put(soldierUUID, System.currentTimeMillis());
+                setTimestamp(soldierUUID, key, System.currentTimeMillis());
             }
             return added;
         }
@@ -52,12 +52,11 @@ public class CoverReservationManager {
         BlockPos key = coverPos.immutable();
 
         if (soldier == null) {
-            // Release all reservations at this position
             synchronized (coverReservations) {
                 Set<UUID> reservations = coverReservations.remove(key);
                 if (reservations != null) {
                     for (UUID uuid : reservations) {
-                        reservationTimestamps.remove(uuid);
+                        removeTimestamp(uuid, key);
                     }
                 }
             }
@@ -70,7 +69,7 @@ public class CoverReservationManager {
             Set<UUID> reservations = coverReservations.get(key);
             if (reservations != null) {
                 reservations.remove(soldierUUID);
-                reservationTimestamps.remove(soldierUUID);
+                removeTimestamp(soldierUUID, key);
                 
                 if (reservations.isEmpty()) {
                     coverReservations.remove(key);
@@ -93,7 +92,7 @@ public class CoverReservationManager {
                 Set<UUID> reservations = entry.getValue();
                 
                 if (reservations.remove(soldierUUID)) {
-                    reservationTimestamps.remove(soldierUUID);
+                    removeTimestamp(soldierUUID, entry.getKey());
                     
                     if (reservations.isEmpty()) {
                         iterator.remove();
@@ -125,7 +124,6 @@ public class CoverReservationManager {
             return true;
         }
         
-        // If soldier already has this cover reserved, it's available for them
         if (soldier != null && reservations.contains(soldier.getUUID())) {
             return true;
         }
@@ -183,14 +181,41 @@ public class CoverReservationManager {
         return result;
     }
     
+    private static void setTimestamp(UUID soldierUUID, BlockPos coverPos, long time) {
+        reservationTimestamps
+            .computeIfAbsent(soldierUUID, k -> new ConcurrentHashMap<>())
+            .put(coverPos, time);
+    }
+    
+    private static void removeTimestamp(UUID soldierUUID, BlockPos coverPos) {
+        Map<BlockPos, Long> perSoldier = reservationTimestamps.get(soldierUUID);
+        if (perSoldier != null) {
+            perSoldier.remove(coverPos);
+            if (perSoldier.isEmpty()) {
+                reservationTimestamps.remove(soldierUUID);
+            }
+        }
+    }
+    
     private static void cleanupExpiredReservations(Set<UUID> reservations) {
         long currentTime = System.currentTimeMillis();
         reservations.removeIf(uuid -> {
-            Long timestamp = reservationTimestamps.get(uuid);
-            if (timestamp == null) {
+            Map<BlockPos, Long> perSoldier = reservationTimestamps.get(uuid);
+            if (perSoldier == null) return true;
+            // If any of this soldier's reservations are expired, remove them all
+            // (simplified: check the oldest timestamp)
+            long oldest = perSoldier.values().stream().mapToLong(Long::longValue).min().orElse(0);
+            boolean expired = (currentTime - oldest) > RESERVATION_TIMEOUT_MS;
+            if (expired) {
+                // Actually remove the specific cover timestamps that are expired
+                perSoldier.entrySet().removeIf(e -> (currentTime - e.getValue()) > RESERVATION_TIMEOUT_MS);
+                if (perSoldier.isEmpty()) {
+                    reservationTimestamps.remove(uuid);
+                }
+                // Check if this specific UUID is still in any reservation set
                 return true;
             }
-            return (currentTime - timestamp) > RESERVATION_TIMEOUT_MS;
+            return false;
         });
     }
     
@@ -211,9 +236,11 @@ public class CoverReservationManager {
                 Set<UUID> reservations = entry.getValue();
                 
                 reservations.removeIf(uuid -> {
-                    Long timestamp = reservationTimestamps.get(uuid);
+                    Map<BlockPos, Long> perSoldier = reservationTimestamps.get(uuid);
+                    if (perSoldier == null) return true;
+                    Long timestamp = perSoldier.get(entry.getKey());
                     if (timestamp == null || (currentTime - timestamp) > RESERVATION_TIMEOUT_MS) {
-                        reservationTimestamps.remove(uuid);
+                        removeTimestamp(uuid, entry.getKey());
                         return true;
                     }
                     return false;

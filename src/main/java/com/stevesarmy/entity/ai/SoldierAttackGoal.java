@@ -26,11 +26,9 @@ public class SoldierAttackGoal extends Goal {
         if (!soldier.hasValidAttackTarget()) return false;
         rawTarget = soldier.getAttackTargetPos();
         commandGeneration = soldier.getAttackGeneration();
-        // Only activate if cover goal signaled final approach fallback
-        // OR if we're already within final approach distance
-        isFinalApproach = soldier.isAttackFinalApproach()
-            || (rawTarget != null && soldier.distanceToSqr(
-                rawTarget.getX() + 0.5, rawTarget.getY() + 0.5, rawTarget.getZ() + 0.5) <= 12 * 12);
+        // Only activate when cover goal signals final approach (COMPLETE phase)
+        // Do NOT preempt based on distance — let cover system handle approach
+        isFinalApproach = soldier.isAttackFinalApproach();
         return rawTarget != null && isFinalApproach;
     }
 
