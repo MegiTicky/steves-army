@@ -1,5 +1,6 @@
 package com.stevesarmy.client.screen;
 
+import com.stevesarmy.StevesArmyConfig;
 import com.stevesarmy.client.ClientSquadData;
 import com.stevesarmy.client.FireTeamScopeState;
 import com.stevesarmy.client.screen.widget.OpenInventoryButton;
@@ -213,6 +214,28 @@ public class SquadCommandScreen extends Screen {
         dx += 22;
         drawButton(graphics, "Rebalance", dx, btnY, 60, btnHeight, mouseX, mouseY, () -> {
             NetworkHandler.INSTANCE.sendToServer(SetFireTeamPacket.rebalance());
+        });
+
+        btnY += btnHeight + 10;
+        graphics.drawString(font, Component.literal("-- Spacing --"), contentX, btnY, 0xFFAAAAAA, false);
+        btnY += 12;
+
+        double spacing = StevesArmyConfig.getSpacingDistance();
+        String spacingLabel = String.format("%.1f", spacing);
+        graphics.drawString(font, Component.literal("Distance: " + spacingLabel + "m"), contentX, btnY + 2, 0xFFCCCCCC, false);
+        dx = contentX + font.width("Distance: " + spacingLabel + "m") + 4;
+        drawButton(graphics, "-0.5", dx, btnY, 30, btnHeight, mouseX, mouseY, () -> {
+            double newVal = Math.max(1.0, StevesArmyConfig.getSpacingDistance() - 0.5);
+            for (SoldierRow row : rows) {
+                NetworkHandler.INSTANCE.sendToServer(new SetSoldierConfigPacket(row.entityId, SetSoldierConfigPacket.ConfigType.SPACING_DISTANCE, (int)Math.round(newVal * 10)));
+            }
+        });
+        dx += 34;
+        drawButton(graphics, "+0.5", dx, btnY, 30, btnHeight, mouseX, mouseY, () -> {
+            double newVal = Math.min(10.0, StevesArmyConfig.getSpacingDistance() + 0.5);
+            for (SoldierRow row : rows) {
+                NetworkHandler.INSTANCE.sendToServer(new SetSoldierConfigPacket(row.entityId, SetSoldierConfigPacket.ConfigType.SPACING_DISTANCE, (int)Math.round(newVal * 10)));
+            }
         });
 
         super.render(graphics, mouseX, mouseY, partialTick);

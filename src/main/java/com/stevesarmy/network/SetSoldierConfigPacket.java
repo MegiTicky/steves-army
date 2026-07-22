@@ -1,5 +1,6 @@
 package com.stevesarmy.network;
 
+import com.stevesarmy.StevesArmyConfig;
 import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.squad.FireDiscipline;
@@ -19,7 +20,8 @@ public class SetSoldierConfigPacket {
 
     public enum ConfigType {
         SQUAD_MODE,
-        FIRE_DISCIPLINE
+        FIRE_DISCIPLINE,
+        SPACING_DISTANCE
     }
 
     public SetSoldierConfigPacket(UUID soldierId, ConfigType configType, int value) {
@@ -60,6 +62,12 @@ public class SetSoldierConfigPacket {
                 case FIRE_DISCIPLINE -> {
                     FireDiscipline discipline = FireDiscipline.values()[value % FireDiscipline.values().length];
                     soldier.setFireDiscipline(discipline);
+                }
+                case SPACING_DISTANCE -> {
+                    double spacing = Math.max(1.0, Math.min(10.0, value / 10.0));
+                    StevesArmyConfig.SPACING_DISTANCE.set(spacing);
+                    StevesArmyConfig.SPACING_DISTANCE.save();
+                    StevesArmyMod.LOGGER.info("Spacing distance set to {} via config UI", spacing);
                 }
             }
         });
