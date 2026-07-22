@@ -89,6 +89,7 @@ public class CoverTacticalGoal extends Goal {
     private long attackPhaseStartTime = 0;
     private long attackCoverArrivalTime = 0;
     private BlockPos attackDirectBoundTarget = null;
+    private BlockPos attackExpectedCover = null;
     private boolean attackDwellEligible = false;
     private long attackDwellDelay = 0;
     private int attackAdvanceStaggerTicks = 0;
@@ -1162,10 +1163,10 @@ private void startRepositioning() {
         }
     }
     
-    private void startRepositioning(CoverPoint newCover) {
+    private boolean startRepositioning(CoverPoint newCover) {
         CoverPoint currentCover = getCoverManager().getCurrentCover();
         
-        if (currentCover != null && newCover.getPosition().equals(currentCover.getPosition())) return;
+        if (currentCover != null && newCover.getPosition().equals(currentCover.getPosition())) return false;
         
         getCoverManager().clearTargetCover();
         getCoverManager().resetPeekState();
@@ -1180,7 +1181,9 @@ private void startRepositioning() {
             getCoverManager().setState(CoverBehaviorManager.CoverState.REPOSITIONING);
             setFlags(EnumSet.of(Flag.MOVE, Flag.LOOK));
             moveToCover(newCover);
+            return true;
         }
+        return false;
     }
     
     private void findAndMoveToCover() {
@@ -1424,6 +1427,7 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
             attackPhaseStartTime = System.currentTimeMillis();
             attackCoverArrivalTime = 0;
             attackDirectBoundTarget = null;
+            attackExpectedCover = null;
             attackDwellEligible = false;
             attackHasPeekedThisCover = false;
             // Stagger: deterministic delay based on UUID
@@ -1459,6 +1463,7 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
         }
 
         CoverBehaviorManager.CoverState coverState = getCoverManager().getState();
+        CoverPoint currentCover = getCoverManager().getCurrentCover();
 
         switch (attackPhase) {
             case SELECTING_COVER: {
@@ -1468,15 +1473,24 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
             }
 
             case MOVING_TO_COVER: {
-                // If we arrived in cover, transition to occupying
-                if (coverState == CoverBehaviorManager.CoverState.IN_COVER ||
-                    coverState == CoverBehaviorManager.CoverState.SUPPRESSED_IN_COVER) {
+                // Only transition to occupying when we actually reached the expected cover
+                boolean arrivedAtExpected = false;
+                if (attackExpectedCover != null && currentCover != null) {
+                    arrivedAtExpected = currentCover.getPosition().equals(attackExpectedCover);
+                } else if (attackExpectedCover == null && currentCover != null) {
+                    // No expected position set (initial findAndMoveToCover), accept any cover
+                    arrivedAtExpected = true;
+                }
+
+                if (arrivedAtExpected) {
                     attackPhase = AttackPhase.OCCUPYING_COVER;
                     attackCoverArrivalTime = System.currentTimeMillis();
+                    attackExpectedCover = null;
                     attackDwellEligible = false;
                     attackHasPeekedThisCover = false;
                     if (debugLoggingEnabled) {
-                        StevesArmyMod.LOGGER.info("[AttackPhase] Soldier {} reached cover, occupying", soldier.getId());
+                        StevesArmyMod.LOGGER.info("[AttackPhase] Soldier {} reached expected cover {}, occupying",
+                            soldier.getId(), currentCover.getPosition());
                     }
                 }
                 // If still seeking/repositioning, the cover system handles movement
@@ -1485,7 +1499,6 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
 
             case OCCUPYING_COVER: {
                 if (coverState == CoverBehaviorManager.CoverState.NO_COVER) {
-                    // Lost cover somehow, re-select
                     attackPhase = AttackPhase.SELECTING_COVER;
                     break;
                 }
@@ -1499,28 +1512,25 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
                 // Check if we've completed a peek cycle
                 if (!attackHasPeekedThisCover && !peeking && peekCtrl.getState() == PeekController.State.HIDING
                     && getCoverManager().getTimeSinceLastPeek() > 500) {
-                    // We've returned from a peek
                     if (peekCtrl.getPeekCountSameCover() > 0) {
                         attackHasPeekedThisCover = true;
                     }
                 }
 
-                // Check if time to advance
-                long minDwell = suppressed ? Long.MAX_VALUE : ATTACK_MIN_DWELL_MS;
+                // Advance only when healthy, unsuppressed, not peeking, and dwell met
+                long minDwell = ATTACK_MIN_DWELL_MS;
                 long maxDwell = ATTACK_MAX_DWELL_MS + (attackAdvanceStaggerTicks * 50L);
                 boolean dwellMet = dwellTime >= minDwell;
-                boolean maxDwellReached = dwellTime >= maxDwell;
+                boolean maxDwellReached = dwellTime >= maxDwell && !suppressed && !pinned && !peeking;
                 boolean canAdvance = dwellMet && !suppressed && !pinned && !peeking;
 
                 if (maxDwellReached || (canAdvance && attackHasPeekedThisCover)) {
-                    // Try to find next forward cover
                     if (selectForwardCover()) {
                         attackPhase = AttackPhase.MOVING_TO_COVER;
                         if (debugLoggingEnabled) {
                             StevesArmyMod.LOGGER.info("[AttackPhase] Soldier {} advancing to next cover", soldier.getId());
                         }
                     } else {
-                        // No forward cover: use direct bound
                         startDirectBound();
                         attackPhase = AttackPhase.DIRECT_BOUND;
                         if (debugLoggingEnabled) {
@@ -1608,7 +1618,7 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
         Vec3 objectiveDir = new Vec3(
             objective.getX() - soldierPos.x, 0, objective.getZ() - soldierPos.z).normalize();
 
-        // Filter: require forward progress and reject current/blacklisted/reserved covers
+        // Filter: require forward progress and reject current/blacklisted covers
         for (CoverFinder.ScoredCover sc : scored) {
             CoverPoint cover = sc.cover;
 
@@ -1617,9 +1627,6 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
 
             // Skip blacklisted
             if (failedCoverPositions.contains(cover.getPosition())) continue;
-
-            // Skip if not available for this soldier
-            if (!CoverReservationManager.isAvailableFor(cover.getPosition(), soldier)) continue;
 
             // Hard forward progress filter
             Vec3 candidateDisp = cover.getPosition().getCenter().subtract(soldierPos);
@@ -1630,10 +1637,9 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
             double distToObj = cover.getPosition().distSqr(objective);
             if (distToObj <= ATTACK_OBJECTIVE_RADIUS * ATTACK_OBJECTIVE_RADIUS) continue;
 
-            // Try to reserve and path to this cover
-            if (CoverReservationManager.reserve(cover.getPosition(), soldier)) {
-                getCoverManager().setTargetCover(cover);
-                moveToCover(cover);
+            // Use canonical repositioning transition instead of direct moveToCover
+            if (startRepositioning(cover)) {
+                attackExpectedCover = cover.getPosition();
                 if (debugLoggingEnabled) {
                     StevesArmyMod.LOGGER.info("[AttackForward] Soldier {} selected forward cover {} progress={}",
                         soldier.getId(), cover.getPosition(), String.format("%.1f", forwardProgress));
