@@ -285,8 +285,9 @@ if (currentCover != null) {
     }
     
     /**
-     * Promote the target cover to current cover without releasing the reservation.
-     * This prevents other soldiers from stealing the cover we just arrived at.
+     * Promote the target cover to current cover.
+     * Releases the old cover reservation, keeps the new one, initializes
+     * all current-cover metadata via setCurrentCover, and sets lastCover.
      */
     public void promoteTargetToCurrentCover() {
         if (targetCover == null) return;
@@ -296,12 +297,15 @@ if (currentCover != null) {
                 currentCover != null ? currentCover.getPosition().toString() : "null",
                 targetCover.getPosition().toString());
         }
+        // Release old current cover reservation
         if (currentCover != null) {
+            CoverReservationManager.release(currentCover.getPosition(), soldier);
             this.lastCover = currentCover;
             syncLastCover();
         }
-        this.currentCover = targetCover;
-        syncCurrentCover();
+        // Set new current cover — this initializes all metadata (entryTime,
+        // threatDirection, facingDirection, peekCounts) via setCurrentCover
+        setCurrentCover(targetCover);
         this.targetCover = null;
         syncTargetCover();
     }

@@ -685,16 +685,14 @@ public class CoverTacticalGoal extends Goal {
         }
         
         if (currentCover != null && targetCover.getPosition().equals(currentCover.getPosition())) {
-            getCoverManager().promoteTargetToCurrentCover();
-            getCoverManager().setState(CoverBehaviorManager.CoverState.IN_COVER);
+            onCoverReached(targetCover);
             return;
         }
         
         double distance = soldier.position().distanceTo(targetCover.getPosition().getCenter());
         
         if (distance < COVER_REACHED_DISTANCE) {
-            getCoverManager().promoteTargetToCurrentCover();
-            getCoverManager().setState(CoverBehaviorManager.CoverState.IN_COVER);
+            onCoverReached(targetCover);
             noProgressTicks = 0;
             lastSeekingPosition = null;
             return;
@@ -797,6 +795,11 @@ public class CoverTacticalGoal extends Goal {
                 navigation.stop();
                 getPositionController().moveTo(getCoverStandingPosition(currentCover.getPosition()), POSITIONING_TOLERANCE, POSITIONING_SPEED, "tickInCover", "recenter to cover");
             }
+// Renew current cover reservation every 5 seconds so it doesn't expire
+            // while the soldier is still occupying it
+            if (soldier.tickCount % 100 == 0) {
+                CoverReservationManager.reserve(currentCover.getPosition(), soldier);
+            }
         }
 
         // Flank detection
@@ -843,13 +846,6 @@ public class CoverTacticalGoal extends Goal {
                 getPeekController().tick(soldier, currentCover, getPositionController());
             }
             getCoverManager().setState(CoverBehaviorManager.CoverState.SUPPRESSED_IN_COVER);
-            return;
-        }
-
-        if (shouldExitCoverForFollow()) {
-            getCoverManager().resetPeekState();
-            getPositionController().clear();
-            getCoverManager().clearCover();
             return;
         }
 
@@ -1238,32 +1234,66 @@ private void startRepositioning() {
                 }
             }
         }
-        this.debugSearchCenter = searchCenter;
+this.debugSearchCenter = searchCenter;
         
-Optional<CoverPoint> bestCover = finder.findBestCover(
-            soldier,
-            threatDirection,
-            threats,
-            searchRadius,
-            squadCtx
-        );
+        Optional<CoverPoint> bestCover = Optional.empty();
 
-        if (bestCover.isEmpty()) {
-            bestCover = finder.findBestCover(
-                searchCenter,
-                searchRadius,
-                threats.isEmpty() ? null : threats.get(0),
-                threatDirection
-            );
-        }
-
-        if (bestCover.isEmpty() && squadCtx.inSquad()) {
+        if (soldier.hasValidAttackTarget()) {
+            // ATTACK mode: forward-biased search from the beginning
+            List<CoverFinder.ScoredCover> scored = finder.evaluateAndScoreAllFromCenter(
+                searchCenter, soldier, threatDirection, threats, searchRadius, squadCtx);
+            
+            CoverPoint currentCover = getCoverManager().getCurrentCover();
+            
+            // Filter: prefer forward progress, skip current/blacklisted
+            for (CoverFinder.ScoredCover sc : scored) {
+                CoverPoint cover = sc.cover;
+                if (currentCover != null && cover.getPosition().equals(currentCover.getPosition())) continue;
+                if (failedCoverPositions.contains(cover.getPosition())) continue;
+                
+                bestCover = Optional.of(cover);
+                break;
+            }
+            
+            // If forward-biased found nothing, search from soldier position as fallback
+            if (bestCover.isEmpty()) {
+                List<CoverFinder.ScoredCover> localScored = finder.evaluateAndScoreAll(
+                    soldier, threatDirection, threats, searchRadius, true, squadCtx);
+                for (CoverFinder.ScoredCover sc : localScored) {
+                    CoverPoint cover = sc.cover;
+                    if (currentCover != null && cover.getPosition().equals(currentCover.getPosition())) continue;
+                    if (failedCoverPositions.contains(cover.getPosition())) continue;
+                    
+                    bestCover = Optional.of(cover);
+                    break;
+                }
+            }
+        } else {
             bestCover = finder.findBestCover(
                 soldier,
                 threatDirection,
                 threats,
-                searchRadius
+                searchRadius,
+                squadCtx
             );
+
+            if (bestCover.isEmpty()) {
+                bestCover = finder.findBestCover(
+                    searchCenter,
+                    searchRadius,
+                    threats.isEmpty() ? null : threats.get(0),
+                    threatDirection
+                );
+            }
+
+            if (bestCover.isEmpty() && squadCtx.inSquad()) {
+                bestCover = finder.findBestCover(
+                    soldier,
+                    threatDirection,
+                    threats,
+                    searchRadius
+                );
+            }
         }
         
         if (bestCover.isPresent()) {
@@ -1799,7 +1829,11 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
     }
     
     private void onCoverReached(CoverPoint cover) {
-        // Promote target to current without releasing the reservation
+        // Clear stale reposition flags from previous cover stays
+        getCoverManager().clearShotInCoverRepositionRequest();
+        getCoverManager().clearRepositionRequest();
+        
+        // Promote target to current — releases old reservation, sets metadata
         getCoverManager().promoteTargetToCurrentCover();
         
         navigation.stop();
@@ -1808,10 +1842,15 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
         getCoverManager().setNonPeekableCover(false);
         nonPeekableTicks = 0;
         
+        // Renew reservation for the new current cover
+        CoverReservationManager.reserve(cover.getPosition(), soldier);
+        
         getPositionController().moveTo(getCoverStandingPosition(cover.getPosition()), POSITIONING_TOLERANCE, POSITIONING_SPEED, "onCoverReached", "initial cover positioning");
         
-        // Reset peek controller for new cover
+        // Reset peek controller for new cover and seed the peek cooldown
+        // so soldier settles before peeking — prevents immediate "jump out"
         getPeekController().resetForNewCover(cover.getPosition());
+        getPeekController().setLastPeekEndTime(System.currentTimeMillis());
         
         // Compute peek position with LOS validation for full cover
         if (cover.getType() == CoverType.FULL) {
