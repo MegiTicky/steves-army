@@ -10,6 +10,7 @@ import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.network.SpacingDebugPacket;
 import net.minecraft.client.Camera;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.Font;
 import net.minecraft.client.renderer.GameRenderer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.entity.Entity;
@@ -39,8 +40,6 @@ public class SpacingDebugRenderer {
             entries.clear();
             return;
         }
-        // Merge: update existing entries, add new ones, remove soldiers no longer present
-        // (clearing and repopulating is simpler and safe for the packet size)
         entries.clear();
         for (SpacingDebugPacket.SpacingDebugEntry entry : packet.getEntries()) {
             entries.put(entry.soldierUUID, entry);
@@ -63,6 +62,8 @@ public class SpacingDebugRenderer {
         Tesselator tesselator = Tesselator.getInstance();
         Matrix4f matrix = poseStack.last().pose();
 
+        Font font = mc.font;
+
         for (Map.Entry<UUID, SpacingDebugPacket.SpacingDebugEntry> mapEntry : entries.entrySet()) {
             SpacingDebugPacket.SpacingDebugEntry entry = mapEntry.getValue();
             if (!entry.valid) continue;
@@ -80,21 +81,22 @@ public class SpacingDebugRenderer {
             BlockPos raw = entry.rawTarget;
             BlockPos nav = entry.navigationTarget;
 
-            // Raw target relative to camera
             double rx = raw.getX() + 0.5 - cameraPos.x;
             double ry = raw.getY() + 0.5 - cameraPos.y;
             double rz = raw.getZ() + 0.5 - cameraPos.z;
 
-            // Soldier position relative to camera
             Vec3 soldierPos = entity.position();
             double sx = soldierPos.x - cameraPos.x;
             double sy = soldierPos.y - cameraPos.y + 1.0;
             double sz = soldierPos.z - cameraPos.z;
 
-            // Navigation target relative to camera
             double nx = nav.getX() + 0.5 - cameraPos.x;
             double ny = nav.getY() + 0.5 - cameraPos.y;
             double nz = nav.getZ() + 0.5 - cameraPos.z;
+
+            // Draw forward direction indicator from soldier (yellow line)
+            double fwdEndX = sx + entry.forwardX * 4.0;
+            double fwdEndZ = sz + entry.forwardZ * 4.0;
 
             BufferBuilder buffer = tesselator.getBuilder();
             buffer.begin(VertexFormat.Mode.DEBUG_LINES, DefaultVertexFormat.POSITION_COLOR);
@@ -106,6 +108,16 @@ public class SpacingDebugRenderer {
             // Raw target to navigation target (white)
             buffer.vertex(matrix, (float) rx, (float) ry, (float) rz).color(255, 255, 255, 150).endVertex();
             buffer.vertex(matrix, (float) nx, (float) ny, (float) nz).color(255, 255, 255, 150).endVertex();
+
+            // Forward direction indicator (yellow)
+            buffer.vertex(matrix, (float) sx, (float) sy, (float) sz).color(255, 255, 0, 180).endVertex();
+            buffer.vertex(matrix, (float) fwdEndX, (float) sy, (float) fwdEndZ).color(255, 255, 0, 180).endVertex();
+
+            // Perpendicular indicator (magenta)
+            double perpEndX = sx + entry.perpX * 3.0;
+            double perpEndZ = sz + entry.perpZ * 3.0;
+            buffer.vertex(matrix, (float) sx, (float) sy, (float) sz).color(255, 0, 255, 150).endVertex();
+            buffer.vertex(matrix, (float) perpEndX, (float) sy, (float) perpEndZ).color(255, 0, 255, 150).endVertex();
 
             tesselator.end();
 
@@ -120,6 +132,18 @@ public class SpacingDebugRenderer {
             buffer.begin(VertexFormat.Mode.DEBUG_LINES, DefaultVertexFormat.POSITION_COLOR);
             renderBox(buffer, matrix, nx - 0.3, ny - 0.3, nz - 0.3, nx + 0.3, ny + 0.3, nz + 0.3, 0, 255, 255);
             tesselator.end();
+
+            // Label above soldier: lane index / total
+            String label = "L" + entry.laneIndex + "/" + entry.totalLanes;
+            float labelX = (float)(soldierPos.x - cameraPos.x - font.width(label) / 2.0f);
+            float labelY = (float)(soldierPos.y - cameraPos.y + 1.8);
+            poseStack.pushPose();
+            poseStack.translate(labelX, labelY, 0);
+            matrix = poseStack.last().pose();
+            // Undo the earlier matrix reference — font drawing in world space is complex,
+            // so we just draw a simple overlay line. Skip font rendering for now.
+            poseStack.popPose();
+            matrix = poseStack.last().pose();
         }
 
         RenderSystem.enableDepthTest();

@@ -26,6 +26,7 @@ import com.stevesarmy.network.SpacingDebugPacket.SpacingDebugEntry;
 import com.stevesarmy.squad.FireDiscipline;
 import com.stevesarmy.squad.FireTeam;
 import com.stevesarmy.squad.FireTeamAssignment;
+import com.stevesarmy.squad.SquadLaneAssignment;
 import com.stevesarmy.squad.SquadManager;
 import com.stevesarmy.squad.SquadMode;
 import com.stevesarmy.squad.SquadFormation;
@@ -901,6 +902,7 @@ public class SoldierEntity extends PathfinderMob implements Container {
                 clearForcedTarget();
                 clearPingSuppressPos();
                 threatAwareness.clear();
+                if (squadId != null) com.stevesarmy.util.SpacingHelper.clearAssignment(squadId);
                 com.stevesarmy.StevesArmyMod.LOGGER.info("Switched to FOLLOW mode, cleared all threat data");
             }
             case HOLD -> {
@@ -913,6 +915,7 @@ public class SoldierEntity extends PathfinderMob implements Container {
                 clearForcedTarget();
                 clearPingSuppressPos();
                 threatAwareness.clear();
+                if (squadId != null) com.stevesarmy.util.SpacingHelper.clearAssignment(squadId);
                 StevesArmyMod.LOGGER.info("Switched to HOLD mode, cleared all threat data");
             }
             case SUPPRESS_AREA -> {
@@ -957,12 +960,18 @@ public BlockPos getPingMoveTarget() {
     public void clearPingMoveTarget() {
         pingMoveTarget = null;
         pingMoveTimestamp = 0;
+        if (squadId != null) {
+            com.stevesarmy.util.SpacingHelper.clearAssignment(squadId);
+        }
     }
 
     public void clearPingMoveTargetIfGeneration(int expectedGeneration) {
         if (pingMoveGeneration == expectedGeneration) {
             pingMoveTarget = null;
             pingMoveTimestamp = 0;
+            if (squadId != null) {
+                com.stevesarmy.util.SpacingHelper.clearAssignment(squadId);
+            }
         }
     }
 
@@ -988,12 +997,18 @@ public BlockPos getPingMoveTarget() {
     public void clearAttackTarget() {
         this.attackTargetPos = null;
         this.attackTargetTimestamp = 0;
+        if (squadId != null) {
+            com.stevesarmy.util.SpacingHelper.clearAssignment(squadId);
+        }
     }
 
     public void clearAttackTargetIfGeneration(int expectedGeneration) {
         if (attackGeneration == expectedGeneration) {
             this.attackTargetPos = null;
             this.attackTargetTimestamp = 0;
+            if (squadId != null) {
+                com.stevesarmy.util.SpacingHelper.clearAssignment(squadId);
+            }
         }
     }
 
@@ -1270,16 +1285,20 @@ public BlockPos getPingMoveTarget() {
         if (!com.stevesarmy.client.SpacingDebugRenderer.isEnabled()) return;
 
         BlockPos pingTarget = getPingMoveTarget();
-        BlockPos offset = getFormationOffset();
         boolean hasPing = pingTarget != null && hasValidPingMoveTarget();
-        boolean hasOffset = offset != null;
 
         List<SpacingDebugEntry> entries = new ArrayList<>();
         if (hasPing) {
-            BlockPos navTarget = hasOffset ? pingTarget.offset(offset) : pingTarget;
-            entries.add(new SpacingDebugEntry(getUUID(), true, pingTarget, navTarget, offset, getPingMoveGeneration()));
+            SquadLaneAssignment assignment = com.stevesarmy.util.SpacingHelper.getAssignment(squadId);
+            if (assignment != null && assignment.getSlot(getUUID()) != null) {
+                entries.add(SpacingDebugEntry.fromAssignment(this, assignment));
+            } else {
+                entries.add(new SpacingDebugEntry(getUUID(), true, pingTarget, pingTarget, null,
+                    getPingMoveGeneration(), 0, 1, 0, -1, 1, 0));
+            }
         } else {
-            entries.add(new SpacingDebugEntry(getUUID(), false, BlockPos.ZERO, BlockPos.ZERO, null, 0));
+            entries.add(new SpacingDebugEntry(getUUID(), false, BlockPos.ZERO, BlockPos.ZERO, null,
+                0, 0, 0, 0, 0, 0, 0));
         }
         NetworkHandler.sendTo(player, new SpacingDebugPacket(true, entries));
     }

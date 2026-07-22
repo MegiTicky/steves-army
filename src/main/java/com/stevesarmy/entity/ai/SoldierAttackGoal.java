@@ -2,6 +2,7 @@ package com.stevesarmy.entity.ai;
 
 import com.stevesarmy.combat.cover.CoverBehaviorManager;
 import com.stevesarmy.entity.SoldierEntity;
+import com.stevesarmy.squad.SquadLaneAssignment;
 import com.stevesarmy.util.SpacingHelper;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.entity.ai.goal.Goal;
@@ -12,6 +13,7 @@ public class SoldierAttackGoal extends Goal {
     private final SoldierEntity soldier;
     private BlockPos rawTarget;
     private BlockPos navigationTarget;
+    private BlockPos finalLaneTarget;
     private int commandGeneration;
     private final double speedModifier;
     private final float closeDistance;
@@ -38,12 +40,12 @@ public class SoldierAttackGoal extends Goal {
     public boolean canContinueToUse() {
         if (!soldier.isAlive()) return false;
         if (!soldier.hasValidAttackTarget()) return false;
-        if (navigationTarget == null) return false;
+        if (finalLaneTarget == null) return false;
 
         double distSq = soldier.distanceToSqr(
-            navigationTarget.getX() + 0.5,
-            navigationTarget.getY() + 0.5,
-            navigationTarget.getZ() + 0.5);
+            finalLaneTarget.getX() + 0.5,
+            finalLaneTarget.getY() + 0.5,
+            finalLaneTarget.getZ() + 0.5);
         return distSq > closeDistance * closeDistance;
     }
 
@@ -62,6 +64,7 @@ public class SoldierAttackGoal extends Goal {
         soldier.clearAttackTargetIfGeneration(commandGeneration);
         rawTarget = null;
         navigationTarget = null;
+        finalLaneTarget = null;
     }
 
     @Override
@@ -85,17 +88,18 @@ public class SoldierAttackGoal extends Goal {
                 computeNavigationTarget();
             }
 
-            if (navigationTarget == null) return;
+            if (finalLaneTarget == null) return;
 
             double distance = soldier.distanceToSqr(
-                navigationTarget.getX() + 0.5,
-                navigationTarget.getY() + 0.5,
-                navigationTarget.getZ() + 0.5);
+                finalLaneTarget.getX() + 0.5,
+                finalLaneTarget.getY() + 0.5,
+                finalLaneTarget.getZ() + 0.5);
             if (distance > closeDistance * closeDistance) {
                 CoverBehaviorManager.CoverState coverState = soldier.getCoverBehaviorManager().getState();
                 boolean coverIsMoving = coverState == CoverBehaviorManager.CoverState.SEEKING_COVER ||
                                         coverState == CoverBehaviorManager.CoverState.REPOSITIONING;
                 if (!coverIsMoving) {
+                    navigationTarget = SpacingHelper.applySpacing(rawTarget, soldier);
                     submitNavigation();
                 }
 
@@ -112,7 +116,14 @@ public class SoldierAttackGoal extends Goal {
     private void computeNavigationTarget() {
         if (rawTarget == null) {
             navigationTarget = null;
+            finalLaneTarget = null;
             return;
+        }
+        SquadLaneAssignment assignment = SpacingHelper.getOrCreateAssignment(rawTarget, soldier);
+        if (assignment != null) {
+            finalLaneTarget = assignment.getFinalLanePosition(soldier.getUUID());
+        } else {
+            finalLaneTarget = rawTarget;
         }
         navigationTarget = SpacingHelper.applySpacing(rawTarget, soldier);
     }

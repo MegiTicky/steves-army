@@ -24,6 +24,7 @@ import com.stevesarmy.entity.ai.PeekController;
 import com.stevesarmy.network.NetworkHandler;
 import com.stevesarmy.network.SpacingDebugPacket;
 import com.stevesarmy.network.SpacingDebugPacket.SpacingDebugEntry;
+import com.stevesarmy.squad.SquadLaneAssignment;
 import com.stevesarmy.squad.SquadData;
 import com.stevesarmy.squad.SquadManager;
 import com.stevesarmy.squad.SquadThreatIntel;
@@ -340,16 +341,20 @@ CoverDebugManager.setShowRays(false);
         List<SpacingDebugEntry> entries = new ArrayList<>();
         for (SoldierEntity s : soldiers) {
             BlockPos pingTarget = s.getPingMoveTarget();
-            BlockPos offset = s.getFormationOffset();
             boolean hasPing = pingTarget != null && s.hasValidPingMoveTarget();
-            boolean hasOffset = offset != null;
 
             if (hasPing) {
-                BlockPos navTarget = hasOffset ? pingTarget.offset(offset) : pingTarget;
-                entries.add(new SpacingDebugEntry(s.getUUID(), true, pingTarget, navTarget, offset, s.getPingMoveGeneration()));
+                SquadLaneAssignment assignment = com.stevesarmy.util.SpacingHelper.getAssignment(s.getSquadId());
+                if (assignment != null && assignment.getSlot(s.getUUID()) != null) {
+                    entries.add(SpacingDebugEntry.fromAssignment(s, assignment));
+                } else {
+                    BlockPos navTarget = pingTarget;
+                    entries.add(new SpacingDebugEntry(s.getUUID(), true, pingTarget, navTarget, null,
+                        s.getPingMoveGeneration(), 0, 1, 0, -1, 1, 0));
+                }
             } else {
-                // Include soldier but mark invalid so renderer skips it
-                entries.add(new SpacingDebugEntry(s.getUUID(), false, BlockPos.ZERO, BlockPos.ZERO, null, 0));
+                entries.add(new SpacingDebugEntry(s.getUUID(), false, BlockPos.ZERO, BlockPos.ZERO, null,
+                    0, 0, 0, 0, 0, 0, 0));
             }
         }
         NetworkHandler.sendTo(player, new SpacingDebugPacket(true, entries));
