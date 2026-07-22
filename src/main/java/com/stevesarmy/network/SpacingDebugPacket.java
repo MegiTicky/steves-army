@@ -18,14 +18,16 @@ public class SpacingDebugPacket {
 
     public static class SpacingDebugEntry {
         public final UUID soldierUUID;
+        public final boolean valid;
         public final BlockPos rawTarget;
         public final BlockPos navigationTarget;
         public final BlockPos offset;
         public final int commandGeneration;
 
-        public SpacingDebugEntry(UUID soldierUUID, BlockPos rawTarget, BlockPos navigationTarget,
-                                 BlockPos offset, int commandGeneration) {
+        public SpacingDebugEntry(UUID soldierUUID, boolean valid, BlockPos rawTarget,
+                                 BlockPos navigationTarget, BlockPos offset, int commandGeneration) {
             this.soldierUUID = soldierUUID;
+            this.valid = valid;
             this.rawTarget = rawTarget;
             this.navigationTarget = navigationTarget;
             this.offset = offset;
@@ -44,12 +46,13 @@ public class SpacingDebugPacket {
         this.entries = new ArrayList<>();
         for (int i = 0; i < count; i++) {
             UUID uuid = buf.readUUID();
-            BlockPos raw = buf.readBlockPos();
-            BlockPos nav = buf.readBlockPos();
-            boolean hasOffset = buf.readBoolean();
+            boolean valid = buf.readBoolean();
+            BlockPos raw = valid ? buf.readBlockPos() : BlockPos.ZERO;
+            BlockPos nav = valid ? buf.readBlockPos() : BlockPos.ZERO;
+            boolean hasOffset = valid && buf.readBoolean();
             BlockPos offset = hasOffset ? buf.readBlockPos() : null;
-            int gen = buf.readInt();
-            entries.add(new SpacingDebugEntry(uuid, raw, nav, offset, gen));
+            int gen = valid ? buf.readInt() : 0;
+            entries.add(new SpacingDebugEntry(uuid, valid, raw, nav, offset, gen));
         }
     }
 
@@ -58,13 +61,16 @@ public class SpacingDebugPacket {
         buf.writeInt(msg.entries.size());
         for (SpacingDebugEntry entry : msg.entries) {
             buf.writeUUID(entry.soldierUUID);
-            buf.writeBlockPos(entry.rawTarget);
-            buf.writeBlockPos(entry.navigationTarget);
-            buf.writeBoolean(entry.offset != null);
-            if (entry.offset != null) {
-                buf.writeBlockPos(entry.offset);
+            buf.writeBoolean(entry.valid);
+            if (entry.valid) {
+                buf.writeBlockPos(entry.rawTarget);
+                buf.writeBlockPos(entry.navigationTarget);
+                buf.writeBoolean(entry.offset != null);
+                if (entry.offset != null) {
+                    buf.writeBlockPos(entry.offset);
+                }
+                buf.writeInt(entry.commandGeneration);
             }
-            buf.writeInt(entry.commandGeneration);
         }
     }
 

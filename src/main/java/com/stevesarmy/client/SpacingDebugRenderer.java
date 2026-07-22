@@ -35,6 +35,12 @@ public class SpacingDebugRenderer {
 
     public static void receivePacket(SpacingDebugPacket packet) {
         enabled = packet.isEnabled();
+        if (!enabled) {
+            entries.clear();
+            return;
+        }
+        // Merge: update existing entries, add new ones, remove soldiers no longer present
+        // (clearing and repopulating is simpler and safe for the packet size)
         entries.clear();
         for (SpacingDebugPacket.SpacingDebugEntry entry : packet.getEntries()) {
             entries.put(entry.soldierUUID, entry);
@@ -59,6 +65,7 @@ public class SpacingDebugRenderer {
 
         for (Map.Entry<UUID, SpacingDebugPacket.SpacingDebugEntry> mapEntry : entries.entrySet()) {
             SpacingDebugPacket.SpacingDebugEntry entry = mapEntry.getValue();
+            if (!entry.valid) continue;
 
             // Find the soldier entity on the client
             Entity entity = null;
@@ -73,7 +80,7 @@ public class SpacingDebugRenderer {
             BlockPos raw = entry.rawTarget;
             BlockPos nav = entry.navigationTarget;
 
-            // Raw target: green box
+            // Raw target relative to camera
             double rx = raw.getX() + 0.5 - cameraPos.x;
             double ry = raw.getY() + 0.5 - cameraPos.y;
             double rz = raw.getZ() + 0.5 - cameraPos.z;
@@ -96,7 +103,7 @@ public class SpacingDebugRenderer {
             buffer.vertex(matrix, (float) sx, (float) sy, (float) sz).color(0, 255, 255, 200).endVertex();
             buffer.vertex(matrix, (float) nx, (float) ny, (float) nz).color(0, 255, 255, 200).endVertex();
 
-            // Raw target to navigation target (white dashed feel)
+            // Raw target to navigation target (white)
             buffer.vertex(matrix, (float) rx, (float) ry, (float) rz).color(255, 255, 255, 150).endVertex();
             buffer.vertex(matrix, (float) nx, (float) ny, (float) nz).color(255, 255, 255, 150).endVertex();
 

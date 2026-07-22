@@ -320,33 +320,39 @@ CoverDebugManager.setShowRays(false);
             "Spacing offset visualization: " + (enabled ? "ON" : "OFF")
         ), true);
 
-        // Send packet to client with current spacing data
-        ServerPlayer player = context.getSource().getPlayer();
-        if (player != null) {
-            ServerLevel level = player.serverLevel();
-            List<SoldierEntity> soldiers = level.getEntitiesOfClass(
-                SoldierEntity.class,
-                player.getBoundingBox().inflate(100),
-                s -> s.isOwnedBy(player)
-            );
-            List<SpacingDebugEntry> entries = new ArrayList<>();
-            for (SoldierEntity s : soldiers) {
-                entries.add(new SpacingDebugEntry(
-                    s.getUUID(),
-                    s.getPingMoveTarget() != null ? s.getPingMoveTarget() : BlockPos.ZERO,
-                    s.getFormationOffset() != null
-                        ? (s.getPingMoveTarget() != null
-                            ? s.getPingMoveTarget().offset(s.getFormationOffset())
-                            : BlockPos.ZERO)
-                        : BlockPos.ZERO,
-                    s.getFormationOffset(),
-                    s.getPingMoveGeneration()
-                ));
-            }
-            NetworkHandler.sendTo(player, new SpacingDebugPacket(enabled, entries));
+        if (enabled) {
+            sendSpacingDebugPacket(context);
         }
 
         return 1;
+    }
+
+    private static void sendSpacingDebugPacket(CommandContext<CommandSourceStack> context) {
+        ServerPlayer player = context.getSource().getPlayer();
+        if (player == null) return;
+
+        ServerLevel level = player.serverLevel();
+        List<SoldierEntity> soldiers = level.getEntitiesOfClass(
+            SoldierEntity.class,
+            player.getBoundingBox().inflate(100),
+            s -> s.isOwnedBy(player)
+        );
+        List<SpacingDebugEntry> entries = new ArrayList<>();
+        for (SoldierEntity s : soldiers) {
+            BlockPos pingTarget = s.getPingMoveTarget();
+            BlockPos offset = s.getFormationOffset();
+            boolean hasPing = pingTarget != null && s.hasValidPingMoveTarget();
+            boolean hasOffset = offset != null;
+
+            if (hasPing) {
+                BlockPos navTarget = hasOffset ? pingTarget.offset(offset) : pingTarget;
+                entries.add(new SpacingDebugEntry(s.getUUID(), true, pingTarget, navTarget, offset, s.getPingMoveGeneration()));
+            } else {
+                // Include soldier but mark invalid so renderer skips it
+                entries.add(new SpacingDebugEntry(s.getUUID(), false, BlockPos.ZERO, BlockPos.ZERO, null, 0));
+            }
+        }
+        NetworkHandler.sendTo(player, new SpacingDebugPacket(true, entries));
     }
 
     private static int cycleCombatMode(CommandContext<CommandSourceStack> context) {

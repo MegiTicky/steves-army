@@ -21,8 +21,11 @@ import com.stevesarmy.inventory.SoldierInventory;
 import com.stevesarmy.inventory.SoldierInventoryHandler;
 import com.stevesarmy.network.NetworkHandler;
 import com.stevesarmy.network.OpenSoldierInventoryMessage;
+import com.stevesarmy.network.SpacingDebugPacket;
+import com.stevesarmy.network.SpacingDebugPacket.SpacingDebugEntry;
 import com.stevesarmy.squad.FireDiscipline;
 import com.stevesarmy.squad.FireTeam;
+import com.stevesarmy.squad.FireTeamAssignment;
 import com.stevesarmy.squad.SquadManager;
 import com.stevesarmy.squad.SquadMode;
 import com.stevesarmy.squad.SquadFormation;
@@ -63,6 +66,8 @@ import net.minecraftforge.items.IItemHandler;
 
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -873,7 +878,9 @@ public class SoldierEntity extends PathfinderMob implements Container {
                 setSquadMode(com.stevesarmy.squad.SquadMode.HOLD);
                 setHoldPosition(BlockPos.containing(position));
                 coverBehaviorManager.clearCover();
+                cancelCoverMovement();
                 StevesArmyMod.LOGGER.info("Set move target: {}", pingMoveTarget);
+                sendSpacingDebugToOwner();
             }
             case THREAT_DIRECTION -> {
                 BlockPos pos = BlockPos.containing(position);
@@ -927,7 +934,9 @@ public class SoldierEntity extends PathfinderMob implements Container {
                 setHoldPosition(attackTargetPos);
                 forcedTargetPos = attackTargetPos;
                 forcedTargetTimestamp = System.currentTimeMillis();
+                cancelCoverMovement();
                 StevesArmyMod.LOGGER.info("ATTACK: set attack position at {}", attackTargetPos);
+                sendSpacingDebugToOwner();
             }
         }
     }
@@ -1252,5 +1261,26 @@ public BlockPos getPingMoveTarget() {
         if (moveControl instanceof com.stevesarmy.entity.ai.CoverPositionController ctrl) {
             ctrl.clear();
         }
+    }
+
+    public void sendSpacingDebugToOwner() {
+        if (!(level() instanceof ServerLevel serverLevel)) return;
+        LivingEntity owner = getOwner();
+        if (!(owner instanceof ServerPlayer player)) return;
+        if (!com.stevesarmy.client.SpacingDebugRenderer.isEnabled()) return;
+
+        BlockPos pingTarget = getPingMoveTarget();
+        BlockPos offset = getFormationOffset();
+        boolean hasPing = pingTarget != null && hasValidPingMoveTarget();
+        boolean hasOffset = offset != null;
+
+        List<SpacingDebugEntry> entries = new ArrayList<>();
+        if (hasPing) {
+            BlockPos navTarget = hasOffset ? pingTarget.offset(offset) : pingTarget;
+            entries.add(new SpacingDebugEntry(getUUID(), true, pingTarget, navTarget, offset, getPingMoveGeneration()));
+        } else {
+            entries.add(new SpacingDebugEntry(getUUID(), false, BlockPos.ZERO, BlockPos.ZERO, null, 0));
+        }
+        NetworkHandler.sendTo(player, new SpacingDebugPacket(true, entries));
     }
 }
