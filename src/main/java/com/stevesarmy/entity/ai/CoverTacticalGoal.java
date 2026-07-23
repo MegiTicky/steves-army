@@ -1850,6 +1850,13 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
                     }
                 } else {
                     attackPhase = AttackPhase.MOVING_TO_COVER;
+                    // If starting from NO_COVER, set the cover manager state to
+                    // SEEKING_COVER so the normal arrival, micro-positioning,
+                    // stuck detection, and timeout handlers will run.
+                    if (currentCover == null && getCoverManager().getTargetCover() != null) {
+                        getCoverManager().setState(CoverBehaviorManager.CoverState.SEEKING_COVER);
+                        setFlags(EnumSet.of(Flag.MOVE, Flag.LOOK));
+                    }
                     if (attackDebugLog()) {
                         StevesArmyMod.LOGGER.info("[AttackPhase] Soldier {} SELECTING_COVER -> MOVING_TO_COVER: cover found",
                             soldier.getId());
@@ -1860,6 +1867,19 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
 
             case MOVING_TO_COVER: {
                 CoverPoint targetCover = getCoverManager().getTargetCover();
+
+                // A fresh attack can clear the manager to NO_COVER after the
+                // target was selected. Restore the movement state so the
+                // normal cover navigation handlers can process arrival.
+                if (coverState == CoverBehaviorManager.CoverState.NO_COVER &&
+                    targetCover != null && currentCover == null) {
+                    getCoverManager().setState(CoverBehaviorManager.CoverState.SEEKING_COVER);
+                    setFlags(EnumSet.of(Flag.MOVE, Flag.LOOK));
+                    if (attackDebugLog()) {
+                        StevesArmyMod.LOGGER.info("[AttackPhase] Soldier {} MOVING_TO_COVER restored NO_COVER -> SEEKING_COVER for target {}",
+                            soldier.getId(), targetCover.getPosition());
+                    }
+                }
 
                 // Reconciliation: if the cover system has parked us in a cover
                 // (e.g., suppression pulled us back while we were advancing),
