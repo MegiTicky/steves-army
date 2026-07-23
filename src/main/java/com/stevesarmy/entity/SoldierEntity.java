@@ -918,6 +918,8 @@ public class SoldierEntity extends PathfinderMob implements Container {
             }
             case ATTACK -> {
                 setAttackTarget(BlockPos.containing(position));
+                coverBehaviorManager.clearCover();
+                cancelCoverMovement();
                 setSquadMode(com.stevesarmy.squad.SquadMode.HOLD);
                 setHoldPosition(attackTargetPos);
                 StevesArmyMod.LOGGER.info("ATTACK: set attack position at {} (gen {})", attackTargetPos, attackGeneration);
@@ -973,6 +975,9 @@ public BlockPos getPingMoveTarget() {
         attackGeneration++;
         this.attackTargetPos = pos;
         this.attackTargetTimestamp = System.currentTimeMillis();
+        this.attackFinalApproach = false;
+        // Clear incompatible ping move target
+        clearPingMoveTarget();
         // Seed objective direction into threat awareness for cover scoring
         Vec3 toObjective = new Vec3(
             pos.getX() - this.getX(), 0, pos.getZ() - this.getZ());

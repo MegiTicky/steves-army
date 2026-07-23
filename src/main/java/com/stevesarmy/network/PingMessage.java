@@ -81,8 +81,8 @@ public class PingMessage {
 
             List<SoldierEntity> owned = resolveSquadSoldiers(level, sender, scope);
 
-            // GO_TO and SEND should also clear stale ATTACK state
-            if (type == PingType.GO_TO || type == PingType.SEND) {
+            // GO_TO, SEND, and ATTACK should also clear stale ATTACK state
+            if (type == PingType.GO_TO || type == PingType.SEND || type == PingType.ATTACK) {
                 for (SoldierEntity soldier : owned) {
                     soldier.clearAttackTarget();
                 }

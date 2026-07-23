@@ -51,7 +51,7 @@ public class CoverTacticalGoal extends Goal {
     private static final int REEVALUATE_INTERVAL_TICKS = 60;
     
     private static final double COVER_REACHED_DISTANCE = 1.5D;
-    private static final double COVER_VALID_DISTANCE = 2.0D;
+    private static final double COVER_VALID_DISTANCE = 1.25D;
     private static final double COMBAT_COVER_VALID_DISTANCE = 6.0D;
     private static final double COVER_ABANDON_DISTANCE = 8.0D;
     
@@ -1682,6 +1682,67 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
         attackFrontierDistance = attackBestObjectiveDist;
     }
 
+    /**
+     * Full reset for a new attack command. Called when attackGeneration changes
+     * while the goal is already running. Cancels old movement, clears stale
+     * state, but preserves current occupied cover if any so the soldier
+     * doesn't abandon protection unnecessarily.
+     */
+    private void resetAttackCommand() {
+        // Cancel old movement
+        navigation.stop();
+        getPositionController().clear();
+
+        // Cancel fallback advance
+        fallbackAdvanceTarget = null;
+        fallbackStuckTicks = 0;
+        fallbackLastPosition = null;
+        fallbackNoProgressResets = 0;
+
+        // Cancel pending retry
+        pendingRetryCover = null;
+        isRetryAttempt = false;
+
+        // Clear old target-cover reservation and stale cover state
+        CoverPoint oldTarget = getCoverManager().getTargetCover();
+        if (oldTarget != null) {
+            CoverReservationManager.release(oldTarget.getPosition(), soldier);
+        }
+        getCoverManager().clearTargetCover();
+
+        // Reset attack phase fields (same as initAttackPhase but
+        // we do NOT change attackCommandGeneration — that's done by caller)
+        attackPhase = AttackPhase.SELECTING_COVER;
+        attackPhaseStartTime = System.currentTimeMillis();
+        attackCoverArrivalTime = 0;
+        attackExpectedCover = null;
+        attackDwellEligible = false;
+        attackHasPeekedThisCover = false;
+        attackBestObjectiveDist = Double.MAX_VALUE;
+        attackFrontierDistance = Double.MAX_VALUE;
+
+        // Stagger for this command
+        attackAdvanceStaggerTicks = Math.abs(soldier.getUUID().hashCode() % 60);
+
+        // Cancel final approach on the soldier
+        soldier.setAttackFinalApproach(false);
+
+        // Preserve current occupied cover — don't call clearCover() here.
+        // The soldier can start from where they are. If the current cover
+        // is invalid for the new objective, SELECTING_COVER will find a new one.
+
+        // Reset progress/stuck trackers
+        noProgressTicks = 0;
+        lastSeekingPosition = null;
+        stuckTicks = 0;
+        nonPeekableTicks = 0;
+
+        if (attackDebugLog()) {
+            StevesArmyMod.LOGGER.info("[AttackPhase] Soldier {} reset attack command gen {}, phase={}, coverState={}",
+                soldier.getId(), soldier.getAttackGeneration(), attackPhase, getCoverManager().getState());
+        }
+    }
+
     private void initAttackPhase() {
         int gen = soldier.getAttackGeneration();
         if (attackCommandGeneration != gen) {
@@ -1711,6 +1772,17 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
         if (!soldier.hasValidAttackTarget()) {
             attackPhase = AttackPhase.NONE;
             return;
+        }
+
+        // Detect new attack command while goal is already running
+        int currentGen = soldier.getAttackGeneration();
+        if (attackCommandGeneration != currentGen) {
+            attackCommandGeneration = currentGen;
+            resetAttackCommand();
+            if (attackDebugLog()) {
+                StevesArmyMod.LOGGER.info("[AttackPhase] Soldier {} new attack generation {} detected, resetting command",
+                    soldier.getId(), currentGen);
+            }
         }
 
         BlockPos objective = soldier.getAttackTargetPos();
