@@ -13,13 +13,17 @@ import net.minecraft.world.effect.MobEffectInstance;
 import net.minecraft.world.effect.MobEffects;
 import net.minecraft.world.level.Level;
 import net.minecraftforge.event.entity.EntityJoinLevelEvent;
+import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
 
+import java.util.HashMap;
+import java.util.Map;
 import java.util.UUID;
 
 @Mod.EventBusSubscriber(modid = StevesArmyMod.MODID)
 public class TeamEventHandler {
+    private static final Map<UUID, String> LAST_PLAYER_TEAMS = new HashMap<>();
 
     @SubscribeEvent
     public static void onEntityJoin(EntityJoinLevelEvent event) {
@@ -73,7 +77,33 @@ public class TeamEventHandler {
     private static void onPlayerLogin(ServerPlayer player) {
         UUID playerUUID = player.getUUID();
         TeamManager.addPlayerToFriendlyTeam(player, playerUUID);
+        TeamManager.synchronizeOwnedSoldiers(player.getServer(), player);
+        LAST_PLAYER_TEAMS.put(playerUUID, getTeamName(player));
         FireTeamAssignment assignment = FireTeamAssignment.get((ServerLevel) player.level(), playerUUID);
         NetworkHandler.sendTo(player, new FireTeamScopeSyncPacket(assignment.getTeamCount()));
+    }
+
+    @SubscribeEvent
+    public static void onServerTick(TickEvent.ServerTickEvent event) {
+        if (event.phase != TickEvent.Phase.END || event.getServer().getTickCount() % 10 != 0) return;
+
+        for (ServerPlayer player : event.getServer().getPlayerList().getPlayers()) {
+            UUID playerUUID = player.getUUID();
+            String currentTeam = getTeamName(player);
+            String previousTeam = LAST_PLAYER_TEAMS.put(playerUUID, currentTeam);
+            if (previousTeam == null || previousTeam.equals(currentTeam)) continue;
+
+            if (player.getTeam() == null) {
+                TeamManager.addPlayerToFriendlyTeam(player, playerUUID);
+            }
+            TeamManager.synchronizeOwnedSoldiers(event.getServer(), player);
+            StevesArmyMod.LOGGER.info("[SoldierTeam] player team changed: {} -> {} for owner {}",
+                previousTeam, currentTeam, player.getScoreboardName());
+        }
+        LAST_PLAYER_TEAMS.keySet().removeIf(uuid -> event.getServer().getPlayerList().getPlayer(uuid) == null);
+    }
+
+    private static String getTeamName(ServerPlayer player) {
+        return player.getTeam() == null ? "none" : player.getTeam().getName();
     }
 }

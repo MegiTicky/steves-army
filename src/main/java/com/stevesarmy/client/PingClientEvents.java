@@ -141,6 +141,11 @@ public class PingClientEvents {
         Player viewer = mc.player;
         if (viewer == null) return;
 
+        if (entity instanceof SoldierEntity soldier && soldier.isOwnedBy(viewer)) {
+            event.setResult(Event.Result.ALLOW);
+            return;
+        }
+
         Team entityTeam = entity.getTeam();
         Team viewerTeam = viewer.getTeam();
 
