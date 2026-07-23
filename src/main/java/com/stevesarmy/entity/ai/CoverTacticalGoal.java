@@ -97,6 +97,7 @@ public class CoverTacticalGoal extends Goal {
     private static final long DIRECT_BOUND_TIMEOUT_MS = 8000;
     private static final int DIRECT_BOUND_COVER_RECHECK_TICKS = 40;
     private static final int DIRECT_BOUND_MAX_NO_PROGRESS_RESETS = 3;
+    private static final double ATTACK_FRONTIER_TOLERANCE = 2.0;
 
     // Attack phase state
     private AttackPhase attackPhase = AttackPhase.NONE;
@@ -109,6 +110,11 @@ public class CoverTacticalGoal extends Goal {
     private long attackDwellDelay = 0;
     private int attackAdvanceStaggerTicks = 0;
     private boolean attackHasPeekedThisCover = false;
+
+    // Attack progress tracking: best (closest) distance to objective this command
+    private double attackBestObjectiveDist = Double.MAX_VALUE;
+    // Forward frontier: any cover closer to objective than this is acceptable
+    private double attackFrontierDistance = Double.MAX_VALUE;
 
     // Direct-bound state
     private int directBoundStuckTicks = 0;
@@ -1378,11 +1384,9 @@ this.debugSearchCenter = searchCenter;
                 if (currentCover != null && cover.getPosition().equals(currentCover.getPosition())) continue;
                 if (failedCoverPositions.contains(cover.getPosition())) continue;
 
-                // Hard forward progress filter
-                if (objectiveDir != null) {
-                    Vec3 candidateDisp = cover.getPosition().getCenter().subtract(soldierPos);
-                    double forwardProgress = candidateDisp.x * objectiveDir.x + candidateDisp.z * objectiveDir.z;
-                    if (forwardProgress < ATTACK_MIN_FORWARD_PROGRESS) continue;
+                if (!isForwardCoverCandidate(cover.getPosition(), soldier.getAttackTargetPos(), objectiveDir)) {
+                    logRejectedAttackCover(cover, soldier.getAttackTargetPos(), objectiveDir);
+                    continue;
                 }
 
                 // Hard primary-threat protection preference
@@ -1406,6 +1410,11 @@ this.debugSearchCenter = searchCenter;
                     CoverPoint cover = sc.cover;
                     if (currentCover != null && cover.getPosition().equals(currentCover.getPosition())) continue;
                     if (failedCoverPositions.contains(cover.getPosition())) continue;
+
+                    if (!isForwardCoverCandidate(cover.getPosition(), soldier.getAttackTargetPos(), objectiveDir)) {
+                        logRejectedAttackCover(cover, soldier.getAttackTargetPos(), objectiveDir);
+                        continue;
+                    }
 
                     // Fallback still requires primary-threat protection
                     if (threatDir != null) {
@@ -1607,6 +1616,67 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
     
     // --- Attack Phase Methods ---
 
+    /**
+     * Unified forward-progress predicate for attack-mode cover candidates.
+     * A candidate is valid only if it moves the soldier toward the objective
+     * and does not regress behind the best progress made this command.
+     */
+    private boolean isForwardCoverCandidate(BlockPos candidatePos, BlockPos objective, Vec3 objectiveDir) {
+        if (objectiveDir == null) return false;
+
+        // Minimum projected forward progress from current position
+        Vec3 candidateCenter = candidatePos.getCenter();
+        Vec3 disp = candidateCenter.subtract(soldier.position());
+        double forwardProgress = disp.x * objectiveDir.x + disp.z * objectiveDir.z;
+        if (forwardProgress < ATTACK_MIN_FORWARD_PROGRESS) {
+            return false;
+        }
+
+        // Must be closer to objective than soldier currently is
+        double distToObj = candidatePos.distSqr(objective);
+        double soldierDist = soldier.blockPosition().distSqr(objective);
+        if (distToObj >= soldierDist - 0.01) {
+            return false;
+        }
+
+        // Must not regress behind the forward frontier (best progress this command)
+        if (attackFrontierDistance < Double.MAX_VALUE && distToObj > attackFrontierDistance + ATTACK_FRONTIER_TOLERANCE * ATTACK_FRONTIER_TOLERANCE) {
+            return false;
+        }
+
+        return true;
+    }
+
+    private void logRejectedAttackCover(CoverPoint cover, BlockPos objective, Vec3 objectiveDir) {
+        if (!attackDebugLog() || objectiveDir == null) return;
+
+        Vec3 displacement = cover.getPosition().getCenter().subtract(soldier.position());
+        double forwardProgress = displacement.x * objectiveDir.x + displacement.z * objectiveDir.z;
+        double candidateDistance = cover.getPosition().distSqr(objective);
+        double soldierDistance = soldier.blockPosition().distSqr(objective);
+        boolean regressesFrontier = attackFrontierDistance < Double.MAX_VALUE
+            && candidateDistance > attackFrontierDistance + ATTACK_FRONTIER_TOLERANCE * ATTACK_FRONTIER_TOLERANCE;
+
+        StevesArmyMod.LOGGER.info("[AttackForward] Soldier {} ({}) rejected cover {}: progress={}, candidateDist={}, soldierDist={}, frontier={}, frontierRegression={}",
+            soldier.getId(), soldier.getName().getString(), cover.getPosition(),
+            String.format("%.1f", forwardProgress), String.format("%.1f", candidateDistance),
+            String.format("%.1f", soldierDistance), String.format("%.1f", attackFrontierDistance),
+            regressesFrontier);
+    }
+
+    /**
+     * Update attack progress frontier when the soldier arrives at a cover
+     * or completes a direct bound. This prevents regression behind this point.
+     */
+    private void updateAttackProgress(BlockPos objective) {
+        double distSq = soldier.blockPosition().distSqr(objective);
+        if (distSq < attackBestObjectiveDist) {
+            attackBestObjectiveDist = distSq;
+        }
+        // Frontier is slightly ahead of best progress to allow some lateral movement
+        attackFrontierDistance = attackBestObjectiveDist;
+    }
+
     private void resetDirectBoundState() {
         attackDirectBoundTarget = null;
         directBoundStuckTicks = 0;
@@ -1628,6 +1698,8 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
             attackExpectedCover = null;
             attackDwellEligible = false;
             attackHasPeekedThisCover = false;
+            attackBestObjectiveDist = Double.MAX_VALUE;
+            attackFrontierDistance = Double.MAX_VALUE;
             resetDirectBoundState();
             // Stagger: deterministic delay based on UUID
             attackAdvanceStaggerTicks = Math.abs(soldier.getUUID().hashCode() % 60); // 0-3 seconds
@@ -1654,6 +1726,7 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
             if (attackPhase != AttackPhase.COMPLETE) {
                 attackPhase = AttackPhase.COMPLETE;
                 soldier.setAttackFinalApproach(true);
+                updateAttackProgress(objective);
                 if (attackDebugLog()) {
                     StevesArmyMod.LOGGER.info("[AttackPhase] Soldier {} objective reached, completing", soldier.getId());
                 }
@@ -1721,6 +1794,7 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
                     attackExpectedCover = null;
                     attackDwellEligible = false;
                     attackHasPeekedThisCover = false;
+                    updateAttackProgress(objective);
                     if (attackDebugLog()) {
                         StevesArmyMod.LOGGER.info("[AttackPhase] Soldier {} ({}) MOVING_TO_COVER -> OCCUPYING_COVER: cover state {} at {}",
                             soldier.getId(), soldier.getName().getString(), coverState, currentCover.getPosition());
@@ -1750,6 +1824,7 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
                     attackExpectedCover = null;
                     attackDwellEligible = false;
                     attackHasPeekedThisCover = false;
+                    updateAttackProgress(objective);
                     if (attackDebugLog()) {
                         StevesArmyMod.LOGGER.info("[AttackPhase] Soldier {} MOVING_TO_COVER -> OCCUPYING_COVER: reached cover {}, dwell timer starts",
                             soldier.getId(), currentCover.getPosition());
@@ -1866,6 +1941,7 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
                     resetDirectBoundState();
                     attackPhase = AttackPhase.OCCUPYING_COVER;
                     attackCoverArrivalTime = System.currentTimeMillis();
+                    updateAttackProgress(objective);
                     if (attackDebugLog()) {
                         StevesArmyMod.LOGGER.info("[AttackPhase] Soldier {} DIRECT_BOUND -> OCCUPYING_COVER: cover preempted bound",
                             soldier.getId());
@@ -1895,6 +1971,7 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
                         attackDirectBoundTarget.getY() + 0.5,
                         attackDirectBoundTarget.getZ() + 0.5);
                     if (distToBound <= DIRECT_BOUND_ARRIVAL_RADIUS) {
+                        updateAttackProgress(objective);
                         resetDirectBoundState();
                         attackPhase = AttackPhase.SELECTING_COVER;
                         if (attackDebugLog()) {
