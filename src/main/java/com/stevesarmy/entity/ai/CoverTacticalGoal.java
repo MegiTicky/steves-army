@@ -578,6 +578,17 @@ public class CoverTacticalGoal extends Goal {
         
         // Attack mode: run phase logic after state handling
         if (soldier.hasValidAttackTarget()) {
+            // Periodic attack-mode snapshot every 20 ticks
+            if (soldier.tickCount % 20 == 0) {
+                CoverPoint tgt = getCoverManager().getTargetCover();
+                CoverPoint cur = getCoverManager().getCurrentCover();
+                BlockPos targetPos = tgt != null ? tgt.getPosition() : null;
+                double dist = targetPos != null ? soldier.position().distanceTo(targetPos.getCenter()) : -1;
+                StevesArmyMod.LOGGER.info("[CoverNav] Soldier {} phase={} state={} targetCover={} currentCover={} distToTarget={} isCQB={}",
+                    soldier.getId(), attackPhase, getCoverManager().getState(),
+                    targetPos, cur != null ? cur.getPosition() : null,
+                    String.format("%.2f", dist), soldier.isCQB());
+            }
             tickAttackPhase();
         } else {
             // Non-ATTACK: log structured transition if debug enabled (rate-limited)
@@ -626,6 +637,10 @@ public class CoverTacticalGoal extends Goal {
         double distance = soldier.position().distanceTo(targetCover.getPosition().getCenter());
         
         if (distance < COVER_REACHED_DISTANCE) {
+            if (soldier.hasValidAttackTarget()) {
+                StevesArmyMod.LOGGER.info("[CoverNav] Soldier {} reached cover at dist={} cover={}",
+                    soldier.getId(), String.format("%.2f", distance), targetCover.getPosition());
+            }
             onCoverReached(targetCover);
             noProgressTicks = 0;
             lastSeekingPosition = null;
@@ -635,6 +650,10 @@ public class CoverTacticalGoal extends Goal {
         if (distance < COVER_VALID_DISTANCE) {
             CoverPositionController moveControl = getPositionController();
             if (moveControl.getLastResult() != CoverPositionController.MovementResult.IN_PROGRESS) {
+                if (soldier.hasValidAttackTarget()) {
+                    StevesArmyMod.LOGGER.info("[CoverNav] Soldier {} handoff to position controller at dist={} cover={}",
+                        soldier.getId(), String.format("%.2f", distance), targetCover.getPosition());
+                }
                 navigation.stop();
                 moveControl.moveTo(getCoverStandingPosition(targetCover.getPosition()), POSITIONING_TOLERANCE, POSITIONING_SPEED, "tickSeekingCover", "recenter to target cover");
             }
@@ -650,6 +669,10 @@ public class CoverTacticalGoal extends Goal {
                 lastSeekingPosition = null;
                 if (stuckTicks > MAX_STUCK_TICKS) {
                     if (targetCover != null) {
+                        if (soldier.hasValidAttackTarget()) {
+                            StevesArmyMod.LOGGER.info("[CoverNav] Soldier {} stuck seeking cover, blacklisting. cover={}",
+                                soldier.getId(), targetCover.getPosition());
+                        }
                         blacklistCover(targetCover.getPosition(), BlacklistReason.STUCK_SEEKING);
                     }
                     getCoverManager().clearTargetCover();
@@ -684,6 +707,10 @@ public class CoverTacticalGoal extends Goal {
         }
         
         if (getCoverManager().getTimeSeeking() > MAX_SEEKING_TIME_MS) {
+            if (soldier.hasValidAttackTarget()) {
+                StevesArmyMod.LOGGER.info("[CoverNav] Soldier {} ATTACK seeking timeout, resetting. cover={}",
+                    soldier.getId(), targetCover != null ? targetCover.getPosition() : "null");
+            }
             getCoverManager().resetPeekState();
             getPositionController().clear();
             getCoverManager().clearTargetCover();
@@ -1602,23 +1629,64 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
 
         switch (attackPhase) {
             case SELECTING_COVER: {
+                // If suppressed or not recovered, don't start a new move yet
+                if (!canLeaveCoverNow() && currentCover != null) {
+                    attackPhase = AttackPhase.OCCUPYING_COVER;
+                    attackCoverArrivalTime = System.currentTimeMillis();
+                    if (attackDebugLog()) {
+                        StevesArmyMod.LOGGER.info("[AttackPhase] Soldier {} SELECTING_COVER -> OCCUPYING_COVER: suppressed, waiting at {}",
+                            soldier.getId(), currentCover.getPosition());
+                    }
+                    break;
+                }
                 attackPhase = AttackPhase.MOVING_TO_COVER;
                 if (attackDebugLog()) {
                     StevesArmyMod.LOGGER.info("[AttackPhase] Soldier {} SELECTING_COVER -> MOVING_TO_COVER: starting cover search",
                         soldier.getId());
                 }
-                findAndMoveToCover();
+                if (currentCover != null) {
+                    // Already in a cover — use canonical repositioning to synchronize cover state
+                    findAndMoveToCover();
+                    if (getCoverManager().getTargetCover() != null) {
+                        getCoverManager().setState(CoverBehaviorManager.CoverState.REPOSITIONING);
+                        setFlags(EnumSet.of(Flag.MOVE, Flag.LOOK));
+                    }
+                } else {
+                    findAndMoveToCover();
+                }
                 break;
             }
 
             case MOVING_TO_COVER: {
                 CoverPoint targetCover = getCoverManager().getTargetCover();
 
+                // Reconciliation: if the cover system has parked us in a cover
+                // (e.g., suppression pulled us back while we were advancing),
+                // treat it as arrival so the attack phase can recover.
+                if ((coverState == CoverBehaviorManager.CoverState.IN_COVER ||
+                     coverState == CoverBehaviorManager.CoverState.SUPPRESSED_IN_COVER) &&
+                    currentCover != null) {
+                    attackPhase = AttackPhase.OCCUPYING_COVER;
+                    attackCoverArrivalTime = System.currentTimeMillis();
+                    attackExpectedCover = null;
+                    attackDwellEligible = false;
+                    attackHasPeekedThisCover = false;
+                    if (attackDebugLog()) {
+                        StevesArmyMod.LOGGER.info("[AttackPhase] Soldier {} MOVING_TO_COVER -> OCCUPYING_COVER: cover state {} at {}",
+                            soldier.getId(), coverState, currentCover.getPosition());
+                    }
+                    break;
+                }
+
                 // CHECK ARRIVAL FIRST: promotion clears targetCover, so we must
                 // detect arrival by currentCover matching expectedCover BEFORE
                 // treating a null target as movement failure.
                 boolean arrivedAtExpected = false;
                 if (attackExpectedCover != null && currentCover != null) {
+                    if (!currentCover.getPosition().equals(attackExpectedCover)) {
+                        StevesArmyMod.LOGGER.info("[CoverNav] Soldier {} attackExpectedCover mismatch! expected={} actual={}",
+                            soldier.getId(), attackExpectedCover, currentCover.getPosition());
+                    }
                     arrivedAtExpected = currentCover.getPosition().equals(attackExpectedCover);
                 } else if (attackExpectedCover == null && currentCover != null && targetCover == null) {
                     // Expected not set (initial selection via findAndMoveToCover),
@@ -1955,6 +2023,11 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
         if (isReachable) {
             pendingRetryCover = null; // Clear any pending retry on success
             navigation.moveTo(path, 1.2);
+            if (soldier.hasValidAttackTarget()) {
+                StevesArmyMod.LOGGER.info("[CoverNav] Soldier {} ATTACK nav to cover {} from pos {} dist={}",
+                    soldier.getId(), wallPos, soldier.blockPosition(),
+                    String.format("%.2f", soldier.position().distanceTo(standingPos)));
+            }
             if (debugLoggingEnabled) {
                 StevesArmyMod.LOGGER.info("[PathDebug] Soldier {} started navigation to cover {} from pos {} (path nodes={})", 
                     soldier.getId(), wallPos, soldier.blockPosition(), path.getNodeCount());
@@ -2033,6 +2106,10 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
         CoverPoint oldTarget = getCoverManager().getTargetCover();
         if (oldTarget != null) {
             CoverReservationManager.release(oldTarget.getPosition(), soldier);
+        }
+        // If the blacklisted cover matches the expected attack target, clear it
+        if (attackExpectedCover != null && pos.equals(attackExpectedCover)) {
+            attackExpectedCover = null;
         }
         getCoverManager().clearTargetCover();
         if (debugLoggingEnabled) {
