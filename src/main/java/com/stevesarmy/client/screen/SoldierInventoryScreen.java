@@ -1,12 +1,15 @@
 package com.stevesarmy.client.screen;
 
 import com.stevesarmy.StevesArmyMod;
+import com.stevesarmy.combat.GunIntegration;
+import com.stevesarmy.inventory.SoldierInventory;
 import com.stevesarmy.inventory.SoldierInventoryMenu;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.entity.player.Inventory;
+import net.minecraft.world.item.ItemStack;
 
 public class SoldierInventoryScreen extends AbstractContainerScreen<SoldierInventoryMenu> {
     private static final int GUI_WIDTH = 176;
@@ -32,6 +35,13 @@ public class SoldierInventoryScreen extends AbstractContainerScreen<SoldierInven
     @Override
     protected void renderLabels(GuiGraphics guiGraphics, int mouseX, int mouseY) {
         guiGraphics.drawString(this.font, this.title, this.titleLabelX, this.titleLabelY, 4210752, false);
+
+        int totalAmmo = computeTotalAmmo();
+        if (totalAmmo >= 0) {
+            String ammoStr = String.valueOf(totalAmmo);
+            guiGraphics.drawString(this.font, Component.literal("◆" + ammoStr),
+                this.imageWidth - this.font.width(ammoStr) - 8, this.titleLabelY, 0xFFAAAAAA, false);
+        }
     }
 
     @Override
@@ -39,5 +49,19 @@ public class SoldierInventoryScreen extends AbstractContainerScreen<SoldierInven
         this.renderBackground(guiGraphics);
         super.render(guiGraphics, mouseX, mouseY, partialTick);
         this.renderTooltip(guiGraphics, mouseX, mouseY);
+    }
+
+    private int computeTotalAmmo() {
+        ItemStack mainHand = this.menu.getSoldierInventoryItem(SoldierInventory.SLOT_MAIN_HAND);
+        if (mainHand.isEmpty()) return -1;
+
+        int magazineAmmo = GunIntegration.getCurrentAmmo(mainHand);
+        int inventoryAmmo = 0;
+
+        for (int i = SoldierInventory.SLOT_GENERAL_START; i < SoldierInventory.INVENTORY_SIZE; i++) {
+            inventoryAmmo += GunIntegration.getAmmoCountForGun(mainHand, this.menu.getSoldierInventoryItem(i));
+        }
+
+        return magazineAmmo + inventoryAmmo;
     }
 }

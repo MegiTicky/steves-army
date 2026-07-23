@@ -1337,23 +1337,7 @@ private void tickCoverPeekCycle(CoverBehaviorManager coverManager) {
             if (dist > SUPPRESSION_MAX_RANGE) continue;
             
             if (GunIntegration.isTaczLoaded() && GunIntegration.hasGun(soldier)) {
-                int magazineAmmo = GunIntegration.getCurrentAmmo(soldier);
-                SoldierInventory inv = soldier.getSoldierInventory();
-                int inventoryAmmo = 0;
-                
-                if (inv != null) {
-                    String ammoId = GunIntegration.getAmmoId(soldier);
-                    if (ammoId != null && !ammoId.isEmpty()) {
-                        for (int i = SoldierInventory.SLOT_GENERAL_START; i < SoldierInventory.INVENTORY_SIZE; i++) {
-                            ItemStack stack = inv.getItem(i);
-                            if (!stack.isEmpty() && stack.getItem().getDescriptionId().contains(ammoId)) {
-                                inventoryAmmo += stack.getCount();
-                            }
-                        }
-                    }
-                }
-                
-                int totalAmmo = magazineAmmo + inventoryAmmo;
+                int totalAmmo = getTotalAmmo();
                 if (totalAmmo == 0) continue;
             }
             
@@ -1661,15 +1645,10 @@ private void tickCoverPeekCycle(CoverBehaviorManager coverManager) {
         
         com.stevesarmy.inventory.SoldierInventory inv = soldier.getSoldierInventory();
         if (inv != null) {
-            String ammoId = GunIntegration.getAmmoId(soldier);
-            if (ammoId != null && !ammoId.isEmpty()) {
-                for (int i = com.stevesarmy.inventory.SoldierInventory.SLOT_GENERAL_START; 
-                     i < com.stevesarmy.inventory.SoldierInventory.INVENTORY_SIZE; i++) {
-                    ItemStack stack = inv.getItem(i);
-                    if (!stack.isEmpty() && stack.getItem().getDescriptionId().contains(ammoId)) {
-                        inventoryAmmo += stack.getCount();
-                    }
-                }
+            ItemStack gunStack = inv.getItem(com.stevesarmy.inventory.SoldierInventory.SLOT_MAIN_HAND);
+            for (int i = com.stevesarmy.inventory.SoldierInventory.SLOT_GENERAL_START;
+                 i < com.stevesarmy.inventory.SoldierInventory.INVENTORY_SIZE; i++) {
+                inventoryAmmo += GunIntegration.getAmmoCountForGun(gunStack, inv.getItem(i));
             }
         }
         

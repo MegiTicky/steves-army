@@ -53,6 +53,9 @@ public class GunIntegration {
     public static boolean useInventoryAmmo(LivingEntity entity) { return gunHandler.useInventoryAmmo(entity); }
     public static String getGunId(LivingEntity entity) { return gunHandler.getGunId(entity); }
     public static String getAmmoId(LivingEntity entity) { return gunHandler.getAmmoId(entity); }
+    public static int getCurrentAmmo(ItemStack gunStack) { return gunHandler.getCurrentAmmo(gunStack); }
+    public static String getAmmoId(ItemStack gunStack) { return gunHandler.getAmmoId(gunStack); }
+    public static int getAmmoCountForGun(ItemStack gunStack, ItemStack ammoStack) { return gunHandler.getAmmoCountForGun(gunStack, ammoStack); }
     public static void lowCrouch(LivingEntity entity, boolean isLowCrouch) { gunHandler.lowCrouch(entity, isLowCrouch); }
     public static boolean isLowCrouching(LivingEntity entity) { return gunHandler.isLowCrouching(entity); }
     public static float[] getGunRecoil(LivingEntity entity) { return gunHandler.getGunRecoil(entity); }
@@ -92,6 +95,9 @@ public class GunIntegration {
         boolean useInventoryAmmo(LivingEntity entity);
         String getGunId(LivingEntity entity);
         String getAmmoId(LivingEntity entity);
+        int getCurrentAmmo(ItemStack gunStack);
+        String getAmmoId(ItemStack gunStack);
+        int getAmmoCountForGun(ItemStack gunStack, ItemStack ammoStack);
         void lowCrouch(LivingEntity entity, boolean isLowCrouch);
         boolean isLowCrouching(LivingEntity entity);
         float[] getGunRecoil(LivingEntity entity);
@@ -126,6 +132,9 @@ public class GunIntegration {
         @Override public boolean useInventoryAmmo(LivingEntity entity) { return false; }
         @Override public String getGunId(LivingEntity entity) { return ""; }
         @Override public String getAmmoId(LivingEntity entity) { return ""; }
+        @Override public int getCurrentAmmo(ItemStack gunStack) { return 0; }
+        @Override public String getAmmoId(ItemStack gunStack) { return ""; }
+        @Override public int getAmmoCountForGun(ItemStack gunStack, ItemStack ammoStack) { return 0; }
         @Override public void lowCrouch(LivingEntity entity, boolean isLowCrouch) {}
         @Override public boolean isLowCrouching(LivingEntity entity) { return false; }
         @Override public float[] getGunRecoil(LivingEntity entity) { return new float[]{0.5f, 0.25f}; }
@@ -631,17 +640,7 @@ public class GunIntegration {
 
         @Override
         public int getCurrentAmmo(LivingEntity entity) {
-            try {
-                ItemStack gunStack = entity.getMainHandItem();
-                Class<?> iGunClass = Class.forName("com.tacz.guns.api.item.IGun");
-                Method getIGunOrNull = iGunClass.getMethod("getIGunOrNull", ItemStack.class);
-                Object iGun = getIGunOrNull.invoke(null, gunStack);
-                if (iGun == null) return 0;
-                Method getCurrentAmmoCount = iGunClass.getMethod("getCurrentAmmoCount", ItemStack.class);
-                return (int) getCurrentAmmoCount.invoke(iGun, gunStack);
-            } catch (Exception e) {
-                return 0;
-            }
+            return getCurrentAmmoFromStack(entity.getMainHandItem());
         }
 
         @Override
@@ -734,20 +733,36 @@ public class GunIntegration {
 
         @Override
         public String getAmmoId(LivingEntity entity) {
+            return getAmmoIdFromStack(entity.getMainHandItem());
+        }
+
+        private int getCurrentAmmoFromStack(ItemStack gunStack) {
             try {
-                ItemStack gunStack = entity.getMainHandItem();
+                Class<?> iGunClass = Class.forName("com.tacz.guns.api.item.IGun");
+                Method getIGunOrNull = iGunClass.getMethod("getIGunOrNull", ItemStack.class);
+                Object iGun = getIGunOrNull.invoke(null, gunStack);
+                if (iGun == null) return 0;
+                Method getCurrentAmmoCount = iGunClass.getMethod("getCurrentAmmoCount", ItemStack.class);
+                return (int) getCurrentAmmoCount.invoke(iGun, gunStack);
+            } catch (Exception e) {
+                return 0;
+            }
+        }
+
+        private String getAmmoIdFromStack(ItemStack gunStack) {
+            try {
                 Class<?> iGunClass = Class.forName("com.tacz.guns.api.item.IGun");
                 Method getIGunOrNull = iGunClass.getMethod("getIGunOrNull", ItemStack.class);
                 Object iGun = getIGunOrNull.invoke(null, gunStack);
                 if (iGun == null) return "";
-                
+
                 Method getGunId = iGunClass.getMethod("getGunId", ItemStack.class);
                 Object gunId = getGunId.invoke(iGun, gunStack);
-                
+
                 Class<?> timelessApiClass = Class.forName("com.tacz.guns.api.TimelessAPI");
                 Method getCommonGunIndex = timelessApiClass.getMethod("getCommonGunIndex", ResourceLocation.class);
                 Object indexOpt = getCommonGunIndex.invoke(null, gunId);
-                
+
                 if (indexOpt instanceof Optional<?> opt && opt.isPresent()) {
                     Object gunIndex = opt.get();
                     Method getGunData = gunIndex.getClass().getMethod("getGunData");
@@ -760,7 +775,51 @@ public class GunIntegration {
             }
             return "";
         }
-        
+
+        @Override
+        public int getCurrentAmmo(ItemStack gunStack) {
+            return getCurrentAmmoFromStack(gunStack);
+        }
+
+        @Override
+        public String getAmmoId(ItemStack gunStack) {
+            return getAmmoIdFromStack(gunStack);
+        }
+
+        @Override
+        public int getAmmoCountForGun(ItemStack gunStack, ItemStack ammoStack) {
+            if (gunStack.isEmpty() || ammoStack.isEmpty()) return 0;
+            try {
+                Class<?> iAmmoClass = Class.forName("com.tacz.guns.api.item.IAmmo");
+                Method getIAmmoOrNull = iAmmoClass.getMethod("getIAmmoOrNull", ItemStack.class);
+                Object iAmmo = getIAmmoOrNull.invoke(null, ammoStack);
+                if (iAmmo != null) {
+                    Method isAmmoOfGun = iAmmoClass.getMethod("isAmmoOfGun", ItemStack.class, ItemStack.class);
+                    if ((boolean) isAmmoOfGun.invoke(iAmmo, gunStack, ammoStack)) {
+                        return ammoStack.getCount();
+                    }
+                }
+
+                Class<?> iAmmoBoxClass = Class.forName("com.tacz.guns.api.item.IAmmoBox");
+                if (!iAmmoBoxClass.isInstance(ammoStack.getItem())) return 0;
+
+                Method isAmmoBoxOfGun = iAmmoBoxClass.getMethod("isAmmoBoxOfGun", ItemStack.class, ItemStack.class);
+                if (!(boolean) isAmmoBoxOfGun.invoke(ammoStack.getItem(), gunStack, ammoStack)) return 0;
+
+                Method isCreative = iAmmoBoxClass.getMethod("isCreative", ItemStack.class);
+                Method isAllTypeCreative = iAmmoBoxClass.getMethod("isAllTypeCreative", ItemStack.class);
+                if ((boolean) isCreative.invoke(ammoStack.getItem(), ammoStack)
+                    || (boolean) isAllTypeCreative.invoke(ammoStack.getItem(), ammoStack)) {
+                    return 9999;
+                }
+
+                Method getAmmoCount = iAmmoBoxClass.getMethod("getAmmoCount", ItemStack.class);
+                return (int) getAmmoCount.invoke(ammoStack.getItem(), ammoStack);
+            } catch (Exception e) {
+                return 0;
+            }
+        }
+
         @Override
         public void lowCrouch(LivingEntity entity, boolean isLowCrouch) {
             if (entity instanceof SoldierEntity soldier) {

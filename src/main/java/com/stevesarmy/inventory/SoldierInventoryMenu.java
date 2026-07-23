@@ -167,4 +167,15 @@ public class SoldierInventoryMenu extends AbstractContainerMenu {
     public int getSoldierId() {
         return soldierId;
     }
+
+    public ItemStack getSoldierInventoryItem(int inventorySlot) {
+        if (inventorySlot == SoldierInventory.SLOT_MAIN_HAND) {
+            return this.getSlot(4).getItem();
+        }
+        if (inventorySlot >= SoldierInventory.SLOT_GENERAL_START
+            && inventorySlot < SoldierInventory.INVENTORY_SIZE) {
+            return this.getSlot(5 + inventorySlot - SoldierInventory.SLOT_GENERAL_START).getItem();
+        }
+        return ItemStack.EMPTY;
+    }
 }
