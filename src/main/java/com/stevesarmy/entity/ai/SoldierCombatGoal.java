@@ -408,8 +408,8 @@ boolean isBolting = GunIntegration.isBolting(soldier);
             double distSq = soldier.distanceToSqr(target);
             if (!soldier.getCoverBehaviorManager().isInCover() && distSq > SoldierEntity.CQB_RANGE * SoldierEntity.CQB_RANGE) {
                 if (soldier.getCoverBehaviorManager().isSeekingCover()) {
-                    StevesArmyMod.LOGGER.info("[CoverNav] Soldier {} CQB overwriting navigation while seeking cover! target={}",
-                        soldier.getId(), target.blockPosition());
+                    StevesArmyMod.LOGGER.info("[CoverNav] Soldier {} ({}) CQB overwriting navigation while seeking cover! target={}",
+                        soldier.getId(), soldier.getName().getString(), target.blockPosition());
                 }
                 soldier.getNavigation().moveTo(target, 1.0);
             }
