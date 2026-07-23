@@ -410,8 +410,6 @@ boolean isBolting = GunIntegration.isBolting(soldier);
                 // Don't overwrite cover/direct-bound navigation
                 if (soldier.getCoverBehaviorManager().isSeekingCover()) {
                     // Only log once
-                } else if (soldier.getCoverTacticalGoal() != null && soldier.getCoverTacticalGoal().getAttackPhase() == CoverTacticalGoal.AttackPhase.DIRECT_BOUND) {
-                    // Direct bound owns navigation — don't overwrite
                 } else {
                     soldier.getNavigation().moveTo(target, 1.0);
                 }

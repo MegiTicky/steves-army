@@ -27,7 +27,6 @@ public class CoverTacticalGoal extends Goal {
         SELECTING_COVER,
         MOVING_TO_COVER,
         OCCUPYING_COVER,
-        DIRECT_BOUND,
         COMPLETE
     }
 
@@ -85,26 +84,25 @@ public class CoverTacticalGoal extends Goal {
     // Attack-mode constants
     private static final int ATTACK_FORWARD_BIAS_BLOCKS = 6;
     private static final double ATTACK_MIN_FORWARD_PROGRESS = 2.0;
-    private static final double ATTACK_DIRECT_BOUND_LENGTH = 6.0;
     private static final long ATTACK_MIN_DWELL_MS = 4000;
     private static final long ATTACK_MAX_DWELL_MS = 8000;
     private static final double ATTACK_OBJECTIVE_RADIUS = 4.0;
 
-    // Direct-bound constants
-    private static final double DIRECT_BOUND_ARRIVAL_RADIUS = 6.25; // 2.5 blocks^2
-    private static final double DIRECT_BOUND_MIN_DISTANCE = 2.0;
-    private static final int DIRECT_BOUND_STUCK_TICKS = 80;
-    private static final long DIRECT_BOUND_TIMEOUT_MS = 8000;
-    private static final int DIRECT_BOUND_COVER_RECHECK_TICKS = 40;
-    private static final int DIRECT_BOUND_MAX_NO_PROGRESS_RESETS = 3;
+    // Attack corridor constants (search rectangle along objective direction)
+    private static final int ATTACK_CORRIDOR_FORWARD_LENGTH = 24;
+    private static final int ATTACK_CORRIDOR_HALF_WIDTH = 6;
+    private static final int ATTACK_CORRIDOR_SEARCH_RADIUS = 24;
     private static final double ATTACK_FRONTIER_TOLERANCE = 2.0;
+    private static final int ATTACK_CORRIDOR_REFRESH_TICKS = 15;
+    // Fallback advance when no cover found in corridor
+    private static final double ATTACK_FALLBACK_ADVANCE_LENGTH = 4.0;
+    private static final int ATTACK_FALLBACK_STUCK_TICKS = 60;
 
     // Attack phase state
     private AttackPhase attackPhase = AttackPhase.NONE;
     private int attackCommandGeneration = -1;
     private long attackPhaseStartTime = 0;
     private long attackCoverArrivalTime = 0;
-    private BlockPos attackDirectBoundTarget = null;
     private BlockPos attackExpectedCover = null;
     private boolean attackDwellEligible = false;
     private long attackDwellDelay = 0;
@@ -116,15 +114,13 @@ public class CoverTacticalGoal extends Goal {
     // Forward frontier: any cover closer to objective than this is acceptable
     private double attackFrontierDistance = Double.MAX_VALUE;
 
-    // Direct-bound state
-    private int directBoundStuckTicks = 0;
-    private Vec3 directBoundLastPosition = null;
-    private long directBoundStartTime = 0;
-    private int directBoundCoverRecheckTimer = 0;
-    private int directBoundNoProgressResets = 0;
-    private boolean directBoundHadValidPath = false;
-
     private long lastFlankRepositionTime = 0;
+
+    // Fallback advance state (no cover found — walk forward and re-search)
+    private BlockPos fallbackAdvanceTarget = null;
+    private int fallbackStuckTicks = 0;
+    private Vec3 fallbackLastPosition = null;
+    private int fallbackNoProgressResets = 0;
 
     private final Set<BlockPos> failedCoverPositions = new HashSet<>();
     private final java.util.Map<BlockPos, BlacklistEntry> blacklistReasons = new java.util.HashMap<>();
@@ -328,7 +324,7 @@ public class CoverTacticalGoal extends Goal {
         List<CoverFinder.ScoredCover> scored;
         if (!searchCenter.equals(soldier.blockPosition())) {
             scored = finder.evaluateAndScoreAllFromCenter(
-                searchCenter, soldier, threatDirection, threats, searchRadius, squadCtx);
+                searchCenter, soldier, threatDirection, threats, ATTACK_CORRIDOR_SEARCH_RADIUS, squadCtx);
         } else {
             scored = finder.evaluateAndScoreAll(
                 soldier, threatDirection, threats, searchRadius, false, squadCtx);
@@ -1364,7 +1360,7 @@ this.debugSearchCenter = searchCenter;
         if (soldier.hasValidAttackTarget()) {
             // ATTACK mode: forward-biased search from the beginning
             List<CoverFinder.ScoredCover> scored = finder.evaluateAndScoreAllFromCenter(
-                searchCenter, soldier, threatDirection, threats, searchRadius, squadCtx);
+                searchCenter, soldier, threatDirection, threats, ATTACK_CORRIDOR_SEARCH_RADIUS, squadCtx);
 
             CoverPoint currentCover = getCoverManager().getCurrentCover();
             Vec3 soldierPos = soldier.position();
@@ -1384,7 +1380,7 @@ this.debugSearchCenter = searchCenter;
                 if (currentCover != null && cover.getPosition().equals(currentCover.getPosition())) continue;
                 if (failedCoverPositions.contains(cover.getPosition())) continue;
 
-                if (!isForwardCoverCandidate(cover.getPosition(), soldier.getAttackTargetPos(), objectiveDir)) {
+                if (!isAttackCorridorCandidate(cover.getPosition(), soldier.getAttackTargetPos(), objectiveDir)) {
                     logRejectedAttackCover(cover, soldier.getAttackTargetPos(), objectiveDir);
                     continue;
                 }
@@ -1405,13 +1401,13 @@ this.debugSearchCenter = searchCenter;
             // (still requires primary-threat protection)
             if (bestCover.isEmpty()) {
                 List<CoverFinder.ScoredCover> localScored = finder.evaluateAndScoreAll(
-                    soldier, threatDirection, threats, searchRadius, true, squadCtx);
+                    soldier, threatDirection, threats, ATTACK_CORRIDOR_SEARCH_RADIUS, true, squadCtx);
                 for (CoverFinder.ScoredCover sc : localScored) {
                     CoverPoint cover = sc.cover;
                     if (currentCover != null && cover.getPosition().equals(currentCover.getPosition())) continue;
                     if (failedCoverPositions.contains(cover.getPosition())) continue;
 
-                    if (!isForwardCoverCandidate(cover.getPosition(), soldier.getAttackTargetPos(), objectiveDir)) {
+                    if (!isAttackCorridorCandidate(cover.getPosition(), soldier.getAttackTargetPos(), objectiveDir)) {
                         logRejectedAttackCover(cover, soldier.getAttackTargetPos(), objectiveDir);
                         continue;
                     }
@@ -1647,6 +1643,15 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
         return true;
     }
 
+    private boolean isAttackCorridorCandidate(BlockPos candidatePos, BlockPos objective, Vec3 objectiveDir) {
+        if (!isForwardCoverCandidate(candidatePos, objective, objectiveDir)) return false;
+
+        Vec3 displacement = candidatePos.getCenter().subtract(soldier.position());
+        double forward = displacement.x * objectiveDir.x + displacement.z * objectiveDir.z;
+        double lateral = Math.abs(displacement.x * objectiveDir.z - displacement.z * objectiveDir.x);
+        return forward <= ATTACK_CORRIDOR_FORWARD_LENGTH && lateral <= ATTACK_CORRIDOR_HALF_WIDTH;
+    }
+
     private void logRejectedAttackCover(CoverPoint cover, BlockPos objective, Vec3 objectiveDir) {
         if (!attackDebugLog() || objectiveDir == null) return;
 
@@ -1677,16 +1682,6 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
         attackFrontierDistance = attackBestObjectiveDist;
     }
 
-    private void resetDirectBoundState() {
-        attackDirectBoundTarget = null;
-        directBoundStuckTicks = 0;
-        directBoundLastPosition = null;
-        directBoundStartTime = 0;
-        directBoundCoverRecheckTimer = 0;
-        directBoundNoProgressResets = 0;
-        directBoundHadValidPath = false;
-    }
-
     private void initAttackPhase() {
         int gen = soldier.getAttackGeneration();
         if (attackCommandGeneration != gen) {
@@ -1694,13 +1689,15 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
             attackPhase = AttackPhase.SELECTING_COVER;
             attackPhaseStartTime = System.currentTimeMillis();
             attackCoverArrivalTime = 0;
-            attackDirectBoundTarget = null;
             attackExpectedCover = null;
             attackDwellEligible = false;
             attackHasPeekedThisCover = false;
             attackBestObjectiveDist = Double.MAX_VALUE;
             attackFrontierDistance = Double.MAX_VALUE;
-            resetDirectBoundState();
+            fallbackAdvanceTarget = null;
+            fallbackStuckTicks = 0;
+            fallbackLastPosition = null;
+            fallbackNoProgressResets = 0;
             // Stagger: deterministic delay based on UUID
             attackAdvanceStaggerTicks = Math.abs(soldier.getUUID().hashCode() % 60); // 0-3 seconds
             if (attackDebugLog()) {
@@ -1737,6 +1734,14 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
         CoverBehaviorManager.CoverState coverState = getCoverManager().getState();
         CoverPoint currentCover = getCoverManager().getCurrentCover();
 
+        if (attackPhase == AttackPhase.SELECTING_COVER && fallbackAdvanceTarget != null) {
+            tickFallbackAdvance();
+            if (fallbackAdvanceTarget != null && soldier.tickCount % ATTACK_CORRIDOR_REFRESH_TICKS != 0) {
+                return;
+            }
+            fallbackAdvanceTarget = null;
+        }
+
         switch (attackPhase) {
             case SELECTING_COVER: {
                 // If suppressed or not recovered, don't start a new move yet
@@ -1763,11 +1768,12 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
                 }
 
                 if (result == CoverMoveResult.NO_COVER_FOUND || result == CoverMoveResult.NO_ELIGIBLE_COVER) {
-                    // No cover available — fall back to direct bound
-                    startDirectBound();
-                    attackPhase = AttackPhase.DIRECT_BOUND;
+                    // No cover in the corridor: advance a short, normal navigation
+                    // segment and search again without changing movement owners.
+                    startFallbackAdvance();
+                    attackPhase = AttackPhase.SELECTING_COVER;
                     if (attackDebugLog()) {
-                        StevesArmyMod.LOGGER.info("[AttackPhase] Soldier {} SELECTING_COVER -> DIRECT_BOUND: no cover available (result={})",
+                        StevesArmyMod.LOGGER.info("[AttackPhase] Soldier {} advancing through uncovered corridor (result={})",
                             soldier.getId(), result);
                     }
                 } else {
@@ -1913,10 +1919,10 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
                                 soldier.getId(), maxDwellReached ? "max dwell" : "advance");
                         }
                     } else {
-                        startDirectBound();
-                        attackPhase = AttackPhase.DIRECT_BOUND;
+                        startFallbackAdvance();
+                        attackPhase = AttackPhase.SELECTING_COVER;
                         if (attackDebugLog()) {
-                            StevesArmyMod.LOGGER.info("[AttackPhase] Soldier {} {} -> DIRECT_BOUND: no forward cover",
+                            StevesArmyMod.LOGGER.info("[AttackPhase] Soldier {} advancing through uncovered corridor",
                                 soldier.getId(), maxDwellReached ? "max dwell" : "advance");
                         }
                     }
@@ -1931,99 +1937,6 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
                     getCoverManager().clearRepositionRequest();
                     attackPhase = AttackPhase.SELECTING_COVER;
                 }
-                break;
-            }
-
-            case DIRECT_BOUND: {
-                // If cover appeared (e.g., cover system found one), preempt
-                if (coverState == CoverBehaviorManager.CoverState.IN_COVER ||
-                    coverState == CoverBehaviorManager.CoverState.SUPPRESSED_IN_COVER) {
-                    resetDirectBoundState();
-                    attackPhase = AttackPhase.OCCUPYING_COVER;
-                    attackCoverArrivalTime = System.currentTimeMillis();
-                    updateAttackProgress(objective);
-                    if (attackDebugLog()) {
-                        StevesArmyMod.LOGGER.info("[AttackPhase] Soldier {} DIRECT_BOUND -> OCCUPYING_COVER: cover preempted bound",
-                            soldier.getId());
-                    }
-                    break;
-                }
-
-                // Periodic cover recheck while bounding
-                if (++directBoundCoverRecheckTimer >= DIRECT_BOUND_COVER_RECHECK_TICKS) {
-                    directBoundCoverRecheckTimer = 0;
-                    CoverMoveResult recheck = findAndMoveToCover();
-                    if (recheck == CoverMoveResult.COVER_STARTED) {
-                        resetDirectBoundState();
-                        attackPhase = AttackPhase.MOVING_TO_COVER;
-                        if (attackDebugLog()) {
-                            StevesArmyMod.LOGGER.info("[AttackPhase] Soldier {} DIRECT_BOUND -> MOVING_TO_COVER: cover found during bound recheck",
-                                soldier.getId());
-                        }
-                        break;
-                    }
-                }
-
-                // Check arrival at bound target
-                if (attackDirectBoundTarget != null) {
-                    double distToBound = soldier.distanceToSqr(
-                        attackDirectBoundTarget.getX() + 0.5,
-                        attackDirectBoundTarget.getY() + 0.5,
-                        attackDirectBoundTarget.getZ() + 0.5);
-                    if (distToBound <= DIRECT_BOUND_ARRIVAL_RADIUS) {
-                        updateAttackProgress(objective);
-                        resetDirectBoundState();
-                        attackPhase = AttackPhase.SELECTING_COVER;
-                        if (attackDebugLog()) {
-                            StevesArmyMod.LOGGER.info("[AttackPhase] Soldier {} direct bound complete, re-selecting cover", soldier.getId());
-                        }
-                        break;
-                    }
-                }
-
-                // Stuck detection
-                Vec3 currentPos = soldier.position();
-                if (directBoundLastPosition != null) {
-                    double moved = currentPos.distanceToSqr(directBoundLastPosition);
-                    if (moved < 0.01) {
-                        if (++directBoundStuckTicks >= DIRECT_BOUND_STUCK_TICKS) {
-                            if (directBoundNoProgressResets < DIRECT_BOUND_MAX_NO_PROGRESS_RESETS) {
-                                directBoundNoProgressResets++;
-                                directBoundStuckTicks = 0;
-                                directBoundLastPosition = null;
-                                if (attackDebugLog()) {
-                                    StevesArmyMod.LOGGER.info("[AttackPhase] Soldier {} direct bound stuck, retrying bound (attempt {}/{})",
-                                        soldier.getId(), directBoundNoProgressResets, DIRECT_BOUND_MAX_NO_PROGRESS_RESETS);
-                                }
-                                startDirectBound();
-                            } else {
-                                if (attackDebugLog()) {
-                                    StevesArmyMod.LOGGER.info("[AttackPhase] Soldier {} direct bound failed after {} retries, falling back to SELECTING_COVER",
-                                        soldier.getId(), DIRECT_BOUND_MAX_NO_PROGRESS_RESETS);
-                                }
-                                resetDirectBoundState();
-                                attackPhase = AttackPhase.SELECTING_COVER;
-                            }
-                            break;
-                        }
-                    } else {
-                        directBoundStuckTicks = 0;
-                    }
-                }
-                directBoundLastPosition = currentPos;
-
-                // Timeout
-                long boundTime = System.currentTimeMillis() - directBoundStartTime;
-                if (boundTime > DIRECT_BOUND_TIMEOUT_MS) {
-                    if (attackDebugLog()) {
-                        StevesArmyMod.LOGGER.info("[AttackPhase] Soldier {} direct bound timed out ({}ms), re-selecting cover",
-                            soldier.getId(), boundTime);
-                    }
-                    resetDirectBoundState();
-                    attackPhase = AttackPhase.SELECTING_COVER;
-                    break;
-                }
-
                 break;
             }
 
@@ -2067,7 +1980,7 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
         SquadCoverContext squadCtx = buildSquadCoverContext();
 
         List<CoverFinder.ScoredCover> scored = finder.evaluateAndScoreAllFromCenter(
-            searchCenter, soldier, threatDirection, threats, SEARCH_RADIUS, squadCtx);
+            searchCenter, soldier, threatDirection, threats, ATTACK_CORRIDOR_SEARCH_RADIUS, squadCtx);
 
         CoverPoint currentCover = getCoverManager().getCurrentCover();
         Vec3 soldierPos = soldier.position();
@@ -2091,7 +2004,7 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
             // Hard forward progress filter
             Vec3 candidateDisp = cover.getPosition().getCenter().subtract(soldierPos);
             double forwardProgress = candidateDisp.x * objectiveDir.x + candidateDisp.z * objectiveDir.z;
-            if (forwardProgress < ATTACK_MIN_FORWARD_PROGRESS) continue;
+            if (!isAttackCorridorCandidate(cover.getPosition(), objective, objectiveDir)) continue;
 
             // Don't go beyond the objective
             double distToObj = cover.getPosition().distSqr(objective);
@@ -2120,9 +2033,11 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
     }
 
     /**
-     * Start a short direct bound toward the objective when no cover is available.
+     * Advance through a short uncovered segment using the same navigation owner
+     * as cover movement. The next attack tick immediately searches the corridor
+     * again, so a newly available cover can interrupt this fallback naturally.
      */
-    private void startDirectBound() {
+    private void startFallbackAdvance() {
         if (!soldier.hasValidAttackTarget()) return;
         BlockPos objective = soldier.getAttackTargetPos();
 
@@ -2131,43 +2046,73 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
             0,
             objective.getZ() - soldier.getZ());
         double dist = toTarget.length();
-        if (dist < DIRECT_BOUND_MIN_DISTANCE) return;
+        if (dist < ATTACK_OBJECTIVE_RADIUS) return;
 
         Vec3 dir = toTarget.normalize();
-        double boundLen = Math.min(ATTACK_DIRECT_BOUND_LENGTH, dist - ATTACK_OBJECTIVE_RADIUS);
-        if (boundLen < 1.0) return; // skip zero-length bounds
+        double advanceLen = Math.min(ATTACK_FALLBACK_ADVANCE_LENGTH, dist - ATTACK_OBJECTIVE_RADIUS);
+        if (advanceLen < 1.0) return;
 
-        // Compute destination as a real-world position, not just BlockPos offset
-        Vec3 dest = soldier.position().add(dir.x * boundLen, 0, dir.z * boundLen);
+        Vec3 dest = soldier.position().add(dir.x * advanceLen, 0, dir.z * advanceLen);
         BlockPos destBlock = new BlockPos((int)Math.floor(dest.x), soldier.blockPosition().getY(), (int)Math.floor(dest.z));
 
-        // Validate path before clearing cover state
         Path path = soldier.getNavigation().createPath(destBlock.getX() + 0.5, destBlock.getY(), destBlock.getZ() + 0.5, 1);
         if (path == null || !path.canReach()) {
-            // Try a shorter bound
-            double shortLen = Math.min(boundLen * 0.5, 3.0);
-            if (shortLen < 1.0) return;
-            dest = soldier.position().add(dir.x * shortLen, 0, dir.z * shortLen);
-            destBlock = new BlockPos((int)Math.floor(dest.x), soldier.blockPosition().getY(), (int)Math.floor(dest.z));
-            path = soldier.getNavigation().createPath(destBlock.getX() + 0.5, destBlock.getY(), destBlock.getZ() + 0.5, 1);
-            if (path == null || !path.canReach()) return;
-            boundLen = shortLen;
+            fallbackAdvanceTarget = null;
+            return;
         }
 
-        // Only now clear cover and start the bound
-        getCoverManager().clearCover();
-        attackDirectBoundTarget = destBlock;
-        directBoundStartTime = System.currentTimeMillis();
-        directBoundLastPosition = soldier.position();
-        directBoundStuckTicks = 0;
-        directBoundCoverRecheckTimer = 0;
-        directBoundHadValidPath = true;
-
+        fallbackAdvanceTarget = destBlock;
+        fallbackStuckTicks = 0;
+        fallbackLastPosition = soldier.position();
+        fallbackNoProgressResets = 0;
         soldier.getNavigation().moveTo(path, 1.2D);
 
         if (attackDebugLog()) {
-            StevesArmyMod.LOGGER.info("[AttackDirectBound] Soldier {} bounding to {} (len={}, objDist={})",
-                soldier.getId(), destBlock, String.format("%.1f", boundLen), String.format("%.1f", dist));
+            StevesArmyMod.LOGGER.info("[AttackAdvance] Soldier {} advancing to {} (len={}, objDist={})",
+                soldier.getId(), destBlock, String.format("%.1f", advanceLen), String.format("%.1f", dist));
+        }
+    }
+
+    private void tickFallbackAdvance() {
+        if (fallbackAdvanceTarget == null) return;
+
+        double distance = soldier.distanceToSqr(
+            fallbackAdvanceTarget.getX() + 0.5,
+            fallbackAdvanceTarget.getY() + 0.5,
+            fallbackAdvanceTarget.getZ() + 0.5);
+        if (distance <= 4.0) {
+            fallbackAdvanceTarget = null;
+            fallbackLastPosition = null;
+            fallbackStuckTicks = 0;
+            return;
+        }
+
+        if (fallbackLastPosition != null && soldier.position().distanceToSqr(fallbackLastPosition) < 0.01) {
+            fallbackStuckTicks++;
+        } else {
+            fallbackStuckTicks = 0;
+        }
+        fallbackLastPosition = soldier.position();
+
+        if (fallbackStuckTicks >= ATTACK_FALLBACK_STUCK_TICKS) {
+            fallbackAdvanceTarget = null;
+            fallbackLastPosition = null;
+            fallbackStuckTicks = 0;
+            fallbackNoProgressResets++;
+            navigation.stop();
+            if (attackDebugLog()) {
+                StevesArmyMod.LOGGER.info("[AttackAdvance] Soldier {} fallback advance stopped after no progress (reset {})",
+                    soldier.getId(), fallbackNoProgressResets);
+            }
+            return;
+        }
+
+        if (navigation.isDone()) {
+            navigation.moveTo(
+                fallbackAdvanceTarget.getX() + 0.5,
+                fallbackAdvanceTarget.getY(),
+                fallbackAdvanceTarget.getZ() + 0.5,
+                1.2D);
         }
     }
 

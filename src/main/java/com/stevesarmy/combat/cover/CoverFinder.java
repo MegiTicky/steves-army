@@ -20,6 +20,7 @@ import com.stevesarmy.squad.SquadCoverContext;
 
 public class CoverFinder {
     private static final int DEFAULT_SEARCH_RADIUS = 12;
+    private static final int MAX_SEARCH_RADIUS = 24;
     private static final int MAX_COVER_POINTS = 50;
     private static final int MAX_HEIGHT_CHECK = 3;
     
@@ -43,7 +44,7 @@ public class CoverFinder {
     // Pre-calculate inside-out search pattern to eliminate directional bias
     private static final List<BlockPos> SEARCH_OFFSETS = new ArrayList<>();
     static {
-        int r = DEFAULT_SEARCH_RADIUS;
+        int r = MAX_SEARCH_RADIUS;
         for (int x = -r; x <= r; x++) {
             for (int z = -r; z <= r; z++) {
                 for (int y = -r / 2; y <= r / 2; y++) {
@@ -67,7 +68,7 @@ public class CoverFinder {
     
     public List<CoverPoint> findCoverPoints(BlockPos center, int radius, LivingEntity threat) {
         List<CoverPoint> coverPoints = new ArrayList<>();
-        int searchRadius = Math.min(radius, DEFAULT_SEARCH_RADIUS);
+        int searchRadius = Math.min(radius, MAX_SEARCH_RADIUS);
         int maxDistSq = searchRadius * searchRadius;
 
         // Search closest blocks first to guarantee we find the best nearby cover before hitting the 50 limit
