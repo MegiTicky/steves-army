@@ -3,6 +3,8 @@ package com.stevesarmy.squad;
 import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.entity.EnemySoldierEntity;
 import com.stevesarmy.entity.SoldierEntity;
+import com.stevesarmy.network.FireTeamScopeSyncPacket;
+import com.stevesarmy.network.NetworkHandler;
 import com.stevesarmy.util.SoldierNameGenerator;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
@@ -54,6 +56,8 @@ public class TeamEventHandler {
                     ServerPlayer ownerPlayer = serverLevel.getServer().getPlayerList().getPlayer(ownerUUID);
                     if (ownerPlayer != null) {
                         TeamManager.addPlayerToFriendlyTeam(ownerPlayer, ownerUUID);
+                        FireTeamAssignment assignment = FireTeamAssignment.get(serverLevel, ownerUUID);
+                        NetworkHandler.sendTo(ownerPlayer, new FireTeamScopeSyncPacket(assignment.getTeamCount()));
                     }
                 }
 
@@ -69,5 +73,7 @@ public class TeamEventHandler {
     private static void onPlayerLogin(ServerPlayer player) {
         UUID playerUUID = player.getUUID();
         TeamManager.addPlayerToFriendlyTeam(player, playerUUID);
+        FireTeamAssignment assignment = FireTeamAssignment.get((ServerLevel) player.level(), playerUUID);
+        NetworkHandler.sendTo(player, new FireTeamScopeSyncPacket(assignment.getTeamCount()));
     }
 }

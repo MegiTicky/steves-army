@@ -44,10 +44,10 @@ public class FireTeamWheelHandler {
                 FireTeam selected = currentHoveredTeam;
                 if (selected != FireTeam.ALL) {
                     if (selected.ordinal() <= FireTeamScopeState.INSTANCE.getTeamCount()) {
-                        FireTeamScopeState.INSTANCE.setCurrentScope(selected);
+                        FireTeamScopeState.INSTANCE.setCurrentScope(selected, "fire-team wheel");
                     }
                 } else {
-                    FireTeamScopeState.INSTANCE.setCurrentScope(FireTeam.ALL);
+                    FireTeamScopeState.INSTANCE.setCurrentScope(FireTeam.ALL, "fire-team wheel");
                 }
             }
 

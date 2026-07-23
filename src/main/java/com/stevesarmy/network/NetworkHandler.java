@@ -71,6 +71,10 @@ public class NetworkHandler {
             FormationMessage::encode,
             FormationMessage::new,
             FormationMessage::handle);
+        INSTANCE.registerMessage(id++, FireTeamScopeSyncPacket.class,
+            FireTeamScopeSyncPacket::encode,
+            FireTeamScopeSyncPacket::decode,
+            FireTeamScopeSyncPacket::handle);
     }
 
     public static void sendTo(ServerPlayer player, Object message) {

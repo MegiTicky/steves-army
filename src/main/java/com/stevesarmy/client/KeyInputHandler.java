@@ -43,7 +43,7 @@ public class KeyInputHandler {
                 || GLFW.glfwGetKey(window, GLFW.GLFW_KEY_RIGHT_CONTROL) == GLFW.GLFW_PRESS;
 
             if (ctrlHeld) {
-                FireTeamScopeState.INSTANCE.setCurrentScope(FireTeam.ALL);
+                FireTeamScopeState.INSTANCE.setCurrentScope(FireTeam.ALL, "cycle key with Ctrl");
                 mc.player.displayClientMessage(Component.literal("[ALL]"), true);
             } else {
                 FireTeam current = FireTeamScopeState.INSTANCE.getCurrentScope();
@@ -54,7 +54,7 @@ public class KeyInputHandler {
                 } else {
                     next = FireTeam.values()[current.ordinal() + 1];
                 }
-                FireTeamScopeState.INSTANCE.setCurrentScope(next);
+                FireTeamScopeState.INSTANCE.setCurrentScope(next, "cycle key");
                 mc.player.displayClientMessage(Component.literal("[" + next.getShortName() + "]"), true);
             }
         }

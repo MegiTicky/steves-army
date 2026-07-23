@@ -102,6 +102,7 @@ public class SetFireTeamPacket {
                     }
                 }
             }
+            NetworkHandler.sendTo(player, new FireTeamScopeSyncPacket(fta.getTeamCount()));
         });
         ctx.get().setPacketHandled(true);
     }
