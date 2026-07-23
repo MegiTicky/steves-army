@@ -407,11 +407,14 @@ boolean isBolting = GunIntegration.isBolting(soldier);
         if (soldier.isCQB() && target != null && target.isAlive()) {
             double distSq = soldier.distanceToSqr(target);
             if (!soldier.getCoverBehaviorManager().isInCover() && distSq > SoldierEntity.CQB_RANGE * SoldierEntity.CQB_RANGE) {
+                // Don't overwrite cover/direct-bound navigation
                 if (soldier.getCoverBehaviorManager().isSeekingCover()) {
-                    StevesArmyMod.LOGGER.info("[CoverNav] Soldier {} ({}) CQB overwriting navigation while seeking cover! target={}",
-                        soldier.getId(), soldier.getName().getString(), target.blockPosition());
+                    // Only log once
+                } else if (soldier.getCoverTacticalGoal() != null && soldier.getCoverTacticalGoal().getAttackPhase() == CoverTacticalGoal.AttackPhase.DIRECT_BOUND) {
+                    // Direct bound owns navigation — don't overwrite
+                } else {
+                    soldier.getNavigation().moveTo(target, 1.0);
                 }
-                soldier.getNavigation().moveTo(target, 1.0);
             }
         }
     }

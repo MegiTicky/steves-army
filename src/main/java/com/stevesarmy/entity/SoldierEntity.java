@@ -144,6 +144,7 @@ public class SoldierEntity extends PathfinderMob implements Container {
     private SoldierCombatGoal combatGoal;
     private CoverBehaviorManager coverBehaviorManager;
     private PeekController peekController;
+    private CoverTacticalGoal coverTacticalGoal;
     private final ThreatAwareness threatAwareness;
     
     private BlockPos pingMoveTarget = null;
@@ -277,7 +278,7 @@ public class SoldierEntity extends PathfinderMob implements Container {
         this.goalSelector.addGoal(1, new OpenDoorGoal(this, true));
         this.goalSelector.addGoal(1, new SoldierMoveToPingGoal(this));
         this.goalSelector.addGoal(1, new SoldierAttackGoal(this));
-        this.goalSelector.addGoal(2, new CoverTacticalGoal(this));
+        this.goalSelector.addGoal(2, (this.coverTacticalGoal = new CoverTacticalGoal(this)));
         this.goalSelector.addGoal(3, new SoldierFollowOwnerGoal(this));
         this.goalSelector.addGoal(3, new SoldierHoldPositionGoal(this));
         this.goalSelector.addGoal(4, combatGoal);
@@ -1096,6 +1097,10 @@ public BlockPos getPingMoveTarget() {
     
     public SoldierCombatGoal getCombatGoal() {
         return combatGoal;
+    }
+
+    public CoverTacticalGoal getCoverTacticalGoal() {
+        return coverTacticalGoal;
     }
     
     public CoverBehaviorManager getCoverBehaviorManager() {
