@@ -1,18 +1,17 @@
 package com.stevesarmy.client;
 
 import com.mojang.blaze3d.systems.RenderSystem;
-import com.mojang.blaze3d.vertex.*;
 import com.stevesarmy.squad.FireTeam;
+import com.mojang.math.Axis;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
-import net.minecraft.client.renderer.GameRenderer;
-import net.minecraft.network.chat.Component;
-import org.joml.Matrix4f;
 
 public class FireTeamWheelRenderer {
     private static final int INNER_RADIUS = 30;
     private static final int OUTER_RADIUS = 80;
     private static final int LABEL_RADIUS = 70;
+    private static final int SEPARATOR_COLOR = 0xCCAAAAAA;
+    private static final int SEPARATOR_HALF_WIDTH = 0;
 
     public static void render(GuiGraphics guiGraphics) {
         if (!FireTeamWheelHandler.isWheelActive()) return;
@@ -34,22 +33,7 @@ public class FireTeamWheelRenderer {
         RenderSystem.defaultBlendFunc();
         RenderSystem.disableDepthTest();
 
-        // Sectors: ALL at top (sector 0), then ALPHA, BRAVO, CHARLIE, DELTA clockwise
-        for (int i = 0; i < numSectors; i++) {
-            FireTeam team;
-            if (i == 0) {
-                team = FireTeam.ALL;
-            } else {
-                team = FireTeam.values()[i]; // ALPHA=1, BRAVO=2, CHARLIE=3, DELTA=4
-            }
-            boolean isHovered = team == hovered;
-            int startAngle = i * sectorSize;
-
-            int color = getTeamColor(team);
-            int alpha = isHovered ? 180 : 80;
-            int renderColor = (alpha << 24) | (color & 0x00FFFFFF);
-            drawSector(guiGraphics.pose(), centerX, centerY, INNER_RADIUS, OUTER_RADIUS, startAngle, sectorSize, renderColor);
-        }
+        drawSectorSeparators(guiGraphics, centerX, centerY, numSectors, sectorSize);
 
         for (int i = 0; i < numSectors; i++) {
             FireTeam team;
@@ -89,46 +73,16 @@ public class FireTeamWheelRenderer {
         };
     }
 
-    private static void drawSector(PoseStack poseStack, int centerX, int centerY, int innerRadius, int outerRadius, int startAngleDeg, int arcDeg, int color) {
-        float a = ((color >> 24) & 0xFF) / 255.0f;
-        float r = ((color >> 16) & 0xFF) / 255.0f;
-        float g = ((color >> 8) & 0xFF) / 255.0f;
-        float b = (color & 0xFF) / 255.0f;
-
-        RenderSystem.setShader(GameRenderer::getPositionColorShader);
-
-        Tesselator tesselator = Tesselator.getInstance();
-        BufferBuilder buffer = tesselator.getBuilder();
-        Matrix4f matrix = poseStack.last().pose();
-
-        double startRad = Math.toRadians(startAngleDeg - 90);
-        double endRad = Math.toRadians(startAngleDeg + arcDeg - 90);
-        int segments = Math.max(4, arcDeg / 5);
-        double step = (endRad - startRad) / segments;
-
-        buffer.begin(VertexFormat.Mode.TRIANGLES, DefaultVertexFormat.POSITION_COLOR);
-        for (int i = 0; i < segments; i++) {
-            double angle1 = startRad + i * step;
-            double angle2 = startRad + (i + 1) * step;
-            float cos1 = (float) Math.cos(angle1);
-            float sin1 = (float) Math.sin(angle1);
-            float cos2 = (float) Math.cos(angle2);
-            float sin2 = (float) Math.sin(angle2);
-            float innerX1 = centerX + cos1 * innerRadius;
-            float innerY1 = centerY + sin1 * innerRadius;
-            float outerX1 = centerX + cos1 * outerRadius;
-            float outerY1 = centerY + sin1 * outerRadius;
-            float innerX2 = centerX + cos2 * innerRadius;
-            float innerY2 = centerY + sin2 * innerRadius;
-            float outerX2 = centerX + cos2 * outerRadius;
-            float outerY2 = centerY + sin2 * outerRadius;
-            buffer.vertex(matrix, innerX1, innerY1, 0).color(r, g, b, a).endVertex();
-            buffer.vertex(matrix, outerX1, outerY1, 0).color(r, g, b, a).endVertex();
-            buffer.vertex(matrix, innerX2, innerY2, 0).color(r, g, b, a).endVertex();
-            buffer.vertex(matrix, innerX2, innerY2, 0).color(r, g, b, a).endVertex();
-            buffer.vertex(matrix, outerX1, outerY1, 0).color(r, g, b, a).endVertex();
-            buffer.vertex(matrix, outerX2, outerY2, 0).color(r, g, b, a).endVertex();
+    private static void drawSectorSeparators(GuiGraphics guiGraphics, int centerX, int centerY,
+                                             int sectorCount, int sectorSize) {
+        for (int i = 0; i < sectorCount; i++) {
+            float angle = i * sectorSize - 90.0f;
+            guiGraphics.pose().pushPose();
+            guiGraphics.pose().translate(centerX, centerY, 0);
+            guiGraphics.pose().mulPose(Axis.ZP.rotationDegrees(angle));
+            guiGraphics.fill(INNER_RADIUS, -SEPARATOR_HALF_WIDTH,
+                OUTER_RADIUS, SEPARATOR_HALF_WIDTH + 1, SEPARATOR_COLOR);
+            guiGraphics.pose().popPose();
         }
-        tesselator.end();
     }
 }
