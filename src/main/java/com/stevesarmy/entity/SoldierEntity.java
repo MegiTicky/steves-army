@@ -791,18 +791,27 @@ public class SoldierEntity extends PathfinderMob implements Container {
     
     @Override
     public boolean hurt(DamageSource source, float amount) {
-        StevesArmyMod.LOGGER.info("[DAMAGE_DEBUG] SoldierEntity.hurt() called: entity={} id={} source={} amount={} sourceEntity={}",
-            this.getName().getString(), this.getId(), source.getMsgId(), amount,
-            source.getEntity() != null ? source.getEntity().getName().getString() + "(" + source.getEntity().getClass().getSimpleName() + ")" : "null");
+        if (com.stevesarmy.entity.ai.CoverTacticalGoal.isDebugLoggingEnabled()) {
+            StevesArmyMod.LOGGER.info("[DAMAGE_DEBUG] SoldierEntity.hurt() called: entity={} id={} source={} amount={} sourceEntity={}",
+                this.getName().getString(), this.getId(), source.getMsgId(), amount,
+                source.getEntity() != null ? source.getEntity().getName().getString() + "(" + source.getEntity().getClass().getSimpleName() + ")" : "null");
+        }
         boolean result = super.hurt(source, amount);
-        StevesArmyMod.LOGGER.info("[DAMAGE_DEBUG] SoldierEntity.hurt() result: {} (super.hurt returned {})", result ? "damage applied" : "damage blocked", result);
+        if (com.stevesarmy.entity.ai.CoverTacticalGoal.isDebugLoggingEnabled()) {
+            StevesArmyMod.LOGGER.info("[DAMAGE_DEBUG] SoldierEntity.hurt() result: {} (super.hurt returned {})", result ? "damage applied" : "damage blocked", result);
+        }
         
         if (result && !this.level().isClientSide && coverBehaviorManager != null) {
             CoverBehaviorManager.CoverState preState = coverBehaviorManager.getState();
             long timeInCover = coverBehaviorManager.getTimeInCover();
             PeekController.State prePeekState = peekController.getState();
             
-            coverBehaviorManager.onTakeDamage();
+            LivingEntity attacker = source.getEntity() instanceof LivingEntity a ? a : null;
+            coverBehaviorManager.onTakeDamage(attacker);
+            
+            if (attacker != null) {
+                coverBehaviorManager.onIncomingFire(attacker);
+            }
             
             if ((preState == CoverBehaviorManager.CoverState.IN_COVER ||
                  preState == CoverBehaviorManager.CoverState.SUPPRESSED_IN_COVER) &&
@@ -811,9 +820,7 @@ public class SoldierEntity extends PathfinderMob implements Container {
                 coverBehaviorManager.requestShotInCoverReposition();
             }
             
-            if (source.getEntity() instanceof LivingEntity attacker && attacker != this) {
-                coverBehaviorManager.onIncomingFire(attacker);
-                
+            if (attacker != null && attacker != this) {
                 Vec3 toAttacker = attacker.position().subtract(this.position()).normalize();
                 threatAwareness.setSmoothDirection(toAttacker);
             }

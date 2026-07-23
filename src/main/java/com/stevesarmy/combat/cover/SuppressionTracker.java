@@ -13,6 +13,10 @@ public class SuppressionTracker {
     private long lastBurstTime = 0;
     private int burstCount = 0;
 
+    private int tickCounter = 0;
+    private boolean wasSuppressed = false;
+    private boolean wasPinned = false;
+
     private static final float DECAY_RATE = 0.15f;
     private static final float NEAR_MISS_THRESHOLD = 3.0f;
     private static final float NEAR_MISS_SUPPRESSION = 0.25f;
@@ -101,8 +105,17 @@ public class SuppressionTracker {
         }
 
         if (debugLog()) {
-            StevesArmyMod.LOGGER.info("[Suppression] Soldier tick: inCover={}, decay=" + String.format("%.4f", decayAmount) + ", peakSlow=" + String.format("%.2f", peakSlowdown) + ", sup " + String.format("%.2f", oldLevel) + " -> " + String.format("%.2f", suppressionLevel) + ", suppressed={}",
-                inCover, isSuppressed());
+            tickCounter++;
+            boolean nowSuppressed = isSuppressed();
+            boolean nowPinned = isPinned();
+            // Log on state transitions or every 20 ticks
+            if (nowSuppressed != wasSuppressed || nowPinned != wasPinned || tickCounter >= 20) {
+                tickCounter = 0;
+                wasSuppressed = nowSuppressed;
+                wasPinned = nowPinned;
+                StevesArmyMod.LOGGER.info("[Suppression] Soldier tick: inCover={}, decay=" + String.format("%.4f", decayAmount) + ", peakSlow=" + String.format("%.2f", peakSlowdown) + ", sup " + String.format("%.2f", oldLevel) + " -> " + String.format("%.2f", suppressionLevel) + ", suppressed={}",
+                    inCover, isSuppressed());
+            }
         }
     }
 

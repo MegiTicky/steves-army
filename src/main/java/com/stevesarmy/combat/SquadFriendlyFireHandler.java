@@ -3,6 +3,7 @@ package com.stevesarmy.combat;
 import com.stevesarmy.StevesArmyConfig;
 import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.entity.SoldierEntity;
+import com.stevesarmy.entity.ai.CoverTacticalGoal;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.scores.Team;
@@ -18,37 +19,51 @@ public class SquadFriendlyFireHandler {
         LivingEntity victim = event.getEntity();
         Entity attackerEntity = event.getSource().getEntity();
         
-        StevesArmyMod.LOGGER.info("[DAMAGE_DEBUG] onLivingHurt: victim={}({}) type={} attackerEntity={}({}) source={}",
-            victim.getName().getString(), victim.getClass().getSimpleName(), net.minecraftforge.registries.ForgeRegistries.ENTITY_TYPES.getKey(victim.getType()),
-            attackerEntity != null ? attackerEntity.getName().getString() : "null",
-            attackerEntity != null ? attackerEntity.getClass().getSimpleName() : "null",
-            event.getSource().getMsgId());
+        boolean debug = CoverTacticalGoal.isDebugLoggingEnabled();
+        
+        if (debug) {
+            StevesArmyMod.LOGGER.info("[DAMAGE_DEBUG] onLivingHurt: victim={}({}) type={} attackerEntity={}({}) source={}",
+                victim.getName().getString(), victim.getClass().getSimpleName(), net.minecraftforge.registries.ForgeRegistries.ENTITY_TYPES.getKey(victim.getType()),
+                attackerEntity != null ? attackerEntity.getName().getString() : "null",
+                attackerEntity != null ? attackerEntity.getClass().getSimpleName() : "null",
+                event.getSource().getMsgId());
+        }
         
         if (!(attackerEntity instanceof LivingEntity attacker)) {
-            StevesArmyMod.LOGGER.info("[DAMAGE_DEBUG] onLivingHurt: attacker not LivingEntity, passing through");
+            if (debug) {
+                StevesArmyMod.LOGGER.info("[DAMAGE_DEBUG] onLivingHurt: attacker not LivingEntity, passing through");
+            }
             return;
         }
         if (victim == attacker) {
-            StevesArmyMod.LOGGER.info("[DAMAGE_DEBUG] onLivingHurt: self-damage, skipping");
+            if (debug) {
+                StevesArmyMod.LOGGER.info("[DAMAGE_DEBUG] onLivingHurt: self-damage, skipping");
+            }
             return;
         }
         
         Team attackerTeam = attacker.getTeam();
         Team victimTeam = victim.getTeam();
         
-        StevesArmyMod.LOGGER.info("[DAMAGE_DEBUG] onLivingHurt: attackerTeam={} victimTeam={}",
-            attackerTeam != null ? attackerTeam.getName() : "null",
-            victimTeam != null ? victimTeam.getName() : "null");
+        if (debug) {
+            StevesArmyMod.LOGGER.info("[DAMAGE_DEBUG] onLivingHurt: attackerTeam={} victimTeam={}",
+                attackerTeam != null ? attackerTeam.getName() : "null",
+                victimTeam != null ? victimTeam.getName() : "null");
+        }
         
         if (attackerTeam != null && victimTeam != null
             && !(attacker instanceof SoldierEntity) && !(victim instanceof SoldierEntity)) {
             boolean sameTeam = attackerTeam.equals(victimTeam);
             boolean allied = attackerTeam.isAlliedTo(victimTeam);
             boolean ff = attackerTeam.isAllowFriendlyFire();
-            StevesArmyMod.LOGGER.info("[DAMAGE_DEBUG] onLivingHurt: sameTeam={} allied={} allowFF={}", sameTeam, allied, ff);
+            if (debug) {
+                StevesArmyMod.LOGGER.info("[DAMAGE_DEBUG] onLivingHurt: sameTeam={} allied={} allowFF={}", sameTeam, allied, ff);
+            }
             if (sameTeam || allied) {
                 if (!ff) {
-                    StevesArmyMod.LOGGER.info("[DAMAGE_DEBUG] onLivingHurt: CANCELLED by team friendlyfire check");
+                    if (debug) {
+                        StevesArmyMod.LOGGER.info("[DAMAGE_DEBUG] onLivingHurt: CANCELLED by team friendlyfire check");
+                    }
                     event.setCanceled(true);
                     debugLog(attacker, victim, "team friendlyfire off");
                     return;
@@ -59,9 +74,13 @@ public class SquadFriendlyFireHandler {
         if (StevesArmyConfig.getSquadFriendlyFire()) {
             if (attacker instanceof SoldierEntity attackerSoldier) {
                 boolean friendly = attackerSoldier.isFriendlyTo(victim);
-                StevesArmyMod.LOGGER.info("[DAMAGE_DEBUG] onLivingHurt: attacker is Soldier, isFriendlyTo(victim)={}", friendly);
+                if (debug) {
+                    StevesArmyMod.LOGGER.info("[DAMAGE_DEBUG] onLivingHurt: attacker is Soldier, isFriendlyTo(victim)={}", friendly);
+                }
                 if (friendly) {
-                    StevesArmyMod.LOGGER.info("[DAMAGE_DEBUG] onLivingHurt: CANCELLED by squad protection (attacker check)");
+                    if (debug) {
+                        StevesArmyMod.LOGGER.info("[DAMAGE_DEBUG] onLivingHurt: CANCELLED by squad protection (attacker check)");
+                    }
                     event.setCanceled(true);
                     debugLog(attacker, victim, "squad protection");
                     return;
@@ -70,9 +89,13 @@ public class SquadFriendlyFireHandler {
             
             if (victim instanceof SoldierEntity victimSoldier) {
                 boolean friendly = victimSoldier.isFriendlyTo(attacker);
-                StevesArmyMod.LOGGER.info("[DAMAGE_DEBUG] onLivingHurt: victim is Soldier, isFriendlyTo(attacker)={}", friendly);
+                if (debug) {
+                    StevesArmyMod.LOGGER.info("[DAMAGE_DEBUG] onLivingHurt: victim is Soldier, isFriendlyTo(attacker)={}", friendly);
+                }
                 if (friendly) {
-                    StevesArmyMod.LOGGER.info("[DAMAGE_DEBUG] onLivingHurt: CANCELLED by squad protection (victim check)");
+                    if (debug) {
+                        StevesArmyMod.LOGGER.info("[DAMAGE_DEBUG] onLivingHurt: CANCELLED by squad protection (victim check)");
+                    }
                     event.setCanceled(true);
                     debugLog(attacker, victim, "squad protection");
                     return;
@@ -80,7 +103,9 @@ public class SquadFriendlyFireHandler {
             }
         }
         
-        StevesArmyMod.LOGGER.info("[DAMAGE_DEBUG] onLivingHurt: DAMAGE PASSED THROUGH, amount={}", event.getAmount());
+        if (debug) {
+            StevesArmyMod.LOGGER.info("[DAMAGE_DEBUG] onLivingHurt: DAMAGE PASSED THROUGH, amount={}", event.getAmount());
+        }
     }
     
     private static void debugLog(LivingEntity attacker, LivingEntity victim, String reason) {

@@ -1,6 +1,7 @@
 package com.stevesarmy.combat;
 
 import com.stevesarmy.StevesArmyMod;
+import com.stevesarmy.entity.ai.CoverTacticalGoal;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.level.ClipContext;
@@ -81,7 +82,9 @@ public class ExposureCalculator {
 
     public static AimPointResult getBestAimPoint(LivingEntity observer, LivingEntity target, BlockPos skipBlock) {
         if (observer.level() != target.level()) {
-            StevesArmyMod.LOGGER.info("[DAMAGE_DEBUG] getBestAimPoint: different levels, returning FALLBACK");
+            if (CoverTacticalGoal.isDebugLoggingEnabled()) {
+                StevesArmyMod.LOGGER.info("[DAMAGE_DEBUG] getBestAimPoint: different levels, returning FALLBACK");
+            }
             return new AimPointResult(target.getEyePosition(), AimPointType.FALLBACK, false, false);
         }
         

@@ -38,17 +38,8 @@ public class IncomingFireHandler {
 
     @SubscribeEvent
     public static void onLivingHurt(LivingHurtEvent event) {
-        if (event.getEntity() instanceof SoldierEntity soldier) {
-            CoverBehaviorManager coverManager = soldier.getCoverBehaviorManager();
-            if (coverManager != null) {
-                LivingEntity attacker = event.getSource().getEntity() instanceof LivingEntity a ? a : null;
-                coverManager.onTakeDamage(attacker);
-
-                if (attacker != null) {
-                    coverManager.onIncomingFire(attacker);
-                }
-            }
-        }
+        // SoldierEntity applies suppression in its own hurt() method.
+        // Skip it here to avoid double-counting damage suppression.
     }
 
     @SubscribeEvent
