@@ -71,6 +71,10 @@ public class NetworkHandler {
             FormationMessage::encode,
             FormationMessage::new,
             FormationMessage::handle);
+        INSTANCE.registerMessage(id++, RecallPacket.class,
+            RecallPacket::encode,
+            RecallPacket::decode,
+            RecallPacket::handle);
         INSTANCE.registerMessage(id++, FireTeamScopeSyncPacket.class,
             FireTeamScopeSyncPacket::encode,
             FireTeamScopeSyncPacket::decode,

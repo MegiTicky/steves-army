@@ -8,6 +8,7 @@ import com.stevesarmy.client.screen.widget.SquadControlWidget;
 import com.stevesarmy.client.screen.widget.SquadModeWidget;
 import com.stevesarmy.network.NetworkHandler;
 import com.stevesarmy.network.OpenSoldierInventoryMessage;
+import com.stevesarmy.network.RecallPacket;
 import com.stevesarmy.network.SetFireTeamPacket;
 import com.stevesarmy.network.SetSoldierConfigPacket;
 import com.stevesarmy.network.SquadStatusSyncPacket;
@@ -35,6 +36,7 @@ public class SquadCommandScreen extends Screen {
     private static final int COL_DISC_WIDTH = 24;
     private static final int COL_MODE_WIDTH = 50;
     private static final int COL_INV_WIDTH = 58;
+    private static final int COL_RECALL_WIDTH = 50;
     private static final int COL_SPACING = 4;
 
     private List<SoldierRow> rows = new ArrayList<>();
@@ -51,8 +53,10 @@ public class SquadCommandScreen extends Screen {
         FireDiscipline discipline;
         FireTeam fireTeam;
         double distance;
+        int recallTicks;
         int modeWidgetX;
         int invButtonX;
+        int recallButtonX;
 
         final SquadModeWidget modeWidget;
         final OpenInventoryButton invButton;
@@ -68,6 +72,7 @@ public class SquadCommandScreen extends Screen {
             this.discipline = entry.getFireDiscipline();
             this.fireTeam = entry.getFireTeam();
             this.distance = entry.distance;
+            this.recallTicks = entry.recallTicks;
             this.modeWidget = new SquadModeWidget(entry.getSquadMode(), mode -> {
                 NetworkHandler.INSTANCE.sendToServer(new SetSoldierConfigPacket(entityId, SetSoldierConfigPacket.ConfigType.SQUAD_MODE, mode.ordinal()));
             });
@@ -85,6 +90,7 @@ public class SquadCommandScreen extends Screen {
             this.discipline = entry.getFireDiscipline();
             this.fireTeam = entry.getFireTeam();
             this.distance = entry.distance;
+            this.recallTicks = entry.recallTicks;
             this.modeWidget.setMode(entry.getSquadMode());
             this.invButton.setInRange(distance <= 20.0);
         }
@@ -121,6 +127,7 @@ public class SquadCommandScreen extends Screen {
     @Override
     public void tick() {
         super.tick();
+        teamCount = FireTeamScopeState.INSTANCE.getTeamCount();
         updateRows();
     }
 
@@ -169,6 +176,11 @@ public class SquadCommandScreen extends Screen {
 
             row.invButtonX = x;
             row.invButton.render(graphics, font, x, y, row.invButton.getWidth(), row.invButton.getHeight(), mouseX - x, mouseY - y);
+            x += row.invButton.getWidth() + COL_SPACING;
+
+            row.recallButtonX = x;
+            drawRecallButton(graphics, x, y, row.recallTicks, mouseX, mouseY);
+            x += COL_RECALL_WIDTH + COL_SPACING;
         }
 
         int footerY = ROW_START_Y + Math.max(rows.size(), 1) * ROW_HEIGHT + 8;
@@ -200,7 +212,6 @@ public class SquadCommandScreen extends Screen {
             if (teamCount > 1) {
                 teamCount--;
                 NetworkHandler.INSTANCE.sendToServer(SetFireTeamPacket.setTeamCount(teamCount));
-                FireTeamScopeState.INSTANCE.setTeamCount(teamCount);
             }
         });
         dx += 18;
@@ -208,7 +219,6 @@ public class SquadCommandScreen extends Screen {
             if (teamCount < 4) {
                 teamCount++;
                 NetworkHandler.INSTANCE.sendToServer(SetFireTeamPacket.setTeamCount(teamCount));
-                FireTeamScopeState.INSTANCE.setTeamCount(teamCount);
             }
         });
         dx += 22;
@@ -322,6 +332,25 @@ public class SquadCommandScreen extends Screen {
         return x + COL_DISC_WIDTH;
     }
 
+    private void drawRecallButton(GuiGraphics graphics, int x, int y, int recallTicks, int mouseX, int mouseY) {
+        boolean isRecalling = recallTicks > 0;
+        int w = COL_RECALL_WIDTH;
+        int h = 12;
+        String label = isRecalling ? ((recallTicks + 19) / 20) + "s" : "Recall";
+        boolean hovered = mouseX >= x && mouseX <= x + w && mouseY >= y && mouseY <= y + h;
+
+        int bgColor = isRecalling ? 0x88000000 : (hovered ? 0xFF444444 : 0x88000000);
+        int borderColor = isRecalling ? 0xFF333333 : 0xFF555555;
+        int textColor = isRecalling ? 0xFF888888 : 0xFFAAAAAA;
+
+        graphics.fill(x, y, x + w, y + h, bgColor);
+        graphics.fill(x, y, x + w, y + 1, borderColor);
+        graphics.fill(x, y + h - 1, x + w, y + h, borderColor);
+        graphics.fill(x, y, x + 1, y + h, borderColor);
+        graphics.fill(x + w - 1, y, x + w, y + h, borderColor);
+        graphics.drawString(font, Component.literal(label), x + 2, y + 2, textColor, false);
+    }
+
     private void drawButton(GuiGraphics graphics, String label, int x, int y, int w, int h, int mx, int my, Runnable onClick) {
         boolean hovered = mx >= x && mx <= x + w && my >= y && my <= y + h;
         graphics.fill(x, y, x + w, y + h, hovered ? 0xFF444444 : 0x88000000);
@@ -367,6 +396,7 @@ public class SquadCommandScreen extends Screen {
 
                 if (tryClickWidget(row.modeWidget, mouseX, row.modeWidgetX, localMouseY)) return true;
                 if (tryClickWidget(row.invButton, mouseX, row.invButtonX, localMouseY)) return true;
+                if (tryClickRecallButton(mouseX, row.recallButtonX, localMouseY, row.entityIntId, row.recallTicks)) return true;
                 return true;
             }
         }
@@ -376,6 +406,15 @@ public class SquadCommandScreen extends Screen {
     private boolean tryClickWidget(SquadControlWidget widget, double mouseX, int widgetX, int localMouseY) {
         int localMouseX = (int)(mouseX - widgetX);
         return widget.mouseClicked(localMouseX, localMouseY, 0);
+    }
+
+    private boolean tryClickRecallButton(double mouseX, int buttonX, int localMouseY, int soldierId, int recallTicks) {
+        if (recallTicks > 0) return false;
+        if (mouseX >= buttonX && mouseX <= buttonX + COL_RECALL_WIDTH && localMouseY >= 0 && localMouseY <= 12) {
+            NetworkHandler.INSTANCE.sendToServer(new RecallPacket(soldierId));
+            return true;
+        }
+        return false;
     }
 
     @Override

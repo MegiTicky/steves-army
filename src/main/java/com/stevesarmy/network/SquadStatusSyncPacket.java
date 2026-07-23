@@ -46,8 +46,9 @@ public class SquadStatusSyncPacket {
             int fireTeamOrdinal = buf.readVarInt();
             int coverState = buf.readVarInt();
             double distance = buf.readDouble();
+            int recallTicks = buf.readVarInt();
             entries.add(new SoldierStatusEntry(entityId, entityIntId, name, health, maxHealth, totalAmmo, gunName,
-                squadModeOrdinal, fireDisciplineOrdinal, fireTeamOrdinal, coverState, distance));
+                squadModeOrdinal, fireDisciplineOrdinal, fireTeamOrdinal, coverState, distance, recallTicks));
         }
         return new SquadStatusSyncPacket(entries);
     }
@@ -67,6 +68,7 @@ public class SquadStatusSyncPacket {
             buf.writeVarInt(entry.fireTeamOrdinal);
             buf.writeVarInt(entry.coverState);
             buf.writeDouble(entry.distance);
+            buf.writeVarInt(entry.recallTicks);
         }
     }
 
@@ -114,7 +116,8 @@ public class SquadStatusSyncPacket {
                     soldier.getFireDiscipline().ordinal(),
                     FireTeamAssignment.get(serverLevel, player.getUUID()).getTeamFor(soldier.getUUID()).ordinal(),
                     soldier.getSyncedCoverState(),
-                    soldier.distanceTo(player)
+                    soldier.distanceTo(player),
+                    soldier.getRecallTicks()
                 ));
             }
         }
@@ -134,11 +137,12 @@ public class SquadStatusSyncPacket {
         public final int fireTeamOrdinal;
         public final int coverState;
         public final double distance;
+        public final int recallTicks;
 
         public SoldierStatusEntry(UUID entityId, int entityIntId, String name, float health, float maxHealth,
                                    int totalAmmo, String gunName, int squadModeOrdinal,
                                    int fireDisciplineOrdinal, int fireTeamOrdinal,
-                                   int coverState, double distance) {
+                                   int coverState, double distance, int recallTicks) {
             this.entityId = entityId;
             this.entityIntId = entityIntId;
             this.name = name;
@@ -151,6 +155,7 @@ public class SquadStatusSyncPacket {
             this.fireTeamOrdinal = fireTeamOrdinal;
             this.coverState = coverState;
             this.distance = distance;
+            this.recallTicks = recallTicks;
         }
 
         public SquadMode getSquadMode() { return SquadMode.values()[squadModeOrdinal % SquadMode.values().length]; }

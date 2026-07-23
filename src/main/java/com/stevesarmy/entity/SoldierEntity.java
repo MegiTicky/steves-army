@@ -130,6 +130,9 @@ public class SoldierEntity extends PathfinderMob implements Container {
     private static final EntityDataAccessor<Integer> FIRE_TEAM =
         SynchedEntityData.defineId(SoldierEntity.class, EntityDataSerializers.INT);
 
+    private static final EntityDataAccessor<Integer> RECALL_TICKS =
+        SynchedEntityData.defineId(SoldierEntity.class, EntityDataSerializers.INT);
+
     @Nullable
     private UUID squadId;
     private SquadFormation squadFormation = SquadFormation.NONE;
@@ -267,6 +270,7 @@ public class SoldierEntity extends PathfinderMob implements Container {
         this.entityData.define(THREAT_DIR_Z, 0f);
         this.entityData.define(FIRE_DISCIPLINE, FireDiscipline.STANDARD.ordinal());
         this.entityData.define(FIRE_TEAM, FireTeam.ALPHA.ordinal());
+        this.entityData.define(RECALL_TICKS, 0);
     }
 
     @Override
@@ -433,6 +437,27 @@ public class SoldierEntity extends PathfinderMob implements Container {
 
     public void setFireTeam(FireTeam team) {
         this.entityData.set(FIRE_TEAM, team.ordinal());
+    }
+
+    public int getRecallTicks() {
+        return this.entityData.get(RECALL_TICKS);
+    }
+
+    public boolean isRecalling() {
+        return getRecallTicks() > 0;
+    }
+
+    public void setRecallTicks(int ticks) {
+        this.entityData.set(RECALL_TICKS, ticks);
+    }
+
+    public void startRecall() {
+        setRecallTicks(80);
+        this.getNavigation().stop();
+    }
+
+    public void cancelRecall() {
+        setRecallTicks(0);
     }
 
     @Override
@@ -754,6 +779,16 @@ public class SoldierEntity extends PathfinderMob implements Container {
                 }
             }
         }
+
+        if (!this.level().isClientSide && isRecalling()) {
+            int ticks = getRecallTicks() - 1;
+            if (ticks <= 0) {
+                com.stevesarmy.combat.RecallHelper.executeRecall(this);
+            } else {
+                setRecallTicks(ticks);
+                this.getNavigation().stop();
+            }
+        }
     }
     
     @Override
@@ -801,29 +836,34 @@ public class SoldierEntity extends PathfinderMob implements Container {
         if (com.stevesarmy.entity.ai.CoverTacticalGoal.isDebugLoggingEnabled()) {
             StevesArmyMod.LOGGER.info("[DAMAGE_DEBUG] SoldierEntity.hurt() result: {} (super.hurt returned {})", result ? "damage applied" : "damage blocked", result);
         }
-        
-        if (result && !this.level().isClientSide && coverBehaviorManager != null) {
-            CoverBehaviorManager.CoverState preState = coverBehaviorManager.getState();
-            long timeInCover = coverBehaviorManager.getTimeInCover();
-            PeekController.State prePeekState = peekController.getState();
-            
-            LivingEntity attacker = source.getEntity() instanceof LivingEntity a ? a : null;
-            coverBehaviorManager.onTakeDamage(attacker);
-            
-            if (attacker != null) {
-                coverBehaviorManager.onIncomingFire(attacker);
+
+        if (result && !this.level().isClientSide) {
+            if (isRecalling()) {
+                cancelRecall();
             }
-            
-            if ((preState == CoverBehaviorManager.CoverState.IN_COVER ||
-                 preState == CoverBehaviorManager.CoverState.SUPPRESSED_IN_COVER) &&
-                timeInCover >= 2000 &&
-                prePeekState == PeekController.State.HIDING) {
-                coverBehaviorManager.requestShotInCoverReposition();
-            }
-            
-            if (attacker != null && attacker != this) {
-                Vec3 toAttacker = attacker.position().subtract(this.position()).normalize();
-                threatAwareness.setSmoothDirection(toAttacker);
+            if (coverBehaviorManager != null) {
+                CoverBehaviorManager.CoverState preState = coverBehaviorManager.getState();
+                long timeInCover = coverBehaviorManager.getTimeInCover();
+                PeekController.State prePeekState = peekController.getState();
+                
+                LivingEntity attacker = source.getEntity() instanceof LivingEntity a ? a : null;
+                coverBehaviorManager.onTakeDamage(attacker);
+                
+                if (attacker != null) {
+                    coverBehaviorManager.onIncomingFire(attacker);
+                }
+                
+                if ((preState == CoverBehaviorManager.CoverState.IN_COVER ||
+                     preState == CoverBehaviorManager.CoverState.SUPPRESSED_IN_COVER) &&
+                    timeInCover >= 2000 &&
+                    prePeekState == PeekController.State.HIDING) {
+                    coverBehaviorManager.requestShotInCoverReposition();
+                }
+                
+                if (attacker != null && attacker != this) {
+                    Vec3 toAttacker = attacker.position().subtract(this.position()).normalize();
+                    threatAwareness.setSmoothDirection(toAttacker);
+                }
             }
         }
         
