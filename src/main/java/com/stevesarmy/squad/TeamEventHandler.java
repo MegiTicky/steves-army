@@ -40,8 +40,10 @@ public class TeamEventHandler {
                 soldier.addEffect(new MobEffectInstance(MobEffects.GLOWING, Integer.MAX_VALUE, 0, false, false));
 
                 if (level instanceof ServerLevel serverLevel) {
-                    FireTeam savedTeam = FireTeamAssignment.get(serverLevel, ownerUUID).getTeamFor(soldier.getUUID());
+                    FireTeamAssignment fta = FireTeamAssignment.get(serverLevel, ownerUUID);
+                    FireTeam savedTeam = fta.getTeamFor(soldier.getUUID());
                     soldier.setFireTeam(savedTeam);
+                    fta.assignToTeam(soldier.getUUID(), savedTeam);
                 }
 
                 if (!soldier.hasCustomName()) {
