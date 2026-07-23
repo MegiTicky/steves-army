@@ -828,6 +828,19 @@ public class SoldierEntity extends PathfinderMob implements Container {
         }
         return super.getStandingEyeHeight(pose, dimensions);
     }
+
+    @Override
+    public void die(DamageSource source) {
+        if (!this.level().isClientSide && !this.isRemoved() && this.level() instanceof ServerLevel serverLevel) {
+            getOwnerUUID().ifPresent(ownerUUID -> {
+                ServerPlayer owner = serverLevel.getServer().getPlayerList().getPlayer(ownerUUID);
+                if (owner != null) {
+                    owner.sendSystemMessage(Component.literal("[Squad] ").append(this.getCombatTracker().getDeathMessage().copy()));
+                }
+            });
+        }
+        super.die(source);
+    }
     
     @Override
     public boolean hurt(DamageSource source, float amount) {
