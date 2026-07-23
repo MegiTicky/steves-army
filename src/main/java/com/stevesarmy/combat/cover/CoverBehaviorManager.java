@@ -127,8 +127,13 @@ public class CoverBehaviorManager {
             this.seekingStartTime = System.currentTimeMillis();
         }
         
-        if (state == CoverState.IN_COVER || state == CoverState.SUPPRESSED_IN_COVER) {
-            this.coverEntryTime = System.currentTimeMillis();
+        // Only set coverEntryTime when entering a cover state from a non-cover state.
+        // Transitions between IN_COVER and SUPPRESSED_IN_COVER preserve the physical
+        // cover-entry time so suppression/recovery cycles don't reset the dwell clock.
+        if ((state == CoverState.IN_COVER || state == CoverState.SUPPRESSED_IN_COVER)) {
+            if (oldState != CoverState.IN_COVER && oldState != CoverState.SUPPRESSED_IN_COVER) {
+                this.coverEntryTime = System.currentTimeMillis();
+            }
             if (currentCover != null) {
                 this.lastCoverQuality = currentCover.getQuality();
             }

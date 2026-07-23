@@ -67,6 +67,13 @@ public class CombatDebugCommand {
                         .executes(ctx -> toggleCoverLogging(ctx, true)))
                     .then(Commands.literal("off")
                         .executes(ctx -> toggleCoverLogging(ctx, false)))
+                )
+                .then(Commands.literal("attack")
+                    .executes(ctx -> toggleAttackLogging(ctx, null))
+                    .then(Commands.literal("on")
+                        .executes(ctx -> toggleAttackLogging(ctx, true)))
+                    .then(Commands.literal("off")
+                        .executes(ctx -> toggleAttackLogging(ctx, false)))
                 ))
 
             // === RENDER TOGGLES ===
@@ -177,6 +184,7 @@ public class CombatDebugCommand {
             "  all                 - Enable ALL debug (logging + render + combat overlay)\n" +
             "  none                - Disable ALL debug (logging + render + overlays)\n" +
             "  log cover [on|off]  - Toggle cover behavior logging\n" +
+            "  log attack [on|off] - Toggle attack phase logging (quiet, soldier-specific)\n" +
             "  render soldiers     - Toggle soldier cover visualization lines/labels\n" +
             "  render peekcandidates - Toggle peek candidate boxes/LOS rays\n" +
             "  render rays         - Toggle cover raycast visualization\n" +
@@ -213,6 +221,7 @@ public class CombatDebugCommand {
         CoverDebugManager.setShowPeekCandidates(true);
         CoverDebugManager.setVisualizationEnabled(true);
         CoverTacticalGoal.setDebugLogging(true);
+        CoverTacticalGoal.setAttackDebugLogging(true);
 
         context.getSource().sendSuccess(() -> Component.literal(
             "=== Steve's Army Debug: ALL ON ===\n" +
@@ -220,6 +229,7 @@ public class CombatDebugCommand {
             "  Soldier cover visualization: ON\n" +
             "  Peek candidate visualization: ON\n" +
             "  Cover behavior logging: ON\n" +
+            "  Attack phase logging: ON\n" +
             "Use /stevesarmy_debug render mode minimal for compact display\n" +
             "Use /stevesarmy_debug log cover off to disable console logs"
         ), true);
@@ -232,7 +242,7 @@ public class CombatDebugCommand {
         CoverDebugManager.setShowPeekCandidates(false);
         CoverDebugManager.setVisualizationEnabled(false);
         CoverTacticalGoal.setDebugLogging(false);
-CoverDebugManager.setShowRays(false);
+        CoverTacticalGoal.setAttackDebugLogging(false);CoverDebugManager.setShowRays(false);
         CoverDebugManager.setShowSolidBlocks(false);
 
         context.getSource().sendSuccess(() -> Component.literal(
@@ -260,6 +270,20 @@ CoverDebugManager.setShowRays(false);
         CoverTacticalGoal.setDebugLogging(newState);
         context.getSource().sendSuccess(() -> Component.literal(
             "Cover behavior logging: " + (newState ? "ON" : "OFF")
+        ), true);
+        return 1;
+    }
+
+    private static int toggleAttackLogging(CommandContext<CommandSourceStack> context, Boolean enable) {
+        boolean newState;
+        if (enable != null) {
+            newState = enable;
+        } else {
+            newState = !CoverTacticalGoal.isAttackDebugLoggingEnabled();
+        }
+        CoverTacticalGoal.setAttackDebugLogging(newState);
+        context.getSource().sendSuccess(() -> Component.literal(
+            "Attack phase logging: " + (newState ? "ON" : "OFF")
         ), true);
         return 1;
     }
@@ -1012,6 +1036,7 @@ CoverDebugManager.setShowRays(false);
         context.getSource().sendSuccess(() -> Component.literal(
             "=== DEBUG STATUS ===\n" +
             "  Cover logging: " + (CoverTacticalGoal.isDebugLoggingEnabled() ? "ON" : "OFF") + "\n" +
+            "  Attack logging: " + (CoverTacticalGoal.isAttackDebugLoggingEnabled() ? "ON" : "OFF") + "\n" +
             "  Combat overlay: " + CombatDebugRenderer.getDebugModeName() + "\n" +
             "  Soldier viz: " + (CoverDebugManager.isShowSoldierCover() ? "ON" : "OFF") + "\n" +
             "  Peek candidates: " + (CoverDebugManager.isShowPeekCandidates() ? "ON" : "OFF") + "\n" +

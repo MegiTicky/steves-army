@@ -135,13 +135,17 @@ public class CoverFinder {
                 .collect(java.util.stream.Collectors.toList());
             
             if (!protectedCovers.isEmpty()) {
-                StevesArmyMod.LOGGER.info("[CoverFinder] Selected protected cover: {} (threatDir={}, {} protected covers available)",
-                    protectedCovers.get(0).cover.getPosition(), threatDir, protectedCovers.size());
+                if (com.stevesarmy.entity.ai.CoverTacticalGoal.isDebugLoggingEnabled()) {
+                    StevesArmyMod.LOGGER.info("[CoverFinder] Selected protected cover: {} (threatDir={}, {} protected covers available)",
+                        protectedCovers.get(0).cover.getPosition(), threatDir, protectedCovers.size());
+                }
                 return Optional.of(protectedCovers.get(0).cover);
             }
-            
-            StevesArmyMod.LOGGER.info("[CoverFinder] No protected covers available for threatDir={}, using best unprotected cover",
-                threatDir);
+
+            if (com.stevesarmy.entity.ai.CoverTacticalGoal.isDebugLoggingEnabled()) {
+                StevesArmyMod.LOGGER.info("[CoverFinder] No protected covers available for threatDir={}, using best unprotected cover",
+                    threatDir);
+            }
         }
         
         return Optional.of(all.get(0).cover);
@@ -307,12 +311,14 @@ public class CoverFinder {
     
     private float calculateThreatAwareScore(CoverPoint coverPoint, LivingEntity soldier,
                                             Vec3 threatDirection, List<LivingEntity> allThreats, LivingEntity primaryThreat) {
-        StevesArmyMod.LOGGER.info("[ThreatAwareScore] coverPos={}, threatDirection=({}, {}, {}), primaryThreat={}",
-            coverPoint.getPosition(),
-            threatDirection != null ? String.format("%.2f", threatDirection.x) : "null",
-            threatDirection != null ? String.format("%.2f", threatDirection.y) : "null",
-            threatDirection != null ? String.format("%.2f", threatDirection.z) : "null",
-            primaryThreat != null ? primaryThreat.blockPosition() : "null");
+        if (com.stevesarmy.entity.ai.CoverTacticalGoal.isDebugLoggingEnabled()) {
+            StevesArmyMod.LOGGER.info("[ThreatAwareScore] coverPos={}, threatDirection=({}, {}, {}), primaryThreat={}",
+                coverPoint.getPosition(),
+                threatDirection != null ? String.format("%.2f", threatDirection.x) : "null",
+                threatDirection != null ? String.format("%.2f", threatDirection.y) : "null",
+                threatDirection != null ? String.format("%.2f", threatDirection.z) : "null",
+                primaryThreat != null ? primaryThreat.blockPosition() : "null");
+        }
         
         float primaryProtection = calculatePrimaryProtection(coverPoint, threatDirection);
         float flankingProtection = calculateFlankingProtection(coverPoint, allThreats);
@@ -365,17 +371,19 @@ public class CoverFinder {
                            peekAngleScore * PEEK_ANGLE_WEIGHT) + fightability - blindPenalty;
         }
         
-        StevesArmyMod.LOGGER.info("[CoverScore] {} type={} q={} prim={} flank={} dist={} firing={} peek={} fight={} blindPen={} TOTAL={}",
-            coverPoint.getPosition(), coverPoint.getType(),
-            String.format("%.2f", coverPoint.getQuality()),
-            String.format("%.2f", primaryProtection * PRIMARY_PROTECTION_WEIGHT),
-            String.format("%.2f", flankingProtection * FLANKING_PROTECTION_WEIGHT),
-            String.format("%.2f", distanceScore * (isAttackMode ? ATTACK_OBJECTIVE_PROGRESS_WEIGHT : DISTANCE_WEIGHT)),
-            String.format("%.2f", firingQuality * FIRING_QUALITY_WEIGHT),
-            String.format("%.2f", peekAngleScore * PEEK_ANGLE_WEIGHT),
-            String.format("%.2f", fightability),
-            String.format("%.2f", blindPenalty),
-            String.format("%.2f", weightedScore));
+        if (com.stevesarmy.entity.ai.CoverTacticalGoal.isDebugLoggingEnabled()) {
+            StevesArmyMod.LOGGER.info("[CoverScore] {} type={} q={} prim={} flank={} dist={} firing={} peek={} fight={} blindPen={} TOTAL={}",
+                coverPoint.getPosition(), coverPoint.getType(),
+                String.format("%.2f", coverPoint.getQuality()),
+                String.format("%.2f", primaryProtection * PRIMARY_PROTECTION_WEIGHT),
+                String.format("%.2f", flankingProtection * FLANKING_PROTECTION_WEIGHT),
+                String.format("%.2f", distanceScore * (isAttackMode ? ATTACK_OBJECTIVE_PROGRESS_WEIGHT : DISTANCE_WEIGHT)),
+                String.format("%.2f", firingQuality * FIRING_QUALITY_WEIGHT),
+                String.format("%.2f", peekAngleScore * PEEK_ANGLE_WEIGHT),
+                String.format("%.2f", fightability),
+                String.format("%.2f", blindPenalty),
+                String.format("%.2f", weightedScore));
+        }
         
 return weightedScore;
     }
@@ -481,14 +489,16 @@ return weightedScore;
         Direction threatDir = getDirectionFromVector(threatDirection);
         boolean isProtected = protectedDirs.contains(threatDir);
         
-        StevesArmyMod.LOGGER.info("[PrimaryProtection] coverPos={}, threatDirection=({}, {}, {}), threatDir={}, protectedDirs={}, isProtected={}",
-            coverPos,
-            String.format("%.2f", threatDirection.x),
-            String.format("%.2f", threatDirection.y),
-            String.format("%.2f", threatDirection.z),
-            threatDir,
-            protectedDirs,
-            isProtected);
+        if (com.stevesarmy.entity.ai.CoverTacticalGoal.isDebugLoggingEnabled()) {
+            StevesArmyMod.LOGGER.info("[PrimaryProtection] coverPos={}, threatDirection=({}, {}, {}), threatDir={}, protectedDirs={}, isProtected={}",
+                coverPos,
+                String.format("%.2f", threatDirection.x),
+                String.format("%.2f", threatDirection.y),
+                String.format("%.2f", threatDirection.z),
+                threatDir,
+                protectedDirs,
+                isProtected);
+        }
         
         if (isProtected) {
             return coverPoint.getQuality();
@@ -646,7 +656,9 @@ return weightedScore;
         }
         
         debug.append("  FINAL score=").append(String.format("%.3f", bestPeekScore)).append("\n");
-        StevesArmyMod.LOGGER.info(debug.toString());
+        if (com.stevesarmy.entity.ai.CoverTacticalGoal.isDebugLoggingEnabled()) {
+            StevesArmyMod.LOGGER.info(debug.toString());
+        }
         return bestPeekScore;
     }
     

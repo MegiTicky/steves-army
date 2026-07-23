@@ -27,7 +27,7 @@ public class SpacingHelper {
         if (slot == null) return target;
 
         BlockPos laneTarget = assignment.getLaneTarget(soldier.getUUID(), soldier.position());
-        StevesArmyMod.LOGGER.info("[Spacing] Soldier {} lane={}/{} offset=({:.1f},{:.1f}) formation={} target={}",
+        StevesArmyMod.LOGGER.info("[Spacing] Soldier {} lane={}/{} offset=({}) formation={} target={}",
             soldier.getId(), slot.laneIndex, slot.totalLanes,
             slot.laneOffset, slot.forwardOffset, assignment.getFormation(), laneTarget);
 
