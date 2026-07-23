@@ -4,8 +4,6 @@ import com.stevesarmy.StevesArmyConfig;
 import com.stevesarmy.client.ClientSquadData;
 import com.stevesarmy.client.FireTeamScopeState;
 import com.stevesarmy.client.screen.widget.OpenInventoryButton;
-import com.stevesarmy.client.screen.widget.SquadControlWidget;
-import com.stevesarmy.client.screen.widget.SquadModeWidget;
 import com.stevesarmy.network.NetworkHandler;
 import com.stevesarmy.network.OpenSoldierInventoryMessage;
 import com.stevesarmy.network.RecallPacket;
@@ -26,21 +24,23 @@ public class SquadCommandScreen extends Screen {
     private static final int ROW_HEIGHT = 14;
     private static final int PANEL_LEFT = 8;
     private static final int ROW_START_Y = 22;
+    private static final int FOOTER_HEIGHT = 96;
+    private static final int LIST_FOOTER_GAP = 8;
 
     private static final int COL_HEALTH_WIDTH = 40;
     private static final int COL_FT_WIDTH = 24;
-    private static final int COL_NAME_WIDTH = 80;
+    private static final int COL_NAME_WIDTH = 72;
     private static final int COL_GUN_WIDTH = 80;
     private static final int COL_AMMO_WIDTH = 32;
     private static final int COL_DIST_WIDTH = 28;
     private static final int COL_DISC_WIDTH = 24;
-    private static final int COL_MODE_WIDTH = 50;
     private static final int COL_INV_WIDTH = 58;
     private static final int COL_RECALL_WIDTH = 50;
     private static final int COL_SPACING = 4;
 
     private List<SoldierRow> rows = new ArrayList<>();
     private int teamCount = 2;
+    private int scrollOffset;
 
     private static class SoldierRow {
         final UUID entityId;
@@ -54,11 +54,9 @@ public class SquadCommandScreen extends Screen {
         FireTeam fireTeam;
         double distance;
         int recallTicks;
-        int modeWidgetX;
         int invButtonX;
         int recallButtonX;
 
-        final SquadModeWidget modeWidget;
         final OpenInventoryButton invButton;
 
         SoldierRow(SquadStatusSyncPacket.SoldierStatusEntry entry) {
@@ -73,9 +71,6 @@ public class SquadCommandScreen extends Screen {
             this.fireTeam = entry.getFireTeam();
             this.distance = entry.distance;
             this.recallTicks = entry.recallTicks;
-            this.modeWidget = new SquadModeWidget(entry.getSquadMode(), mode -> {
-                NetworkHandler.INSTANCE.sendToServer(new SetSoldierConfigPacket(entityId, SetSoldierConfigPacket.ConfigType.SQUAD_MODE, mode.ordinal()));
-            });
             this.invButton = new OpenInventoryButton(() -> {
                 NetworkHandler.INSTANCE.sendToServer(new OpenSoldierInventoryMessage(entityIntId));
             });
@@ -91,7 +86,6 @@ public class SquadCommandScreen extends Screen {
             this.fireTeam = entry.getFireTeam();
             this.distance = entry.distance;
             this.recallTicks = entry.recallTicks;
-            this.modeWidget.setMode(entry.getSquadMode());
             this.invButton.setInRange(distance <= 20.0);
         }
     }
@@ -111,6 +105,7 @@ public class SquadCommandScreen extends Screen {
         for (SquadStatusSyncPacket.SoldierStatusEntry entry : ClientSquadData.INSTANCE.getAllEntries()) {
             rows.add(new SoldierRow(entry));
         }
+        clampScrollOffset();
     }
 
     private void updateRows() {
@@ -122,6 +117,7 @@ public class SquadCommandScreen extends Screen {
         for (int i = 0; i < entries.size(); i++) {
             rows.get(i).update(entries.get(i), font);
         }
+        clampScrollOffset();
     }
 
     @Override
@@ -134,15 +130,20 @@ public class SquadCommandScreen extends Screen {
     @Override
     public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
         renderBackground(graphics);
+        buttonHandlers.clear();
 
         graphics.drawString(font, Component.literal("Squad Command"), PANEL_LEFT + 4, 6, 0xFFFFFFFF, false);
 
         int contentX = PANEL_LEFT + 4;
         int contentWidth = width - 2 * PANEL_LEFT - 8;
+        int listBottom = getListBottom();
+        int visibleRows = getVisibleRowCount();
 
-        for (int i = 0; i < rows.size(); i++) {
+        graphics.enableScissor(contentX, ROW_START_Y, contentX + contentWidth, listBottom);
+        int lastVisibleRow = Math.min(rows.size(), scrollOffset + visibleRows);
+        for (int i = scrollOffset; i < lastVisibleRow; i++) {
             SoldierRow row = rows.get(i);
-            int y = ROW_START_Y + i * ROW_HEIGHT;
+            int y = ROW_START_Y + (i - scrollOffset) * ROW_HEIGHT;
 
             int rowBg = (i % 2 == 0) ? 0x44000000 : 0x22000000;
             graphics.fill(contentX, y, contentX + contentWidth, y + ROW_HEIGHT, rowBg);
@@ -170,10 +171,6 @@ public class SquadCommandScreen extends Screen {
             x = drawDiscipline(graphics, x, y, row.discipline);
             x += COL_SPACING;
 
-            row.modeWidgetX = x;
-            row.modeWidget.render(graphics, font, x, y, row.modeWidget.getWidth(), row.modeWidget.getHeight(), mouseX - x, mouseY - y);
-            x += row.modeWidget.getWidth() + COL_SPACING;
-
             row.invButtonX = x;
             row.invButton.render(graphics, font, x, y, row.invButton.getWidth(), row.invButton.getHeight(), mouseX - x, mouseY - y);
             x += row.invButton.getWidth() + COL_SPACING;
@@ -182,8 +179,11 @@ public class SquadCommandScreen extends Screen {
             drawRecallButton(graphics, x, y, row.recallTicks, mouseX, mouseY);
             x += COL_RECALL_WIDTH + COL_SPACING;
         }
+        graphics.disableScissor();
 
-        int footerY = ROW_START_Y + Math.max(rows.size(), 1) * ROW_HEIGHT + 8;
+        drawScrollbar(graphics, contentX + contentWidth - 3, ROW_START_Y, listBottom, visibleRows);
+
+        int footerY = getFooterY();
         graphics.drawString(font, Component.literal("-- Squad Settings --"), contentX, footerY, 0xFFAAAAAA, false);
 
         int btnY = footerY + 12;
@@ -372,6 +372,36 @@ public class SquadCommandScreen extends Screen {
 
     private final List<ButtonHitbox> buttonHandlers = new ArrayList<>();
 
+    private int getFooterY() {
+        return Math.max(ROW_START_Y + ROW_HEIGHT, height - FOOTER_HEIGHT);
+    }
+
+    private int getListBottom() {
+        return Math.max(ROW_START_Y + ROW_HEIGHT, getFooterY() - LIST_FOOTER_GAP);
+    }
+
+    private int getVisibleRowCount() {
+        return Math.max(1, (getListBottom() - ROW_START_Y) / ROW_HEIGHT);
+    }
+
+    private int getMaxScrollOffset() {
+        return Math.max(0, rows.size() - getVisibleRowCount());
+    }
+
+    private void clampScrollOffset() {
+        scrollOffset = Math.max(0, Math.min(scrollOffset, getMaxScrollOffset()));
+    }
+
+    private void drawScrollbar(GuiGraphics graphics, int x, int top, int bottom, int visibleRows) {
+        if (rows.size() <= visibleRows) return;
+
+        int trackHeight = bottom - top;
+        int thumbHeight = Math.max(8, trackHeight * visibleRows / rows.size());
+        int thumbY = top + (trackHeight - thumbHeight) * scrollOffset / getMaxScrollOffset();
+        graphics.fill(x, top, x + 2, bottom, 0x66000000);
+        graphics.fill(x, thumbY, x + 2, thumbY + thumbHeight, 0xFF777777);
+    }
+
     private void sendSquadWideConfig(SetSoldierConfigPacket.ConfigType type, int value) {
         for (SoldierRow row : rows) {
             NetworkHandler.INSTANCE.sendToServer(new SetSoldierConfigPacket(row.entityId, type, value));
@@ -387,15 +417,14 @@ public class SquadCommandScreen extends Screen {
             }
         }
 
-        for (int i = 0; i < rows.size(); i++) {
-            SoldierRow row = rows.get(i);
-            int rowY = ROW_START_Y + i * ROW_HEIGHT;
-
-            if (mouseY >= rowY && mouseY <= rowY + ROW_HEIGHT) {
+        if (mouseY >= ROW_START_Y && mouseY < getListBottom()) {
+            int rowIndex = scrollOffset + (int) ((mouseY - ROW_START_Y) / ROW_HEIGHT);
+            if (rowIndex < rows.size()) {
+                SoldierRow row = rows.get(rowIndex);
+                int rowY = ROW_START_Y + (rowIndex - scrollOffset) * ROW_HEIGHT;
                 int localMouseY = (int)(mouseY - rowY);
 
-                if (tryClickWidget(row.modeWidget, mouseX, row.modeWidgetX, localMouseY)) return true;
-                if (tryClickWidget(row.invButton, mouseX, row.invButtonX, localMouseY)) return true;
+                if (tryClickInventoryButton(row, mouseX, localMouseY)) return true;
                 if (tryClickRecallButton(mouseX, row.recallButtonX, localMouseY, row.entityIntId, row.recallTicks)) return true;
                 return true;
             }
@@ -403,9 +432,8 @@ public class SquadCommandScreen extends Screen {
         return super.mouseClicked(mouseX, mouseY, button);
     }
 
-    private boolean tryClickWidget(SquadControlWidget widget, double mouseX, int widgetX, int localMouseY) {
-        int localMouseX = (int)(mouseX - widgetX);
-        return widget.mouseClicked(localMouseX, localMouseY, 0);
+    private boolean tryClickInventoryButton(SoldierRow row, double mouseX, int localMouseY) {
+        return row.invButton.mouseClicked(mouseX - row.invButtonX, localMouseY, 0);
     }
 
     private boolean tryClickRecallButton(double mouseX, int buttonX, int localMouseY, int soldierId, int recallTicks) {
@@ -415,6 +443,16 @@ public class SquadCommandScreen extends Screen {
             return true;
         }
         return false;
+    }
+
+    @Override
+    public boolean mouseScrolled(double mouseX, double mouseY, double delta) {
+        if (mouseY >= ROW_START_Y && mouseY < getListBottom() && getMaxScrollOffset() > 0) {
+            scrollOffset -= (int) Math.signum(delta);
+            clampScrollOffset();
+            return true;
+        }
+        return super.mouseScrolled(mouseX, mouseY, delta);
     }
 
     @Override
