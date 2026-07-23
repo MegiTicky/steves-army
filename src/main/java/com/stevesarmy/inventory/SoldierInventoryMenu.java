@@ -161,6 +161,7 @@ public class SoldierInventoryMenu extends AbstractContainerMenu {
                 soldier.getSoldierInventory().save()
             );
             NetworkHandler.sendTo(serverPlayer, packet);
+            NetworkHandler.sendToTracking(soldier, packet);
         }
     }
 

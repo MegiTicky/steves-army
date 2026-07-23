@@ -9,9 +9,12 @@ import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.fml.DistExecutor;
 import net.minecraftforge.network.NetworkEvent;
 
+import java.util.HashMap;
+import java.util.Map;
 import java.util.function.Supplier;
 
 public class SyncSoldierInventoryPacket {
+    private static final Map<Integer, CompoundTag> PENDING_INVENTORIES = new HashMap<>();
     private final int soldierId;
     private final CompoundTag inventoryTag;
 
@@ -44,12 +47,25 @@ public class SyncSoldierInventoryPacket {
         
         Entity entity = mc.level.getEntity(msg.soldierId);
         if (entity instanceof SoldierEntity soldier) {
-            if (msg.inventoryTag.contains("Inventory")) {
-                soldier.getSoldierInventory().load(msg.inventoryTag.getCompound("Inventory"));
-            } else {
-                soldier.getSoldierInventory().load(msg.inventoryTag);
-            }
-            soldier.getSoldierInventory().syncArmorToEntity(soldier);
+            applyInventory(soldier, msg.inventoryTag);
+        } else {
+            PENDING_INVENTORIES.put(msg.soldierId, msg.inventoryTag.copy());
         }
+    }
+
+    public static void applyPendingInventory(SoldierEntity soldier) {
+        CompoundTag inventoryTag = PENDING_INVENTORIES.remove(soldier.getId());
+        if (inventoryTag != null) {
+            applyInventory(soldier, inventoryTag);
+        }
+    }
+
+    private static void applyInventory(SoldierEntity soldier, CompoundTag inventoryTag) {
+        if (inventoryTag.contains("Inventory")) {
+            soldier.getSoldierInventory().load(inventoryTag.getCompound("Inventory"));
+        } else {
+            soldier.getSoldierInventory().load(inventoryTag);
+        }
+        soldier.getSoldierInventory().syncArmorToEntity(soldier);
     }
 }

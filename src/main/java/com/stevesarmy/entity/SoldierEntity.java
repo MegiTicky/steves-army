@@ -735,6 +735,10 @@ public class SoldierEntity extends PathfinderMob implements Container {
     @Override
     public void tick() {
         super.tick();
+
+        if (this.level().isClientSide) {
+            com.stevesarmy.network.SyncSoldierInventoryPacket.applyPendingInventory(this);
+        }
         
         if (!this.level().isClientSide) {
             threatAwareness.tick();
