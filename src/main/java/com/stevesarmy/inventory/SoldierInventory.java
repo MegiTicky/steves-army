@@ -21,6 +21,7 @@ public class SoldierInventory implements Container {
     public static final int ARMOR_CHEST = 1;
     public static final int ARMOR_LEGS = 2;
     public static final int ARMOR_FEET = 3;
+    public static final int SLOT_OFF_HAND = 4;
     public static final int SLOT_MAIN_HAND = 5;
     public static final int SLOT_GENERAL_START = 6;
 
@@ -44,6 +45,7 @@ public class SoldierInventory implements Container {
         for (int i = 0; i < 4; i++) {
             soldier.setItemSlot(ARMOR_SLOTS[i], items.get(i));
         }
+        soldier.setItemSlot(EquipmentSlot.OFFHAND, items.get(SLOT_OFF_HAND));
         soldier.setItemSlot(EquipmentSlot.MAINHAND, items.get(SLOT_MAIN_HAND));
     }
 
@@ -54,6 +56,11 @@ public class SoldierInventory implements Container {
             if (!ItemStack.matches(currentInSlot, entityItem)) {
                 items.set(i, entityItem.copy());
             }
+        }
+        ItemStack currentOffhand = items.get(SLOT_OFF_HAND);
+        ItemStack entityOffhand = soldier.getOffhandItem();
+        if (!ItemStack.matches(currentOffhand, entityOffhand)) {
+            items.set(SLOT_OFF_HAND, entityOffhand.copy());
         }
         ItemStack currentMainHand = items.get(SLOT_MAIN_HAND);
         ItemStack entityMainHand = soldier.getMainHandItem();
@@ -144,6 +151,7 @@ public class SoldierInventory implements Container {
     }
 
     public void load(CompoundTag tag) {
+        items.clear();
         ListTag list = tag.getList("Items", 10);
         for (int i = 0; i < list.size(); i++) {
             CompoundTag itemTag = list.getCompound(i);

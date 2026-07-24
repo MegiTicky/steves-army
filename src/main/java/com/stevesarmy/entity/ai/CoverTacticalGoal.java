@@ -376,6 +376,7 @@ public class CoverTacticalGoal extends Goal {
     
     @Override
     public boolean canUse() {
+        if (soldier.isHealing()) return false;
         if (cooldown > 0) {
             cooldown--;
             return false;
@@ -446,7 +447,7 @@ public class CoverTacticalGoal extends Goal {
     
     @Override
     public boolean canContinueToUse() {
-        if (!soldier.isAlive()) return false;
+        if (!soldier.isAlive() || soldier.isHealing()) return false;
         
         CoverBehaviorManager.CoverState state = getCoverManager().getState();
         
@@ -506,6 +507,9 @@ public class CoverTacticalGoal extends Goal {
     
     @Override
     public void stop() {
+        if (soldier.isHealing()) {
+            return;
+        }
         CoverBehaviorManager.CoverState state = getCoverManager().getState();
         
         // Don't clear cover if we're in ATTACK mode - preserve state across interruptions

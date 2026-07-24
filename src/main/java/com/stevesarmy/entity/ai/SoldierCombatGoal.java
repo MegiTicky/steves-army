@@ -132,7 +132,7 @@ public class SoldierCombatGoal extends Goal {
 
     @Override
     public boolean canUse() {
-        if (!soldier.isAlive()) return false;
+        if (!soldier.isAlive() || soldier.isHealing()) return false;
 
         if (soldier.hasValidPingThreatPos() || soldier.hasValidPingSuppressPos()) {
             return true;
@@ -152,7 +152,7 @@ public class SoldierCombatGoal extends Goal {
 
     @Override
     public boolean canContinueToUse() {
-        if (!soldier.isAlive()) return false;
+        if (!soldier.isAlive() || soldier.isHealing()) return false;
 
         if (target != null && target.isAlive() && TargetAcquisition.isValidTarget(soldier, target)) {
             if (TargetAcquisition.hasLineOfSight(soldier, target)) {
@@ -241,6 +241,7 @@ public class SoldierCombatGoal extends Goal {
 
     @Override
     public void tick() {
+        if (soldier.isHealing()) return;
         threatTracker.update(soldier);
         
         if (soldier.hasValidPingThreatPos()) {

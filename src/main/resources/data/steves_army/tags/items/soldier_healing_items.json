@@ -1,0 +1,8 @@
+{
+  "replace": false,
+  "values": [
+    {"id": "combatgear:bandages", "required": false},
+    {"id": "combatgear:bandagerealistic", "required": false},
+    {"id": "combatgear:medpack", "required": false}
+  ]
+}

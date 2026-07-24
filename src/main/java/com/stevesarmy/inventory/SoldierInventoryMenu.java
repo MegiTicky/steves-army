@@ -45,6 +45,7 @@ public class SoldierInventoryMenu extends AbstractContainerMenu {
         this.soldier = soldier;
 
         addArmorSlots();
+        addOffhandSlot();
         addMainHandSlot();
         addGeneralSlots();
         addPlayerInventorySlots(playerInventory);
@@ -94,6 +95,18 @@ public class SoldierInventoryMenu extends AbstractContainerMenu {
                 super.set(stack);
                 if (soldier != null) {
                     soldier.setItemSlot(EquipmentSlot.MAINHAND, stack);
+                }
+            }
+        });
+    }
+
+    private void addOffhandSlot() {
+        this.addSlot(new Slot(soldierInventory, SoldierInventory.SLOT_OFF_HAND, 44, 90) {
+            @Override
+            public void set(ItemStack stack) {
+                super.set(stack);
+                if (soldier != null) {
+                    soldier.setItemSlot(EquipmentSlot.OFFHAND, stack);
                 }
             }
         });
@@ -170,12 +183,15 @@ public class SoldierInventoryMenu extends AbstractContainerMenu {
     }
 
     public ItemStack getSoldierInventoryItem(int inventorySlot) {
-        if (inventorySlot == SoldierInventory.SLOT_MAIN_HAND) {
+        if (inventorySlot == SoldierInventory.SLOT_OFF_HAND) {
             return this.getSlot(4).getItem();
+        }
+        if (inventorySlot == SoldierInventory.SLOT_MAIN_HAND) {
+            return this.getSlot(5).getItem();
         }
         if (inventorySlot >= SoldierInventory.SLOT_GENERAL_START
             && inventorySlot < SoldierInventory.INVENTORY_SIZE) {
-            return this.getSlot(5 + inventorySlot - SoldierInventory.SLOT_GENERAL_START).getItem();
+            return this.getSlot(6 + inventorySlot - SoldierInventory.SLOT_GENERAL_START).getItem();
         }
         return ItemStack.EMPTY;
     }

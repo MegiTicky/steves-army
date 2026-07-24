@@ -13,6 +13,7 @@ import com.stevesarmy.entity.ai.SoldierCombatGoal;
 import com.stevesarmy.entity.ai.SoldierFollowOwnerGoal;
 import com.stevesarmy.entity.ai.SoldierHoleRescueGoal;
 import com.stevesarmy.entity.ai.SoldierHoldPositionGoal;
+import com.stevesarmy.entity.ai.SoldierHealGoal;
 import com.stevesarmy.entity.ai.SoldierMoveToPingGoal;
 import com.stevesarmy.entity.ai.SoldierStrollGoal;
 import com.stevesarmy.entity.ai.CoverTacticalGoal;
@@ -150,6 +151,8 @@ public class SoldierEntity extends PathfinderMob implements Container {
     private CoverTacticalGoal coverTacticalGoal;
     private final ThreatAwareness threatAwareness;
     
+    private boolean healing = false;
+
     private BlockPos pingMoveTarget = null;
     private long pingMoveTimestamp = 0;
     private static final long PING_MOVE_MEMORY_MS = 15000;
@@ -206,6 +209,14 @@ public class SoldierEntity extends PathfinderMob implements Container {
     public boolean hasCloseRangeTarget() {
         if (this.getTarget() == null || !this.getTarget().isAlive()) return false;
         return this.distanceToSqr(this.getTarget()) < CQB_RANGE * CQB_RANGE;
+    }
+
+    public boolean isHealing() {
+        return healing;
+    }
+
+    public void setHealing(boolean healing) {
+        this.healing = healing;
     }
 
     public SoldierEntity(EntityType<? extends SoldierEntity> type, Level level) {
@@ -280,6 +291,7 @@ public class SoldierEntity extends PathfinderMob implements Container {
         this.goalSelector.addGoal(0, new SoldierHoleRescueGoal(this));
         this.goalSelector.addGoal(0, new FloatGoal(this));
         this.goalSelector.addGoal(1, new OpenDoorGoal(this, true));
+        this.goalSelector.addGoal(1, new SoldierHealGoal(this));
         this.goalSelector.addGoal(1, new SoldierMoveToPingGoal(this));
         this.goalSelector.addGoal(1, new SoldierAttackGoal(this));
         this.goalSelector.addGoal(2, (this.coverTacticalGoal = new CoverTacticalGoal(this)));
@@ -712,6 +724,8 @@ public class SoldierEntity extends PathfinderMob implements Container {
         try {
             if (slot == EquipmentSlot.MAINHAND) {
                 inventory.setItem(SoldierInventory.SLOT_MAIN_HAND, stack.copy());
+            } else if (slot == EquipmentSlot.OFFHAND) {
+                inventory.setItem(SoldierInventory.SLOT_OFF_HAND, stack.copy());
             } else if (slot.getType() == EquipmentSlot.Type.ARMOR) {
                 int invSlot;
                 switch (slot) {
@@ -855,6 +869,9 @@ public class SoldierEntity extends PathfinderMob implements Container {
         }
 
         if (result && !this.level().isClientSide) {
+            if (isHealing()) {
+                stopUsingItem();
+            }
             if (isRecalling()) {
                 cancelRecall();
             }
