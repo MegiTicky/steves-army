@@ -27,8 +27,6 @@ public class StevesArmyConfig {
 
     public static final ForgeConfigSpec.DoubleValue SPACING_DISTANCE;
 
-    public static final ForgeConfigSpec.ConfigValue<java.util.List<? extends String>> HAZARD_BLOCKS;
-
     static {
         BUILDER.push("aim_quality");
         
@@ -161,17 +159,6 @@ BUILDER.pop();
 
         BUILDER.pop();
 
-        BUILDER.push("hazards");
-
-        HAZARD_BLOCKS = BUILDER
-            .comment("Block IDs that soldiers treat as hazardous and will avoid.",
-                     "Soldiers will not pathfind through these blocks or take cover adjacent to them.",
-                     "Example: [\"createaddition:barbed_wire\", \"create_tank_defenses:military_barbed_wire\"]",
-                     "Default: [] (empty list)")
-            .defineListAllowEmpty("hazardBlocks", java.util.List.of(), s -> s instanceof String);
-
-        BUILDER.pop();
-
         SPEC = BUILDER.build();
     }
     
@@ -241,9 +228,5 @@ BUILDER.pop();
 
     public static double getSpacingDistance() {
         return SPACING_DISTANCE.get();
-    }
-
-    public static java.util.List<? extends String> getHazardBlocks() {
-        return HAZARD_BLOCKS.get();
     }
 }

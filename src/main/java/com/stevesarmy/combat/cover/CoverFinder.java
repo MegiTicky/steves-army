@@ -900,19 +900,12 @@ return qualityScore + shootBonus - distancePenalty;
             return false;
         }
         
-        // Reject if the standing position itself is a hazard block
-        if (com.stevesarmy.util.HazardBlockHelper.isHazardBlock(standingState)) {
+        // Reject if a soldier's bounding box at this position would overlap a hazard block
+        net.minecraft.world.phys.AABB soldierBb = new net.minecraft.world.phys.AABB(
+            pos.getX() + 0.2, pos.getY(), pos.getZ() + 0.2,
+            pos.getX() + 0.8, pos.getY() + 1.8, pos.getZ() + 0.8);
+        if (com.stevesarmy.util.HazardBlockHelper.boundingBoxOverlapsHazard(level, soldierBb)) {
             return false;
-        }
-        
-        // Reject if any adjacent block (eye-level or ground) is a hazard block
-        for (Direction dir : Direction.Plane.HORIZONTAL) {
-            if (com.stevesarmy.util.HazardBlockHelper.isHazardBlock(level.getBlockState(pos.relative(dir)))) {
-                return false;
-            }
-            if (com.stevesarmy.util.HazardBlockHelper.isHazardBlock(level.getBlockState(pos.relative(dir).above()))) {
-                return false;
-            }
         }
         
         boolean hasOpenEyeLevel = false;

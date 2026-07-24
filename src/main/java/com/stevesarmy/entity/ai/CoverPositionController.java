@@ -1,6 +1,7 @@
 package com.stevesarmy.entity.ai;
 
 import com.stevesarmy.StevesArmyMod;
+import com.stevesarmy.util.HazardBlockHelper;
 import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.ai.control.MoveControl;
 import net.minecraft.world.phys.Vec3;
@@ -34,6 +35,18 @@ public class CoverPositionController extends MoveControl {
     }
 
     public void moveTo(Vec3 pos, double tolerance, double speed, String source, String reason) {
+        // Reject movement that would enter a hazard, but allow escape if already inside one
+        if (HazardBlockHelper.sweptPathCrossesHazard(this.mob, this.mob.position(), pos)) {
+            boolean alreadyInside = HazardBlockHelper.boundingBoxOverlapsHazard(this.mob.level(), this.mob.getBoundingBox());
+            if (!alreadyInside) {
+                StevesArmyMod.LOGGER.info("[MoveCtl] Soldier {} moveTo to ({}, {}, {}) blocked by hazard",
+                    ((net.minecraft.world.entity.LivingEntity)this.mob).getId(),
+                    pos.x, pos.y, pos.z);
+                this.lastResult = MovementResult.FAILED;
+                return;
+            }
+        }
+
         this.targetPos = pos;
         this.tolerance = tolerance;
         this.targetSpeed = speed;

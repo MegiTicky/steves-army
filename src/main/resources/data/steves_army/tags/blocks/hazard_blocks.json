@@ -1,0 +1,117 @@
+{
+  "replace": false,
+  "values": [
+    {
+      "id": "createaddition:barbed_wire",
+      "required": false
+    },
+    {
+      "id": "create_tank_defenses:ashes_barbed_wire",
+      "required": false
+    },
+    {
+      "id": "create_tank_defenses:caramel_barbed_wire",
+      "required": false
+    },
+    {
+      "id": "create_tank_defenses:cell_barbed_wire",
+      "required": false
+    },
+    {
+      "id": "create_tank_defenses:ceramic_barbed_wire",
+      "required": false
+    },
+    {
+      "id": "create_tank_defenses:charcoal_barbed_wire",
+      "required": false
+    },
+    {
+      "id": "create_tank_defenses:cream_barbed_wire",
+      "required": false
+    },
+    {
+      "id": "create_tank_defenses:crimson_barbed_wire",
+      "required": false
+    },
+    {
+      "id": "create_tank_defenses:desert_barbed_wire",
+      "required": false
+    },
+    {
+      "id": "create_tank_defenses:dusty_barbed_wire",
+      "required": false
+    },
+    {
+      "id": "create_tank_defenses:foggy_barbed_wire",
+      "required": false
+    },
+    {
+      "id": "create_tank_defenses:forest_barbed_wire",
+      "required": false
+    },
+    {
+      "id": "create_tank_defenses:mesa_barbed_wire",
+      "required": false
+    },
+    {
+      "id": "create_tank_defenses:military_barbed_wire",
+      "required": false
+    },
+    {
+      "id": "create_tank_defenses:morning_barbed_wire",
+      "required": false
+    },
+    {
+      "id": "create_tank_defenses:moss_barbed_wire",
+      "required": false
+    },
+    {
+      "id": "create_tank_defenses:muddy_barbed_wire",
+      "required": false
+    },
+    {
+      "id": "create_tank_defenses:ocean_barbed_wire",
+      "required": false
+    },
+    {
+      "id": "create_tank_defenses:overgrown_barbed_wire",
+      "required": false
+    },
+    {
+      "id": "create_tank_defenses:purity_barbed_wire",
+      "required": false
+    },
+    {
+      "id": "create_tank_defenses:river_barbed_wire",
+      "required": false
+    },
+    {
+      "id": "create_tank_defenses:sea_barbed_wire",
+      "required": false
+    },
+    {
+      "id": "create_tank_defenses:snow_barbed_wire",
+      "required": false
+    },
+    {
+      "id": "create_tank_defenses:sunflower_barbed_wire",
+      "required": false
+    },
+    {
+      "id": "create_tank_defenses:swamp_barbed_wire",
+      "required": false
+    },
+    {
+      "id": "create_tank_defenses:vengeful_barbed_wire",
+      "required": false
+    },
+    {
+      "id": "create_tank_defenses:washed_barbed_wire",
+      "required": false
+    },
+    {
+      "id": "create_tank_defenses:woods_barbed_wire",
+      "required": false
+    }
+  ]
+}
