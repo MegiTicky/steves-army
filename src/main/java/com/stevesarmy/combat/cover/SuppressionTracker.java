@@ -13,6 +13,10 @@ public class SuppressionTracker {
     private long lastBurstTime = 0;
     private int burstCount = 0;
 
+    // Explosion burst damping
+    private long lastExplosionTime = 0;
+    private int explosionBurstCount = 0;
+
     private int tickCounter = 0;
     private boolean wasSuppressed = false;
     private boolean wasPinned = false;
@@ -90,6 +94,50 @@ public class SuppressionTracker {
         }
     }
 
+    public void onExplosion(Vec3 explosionPosition, Vec3 soldierPosition, float exposure) {
+        float radius = com.stevesarmy.StevesArmyConfig.getExplosionSuppressionRadius();
+        float strength = com.stevesarmy.StevesArmyConfig.getExplosionSuppressionStrength();
+        float shelterFloor = com.stevesarmy.StevesArmyConfig.getExplosionShelterFloor();
+        int burstWindowMs = com.stevesarmy.StevesArmyConfig.getExplosionBurstWindowMs();
+        float burstMultiplier = com.stevesarmy.StevesArmyConfig.getExplosionBurstMultiplier();
+
+        double distance = soldierPosition.distanceTo(explosionPosition);
+        if (distance > radius) return;
+
+        float distanceFactor = (float)(1.0 - distance / radius);
+
+        float effectiveExposure = shelterFloor + exposure * (1.0f - shelterFloor);
+
+        float add = strength * distanceFactor * effectiveExposure;
+
+        // Explosion burst damping
+        long now = System.currentTimeMillis();
+        float burstFactor = 1.0f;
+        if (now - lastExplosionTime < burstWindowMs) {
+            explosionBurstCount++;
+            if (explosionBurstCount > 1) {
+                burstFactor = burstMultiplier;
+            }
+        } else {
+            explosionBurstCount = 1;
+        }
+        lastExplosionTime = now;
+        add *= burstFactor;
+
+        suppressionLevel = Math.min(MAX_SUPPRESSION, suppressionLevel + add);
+        if (suppressionLevel > peakSuppression) peakSuppression = suppressionLevel;
+        lastSuppressionTime = now;
+
+        if (debugLog()) {
+            StevesArmyMod.LOGGER.info("[Suppression] explosion: dist=" + String.format("%.1f", distance)
+                + ", exposure=" + String.format("%.2f", exposure)
+                + ", effExposure=" + String.format("%.2f", effectiveExposure)
+                + ", distFactor=" + String.format("%.2f", distanceFactor)
+                + ", burstFactor=" + String.format("%.2f", burstFactor)
+                + ", +" + String.format("%.2f", add) + " sup -> " + String.format("%.2f", suppressionLevel));
+        }
+    }
+
     public void tick(boolean inCover) {
         float oldLevel = suppressionLevel;
         float decayMultiplier = inCover ? 2.0f : 1.0f;
@@ -128,6 +176,7 @@ public class SuppressionTracker {
         lastSuppressionTime = 0;
         nearMissCount = 0;
         burstCount = 0;
+        explosionBurstCount = 0;
     }
 
     public boolean isSuppressed() {

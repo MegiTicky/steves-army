@@ -422,6 +422,10 @@ if (currentCover != null) {
         }
         suppressionTracker.onTakeDamage();
     }
+
+    public void onExplosion(Vec3 explosionPosition, float exposure) {
+        suppressionTracker.onExplosion(explosionPosition, soldier.position(), exposure);
+    }
     
     public void tickSuppression(boolean inCover) {
         suppressionTracker.tick(inCover);

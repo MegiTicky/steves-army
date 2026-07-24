@@ -27,6 +27,12 @@ public class StevesArmyConfig {
 
     public static final ForgeConfigSpec.DoubleValue SPACING_DISTANCE;
 
+    public static final ForgeConfigSpec.DoubleValue EXPLOSION_SUPPRESSION_STRENGTH;
+    public static final ForgeConfigSpec.DoubleValue EXPLOSION_SUPPRESSION_RADIUS;
+    public static final ForgeConfigSpec.DoubleValue EXPLOSION_SHELTER_FLOOR;
+    public static final ForgeConfigSpec.IntValue EXPLOSION_BURST_WINDOW_MS;
+    public static final ForgeConfigSpec.DoubleValue EXPLOSION_BURST_MULTIPLIER;
+
     static {
         BUILDER.push("aim_quality");
         
@@ -159,6 +165,40 @@ BUILDER.pop();
 
         BUILDER.pop();
 
+        BUILDER.push("explosion_suppression");
+
+        EXPLOSION_SUPPRESSION_STRENGTH = BUILDER
+            .comment("Base suppression added by an explosion at distance 0 with full exposure (0.0 to 1.0).",
+                     "Default: 0.45")
+            .defineInRange("explosionSuppressionStrength", 0.45, 0.0, 1.0);
+
+        EXPLOSION_SUPPRESSION_RADIUS = BUILDER
+            .comment("Maximum radius in blocks for explosion suppression effects.",
+                     "Soldiers beyond this distance receive no blast suppression.",
+                     "Default: 8.0 blocks")
+            .defineInRange("explosionSuppressionRadius", 8.0, 1.0, 64.0);
+
+        EXPLOSION_SHELTER_FLOOR = BUILDER
+            .comment("Minimum exposure factor for soldiers in full cover (0.0 to 1.0).",
+                     "0.0 = complete cover blocks all blast suppression.",
+                     "0.15 = even fully covered soldiers feel some blast pressure.",
+                     "Default: 0.15")
+            .defineInRange("explosionShelterFloor", 0.15, 0.0, 1.0);
+
+        EXPLOSION_BURST_WINDOW_MS = BUILDER
+            .comment("Time window in milliseconds for explosion burst damping.",
+                     "Explosions within this window get reduced suppression.",
+                     "Default: 250 ms")
+            .defineInRange("explosionBurstWindowMs", 250, 50, 2000);
+
+        EXPLOSION_BURST_MULTIPLIER = BUILDER
+            .comment("Suppression multiplier for subsequent explosions within the burst window (0.0 to 1.0).",
+                     "First explosion = 1.0x, subsequent = this value.",
+                     "Default: 0.35")
+            .defineInRange("explosionBurstMultiplier", 0.35, 0.0, 1.0);
+
+        BUILDER.pop();
+
         SPEC = BUILDER.build();
     }
     
@@ -228,5 +268,25 @@ BUILDER.pop();
 
     public static double getSpacingDistance() {
         return SPACING_DISTANCE.get();
+    }
+
+    public static float getExplosionSuppressionStrength() {
+        return EXPLOSION_SUPPRESSION_STRENGTH.get().floatValue();
+    }
+
+    public static float getExplosionSuppressionRadius() {
+        return EXPLOSION_SUPPRESSION_RADIUS.get().floatValue();
+    }
+
+    public static float getExplosionShelterFloor() {
+        return EXPLOSION_SHELTER_FLOOR.get().floatValue();
+    }
+
+    public static int getExplosionBurstWindowMs() {
+        return EXPLOSION_BURST_WINDOW_MS.get();
+    }
+
+    public static float getExplosionBurstMultiplier() {
+        return EXPLOSION_BURST_MULTIPLIER.get().floatValue();
     }
 }
