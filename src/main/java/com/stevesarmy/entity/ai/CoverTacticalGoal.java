@@ -2219,6 +2219,21 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
     private Vec3 getCoverStandingPosition(BlockPos coverPos) {
         return getCoverStandingPositionStatic(coverPos);
     }
+
+    private boolean pathCrossesHazard(net.minecraft.world.level.pathfinder.Path path) {
+        for (int i = 0; i < path.getNodeCount(); i++) {
+            net.minecraft.world.level.pathfinder.Node node = path.getNode(i);
+            BlockPos nodePos = node.asBlockPos();
+            if (com.stevesarmy.util.HazardBlockHelper.isHazardBlock(soldier.level(), nodePos)) {
+                if (com.stevesarmy.entity.ai.CoverTacticalGoal.debugLoggingEnabled) {
+                    com.stevesarmy.StevesArmyMod.LOGGER.info("[PathDebug] Soldier {} path node {} at {} is a hazard block, rejecting path",
+                        soldier.getId(), i, nodePos);
+                }
+                return true;
+            }
+        }
+        return false;
+    }
     
     private void moveToCover(CoverPoint cover) {
         BlockPos wallPos = cover.getPosition();
@@ -2237,10 +2252,16 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
         
         if (path != null) {
             if (path.canReach()) {
-                isReachable = true;
-                if (debugLoggingEnabled) {
-                    StevesArmyMod.LOGGER.info("[PathDebug] Soldier {} at {} path REACHED standing {} (canReach=true)", 
-                        soldier.getId(), soldier.blockPosition(), standingPos);
+                // Reject the path if any node along it is a hazard block
+                if (pathCrossesHazard(path)) {
+                    failReason = "path crosses hazard block";
+                    isReachable = false;
+                } else {
+                    isReachable = true;
+                    if (debugLoggingEnabled) {
+                        StevesArmyMod.LOGGER.info("[PathDebug] Soldier {} at {} path REACHED standing {} (canReach=true)", 
+                            soldier.getId(), soldier.blockPosition(), standingPos);
+                    }
                 }
             } else if (path.getNodeCount() > 0) {
                 net.minecraft.world.level.pathfinder.Node endNode = path.getNode(path.getNodeCount() - 1);

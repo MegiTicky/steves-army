@@ -900,6 +900,21 @@ return qualityScore + shootBonus - distancePenalty;
             return false;
         }
         
+        // Reject if the standing position itself is a hazard block
+        if (com.stevesarmy.util.HazardBlockHelper.isHazardBlock(standingState)) {
+            return false;
+        }
+        
+        // Reject if any adjacent block (eye-level or ground) is a hazard block
+        for (Direction dir : Direction.Plane.HORIZONTAL) {
+            if (com.stevesarmy.util.HazardBlockHelper.isHazardBlock(level.getBlockState(pos.relative(dir)))) {
+                return false;
+            }
+            if (com.stevesarmy.util.HazardBlockHelper.isHazardBlock(level.getBlockState(pos.relative(dir).above()))) {
+                return false;
+            }
+        }
+        
         boolean hasOpenEyeLevel = false;
         for (Direction dir : Direction.Plane.HORIZONTAL) {
             if (level.getBlockState(pos.relative(dir).above()).isAir()) {
