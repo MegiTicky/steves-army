@@ -66,6 +66,23 @@ public class SuppressionTracker {
         }
     }
 
+    /**
+     * CBC near-miss. A large-caliber round passing within 3 blocks is
+     * an extreme event — always drives suppression to MAX_SUPPRESSION (1.0).
+     * No distance scaling, no burst damping, no speed multiplier.
+     */
+    public void onCbcNearMiss(LivingEntity soldier) {
+        suppressionLevel = MAX_SUPPRESSION;
+        peakSuppression = MAX_SUPPRESSION;
+        lastSuppressionTime = System.currentTimeMillis();
+        nearMissCount++;
+
+        if (debugLog()) {
+            StevesArmyMod.LOGGER.info("[Suppression] Soldier {} CBC near miss: suppression set to 1.0",
+                soldier.getId());
+        }
+    }
+
     public void onIncomingFire(LivingEntity shooter) {
         onIncomingFire(shooter, 1.0f);
     }

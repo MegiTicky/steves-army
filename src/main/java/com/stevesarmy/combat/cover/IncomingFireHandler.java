@@ -12,6 +12,7 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.projectile.Projectile;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
@@ -21,9 +22,13 @@ import net.minecraftforge.event.entity.living.LivingHurtEvent;
 import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
+import net.minecraftforge.fml.ModList;
 
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Iterator;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import javax.annotation.Nullable;
 
@@ -33,6 +38,13 @@ public class IncomingFireHandler {
     private static final double NEAR_MISS_THRESHOLD = 3.0;
 
     private static final Map<Entity, BulletSnapshot> trackedBullets = new HashMap<>();
+
+    // CBC projectile tracking
+    private static final String CBC_PACKAGE = "rbasamoyai.createbigcannons.munitions.";
+    private static final String CBC_CANNON_PROJECTILE = CBC_PACKAGE + "AbstractCannonProjectile";
+    private static final Map<Entity, BulletSnapshot> trackedCbcProjectiles = new HashMap<>();
+    private static boolean cbcChecked = false;
+    private static boolean cbcLoaded = false;
 
     private record BulletSnapshot(Vec3 pos, Vec3 delta) {}
 
@@ -44,8 +56,11 @@ public class IncomingFireHandler {
 
     @SubscribeEvent
     public static void onEntityJoin(EntityJoinLevelEvent event) {
-        if (event.getEntity().getType() == EntityKineticBullet.TYPE) {
-            trackedBullets.put(event.getEntity(), null);
+        Entity entity = event.getEntity();
+        if (entity.getType() == EntityKineticBullet.TYPE) {
+            trackedBullets.put(entity, null);
+        } else if (isCbcLoaded() && isCbcProjectile(entity)) {
+            trackedCbcProjectiles.put(entity, null);
         }
     }
 
@@ -63,7 +78,7 @@ public class IncomingFireHandler {
             if (!bullet.isAlive()) return true;
 
             LivingEntity shooter = null;
-            if (bullet instanceof net.minecraft.world.entity.projectile.Projectile proj) {
+            if (bullet instanceof Projectile proj) {
                 shooter = proj.getOwner() instanceof LivingEntity owner ? owner : null;
             }
 
@@ -80,6 +95,40 @@ public class IncomingFireHandler {
             entry.setValue(new BulletSnapshot(currentPos, currentDelta));
             return false;
         });
+
+        trackedCbcProjectiles.entrySet().removeIf(entry -> {
+            Entity projectile = entry.getKey();
+            if (!projectile.isAlive()) return true;
+
+            LivingEntity shooter = null;
+            if (projectile instanceof Projectile proj) {
+                shooter = proj.getOwner() instanceof LivingEntity owner ? owner : null;
+            }
+
+            BulletSnapshot prev = entry.getValue();
+            Vec3 currentPos = projectile.position();
+            Vec3 currentDelta = projectile.getDeltaMovement();
+            float speed = (float)currentDelta.length();
+
+            if (prev != null) {
+                // Normal two-tick segment check
+                Vec3 prevEnd = prev.pos.add(prev.delta);
+                checkNearMissCbcSegment(projectile.level(), prev.pos, prevEnd, speed * 2.0f, shooter);
+            } else {
+                // First-tick: use currentPos - delta as pseudo-departure point
+                Vec3 estimatedPrevPos = currentPos.subtract(currentDelta);
+                double segmentLen = currentDelta.length();
+                checkNearMissCbcSegment(projectile.level(), estimatedPrevPos, currentPos, speed * 2.0f, shooter);
+                if (debugLog()) {
+                    StevesArmyMod.LOGGER.info("[CBCSuppressionTrace] first-tick segment for {}: start={}, end={}, segmentLen={}",
+                        projectile.getClass().getSimpleName(),
+                        estimatedPrevPos, currentPos, String.format("%.2f", segmentLen));
+                }
+            }
+
+            entry.setValue(new BulletSnapshot(currentPos, currentDelta));
+            return false;
+        });
     }
 
     public static void checkNearMissLineSegment(Level level, Vec3 start, Vec3 end) {
@@ -91,9 +140,29 @@ public class IncomingFireHandler {
     }
 
     public static void checkNearMissLineSegment(Level level, Vec3 start, Vec3 end, float bulletSpeed, @Nullable LivingEntity shooter) {
+        checkNearMissGeneric(level, start, end, bulletSpeed, shooter, false);
+    }
+
+    /**
+     * CBC near-miss check. Uses the same line-segment geometry as
+     * checkNearMissLineSegment, but always applies enough suppression to
+     * reach the suppressed threshold (0.5) in one hit. A CBC round passing
+     * within 3 blocks is an intense, close-quarters event that should
+     * fully suppress the soldier.
+     */
+    public static void checkNearMissCbcSegment(Level level, Vec3 start, Vec3 end, float bulletSpeed, @Nullable LivingEntity shooter) {
+        checkNearMissGeneric(level, start, end, bulletSpeed, shooter, true);
+    }
+
+    private static void checkNearMissGeneric(Level level, Vec3 start, Vec3 end, float bulletSpeed, @Nullable LivingEntity shooter, boolean isCbc) {
         Vec3 segment = end.subtract(start);
         double segmentLenSq = segment.lengthSqr();
-        if (segmentLenSq < 0.01) return;
+        if (segmentLenSq < 0.01) {
+            if (isCbc && debugLog()) {
+                StevesArmyMod.LOGGER.info("[CBCSuppressionTrace] segment too short, skipping");
+            }
+            return;
+        }
 
         AABB searchBox = new AABB(
             Math.min(start.x, end.x) - NEAR_MISS_THRESHOLD,
@@ -104,6 +173,7 @@ public class IncomingFireHandler {
             Math.max(start.z, end.z) + NEAR_MISS_THRESHOLD
         );
 
+        int matchCount = 0;
         for (SoldierEntity soldier : level.getEntitiesOfClass(SoldierEntity.class, searchBox)) {
             if (shooter != null && soldier == shooter) continue;
 
@@ -116,8 +186,23 @@ public class IncomingFireHandler {
             Vec3 closestPoint = start.add(segment.scale(t));
 
             if (soldier.position().distanceTo(closestPoint) < NEAR_MISS_THRESHOLD) {
-                coverManager.onNearMiss(closestPoint, soldier, bulletSpeed, shooter);
+                if (isCbc) {
+                    coverManager.onCbcNearMiss(closestPoint, soldier, shooter);
+                    if (debugLog()) {
+                        StevesArmyMod.LOGGER.info("[CBCSuppressionTrace] SUPPRESSED soldier {} at dist={}",
+                            soldier.getId(),
+                            String.format("%.2f", soldier.position().distanceTo(closestPoint)));
+                    }
+                } else {
+                    coverManager.onNearMiss(closestPoint, soldier, bulletSpeed, shooter);
+                }
+                matchCount++;
             }
+        }
+
+        if (isCbc && debugLog()) {
+            StevesArmyMod.LOGGER.info("[CBCSuppressionTrace] segment check: start={} end={}, matched {} soldiers",
+                start, end, matchCount);
         }
     }
 
@@ -170,5 +255,34 @@ public class IncomingFireHandler {
         if (distance < NEAR_MISS_THRESHOLD) {
             coverManager.onNearMiss(bulletPosition, soldier);
         }
+    }
+
+    private static boolean isCbcLoaded() {
+        if (!cbcChecked) {
+            cbcLoaded = ModList.get().isLoaded("createbigcannons");
+            cbcChecked = true;
+        }
+        return cbcLoaded;
+    }
+
+    private static boolean isCbcProjectile(Entity entity) {
+        String name = entity.getClass().getName();
+        return name.startsWith(CBC_PACKAGE)
+            && entity instanceof Projectile
+            && !name.contains("PrimedPropellant")
+            && !name.contains("GasCloud")
+            && !name.contains("SmokeEmitter")
+            && !name.contains("Burst")
+            && !name.contains("Renderer");
+    }
+
+    public static void onCbcProjectileSpawn(Entity entity) {
+        if (isCbcLoaded() && isCbcProjectile(entity)) {
+            trackedCbcProjectiles.put(entity, null);
+        }
+    }
+
+    private static boolean debugLog() {
+        return com.stevesarmy.entity.ai.CoverTacticalGoal.isDebugLoggingEnabled();
     }
 }

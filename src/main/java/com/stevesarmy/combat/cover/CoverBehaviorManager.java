@@ -398,6 +398,16 @@ if (currentCover != null) {
         suppressionTracker.onNearMiss(bulletPath, soldier, bulletSpeed);
     }
 
+    /**
+     * CBC near-miss: always drives suppression to 1.0.
+     */
+    public void onCbcNearMiss(net.minecraft.world.phys.Vec3 bulletPath, net.minecraft.world.entity.LivingEntity soldier, @javax.annotation.Nullable net.minecraft.world.entity.LivingEntity shooter) {
+        if (shooter != null && soldier instanceof com.stevesarmy.entity.SoldierEntity s && s.isFriendlyTo(shooter)) {
+            return;
+        }
+        suppressionTracker.onCbcNearMiss(soldier);
+    }
+
     public void onIncomingFire(net.minecraft.world.entity.LivingEntity shooter) {
         if (soldier.isFriendlyTo(shooter)) {
             return;
