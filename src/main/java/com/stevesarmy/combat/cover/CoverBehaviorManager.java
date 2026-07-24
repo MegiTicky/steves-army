@@ -424,7 +424,34 @@ if (currentCover != null) {
     }
 
     public void onExplosion(Vec3 explosionPosition, float exposure) {
+        float previousLevel = suppressionTracker.getSuppressionLevel();
         suppressionTracker.onExplosion(explosionPosition, soldier.position(), exposure);
+
+        float currentLevel = suppressionTracker.getSuppressionLevel();
+        if (currentLevel == previousLevel) {
+            return;
+        }
+
+        // Explosions are event-driven, so do not wait for CoverTacticalGoal to run
+        // before the client and an already-covered soldier see the suppression state.
+        syncSuppression();
+        lastSyncedSuppression = currentLevel;
+
+        if (debugLog()) {
+            StevesArmyMod.LOGGER.info("[ExplosionSuppression] soldier={} synced {} -> {}, suppressed={}, coverState={}, hasCover={}",
+                soldier.getId(), String.format("%.2f", previousLevel), String.format("%.2f", currentLevel),
+                suppressionTracker.isSuppressed(), state, currentCover != null);
+        }
+
+        if (suppressionTracker.isSuppressed() && currentCover != null) {
+            if (currentCover.getType() == CoverType.HALF) {
+                soldier.setLowCrouching(true);
+            }
+            setState(CoverState.SUPPRESSED_IN_COVER);
+            if (debugLog()) {
+                StevesArmyMod.LOGGER.info("[ExplosionSuppression] soldier={} entered SUPPRESSED_IN_COVER", soldier.getId());
+            }
+        }
     }
     
     public void tickSuppression(boolean inCover) {

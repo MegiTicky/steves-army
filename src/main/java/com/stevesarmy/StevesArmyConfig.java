@@ -169,21 +169,21 @@ BUILDER.pop();
 
         EXPLOSION_SUPPRESSION_STRENGTH = BUILDER
             .comment("Base suppression added by an explosion at distance 0 with full exposure (0.0 to 1.0).",
-                     "Default: 0.45")
-            .defineInRange("explosionSuppressionStrength", 0.45, 0.0, 1.0);
+                     "Default: 1.0")
+            .defineInRange("explosionSuppressionStrength", 1.0, 0.0, 1.0);
 
         EXPLOSION_SUPPRESSION_RADIUS = BUILDER
             .comment("Maximum radius in blocks for explosion suppression effects.",
                      "Soldiers beyond this distance receive no blast suppression.",
-                     "Default: 8.0 blocks")
-            .defineInRange("explosionSuppressionRadius", 8.0, 1.0, 64.0);
+                     "Default: 24.0 blocks")
+            .defineInRange("explosionSuppressionRadius", 24.0, 1.0, 64.0);
 
         EXPLOSION_SHELTER_FLOOR = BUILDER
             .comment("Minimum exposure factor for soldiers in full cover (0.0 to 1.0).",
                      "0.0 = complete cover blocks all blast suppression.",
-                     "0.15 = even fully covered soldiers feel some blast pressure.",
-                     "Default: 0.15")
-            .defineInRange("explosionShelterFloor", 0.15, 0.0, 1.0);
+                     "0.70 = nearby explosions strongly suppress even fully covered soldiers.",
+                     "Default: 0.70")
+            .defineInRange("explosionShelterFloor", 0.70, 0.0, 1.0);
 
         EXPLOSION_BURST_WINDOW_MS = BUILDER
             .comment("Time window in milliseconds for explosion burst damping.",

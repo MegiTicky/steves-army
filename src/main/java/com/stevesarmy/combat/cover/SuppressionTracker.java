@@ -102,7 +102,13 @@ public class SuppressionTracker {
         float burstMultiplier = com.stevesarmy.StevesArmyConfig.getExplosionBurstMultiplier();
 
         double distance = soldierPosition.distanceTo(explosionPosition);
-        if (distance > radius) return;
+        if (distance > radius) {
+            if (debugLog()) {
+                StevesArmyMod.LOGGER.info("[ExplosionSuppression] ignored: distance={} exceeds radius={}",
+                    String.format("%.2f", distance), String.format("%.2f", radius));
+            }
+            return;
+        }
 
         float distanceFactor = (float)(1.0 - distance / radius);
 
@@ -124,6 +130,7 @@ public class SuppressionTracker {
         lastExplosionTime = now;
         add *= burstFactor;
 
+        float previousLevel = suppressionLevel;
         suppressionLevel = Math.min(MAX_SUPPRESSION, suppressionLevel + add);
         if (suppressionLevel > peakSuppression) peakSuppression = suppressionLevel;
         lastSuppressionTime = now;
@@ -134,7 +141,9 @@ public class SuppressionTracker {
                 + ", effExposure=" + String.format("%.2f", effectiveExposure)
                 + ", distFactor=" + String.format("%.2f", distanceFactor)
                 + ", burstFactor=" + String.format("%.2f", burstFactor)
-                + ", +" + String.format("%.2f", add) + " sup -> " + String.format("%.2f", suppressionLevel));
+                + ", +" + String.format("%.2f", add) + " sup " + String.format("%.2f", previousLevel)
+                + " -> " + String.format("%.2f", suppressionLevel)
+                + ", suppressed=" + isSuppressed());
         }
     }
 

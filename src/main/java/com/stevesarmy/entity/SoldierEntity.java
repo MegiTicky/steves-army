@@ -525,6 +525,11 @@ public class SoldierEntity extends PathfinderMob implements Container {
     }
 
     @Override
+    protected boolean canRide(Entity vehicle) {
+        return false;
+    }
+
+    @Override
     public boolean requiresCustomPersistence() {
         return true;
     }
@@ -755,6 +760,10 @@ public class SoldierEntity extends PathfinderMob implements Container {
         }
         
         if (!this.level().isClientSide) {
+            // Covers legacy saves and mods that bypass Entity.canRide when mounting.
+            if (this.isPassenger()) {
+                this.stopRiding();
+            }
             threatAwareness.tick();
         }
 
