@@ -1069,20 +1069,26 @@ private boolean shouldSeekCover() {
         ThreatAwareness threats = getThreats();
 
         if (soldier.hasValidAttackTarget()) {
-            StevesArmyMod.LOGGER.info("[CoverGoal] shouldSeekCover=true (ATTACK mode)");
+            if (DiagnosticLogManager.isCoverLoggingEnabled()) {
+                StevesArmyMod.LOGGER.info("[CoverGoal] shouldSeekCover=true (ATTACK mode)");
+            }
             return true;
         }
 
         if (soldier.isCQB() || soldier.hasCloseRangeTarget()) {
-            StevesArmyMod.LOGGER.info("[CoverGoal] shouldSeekCover=false (CQB mode={}, closeRangeTarget={})",
-                soldier.isCQB(), soldier.hasCloseRangeTarget());
+            if (DiagnosticLogManager.isCoverLoggingEnabled()) {
+                StevesArmyMod.LOGGER.info("[CoverGoal] shouldSeekCover=false (CQB mode={}, closeRangeTarget={})",
+                    soldier.isCQB(), soldier.hasCloseRangeTarget());
+            }
             return false;
         }
         
         if (soldier.getSquadMode() == SquadMode.HOLD) {
             boolean hasValid = getCoverManager().getCurrentCover() != null && isCoverStillValid();
             boolean result = !hasValid;
-            StevesArmyMod.LOGGER.info("[CoverGoal] shouldSeekCover={} (HOLD mode, hasValidCover={})", result, hasValid);
+            if (DiagnosticLogManager.isCoverLoggingEnabled()) {
+                StevesArmyMod.LOGGER.info("[CoverGoal] shouldSeekCover={} (HOLD mode, hasValidCover={})", result, hasValid);
+            }
             return result;
         }
         
@@ -1099,12 +1105,16 @@ private boolean shouldSeekCover() {
             if (closeToOwner) {
                 boolean hasThreat = threats.hasActiveThreat();
                 result = (suppressed || lowHealth) || hasThreat;
-                StevesArmyMod.LOGGER.info("[CoverGoal] shouldSeekCover={} (FOLLOW close, suppressed={}, lowHealth={} health={}, hasThreat={})",
-                    result, suppressed, lowHealth, String.format("%.2f", healthRatio), hasThreat);
+                if (DiagnosticLogManager.isCoverLoggingEnabled()) {
+                    StevesArmyMod.LOGGER.info("[CoverGoal] shouldSeekCover={} (FOLLOW close, suppressed={}, lowHealth={} health={}, hasThreat={})",
+                        result, suppressed, lowHealth, String.format("%.2f", healthRatio), hasThreat);
+                }
             } else {
                 result = suppressed || lowHealth;
-                StevesArmyMod.LOGGER.info("[CoverGoal] shouldSeekCover={} (FOLLOW far, suppressed={}, lowHealth={} health={})",
-                    result, suppressed, lowHealth, String.format("%.2f", healthRatio));
+                if (DiagnosticLogManager.isCoverLoggingEnabled()) {
+                    StevesArmyMod.LOGGER.info("[CoverGoal] shouldSeekCover={} (FOLLOW far, suppressed={}, lowHealth={} health={})",
+                        result, suppressed, lowHealth, String.format("%.2f", healthRatio));
+                }
             }
             return result;
         }
@@ -1115,8 +1125,10 @@ private boolean shouldSeekCover() {
         boolean hasThreat = threats.hasActiveThreat();
         
         boolean result = (suppressed || lowHealth) || hasThreat;
-        StevesArmyMod.LOGGER.info("[CoverGoal] shouldSeekCover={} (suppressed={}, lowHealth={} health={}, hasThreat={})",
-            result, suppressed, lowHealth, String.format("%.2f", healthRatio), hasThreat);
+        if (DiagnosticLogManager.isCoverLoggingEnabled()) {
+            StevesArmyMod.LOGGER.info("[CoverGoal] shouldSeekCover={} (suppressed={}, lowHealth={} health={}, hasThreat={})",
+                result, suppressed, lowHealth, String.format("%.2f", healthRatio), hasThreat);
+        }
         return result;
     }
     
@@ -1142,8 +1154,10 @@ private boolean shouldSeekCover() {
             if (owner != null) {
                 double distToOwner = currentCover.getPosition().distSqr(owner.blockPosition());
                 if (distToOwner > 20 * 20) {
-                    StevesArmyMod.LOGGER.info("[CoverGoal] Cover invalid: too far from owner (dist={})",
-                        String.format("%.1f", Math.sqrt(distToOwner)));
+                    if (DiagnosticLogManager.isCoverLoggingEnabled()) {
+                        StevesArmyMod.LOGGER.info("[CoverGoal] Cover invalid: too far from owner (dist={})",
+                            String.format("%.1f", Math.sqrt(distToOwner)));
+                    }
                     return false;
                 }
             }
@@ -1469,13 +1483,17 @@ this.debugSearchCenter = searchCenter;
                     .collect(java.util.stream.Collectors.toList());
                 
                 if (scored.isEmpty()) {
-                    StevesArmyMod.LOGGER.info("[CoverGoal] Soldier {} no valid covers after filtering blacklist", soldier.getId());
+                    if (DiagnosticLogManager.isCoverLoggingEnabled()) {
+                        StevesArmyMod.LOGGER.info("[CoverGoal] Soldier {} no valid covers after filtering blacklist", soldier.getId());
+                    }
                     return CoverMoveResult.NO_ELIGIBLE_COVER;
                 }
                 
                 cover = scored.get(0).cover;
-                StevesArmyMod.LOGGER.info("[CoverGoal] Soldier {} selected fallback cover {} (score={})", 
-                    soldier.getId(), cover.getPosition(), String.format("%.2f", scored.get(0).score));
+                if (DiagnosticLogManager.isCoverLoggingEnabled()) {
+                    StevesArmyMod.LOGGER.info("[CoverGoal] Soldier {} selected fallback cover {} (score={})",
+                        soldier.getId(), cover.getPosition(), String.format("%.2f", scored.get(0).score));
+                }
             }
             
             CoverPoint currentCover = getCoverManager().getCurrentCover();
@@ -1521,13 +1539,15 @@ private Optional<CoverPoint> findBetterCover() {
         List<LivingEntity> threats = getThreatList();
         SquadCoverContext squadCtx = buildSquadCoverContext();
 
-        StevesArmyMod.LOGGER.info("[CoverGoal] Soldier {} finding cover: soldierPos={}, threatDirection=({}, {}, {}), threats={}",
-            soldier.getId(),
-            soldier.blockPosition(),
-            threatDirection != null ? String.format("%.2f", threatDirection.x) : "null",
-            threatDirection != null ? String.format("%.2f", threatDirection.y) : "null",
-            threatDirection != null ? String.format("%.2f", threatDirection.z) : "null",
-            threats.size());
+        if (DiagnosticLogManager.isCoverLoggingEnabled()) {
+            StevesArmyMod.LOGGER.info("[CoverGoal] Soldier {} finding cover: soldierPos={}, threatDirection=({}, {}, {}), threats={}",
+                soldier.getId(),
+                soldier.blockPosition(),
+                threatDirection != null ? String.format("%.2f", threatDirection.x) : "null",
+                threatDirection != null ? String.format("%.2f", threatDirection.y) : "null",
+                threatDirection != null ? String.format("%.2f", threatDirection.z) : "null",
+                threats.size());
+        }
 
         CoverPoint currentCover = getCoverManager().getCurrentCover();
 
