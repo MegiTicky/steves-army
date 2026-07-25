@@ -780,22 +780,25 @@ private static boolean isTransportOwnerOnShip(LivingEntity owner, SoldierState s
         }
         try {
             Class<?> utils = Class.forName(VS_UTILS_CLASS);
+            Class<?> loadedShipClass = Class.forName("org.valkyrienskies.core.api.ships.LoadedShip");
+            Class<?> mountedDataClass = Class.forName("org.valkyrienskies.mod.common.entity.ShipMountedToData");
+            Class<?> shipClass = Class.forName("org.valkyrienskies.core.api.ships.Ship");
+            Class<?> vector3dClass = Class.forName("org.joml.Vector3d");
             MethodHandles.Lookup lookup = MethodHandles.publicLookup();
             // Use MethodHandles to avoid JVM enumerating the entire Kotlin facade method table,
             // which would trigger ClientLevel class loading on dedicated server.
             getShipMountedTo = lookup.findStatic(utils, "getShipMountedTo",
-                MethodType.methodType(Object.class, Entity.class));
+                MethodType.methodType(loadedShipClass, Entity.class));
             getShipsIntersecting = lookup.findStatic(utils, "getShipsIntersecting",
-                MethodType.methodType(Object.class, Level.class, AABB.class));
+                MethodType.methodType(Iterable.class, Level.class, AABB.class));
             getShipObjectManagingPos = lookup.findStatic(utils, "getShipObjectManagingPos",
-                MethodType.methodType(Object.class, Level.class, Vec3i.class));
+                MethodType.methodType(loadedShipClass, Level.class, Vec3i.class));
             getShipObjectManagingPosDouble = lookup.findStatic(utils, "getShipObjectManagingPos",
-                MethodType.methodType(Object.class, Level.class, double.class, double.class, double.class));
+                MethodType.methodType(loadedShipClass, Level.class, double.class, double.class, double.class));
             getShipMountedToData = lookup.findStatic(utils, "getShipMountedToData",
-                MethodType.methodType(Object.class, Entity.class, Float.class));
-            Class<?> shipClass = Class.forName("org.valkyrienskies.core.api.ships.Ship");
+                MethodType.methodType(mountedDataClass, Entity.class, Float.class));
             toWorldCoordinates = lookup.findStatic(utils, "toWorldCoordinates",
-                MethodType.methodType(Object.class, shipClass, double.class, double.class, double.class));
+                MethodType.methodType(vector3dClass, shipClass, double.class, double.class, double.class));
 
             createSeatBlockClass = Class.forName("com.simibubi.create.content.contraptions.actors.seat.SeatBlock");
             createSeatEntityClass = Class.forName("com.simibubi.create.content.contraptions.actors.seat.SeatEntity");
@@ -807,7 +810,6 @@ private static boolean isTransportOwnerOnShip(LivingEntity owner, SoldierState s
                 createSeatSitDown = createSeatBlockClass.getDeclaredMethod("m_7600_",
                     Level.class, BlockPos.class, Entity.class);
             }
-            Class<?> mountedDataClass = Class.forName("org.valkyrienskies.mod.common.entity.ShipMountedToData");
             getMountPosInShip = mountedDataClass.getMethod("getMountPosInShip");
             contraptionEntityClass = Class.forName(CONTRAPTION_ENTITY_CLASS);
             getContraption = contraptionEntityClass.getMethod("getContraption");
@@ -824,7 +826,7 @@ private static boolean isTransportOwnerOnShip(LivingEntity owner, SoldierState s
             }
             available = true;
             StevesArmyMod.LOGGER.info("[VS2] Enabled soldier ship avoidance and transport compatibility");
-        } catch (ReflectiveOperationException exception) {
+        } catch (ReflectiveOperationException | LinkageError exception) {
             logReflectionFailure(exception);
         }
     }
@@ -846,7 +848,7 @@ private static boolean isTransportOwnerOnShip(LivingEntity owner, SoldierState s
         }
     }
 
-    private static void logReflectionFailure(Exception exception) {
+    private static void logReflectionFailure(Throwable exception) {
         available = false;
         if (!reflectionFailureLogged) {
             reflectionFailureLogged = true;
