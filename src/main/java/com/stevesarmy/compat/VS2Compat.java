@@ -21,6 +21,9 @@ import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.fml.ModList;
 
 import javax.annotation.Nullable;
+import java.lang.invoke.MethodHandle;
+import java.lang.invoke.MethodHandles;
+import java.lang.invoke.MethodType;
 import java.lang.reflect.Method;
 import java.util.HashMap;
 import java.util.Map;
@@ -38,13 +41,15 @@ public final class VS2Compat {
     private static boolean initialized;
     private static boolean available;
     private static boolean reflectionFailureLogged;
-    private static Method getShipMountedTo;
-    private static Method getShipMountedToData;
+    // VSGameUtilsKt methods: use MethodHandle to avoid ClientLevel class loading on dedicated server
+    private static MethodHandle getShipMountedTo;
+    private static MethodHandle getShipMountedToData;
+    private static MethodHandle toWorldCoordinates;
+    private static MethodHandle getShipsIntersecting;
+    private static MethodHandle getShipObjectManagingPos;
+    private static MethodHandle getShipObjectManagingPosDouble;
+    // Non-VSGameUtilsKt reflection (safe to use ordinary Method)
     private static Method getMountPosInShip;
-    private static Method toWorldCoordinates;
-    private static Method getShipsIntersecting;
-    private static Method getShipObjectManagingPos;
-    private static Method getShipObjectManagingPosDouble;
     private static Method createSeatSitDown;
     private static Class<?> createSeatBlockClass;
     private static Class<?> createSeatEntityClass;
@@ -143,10 +148,10 @@ public final class VS2Compat {
             Long shipId = null;
             org.joml.Vector3dc worldPos = null;
             try {
-                ship = getShipObjectManagingPos.invoke(null, level, (net.minecraft.core.Vec3i) seatBlockPos);
+                ship = reflect(getShipObjectManagingPos, level, (net.minecraft.core.Vec3i) seatBlockPos);
                 if (ship != null) {
                     shipId = ((Number) getShipId.invoke(ship)).longValue();
-                    worldPos = (org.joml.Vector3dc) toWorldCoordinates.invoke(null, ship,
+                    worldPos = (org.joml.Vector3dc) reflect(toWorldCoordinates, ship,
                         seatBlockPos.getX() + 0.5, seatBlockPos.getY(), seatBlockPos.getZ() + 0.5);
                 }
             } catch (ReflectiveOperationException e) {
@@ -228,7 +233,7 @@ public final class VS2Compat {
             return false;
         }
         try {
-            return getShipMountedTo.invoke(null, entity) != null;
+            return reflect(getShipMountedTo, entity) != null;
         } catch (ReflectiveOperationException exception) {
             logReflectionFailure(exception);
             return false;
@@ -260,7 +265,7 @@ public final class VS2Compat {
 
     private static boolean intersectsShip(Level level, AABB bounds) {
         try {
-            Object ships = getShipsIntersecting.invoke(null, level, bounds);
+            Object ships = reflect(getShipsIntersecting, level, bounds);
             return ships instanceof Iterable<?> iterable && iterable.iterator().hasNext();
         } catch (ReflectiveOperationException exception) {
             logReflectionFailure(exception);
@@ -313,7 +318,7 @@ public final class VS2Compat {
 
     private static boolean tryContraptionSeat(SoldierEntity soldier, LivingEntity owner, SoldierState state) {
         try {
-            Object ship = getShipMountedTo.invoke(null, owner);
+            Object ship = reflect(getShipMountedTo, owner);
             if (ship != null && createInteractiveUtil != null) {
                 long shipId = ((Number) getShipId.invoke(ship)).longValue();
                 Entity mappedVehicle = (Entity) getContraptionEntityForShip.invoke(createInteractiveUtil, shipId, false);
@@ -358,7 +363,7 @@ public final class VS2Compat {
                             if (soldier.isPassenger() && soldier.getVehicle() == vehicle) {
                                 state.transportAnchorId = vehicle.getUUID();
                                 state.transportOwnerId = owner.getUUID();
-                                state.transportShipId = getShipId.invoke(getShipMountedTo.invoke(null, owner)) instanceof Number id
+                                state.transportShipId = getShipId.invoke(reflect(getShipMountedTo, owner)) instanceof Number id
                                     ? id.longValue() : null;
                                 state.seatRetryCooldownTicks = 0;
                                 StevesArmyMod.LOGGER.info("[VS2] Assigned soldier={} to Create contraption seat={} vehicle={}",
@@ -413,7 +418,7 @@ public final class VS2Compat {
                     if (soldier.isPassenger() && soldier.getVehicle() == vehicle) {
                         state.transportAnchorId = vehicle.getUUID();
                         state.transportOwnerId = owner.getUUID();
-                        state.transportShipId = getShipId.invoke(getShipMountedTo.invoke(null, owner)) instanceof Number id
+                        state.transportShipId = getShipId.invoke(reflect(getShipMountedTo, owner)) instanceof Number id
                             ? id.longValue() : null;
                         state.seatRetryCooldownTicks = 0;
                         StevesArmyMod.LOGGER.info("[VS2] Assigned soldier={} to Create contraption seat={} vehicle={}",
@@ -435,13 +440,13 @@ public final class VS2Compat {
 
     private static boolean tryStaticSeat(SoldierEntity soldier, LivingEntity owner, SoldierState state) {
         try {
-            Object ownerShip = getShipMountedTo.invoke(null, owner);
+            Object ownerShip = reflect(getShipMountedTo, owner);
             if (ownerShip == null) {
                 StevesArmyMod.LOGGER.info("[VS2] Static seat fallback: owner={} has no mounted ship", owner.getId());
                 return false;
             }
             long ownerShipId = ((Number) getShipId.invoke(ownerShip)).longValue();
-            Object mountedData = getShipMountedToData.invoke(null, owner, null);
+            Object mountedData = reflect(getShipMountedToData, owner, (Object) null);
             Object mountPosition = mountedData == null ? null : getMountPosInShip.invoke(mountedData);
             if (!(mountPosition instanceof org.joml.Vector3dc localPosition)) {
                 StevesArmyMod.LOGGER.info("[VS2] Static seat fallback has no ship-local owner position owner={}", owner.getId());
@@ -466,7 +471,7 @@ public final class VS2Compat {
                                 continue;
                             }
                             seatBlocks++;
-                            Object seatShip = getShipObjectManagingPos.invoke(null, owner.level(), candidate);
+                            Object seatShip = reflect(getShipObjectManagingPos, owner.level(), candidate);
                             if (seatShip == null || ((Number) getShipId.invoke(seatShip)).longValue() != ownerShipId) {
                                 rejectedShip++;
                                 continue;
@@ -606,7 +611,7 @@ private static boolean isTransportOwnerOnShip(LivingEntity owner, SoldierState s
             if (createSeatEntityClass.isInstance(vehicle)) {
                 try {
                     Vec3 seatWorldPos = vehicle.position();
-                    Object ship = getShipObjectManagingPosDouble.invoke(null, owner.level(), seatWorldPos.x, seatWorldPos.y, seatWorldPos.z);
+                    Object ship = reflect(getShipObjectManagingPosDouble, owner.level(), seatWorldPos.x, seatWorldPos.y, seatWorldPos.z);
                     boolean found = ship != null && state.transportShipId != null
                         && ((Number) getShipId.invoke(ship)).longValue() == state.transportShipId;
                     // Throttle diagnostic logging to once per 100 ticks
@@ -630,7 +635,7 @@ private static boolean isTransportOwnerOnShip(LivingEntity owner, SoldierState s
             if (createSeatEntityClass.isInstance(vehicle)) {
                 try {
                     Vec3 seatWorldPos = vehicle.position();
-                    return getShipObjectManagingPosDouble.invoke(null, entity.level(), seatWorldPos.x, seatWorldPos.y, seatWorldPos.z) != null;
+                    return reflect(getShipObjectManagingPosDouble, entity.level(), seatWorldPos.x, seatWorldPos.y, seatWorldPos.z) != null;
                 } catch (ReflectiveOperationException exception) {
                     logReflectionFailure(exception);
                     return false;
@@ -775,10 +780,23 @@ private static boolean isTransportOwnerOnShip(LivingEntity owner, SoldierState s
         }
         try {
             Class<?> utils = Class.forName(VS_UTILS_CLASS);
-            getShipMountedTo = utils.getMethod("getShipMountedTo", Entity.class);
-            getShipsIntersecting = utils.getMethod("getShipsIntersecting", Level.class, AABB.class);
-            getShipObjectManagingPos = utils.getMethod("getShipObjectManagingPos", Level.class, Vec3i.class);
-            getShipObjectManagingPosDouble = utils.getMethod("getShipObjectManagingPos", Level.class, double.class, double.class, double.class);
+            MethodHandles.Lookup lookup = MethodHandles.publicLookup();
+            // Use MethodHandles to avoid JVM enumerating the entire Kotlin facade method table,
+            // which would trigger ClientLevel class loading on dedicated server.
+            getShipMountedTo = lookup.findStatic(utils, "getShipMountedTo",
+                MethodType.methodType(Object.class, Entity.class));
+            getShipsIntersecting = lookup.findStatic(utils, "getShipsIntersecting",
+                MethodType.methodType(Object.class, Level.class, AABB.class));
+            getShipObjectManagingPos = lookup.findStatic(utils, "getShipObjectManagingPos",
+                MethodType.methodType(Object.class, Level.class, Vec3i.class));
+            getShipObjectManagingPosDouble = lookup.findStatic(utils, "getShipObjectManagingPos",
+                MethodType.methodType(Object.class, Level.class, double.class, double.class, double.class));
+            getShipMountedToData = lookup.findStatic(utils, "getShipMountedToData",
+                MethodType.methodType(Object.class, Entity.class, Float.class));
+            Class<?> shipClass = Class.forName("org.valkyrienskies.core.api.ships.Ship");
+            toWorldCoordinates = lookup.findStatic(utils, "toWorldCoordinates",
+                MethodType.methodType(Object.class, shipClass, double.class, double.class, double.class));
+
             createSeatBlockClass = Class.forName("com.simibubi.create.content.contraptions.actors.seat.SeatBlock");
             createSeatEntityClass = Class.forName("com.simibubi.create.content.contraptions.actors.seat.SeatEntity");
             try {
@@ -789,12 +807,8 @@ private static boolean isTransportOwnerOnShip(LivingEntity owner, SoldierState s
                 createSeatSitDown = createSeatBlockClass.getDeclaredMethod("m_7600_",
                     Level.class, BlockPos.class, Entity.class);
             }
-            getShipMountedToData = utils.getMethod("getShipMountedToData", Entity.class, Float.class);
             Class<?> mountedDataClass = Class.forName("org.valkyrienskies.mod.common.entity.ShipMountedToData");
             getMountPosInShip = mountedDataClass.getMethod("getMountPosInShip");
-            Class<?> shipClass = Class.forName("org.valkyrienskies.core.api.ships.Ship");
-            toWorldCoordinates = utils.getMethod("toWorldCoordinates", shipClass,
-                double.class, double.class, double.class);
             contraptionEntityClass = Class.forName(CONTRAPTION_ENTITY_CLASS);
             getContraption = contraptionEntityClass.getMethod("getContraption");
             Class<?> contraptionClass = Class.forName("com.simibubi.create.content.contraptions.Contraption");
@@ -812,6 +826,23 @@ private static boolean isTransportOwnerOnShip(LivingEntity owner, SoldierState s
             StevesArmyMod.LOGGER.info("[VS2] Enabled soldier ship avoidance and transport compatibility");
         } catch (ReflectiveOperationException exception) {
             logReflectionFailure(exception);
+        }
+    }
+
+    private static Object reflect(MethodHandle handle, Object... args) throws ReflectiveOperationException {
+        try {
+            return handle.invokeWithArguments(args);
+        } catch (ReflectiveOperationException e) {
+            throw e;
+        } catch (RuntimeException e) {
+            // MethodHandle may wrap the real cause
+            Throwable cause = e.getCause();
+            if (cause instanceof ReflectiveOperationException roe) {
+                throw roe;
+            }
+            throw e;
+        } catch (Throwable e) {
+            throw new RuntimeException(e);
         }
     }
 
