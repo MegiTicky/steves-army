@@ -1,6 +1,7 @@
 package com.stevesarmy.entity.ai;
 
 import com.stevesarmy.StevesArmyMod;
+import com.stevesarmy.debug.DiagnosticLogManager;
 import com.stevesarmy.entity.SoldierEntity;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -61,8 +62,10 @@ public class SoldierHoleRescueGoal extends Goal {
         if (stuckAnchorPos == null) {
             stuckAnchorPos = currentPos;
             stuckTicks = 0;
-            StevesArmyMod.LOGGER.info("[HoleRescue DEBUG] Soldier {} initialized anchor at {}", 
-                soldier.getId(), currentPos);
+            if (DiagnosticLogManager.isHoleRescueLoggingEnabled()) {
+                StevesArmyMod.LOGGER.info("[HoleRescue DEBUG] Soldier {} initialized anchor at {}", 
+                    soldier.getId(), currentPos);
+            }
             return false;
         }
         
@@ -75,7 +78,7 @@ public class SoldierHoleRescueGoal extends Goal {
             stuckTicks++;
             
             // Debug logging every 20 ticks
-            if (stuckTicks % 20 == 0) {
+            if (DiagnosticLogManager.isHoleRescueLoggingEnabled() && stuckTicks % 20 == 0) {
                 StevesArmyMod.LOGGER.info("[HoleRescue DEBUG] Soldier {} - distFromAnchor={}, stuckTicks={}, threshold=1.5, cooldownRemaining={}",
                     soldier.getId(), 
                     String.format("%.2f", distFromAnchor), 
@@ -84,16 +87,20 @@ public class SoldierHoleRescueGoal extends Goal {
             }
             
             if (stuckTicks >= STUCK_THRESHOLD_TICKS && hasSurfaceExit()) {
+                if (DiagnosticLogManager.isHoleRescueLoggingEnabled()) {
                 StevesArmyMod.LOGGER.info("[HoleRescue DEBUG] Soldier {} STUCK condition met! stuckTicks={}, will rescue",
                     soldier.getId(), stuckTicks);
+            }
                 return true;
             }
         } else {
             // Escaped the radius = making progress
             stuckAnchorPos = currentPos;
             stuckTicks = 0;
-            StevesArmyMod.LOGGER.info("[HoleRescue DEBUG] Soldier {} escaped anchor (dist={}), resetting", 
-                soldier.getId(), String.format("%.2f", distFromAnchor));
+            if (DiagnosticLogManager.isHoleRescueLoggingEnabled()) {
+                StevesArmyMod.LOGGER.info("[HoleRescue DEBUG] Soldier {} escaped anchor (dist={}), resetting", 
+                    soldier.getId(), String.format("%.2f", distFromAnchor));
+            }
         }
         
         return false;

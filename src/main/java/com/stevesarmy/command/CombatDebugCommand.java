@@ -16,6 +16,7 @@ import com.stevesarmy.combat.cover.CoverFinder;
 import com.stevesarmy.combat.cover.CoverPoint;
 import com.stevesarmy.combat.cover.CoverQualityEvaluator;
 import com.stevesarmy.combat.cover.CoverReservationManager;
+import com.stevesarmy.debug.DiagnosticLogManager;
 import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.entity.TargetEntity;
 import com.stevesarmy.entity.ai.CoverPositionController;
@@ -74,6 +75,20 @@ public class CombatDebugCommand {
                         .executes(ctx -> toggleAttackLogging(ctx, true)))
                     .then(Commands.literal("off")
                         .executes(ctx -> toggleAttackLogging(ctx, false)))
+                )
+                .then(Commands.literal("spacing")
+                    .executes(ctx -> toggleSpacingLogging(ctx, null))
+                    .then(Commands.literal("on")
+                        .executes(ctx -> toggleSpacingLogging(ctx, true)))
+                    .then(Commands.literal("off")
+                        .executes(ctx -> toggleSpacingLogging(ctx, false)))
+                )
+                .then(Commands.literal("holerescue")
+                    .executes(ctx -> toggleHoleRescueLogging(ctx, null))
+                    .then(Commands.literal("on")
+                        .executes(ctx -> toggleHoleRescueLogging(ctx, true)))
+                    .then(Commands.literal("off")
+                        .executes(ctx -> toggleHoleRescueLogging(ctx, false)))
                 ))
 
             // === RENDER TOGGLES ===
@@ -185,6 +200,8 @@ public class CombatDebugCommand {
             "  none                - Disable ALL debug (logging + render + overlays)\n" +
             "  log cover [on|off]  - Toggle cover behavior logging\n" +
             "  log attack [on|off] - Toggle attack phase logging (quiet, soldier-specific)\n" +
+            "  log spacing [on|off] - Toggle formation spacing logging\n" +
+            "  log holerescue [on|off] - Toggle hole rescue diagnostic logging\n" +
             "  render soldiers     - Toggle soldier cover visualization lines/labels\n" +
             "  render peekcandidates - Toggle peek candidate boxes/LOS rays\n" +
             "  render rays         - Toggle cover raycast visualization\n" +
@@ -220,8 +237,7 @@ public class CombatDebugCommand {
         CoverDebugManager.setShowSoldierCover(true);
         CoverDebugManager.setShowPeekCandidates(true);
         CoverDebugManager.setVisualizationEnabled(true);
-        CoverTacticalGoal.setDebugLogging(true);
-        CoverTacticalGoal.setAttackDebugLogging(true);
+        DiagnosticLogManager.enableAll();
 
         context.getSource().sendSuccess(() -> Component.literal(
             "=== Steve's Army Debug: ALL ON ===\n" +
@@ -230,6 +246,8 @@ public class CombatDebugCommand {
             "  Peek candidate visualization: ON\n" +
             "  Cover behavior logging: ON\n" +
             "  Attack phase logging: ON\n" +
+            "  Spacing logging: ON\n" +
+            "  Hole rescue logging: ON\n" +
             "Use /stevesarmy_debug render mode minimal for compact display\n" +
             "Use /stevesarmy_debug log cover off to disable console logs"
         ), true);
@@ -241,8 +259,8 @@ public class CombatDebugCommand {
         CoverDebugManager.setShowSoldierCover(false);
         CoverDebugManager.setShowPeekCandidates(false);
         CoverDebugManager.setVisualizationEnabled(false);
-        CoverTacticalGoal.setDebugLogging(false);
-        CoverTacticalGoal.setAttackDebugLogging(false);CoverDebugManager.setShowRays(false);
+        DiagnosticLogManager.disableAll();
+        CoverDebugManager.setShowRays(false);
         CoverDebugManager.setShowSolidBlocks(false);
 
         context.getSource().sendSuccess(() -> Component.literal(
@@ -251,7 +269,7 @@ public class CombatDebugCommand {
             "  Soldier cover visualization: OFF\n" +
             "  Peek candidate visualization: OFF\n" +
             "  Cover point visualization: OFF\n" +
-"  Raycast visualization: OFF\n" +
+            "  Raycast visualization: OFF\n" +
             "  Solid block visualization: OFF"
         ), true);
         return 1;
@@ -265,9 +283,9 @@ public class CombatDebugCommand {
         if (enable != null) {
             newState = enable;
         } else {
-            newState = !CoverTacticalGoal.isDebugLoggingEnabled();
+            newState = !DiagnosticLogManager.isCoverLoggingEnabled();
         }
-        CoverTacticalGoal.setDebugLogging(newState);
+        DiagnosticLogManager.setCoverLoggingEnabled(newState);
         context.getSource().sendSuccess(() -> Component.literal(
             "Cover behavior logging: " + (newState ? "ON" : "OFF")
         ), true);
@@ -279,11 +297,39 @@ public class CombatDebugCommand {
         if (enable != null) {
             newState = enable;
         } else {
-            newState = !CoverTacticalGoal.isAttackDebugLoggingEnabled();
+            newState = !DiagnosticLogManager.isAttackLoggingEnabled();
         }
-        CoverTacticalGoal.setAttackDebugLogging(newState);
+        DiagnosticLogManager.setAttackLoggingEnabled(newState);
         context.getSource().sendSuccess(() -> Component.literal(
             "Attack phase logging: " + (newState ? "ON" : "OFF")
+        ), true);
+        return 1;
+    }
+
+    private static int toggleSpacingLogging(CommandContext<CommandSourceStack> context, Boolean enable) {
+        boolean newState;
+        if (enable != null) {
+            newState = enable;
+        } else {
+            newState = !DiagnosticLogManager.isSpacingLoggingEnabled();
+        }
+        DiagnosticLogManager.setSpacingLoggingEnabled(newState);
+        context.getSource().sendSuccess(() -> Component.literal(
+            "Spacing logging: " + (newState ? "ON" : "OFF")
+        ), true);
+        return 1;
+    }
+
+    private static int toggleHoleRescueLogging(CommandContext<CommandSourceStack> context, Boolean enable) {
+        boolean newState;
+        if (enable != null) {
+            newState = enable;
+        } else {
+            newState = !DiagnosticLogManager.isHoleRescueLoggingEnabled();
+        }
+        DiagnosticLogManager.setHoleRescueLoggingEnabled(newState);
+        context.getSource().sendSuccess(() -> Component.literal(
+            "Hole rescue logging: " + (newState ? "ON" : "OFF")
         ), true);
         return 1;
     }
@@ -1035,8 +1081,10 @@ public class CombatDebugCommand {
     private static int showDebugStatus(CommandContext<CommandSourceStack> context) {
         context.getSource().sendSuccess(() -> Component.literal(
             "=== DEBUG STATUS ===\n" +
-            "  Cover logging: " + (CoverTacticalGoal.isDebugLoggingEnabled() ? "ON" : "OFF") + "\n" +
-            "  Attack logging: " + (CoverTacticalGoal.isAttackDebugLoggingEnabled() ? "ON" : "OFF") + "\n" +
+            "  Cover logging: " + (DiagnosticLogManager.isCoverLoggingEnabled() ? "ON" : "OFF") + "\n" +
+            "  Attack logging: " + (DiagnosticLogManager.isAttackLoggingEnabled() ? "ON" : "OFF") + "\n" +
+            "  Spacing logging: " + (DiagnosticLogManager.isSpacingLoggingEnabled() ? "ON" : "OFF") + "\n" +
+            "  Hole rescue logging: " + (DiagnosticLogManager.isHoleRescueLoggingEnabled() ? "ON" : "OFF") + "\n" +
             "  Combat overlay: " + CombatDebugRenderer.getDebugModeName() + "\n" +
             "  Soldier viz: " + (CoverDebugManager.isShowSoldierCover() ? "ON" : "OFF") + "\n" +
             "  Peek candidates: " + (CoverDebugManager.isShowPeekCandidates() ? "ON" : "OFF") + "\n" +

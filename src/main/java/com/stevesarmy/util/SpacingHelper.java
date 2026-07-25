@@ -1,6 +1,7 @@
 package com.stevesarmy.util;
 
 import com.stevesarmy.StevesArmyMod;
+import com.stevesarmy.debug.DiagnosticLogManager;
 import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.squad.FireTeam;
 import com.stevesarmy.squad.SquadFormation;
@@ -27,9 +28,11 @@ public class SpacingHelper {
         if (slot == null) return target;
 
         BlockPos laneTarget = assignment.getLaneTarget(soldier.getUUID(), soldier.position());
-        StevesArmyMod.LOGGER.info("[Spacing] Soldier {} lane={}/{} offset=({}) formation={} target={}",
-            soldier.getId(), slot.laneIndex, slot.totalLanes,
-            slot.laneOffset, slot.forwardOffset, assignment.getFormation(), laneTarget);
+        if (DiagnosticLogManager.isSpacingLoggingEnabled()) {
+            StevesArmyMod.LOGGER.info("[Spacing] Soldier {} lane={}/{} offset=({}) formation={} target={}",
+                soldier.getId(), slot.laneIndex, slot.totalLanes,
+                slot.laneOffset, slot.forwardOffset, assignment.getFormation(), laneTarget);
+        }
 
         return laneTarget;
     }
@@ -70,8 +73,10 @@ public class SpacingHelper {
         SquadFormation formation = soldier.getSquadFormation();
         SquadLaneAssignment assignment = new SquadLaneAssignment(squadId, target, team, formation);
         assignments.put(squadId, assignment);
-        StevesArmyMod.LOGGER.info("[Spacing] Created lane assignment: squad={} target={} soldiers={} formation={}",
-            squadId, target, team.size(), formation);
+        if (DiagnosticLogManager.isSpacingLoggingEnabled()) {
+            StevesArmyMod.LOGGER.info("[Spacing] Created lane assignment: squad={} target={} soldiers={} formation={}",
+                squadId, target, team.size(), formation);
+        }
         return assignment;
     }
 
@@ -90,8 +95,10 @@ public class SpacingHelper {
         SquadFormation formation = deduped.get(0).getSquadFormation();
         SquadLaneAssignment assignment = new SquadLaneAssignment(squadId, target, deduped, formation);
         assignments.put(squadId, assignment);
-        StevesArmyMod.LOGGER.info("[Spacing] Created lane assignment via createAssignment: squad={} target={} soldiers={} formation={}",
-            squadId, target, deduped.size(), formation);
+        if (DiagnosticLogManager.isSpacingLoggingEnabled()) {
+            StevesArmyMod.LOGGER.info("[Spacing] Created lane assignment via createAssignment: squad={} target={} soldiers={} formation={}",
+                squadId, target, deduped.size(), formation);
+        }
         return assignment;
     }
 

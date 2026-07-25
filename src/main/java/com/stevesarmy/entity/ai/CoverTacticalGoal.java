@@ -3,6 +3,7 @@ package com.stevesarmy.entity.ai;
 import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.combat.ThreatAwareness;
 import com.stevesarmy.combat.cover.*;
+import com.stevesarmy.debug.DiagnosticLogManager;
 import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.squad.SquadCoverContext;
 import com.stevesarmy.squad.SquadManager;
@@ -135,9 +136,6 @@ public class CoverTacticalGoal extends Goal {
     private CoverFinder.ScoredCover[] cachedTopCovers = new CoverFinder.ScoredCover[0];
     private BlockPos debugSearchCenter = null;
 
-    private static boolean debugLoggingEnabled = false;
-    private static boolean attackDebugLoggingEnabled = false;
-
     // Per-soldier rate limiters (ticks between repeated log lines)
     private static final int SNAPSHOT_INTERVAL = 20; // 1 second at 20 TPS
     private int snapshotCounter = 0;
@@ -148,22 +146,27 @@ public class CoverTacticalGoal extends Goal {
     private int findNewTargetLogCounter = 0;
     private int moveCtlLogCounter = 0;
 
+    // Debug logging gates — delegates to server-wide DiagnosticLogManager.
     public static void setAttackDebugLogging(boolean enabled) {
-        attackDebugLoggingEnabled = enabled;
+        DiagnosticLogManager.setAttackLoggingEnabled(enabled);
     }
 
     public static boolean isAttackDebugLoggingEnabled() {
-        return attackDebugLoggingEnabled;
+        return DiagnosticLogManager.isAttackLoggingEnabled();
     }
 
     private boolean attackDebugLog() {
-        return attackDebugLoggingEnabled && soldier.hasValidAttackTarget();
+        return DiagnosticLogManager.isAttackLoggingEnabled() && soldier.hasValidAttackTarget();
     }
 
-    public AttackPhase getAttackPhase() {
-        return attackPhase;
+    public static void setDebugLogging(boolean enabled) {
+        DiagnosticLogManager.setCoverLoggingEnabled(enabled);
     }
-    
+
+    public static boolean isDebugLoggingEnabled() {
+        return DiagnosticLogManager.isCoverLoggingEnabled();
+    }
+
     public enum BlacklistReason {
         PATH_FAILED("PATH FAILED"),
         STUCK_SEEKING("STUCK SEEKING"),
@@ -190,14 +193,6 @@ public class CoverTacticalGoal extends Goal {
     
     public java.util.Map<BlockPos, BlacklistEntry> getBlacklistReasons() {
         return blacklistReasons;
-    }
-    
-    public static void setDebugLogging(boolean enabled) {
-        debugLoggingEnabled = enabled;
-    }
-    
-    public static boolean isDebugLoggingEnabled() {
-        return debugLoggingEnabled;
     }
     
     public CoverTacticalGoal(SoldierEntity soldier) {
@@ -390,7 +385,7 @@ public class CoverTacticalGoal extends Goal {
         }
         
         if (soldier.hasValidPingMoveTarget() && !soldier.hasValidAttackTarget()) {
-            if (debugLoggingEnabled) {
+            if (DiagnosticLogManager.isCoverLoggingEnabled()) {
                 StevesArmyMod.LOGGER.info("[CoverGoal] canUse=false: hasValidPingMoveTarget");
             }
             return false;
@@ -415,7 +410,7 @@ public class CoverTacticalGoal extends Goal {
                 if (cover != null) {
                     double distance = soldier.position().distanceTo(cover.getPosition().getCenter());
                     if (distance > COVER_ABANDON_DISTANCE) {
-                        if (debugLoggingEnabled) {
+                        if (DiagnosticLogManager.isCoverLoggingEnabled()) {
                             StevesArmyMod.LOGGER.info("[CoverGoal] canUse=false: cover abandoned (dist={})", distance);
                         }
                         getCoverManager().resetPeekState();
@@ -436,7 +431,7 @@ public class CoverTacticalGoal extends Goal {
                 result = false;
                 break;
         }
-        if (debugLoggingEnabled) {
+        if (DiagnosticLogManager.isCoverLoggingEnabled()) {
             StevesArmyMod.LOGGER.info("[CoverGoal] canUse={}, state={}, hasThreat={}, suppressed={}, health={}",
                 result, state, getThreats().hasActiveThreat(),
                 getCoverManager().isSuppressed(),
@@ -459,7 +454,7 @@ public class CoverTacticalGoal extends Goal {
                     getCoverManager().resetPeekState();
                     getPositionController().clear();
                     cooldown = COOLDOWN_TICKS;
-                    if (debugLoggingEnabled) {
+                    if (DiagnosticLogManager.isCoverLoggingEnabled()) {
                         StevesArmyMod.LOGGER.info("[CoverGoal] canContinueToUse=false: FOLLOW mode, not suppressed, far from owner");
                     }
                     return false;
@@ -469,7 +464,7 @@ public class CoverTacticalGoal extends Goal {
         
         boolean result = state != CoverBehaviorManager.CoverState.NO_COVER || 
                          soldier.hasValidAttackTarget();
-        if (debugLoggingEnabled) {
+        if (DiagnosticLogManager.isCoverLoggingEnabled()) {
             StevesArmyMod.LOGGER.info("[CoverGoal] canContinueToUse={}, state={}", result, state);
         }
         return result;
@@ -542,7 +537,7 @@ public class CoverTacticalGoal extends Goal {
         
         PeekController peekCtrl = getPeekController();
         
-        if (debugLoggingEnabled) {
+        if (DiagnosticLogManager.isCoverLoggingEnabled()) {
             tickLogCounter++;
             if (tickLogCounter >= SNAPSHOT_INTERVAL) {
                 tickLogCounter = 0;
@@ -621,7 +616,7 @@ public class CoverTacticalGoal extends Goal {
             tickAttackPhase();
         } else {
             // Non-ATTACK: log structured transition if debug enabled (rate-limited)
-            if (debugLoggingEnabled) {
+            if (DiagnosticLogManager.isCoverLoggingEnabled()) {
                 snapshotCounter++;
                 if (snapshotCounter >= SNAPSHOT_INTERVAL) {
                     snapshotCounter = 0;
@@ -643,7 +638,7 @@ public class CoverTacticalGoal extends Goal {
     private void tickSeekingCover() {
         // Handle pending retry from previous tick
         if (pendingRetryCover != null) {
-            if (debugLoggingEnabled) {
+            if (DiagnosticLogManager.isCoverLoggingEnabled()) {
                 StevesArmyMod.LOGGER.info("[PathDebug] Soldier {} retrying path to cover {}", 
                     soldier.getId(), pendingRetryCover.getPosition());
             }
@@ -716,7 +711,7 @@ public class CoverTacticalGoal extends Goal {
                     if (moved < 0.1) {
                         noProgressTicks++;
                         if (noProgressTicks > 40) {
-                            if (debugLoggingEnabled) {
+                            if (DiagnosticLogManager.isCoverLoggingEnabled()) {
                                 StevesArmyMod.LOGGER.info("[CoverGoal] Soldier {} not progressing toward cover ({} ticks, moved {}), retrying navigation",
                                     soldier.getId(), noProgressTicks, String.format("%.2f", moved));
                             }
@@ -752,7 +747,7 @@ public class CoverTacticalGoal extends Goal {
     private void tickRepositioning() {
         // Handle pending retry from previous tick
         if (pendingRetryCover != null) {
-            if (debugLoggingEnabled) {
+            if (DiagnosticLogManager.isCoverLoggingEnabled()) {
                 StevesArmyMod.LOGGER.info("[PathDebug] Soldier {} retrying path to cover {}",
                     soldier.getId(), pendingRetryCover.getPosition());
             }
@@ -778,7 +773,7 @@ public class CoverTacticalGoal extends Goal {
                 
                 if (angle > MID_MOVE_ANGLE_THRESHOLD) {
                     if (soldier.getRandom().nextFloat() < 0.5f) {
-                        if (debugLoggingEnabled) {
+                        if (DiagnosticLogManager.isCoverLoggingEnabled()) {
                             StevesArmyMod.LOGGER.info("[CoverGoal] Soldier {} mid-move threat shift, cancelling reposition",
                                 soldier.getId());
                         }
@@ -786,7 +781,7 @@ public class CoverTacticalGoal extends Goal {
                         findAndMoveToCover();
                         return;
                     } else {
-                        if (debugLoggingEnabled) {
+                        if (DiagnosticLogManager.isCoverLoggingEnabled()) {
                             StevesArmyMod.LOGGER.info("[CoverGoal] Soldier {} mid-move threat shift, committing to move",
                                 soldier.getId());
                         }
@@ -854,7 +849,7 @@ public class CoverTacticalGoal extends Goal {
                     if (moved < 0.1) {
                         noProgressTicks++;
                         if (noProgressTicks > 40) {
-                            if (debugLoggingEnabled) {
+                            if (DiagnosticLogManager.isCoverLoggingEnabled()) {
                                 StevesArmyMod.LOGGER.info("[CoverGoal] Soldier {} not progressing toward target cover ({} ticks, moved {}), retrying navigation",
                                     soldier.getId(), noProgressTicks, String.format("%.2f", moved));
                             }
@@ -881,7 +876,7 @@ public class CoverTacticalGoal extends Goal {
             PeekController peekCtrl = getPeekController();
             boolean peeking = peekCtrl.isExposed() || peekCtrl.isMovingToPeek() || peekCtrl.isReturning();
             
-            if (debugLoggingEnabled) {
+            if (DiagnosticLogManager.isCoverLoggingEnabled()) {
                 tickLogCounter++;
                 if (tickLogCounter >= SNAPSHOT_INTERVAL) {
                     tickLogCounter = 0;
@@ -894,7 +889,7 @@ public class CoverTacticalGoal extends Goal {
                 }
             }
             if (distance > COVER_ABANDON_DISTANCE) {
-                if (debugLoggingEnabled) {
+                if (DiagnosticLogManager.isCoverLoggingEnabled()) {
                     StevesArmyMod.LOGGER.info("[CoverTacticalGoal] Soldier {} drifted too far from cover ({} > {}), abandoning",
                         soldier.getId(), String.format("%.1f", distance), COVER_ABANDON_DISTANCE);
                 }
@@ -903,7 +898,7 @@ public class CoverTacticalGoal extends Goal {
                 return;
             }
             if (distance > COVER_VALID_DISTANCE && !peeking) {
-                if (debugLoggingEnabled) {
+                if (DiagnosticLogManager.isCoverLoggingEnabled()) {
                     StevesArmyMod.LOGGER.info("[CoverTacticalGoal] Soldier {} got pushed from cover ({} > {}), re-seeking",
                         soldier.getId(), String.format("%.1f", distance), COVER_VALID_DISTANCE);
                 }
@@ -930,7 +925,7 @@ public class CoverTacticalGoal extends Goal {
         if (!soldier.hasValidAttackTarget()) {
             Optional<CoverPoint> flankCover = shouldRepositionForFlank();
             if (flankCover.isPresent()) {
-                if (debugLoggingEnabled) {
+                if (DiagnosticLogManager.isCoverLoggingEnabled()) {
                     StevesArmyMod.LOGGER.info("[CoverGoal] Soldier {} flanked, repositioning to {}",
                         soldier.getId(), flankCover.get().getPosition());
                 }
@@ -1041,7 +1036,7 @@ public class CoverTacticalGoal extends Goal {
             if (!canLeaveCoverNow()) {
                 return PendingRepositionResult.BLOCKED;
             }
-            if (debugLoggingEnabled) {
+            if (DiagnosticLogManager.isCoverLoggingEnabled()) {
                 StevesArmyMod.LOGGER.info("[CoverGoal] Soldier {} shot while hiding in cover, repositioning",
                     soldier.getId());
             }
@@ -1058,7 +1053,7 @@ public class CoverTacticalGoal extends Goal {
             if (!canLeaveCoverNow()) {
                 return PendingRepositionResult.BLOCKED;
             }
-            if (debugLoggingEnabled) {
+            if (DiagnosticLogManager.isCoverLoggingEnabled()) {
                 StevesArmyMod.LOGGER.info("[CoverGoal] Soldier {} reposition requested, acting on it",
                     soldier.getId());
             }
@@ -1189,7 +1184,7 @@ private boolean shouldSeekCover() {
                 double dot = currentThreatDir.dot(entryThreatDir) / (currentThreatDir.length() * entryThreatDir.length());
                 double angle = Math.acos(net.minecraft.util.Mth.clamp(dot, -1.0, 1.0));
                 if (angle > THREAT_ANGLE_REPOSITION_THRESHOLD) {
-                    if (debugLoggingEnabled) {
+                    if (DiagnosticLogManager.isCoverLoggingEnabled()) {
                         StevesArmyMod.LOGGER.info("[CoverGoal] Soldier {} threat direction changed, repositioning",
                             soldier.getId());
                     }
@@ -1199,7 +1194,7 @@ private boolean shouldSeekCover() {
             }
         }
 
-        if (debugLoggingEnabled) {
+        if (DiagnosticLogManager.isCoverLoggingEnabled()) {
             tickLogCounter++;
             if (tickLogCounter >= SNAPSHOT_INTERVAL) {
                 tickLogCounter = 0;
@@ -1315,7 +1310,7 @@ private void startRepositioning() {
             failedCoverPositions.clear();
             blacklistReasons.clear();
             lastBlacklistClearTime = now;
-            if (debugLoggingEnabled) {
+            if (DiagnosticLogManager.isCoverLoggingEnabled()) {
                 StevesArmyMod.LOGGER.info("[CoverGoal] Soldier {} cleared failed cover blacklist", soldier.getId());
             }
         }
@@ -1459,7 +1454,7 @@ this.debugSearchCenter = searchCenter;
         if (bestCover.isPresent()) {
             CoverPoint cover = bestCover.get();
             
-            boolean wantsDebug = debugLoggingEnabled || CoverDebugManager.isShowSoldierCover();
+            boolean wantsDebug = DiagnosticLogManager.isCoverLoggingEnabled() || CoverDebugManager.isShowSoldierCover();
             if (wantsDebug) {
                 List<CoverFinder.ScoredCover> top = finder.findTopCovers(soldier, threatDirection, threats, searchRadius, 5, true);
                 cachedTopCovers = top.toArray(new CoverFinder.ScoredCover[0]);
@@ -1492,7 +1487,7 @@ this.debugSearchCenter = searchCenter;
             if (currentCover != null) {
                 double distToSoldier = soldier.position().distanceTo(cover.getPosition().getCenter());
                 if (distToSoldier < COVER_REACHED_DISTANCE) {
-                    if (debugLoggingEnabled) {
+                    if (DiagnosticLogManager.isCoverLoggingEnabled()) {
                         StevesArmyMod.LOGGER.info("[CoverGoal] Soldier {} selected cover {} too close, blacklisting and falling back to seek",
                             soldier.getId(), cover.getPosition());
                     }
@@ -1547,7 +1542,7 @@ private Optional<CoverPoint> findBetterCover() {
             }
         }
 
-        boolean wantsDebug = debugLoggingEnabled || CoverDebugManager.isShowSoldierCover();
+        boolean wantsDebug = DiagnosticLogManager.isCoverLoggingEnabled() || CoverDebugManager.isShowSoldierCover();
         if (wantsDebug) {
             List<CoverFinder.ScoredCover> top = finder.findTopCovers(soldier, threatDirection, threats, SEARCH_RADIUS, 5, true);
             cachedTopCovers = top.toArray(new CoverFinder.ScoredCover[0]);
@@ -1560,7 +1555,7 @@ private Optional<CoverPoint> findBetterCover() {
         CoverPoint currentCover = getCoverManager().getCurrentCover();
         CoverPoint targetCover = getCoverManager().getTargetCover();
         
-        boolean wantsDebug = debugLoggingEnabled || CoverDebugManager.isShowSoldierCover() || CoverDebugManager.isVisualizationEnabled();
+        boolean wantsDebug = DiagnosticLogManager.isCoverLoggingEnabled() || CoverDebugManager.isShowSoldierCover() || CoverDebugManager.isVisualizationEnabled();
         if (wantsDebug && (cachedTopCovers.length == 0 || soldier.tickCount % 10 == 0)) {
             CoverFinder finder = new CoverFinder(soldier.level());
 Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
@@ -2242,7 +2237,7 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
         if (path != null) {
             if (path.canReach()) {
                 isReachable = true;
-                if (debugLoggingEnabled) {
+                if (DiagnosticLogManager.isCoverLoggingEnabled()) {
                     StevesArmyMod.LOGGER.info("[PathDebug] Soldier {} at {} path REACHED standing {} (canReach=true)", 
                         soldier.getId(), soldier.blockPosition(), standingPos);
                 }
@@ -2256,13 +2251,13 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
                 
                 if (distSq <= 4.0 && yDiff <= 1) {
                     isReachable = true;
-                    if (debugLoggingEnabled) {
+                    if (DiagnosticLogManager.isCoverLoggingEnabled()) {
                         StevesArmyMod.LOGGER.info("[PathDebug] Soldier {} at {} path ACCEPTED: wall={}, end={}, dist={}, yDiff={}", 
                             soldier.getId(), soldier.blockPosition(), wallPos, endPos, String.format("%.2f", dist), yDiff);
                     }
                 } else {
                     failReason = String.format("endpoint too far: dist=%.2f (>2.0), yDiff=%d (>1)", dist, yDiff);
-                    if (debugLoggingEnabled) {
+                    if (DiagnosticLogManager.isCoverLoggingEnabled()) {
                         StevesArmyMod.LOGGER.info("[PathDebug] Soldier {} at {} path FAILED endpoint check: wall={}, end={}, dist={}, yDiff={}", 
                             soldier.getId(), soldier.blockPosition(), wallPos, endPos, String.format("%.2f", dist), yDiff);
                     }
@@ -2280,14 +2275,14 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
                     soldier.getId(), soldier.getName().getString(), wallPos, soldier.blockPosition(),
                     String.format("%.2f", soldier.position().distanceTo(standingPos)));
             }
-            if (debugLoggingEnabled) {
+            if (DiagnosticLogManager.isCoverLoggingEnabled()) {
                 StevesArmyMod.LOGGER.info("[PathDebug] Soldier {} started navigation to cover {} from pos {} (path nodes={})", 
                     soldier.getId(), wallPos, soldier.blockPosition(), path.getNodeCount());
             }
         } else {
             // If this is a null path and NOT already a retry, schedule retry for next tick
             if (path == null && !isRetryAttempt) {
-                if (debugLoggingEnabled) {
+                if (DiagnosticLogManager.isCoverLoggingEnabled()) {
                     StevesArmyMod.LOGGER.info("[PathDebug] Soldier {} at {} null path to cover {}, scheduling retry next tick", 
                         soldier.getId(), soldier.blockPosition(), wallPos);
                 }
@@ -2296,7 +2291,7 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
                 return;
             }
             
-            if (debugLoggingEnabled) {
+            if (DiagnosticLogManager.isCoverLoggingEnabled()) {
                 StevesArmyMod.LOGGER.info("[PathDebug] Soldier {} at {} BLACKLISTED cover {} reason: {}{}", 
                     soldier.getId(), soldier.blockPosition(), wallPos, failReason, isRetryAttempt ? " (after retry)" : "");
             }
@@ -2333,7 +2328,7 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
             if (threatDirection != null && threatDirection.lengthSqr() > 0.001) {
                 BlockPos peekPos = computePeekPosition(cover, threatDirection, target);
                 getCoverManager().setPeekPosition(peekPos);
-                if (peekPos == null && debugLoggingEnabled) {
+                if (peekPos == null && DiagnosticLogManager.isCoverLoggingEnabled()) {
                     StevesArmyMod.LOGGER.info("[CoverGoal] Soldier {} full cover has no peekable adjacent block with LOS", soldier.getId());
                 }
             }
@@ -2364,7 +2359,7 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
             attackExpectedCover = null;
         }
         getCoverManager().clearTargetCover();
-        if (debugLoggingEnabled) {
+        if (DiagnosticLogManager.isCoverLoggingEnabled()) {
             StevesArmyMod.LOGGER.info("[CoverGoal] Soldier {} blacklisted cover at {} reason={}",
                 soldier.getId(), pos, reason.label);
         }
