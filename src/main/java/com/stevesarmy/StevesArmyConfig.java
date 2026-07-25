@@ -217,7 +217,7 @@ BUILDER.pop();
 
         VS2_MAX_TRANSPORTED_SOLDIERS = BUILDER
             .comment("Maximum number of nearby FOLLOW soldiers automatically transported with one owner on a VS ship.")
-            .defineInRange("maxTransportedSoldiers", 4, 0, 16);
+            .defineInRange("maxTransportedSoldiers", 32, 0, 64);
 
         BUILDER.pop();
 
