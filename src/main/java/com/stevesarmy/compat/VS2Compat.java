@@ -6,7 +6,6 @@ import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.squad.SquadMode;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Vec3i;
-import net.minecraft.network.protocol.game.ClientboundAddEntityPacket;
 import net.minecraft.network.protocol.game.ClientboundRemoveEntitiesPacket;
 import net.minecraft.network.protocol.game.ClientboundSetPassengersPacket;
 import net.minecraft.server.level.ServerLevel;
@@ -534,16 +533,13 @@ public final class VS2Compat {
         if (state.transportOwnerId == null) {
             if (soldier.isPassenger() && state.transportAnchorId != null
                 && state.transportAnchorId.equals(soldier.getVehicle().getUUID())) {
-                // Re-apply rider position every tick so VS2's positionRider mixin
-                // keeps the soldier at the transformed world position.
                 soldier.getVehicle().positionRider(soldier);
                 stopMovement(soldier);
                 return;
             }
-            // Vehicle changed or lost; clear state.
             StevesArmyMod.LOGGER.info("[VS2] Command-driven transport lost soldier={} passenger={} expectedAnchor={}",
                 soldier.getId(), soldier.isPassenger(), state.transportAnchorId);
-            // Remove the manually-synced seat entity from clients
+            Vec3 preDismountPos = soldier.position();
             if (state.transportAnchorId != null && soldier.level() instanceof ServerLevel serverLevel) {
                 Entity oldSeat = serverLevel.getEntity(state.transportAnchorId);
                 if (oldSeat != null) {
@@ -556,13 +552,18 @@ public final class VS2Compat {
                     oldSeat.discard();
                 }
             }
+            // Clear drag state before and after dismount to prevent VS2 ship dragging
+            clearShipDraggingState(soldier);
             if (soldier.isPassenger()) {
                 soldier.stopRiding();
             }
             clearShipDraggingState(soldier);
+            Vec3 postReleasePos = soldier.position();
+            StevesArmyMod.LOGGER.info("[VS2] Command transport release soldier={} prePos={} postPos={} dist={}",
+                soldier.getId(), formatVec3(preDismountPos), formatVec3(postReleasePos),
+                String.format("%.2f", preDismountPos.distanceTo(postReleasePos)));
             state.transportAnchorId = null;
             state.transportSeatPosition = null;
-            extractToSafeWorldPosition(soldier, state);
             return;
         }
 
@@ -577,25 +578,21 @@ public final class VS2Compat {
         StevesArmyMod.LOGGER.info("[VS2] Releasing transport soldier={} anchor={} passenger={} owner={} ownerOnShip={}",
             soldier.getId(), anchor == null ? "missing" : anchor.getId(), soldier.isPassenger(),
             owner == null ? "missing" : owner.getId(), ownerOnShip);
+        Vec3 preDismountPos = soldier.position();
+        // Clear drag state before and after dismount to prevent VS2 ship dragging
+        clearShipDraggingState(soldier);
         if (soldier.isPassenger()) {
             soldier.stopRiding();
         }
-        // Clear VS2's stale dragging state so the soldier is not repeatedly extracted.
         clearShipDraggingState(soldier);
+        Vec3 postReleasePos = soldier.position();
+        StevesArmyMod.LOGGER.info("[VS2] Transport release soldier={} prePos={} postPos={} dist={}",
+            soldier.getId(), formatVec3(preDismountPos), formatVec3(postReleasePos),
+            String.format("%.2f", preDismountPos.distanceTo(postReleasePos)));
         state.transportAnchorId = null;
         state.transportOwnerId = null;
         state.transportShipId = null;
         state.transportSeatPosition = null;
-
-        if (owner != null && !ownerOnShip) {
-            BlockPos nearOwner = findSafePositionNear(soldier, owner.blockPosition());
-            if (nearOwner != null) {
-                moveToWorldPosition(soldier, nearOwner);
-                state.lastSafeWorldPosition = nearOwner;
-                return;
-            }
-        }
-        extractToSafeWorldPosition(soldier, state);
     }
 
     private static boolean isTransported(SoldierEntity soldier, SoldierState state) {
@@ -738,12 +735,22 @@ private static boolean isTransportOwnerOnShip(LivingEntity owner, SoldierState s
             Method getter = soldier.getClass().getMethod("getDraggingInformation");
             Object draggingInfo = getter.invoke(soldier);
             if (draggingInfo != null) {
-                draggingInfo.getClass().getMethod("setLastShipStoodOn", Object.class).invoke(draggingInfo, (Object) null);
-                draggingInfo.getClass().getMethod("setAddedMovementLastTick", org.joml.Vector3dc.class)
+                Class<?> dc = draggingInfo.getClass();
+                try {
+                    dc.getMethod("setLastShipStoodOn", Long.class).invoke(draggingInfo, (Long) null);
+                } catch (NoSuchMethodException e1) {
+                    dc.getMethod("setLastShipStoodOn", Object.class).invoke(draggingInfo, (Object) null);
+                }
+                dc.getMethod("setAddedMovementLastTick", org.joml.Vector3dc.class)
                     .invoke(draggingInfo, new org.joml.Vector3d());
-                draggingInfo.getClass().getMethod("setAddedYawRotLastTick", Double.class).invoke(draggingInfo, 0.0);
+                try {
+                    dc.getMethod("setAddedYawRotLastTick", double.class).invoke(draggingInfo, 0.0);
+                } catch (NoSuchMethodException e2) {
+                    dc.getMethod("setAddedYawRotLastTick", Double.class).invoke(draggingInfo, 0.0);
+                }
             }
-        } catch (ReflectiveOperationException ignored) {
+        } catch (ReflectiveOperationException e) {
+            StevesArmyMod.LOGGER.warn("[VS2] Failed to clear dragging state for soldier {}: {}", soldier.getId(), e.getMessage());
         }
     }
 
