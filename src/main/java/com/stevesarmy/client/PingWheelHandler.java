@@ -8,6 +8,9 @@ import com.stevesarmy.util.RateLimiter;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.world.level.ClipContext;
+import net.minecraft.world.level.block.AbstractGlassBlock;
+import net.minecraft.world.level.block.StainedGlassPaneBlock;
+import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
@@ -164,13 +167,7 @@ public class PingWheelHandler {
         Vec3 lookVec = player.getViewVector(1.0f);
         Vec3 endPos = eyePos.add(lookVec.scale(maxDistance));
         
-        BlockHitResult hitResult = player.level().clip(new ClipContext(
-            eyePos,
-            endPos,
-            ClipContext.Block.OUTLINE,
-            ClipContext.Fluid.NONE,
-            player
-        ));
+        BlockHitResult hitResult = clipPingTarget(player, eyePos, endPos, lookVec);
         
         Vec3 pingPos;
         if (hitResult.getType() != HitResult.Type.MISS) {
@@ -185,6 +182,39 @@ public class PingWheelHandler {
         
         PingMessage message = new PingMessage(type, pingPos, dimension, FireTeamScopeState.INSTANCE.getCurrentScope());
         NetworkHandler.INSTANCE.sendToServer(message);
+    }
+
+    /**
+     * Continues through glass and non-colliding vegetation, but retains thin
+     * collidable blocks such as fences and rails as valid ping targets.
+     */
+    private static BlockHitResult clipPingTarget(LocalPlayer player, Vec3 start, Vec3 end, Vec3 direction) {
+        Vec3 rayStart = start;
+        for (int ignoredBlocks = 0; ignoredBlocks < 64; ignoredBlocks++) {
+            BlockHitResult hit = player.level().clip(new ClipContext(
+                rayStart,
+                end,
+                ClipContext.Block.OUTLINE,
+                ClipContext.Fluid.NONE,
+                player
+            ));
+            if (hit.getType() == HitResult.Type.MISS || !isPingTransparent(player, hit)) {
+                return hit;
+            }
+
+            // Move beyond the hit point so the next clip cannot hit this block again.
+            rayStart = hit.getLocation().add(direction.scale(0.001));
+        }
+
+        return BlockHitResult.miss(end, net.minecraft.core.Direction.getNearest(direction.x, direction.y, direction.z),
+            net.minecraft.core.BlockPos.containing(end));
+    }
+
+    private static boolean isPingTransparent(LocalPlayer player, BlockHitResult hit) {
+        BlockState state = player.level().getBlockState(hit.getBlockPos());
+        return state.getBlock() instanceof AbstractGlassBlock
+            || state.getBlock() instanceof StainedGlassPaneBlock
+            || state.getCollisionShape(player.level(), hit.getBlockPos()).isEmpty();
     }
     
     public static boolean isWheelActive() {

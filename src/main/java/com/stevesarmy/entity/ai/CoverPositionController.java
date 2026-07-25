@@ -55,11 +55,6 @@ public class CoverPositionController extends MoveControl {
 
         this.setWantedPosition(pos.x, pos.y, pos.z, speed);
 
-        if (!source.equals(this.debugMoveSource)) {
-            StevesArmyMod.LOGGER.info("[MoveCtl] Soldier {} target=({}, {}, {}) speed={} source={} reason={}",
-                ((net.minecraft.world.entity.LivingEntity)this.mob).getId(),
-                pos.x, pos.y, pos.z, speed, source, reason);
-        }
         this.debugMoveSource = source;
         this.debugMoveReason = reason;
     }

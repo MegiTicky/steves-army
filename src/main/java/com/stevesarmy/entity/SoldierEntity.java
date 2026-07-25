@@ -1,6 +1,7 @@
 package com.stevesarmy.entity;
 
 import com.stevesarmy.StevesArmyMod;
+import com.stevesarmy.compat.VS2Compat;
 import com.stevesarmy.combat.CombatDebugData;
 import com.stevesarmy.combat.DetectionSystem;
 import com.stevesarmy.combat.GunIntegration;
@@ -526,7 +527,7 @@ public class SoldierEntity extends PathfinderMob implements Container {
 
     @Override
     protected boolean canRide(Entity vehicle) {
-        return false;
+        return VS2Compat.isAuthorizedMount(this, vehicle);
     }
 
     @Override
@@ -760,10 +761,6 @@ public class SoldierEntity extends PathfinderMob implements Container {
         }
         
         if (!this.level().isClientSide) {
-            // Covers legacy saves and mods that bypass Entity.canRide when mounting.
-            if (this.isPassenger()) {
-                this.stopRiding();
-            }
             threatAwareness.tick();
         }
 
@@ -807,7 +804,7 @@ public class SoldierEntity extends PathfinderMob implements Container {
             }
         }
 
-        if (!this.level().isClientSide && isRecalling()) {
+        if (!this.level().isClientSide && !this.isPassenger() && isRecalling()) {
             int ticks = getRecallTicks() - 1;
             if (ticks <= 0) {
                 com.stevesarmy.combat.RecallHelper.executeRecall(this);
@@ -817,10 +814,19 @@ public class SoldierEntity extends PathfinderMob implements Container {
             }
         }
     }
+
+    @Override
+    protected void customServerAiStep() {
+        if (VS2Compat.prepareSoldierAi(this)) {
+            return;
+        }
+        super.customServerAiStep();
+    }
     
     @Override
     public void remove(RemovalReason reason) {
         if (!this.level().isClientSide) {
+            VS2Compat.onSoldierRemoved(this);
             TeamManager.removeFromTeam(this);
             com.stevesarmy.combat.cover.CoverReservationManager.releaseAll(this);
             if (this.level() instanceof ServerLevel serverLevel) {

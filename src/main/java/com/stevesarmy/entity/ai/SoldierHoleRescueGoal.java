@@ -33,6 +33,11 @@ public class SoldierHoleRescueGoal extends Goal {
     public boolean canUse() {
         if (!soldier.isAlive()) return false;
         if (soldier.level().isClientSide()) return false;
+        if (soldier.isPassenger()) {
+            stuckAnchorPos = null;
+            stuckTicks = 0;
+            return false;
+        }
         
         // Timestamp-based cooldown check
         int ticksSinceLastRescue = soldier.tickCount - lastRescueTick;
@@ -48,7 +53,8 @@ public class SoldierHoleRescueGoal extends Goal {
         
         // Don't rescue if suppressing
         if (soldier.hasValidPingSuppressPos()) return false;
-        
+
+        // Don't rescue if soldier has recently been on a Create seat (transport release handoff)
         Vec3 currentPos = soldier.position();
         
         // Initialize anchor if needed

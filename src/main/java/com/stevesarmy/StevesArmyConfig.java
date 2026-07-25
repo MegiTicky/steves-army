@@ -33,6 +33,10 @@ public class StevesArmyConfig {
     public static final ForgeConfigSpec.IntValue EXPLOSION_BURST_WINDOW_MS;
     public static final ForgeConfigSpec.DoubleValue EXPLOSION_BURST_MULTIPLIER;
 
+    public static final ForgeConfigSpec.BooleanValue VS2_COMPAT_ENABLED;
+    public static final ForgeConfigSpec.BooleanValue VS2_AUTO_TRANSPORT;
+    public static final ForgeConfigSpec.IntValue VS2_MAX_TRANSPORTED_SOLDIERS;
+
     static {
         BUILDER.push("aim_quality");
         
@@ -196,6 +200,24 @@ BUILDER.pop();
                      "First explosion = 1.0x, subsequent = this value.",
                      "Default: 0.35")
             .defineInRange("explosionBurstMultiplier", 0.35, 0.0, 1.0);
+
+        BUILDER.pop();
+
+        BUILDER.push("valkyrienskies");
+
+        VS2_COMPAT_ENABLED = BUILDER
+            .comment("Enable Valkyrien Skies 2 compatibility when the valkyrienskies mod is installed.",
+                     "Soldiers avoid VS ship navigation and recover from accidental ship contact.")
+            .define("enabled", true);
+
+        VS2_AUTO_TRANSPORT = BUILDER
+            .comment("Automatically mount nearby FOLLOW soldiers to Create seats on the ship their owner boards.",
+                     "Mounted soldiers do not navigate, seek cover, or fight while transported.")
+            .define("autoTransport", true);
+
+        VS2_MAX_TRANSPORTED_SOLDIERS = BUILDER
+            .comment("Maximum number of nearby FOLLOW soldiers automatically transported with one owner on a VS ship.")
+            .defineInRange("maxTransportedSoldiers", 4, 0, 16);
 
         BUILDER.pop();
 
