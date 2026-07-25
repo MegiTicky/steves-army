@@ -3,6 +3,7 @@ package com.stevesarmy;
 import com.mojang.logging.LogUtils;
 import com.stevesarmy.command.CombatDebugCommand;
 import com.stevesarmy.command.StevesArmyCommand;
+import com.stevesarmy.command.TransportCommand;
 import com.stevesarmy.combat.GunIntegration;
 import com.stevesarmy.network.NetworkHandler;
 import com.stevesarmy.registry.ModEntities;
@@ -53,6 +54,7 @@ public class StevesArmyMod {
     private void registerCommands(final RegisterCommandsEvent event) {
         CombatDebugCommand.register(event.getDispatcher());
         StevesArmyCommand.register(event.getDispatcher());
-        LOGGER.info("Registered commands: /stevesarmy, /stevesarmy_debug");
+        TransportCommand.register(event.getDispatcher());
+        LOGGER.info("Registered commands: /stevesarmy, /stevesarmy_debug, /stevesarmy transport");
     }
 }
