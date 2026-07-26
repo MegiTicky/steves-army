@@ -4,6 +4,7 @@ import com.mojang.logging.LogUtils;
 import com.stevesarmy.command.CombatDebugCommand;
 import com.stevesarmy.command.StevesArmyCommand;
 import com.stevesarmy.command.TransportCommand;
+import com.stevesarmy.client.StevesArmyClientConfig;
 import com.stevesarmy.combat.GunIntegration;
 import com.stevesarmy.network.NetworkHandler;
 import com.stevesarmy.registry.ModEntities;
@@ -37,6 +38,7 @@ public class StevesArmyMod {
         ModMenuTypes.register(modEventBus);
 
         ModLoadingContext.get().registerConfig(ModConfig.Type.SERVER, StevesArmyConfig.SPEC);
+        ModLoadingContext.get().registerConfig(ModConfig.Type.CLIENT, StevesArmyClientConfig.SPEC);
 
         modEventBus.addListener(this::commonSetup);
 

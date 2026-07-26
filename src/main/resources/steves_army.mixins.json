@@ -5,7 +5,8 @@
   "refmap": "steves_army.refmap.json",
   "client": [
     "GunDisplayInstanceMixin",
-    "MinecraftGlowMixin"
+    "MinecraftGlowMixin",
+    "SoldierItemInHandLayerMixin"
   ],
   "injectors": {
     "defaultRequire": 1
