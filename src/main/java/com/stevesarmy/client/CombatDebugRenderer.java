@@ -6,7 +6,6 @@ import com.mojang.blaze3d.vertex.DefaultVertexFormat;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.Tesselator;
 import com.mojang.blaze3d.vertex.VertexFormat;
-import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.combat.CombatDebugData;
 import net.minecraft.client.Camera;
 import net.minecraft.client.Minecraft;
@@ -66,8 +65,6 @@ public class CombatDebugRenderer {
     }
     
     public static void render(PoseStack poseStack, Camera camera, float partialTick) {
-        StevesArmyMod.LOGGER.debug("CombatDebugRenderer.render() called - mode: {}, dataCount: {}", currentDebugMode, debugDataList.size());
-        
         if (currentDebugMode == DEBUG_MODE_OFF || debugDataList.isEmpty()) {
             return;
         }

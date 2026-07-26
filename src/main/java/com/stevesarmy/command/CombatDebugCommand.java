@@ -76,6 +76,20 @@ public class CombatDebugCommand {
                     .then(Commands.literal("off")
                         .executes(ctx -> toggleAttackLogging(ctx, false)))
                 )
+                .then(Commands.literal("damage")
+                    .executes(ctx -> toggleDamageLogging(ctx, null))
+                    .then(Commands.literal("on")
+                        .executes(ctx -> toggleDamageLogging(ctx, true)))
+                    .then(Commands.literal("off")
+                        .executes(ctx -> toggleDamageLogging(ctx, false)))
+                )
+                .then(Commands.literal("suppression")
+                    .executes(ctx -> toggleSuppressionLogging(ctx, null))
+                    .then(Commands.literal("on")
+                        .executes(ctx -> toggleSuppressionLogging(ctx, true)))
+                    .then(Commands.literal("off")
+                        .executes(ctx -> toggleSuppressionLogging(ctx, false)))
+                )
                 .then(Commands.literal("spacing")
                     .executes(ctx -> toggleSpacingLogging(ctx, null))
                     .then(Commands.literal("on")
@@ -200,6 +214,8 @@ public class CombatDebugCommand {
             "  none                - Disable ALL debug (logging + render + overlays)\n" +
             "  log cover [on|off]  - Toggle cover behavior logging\n" +
             "  log attack [on|off] - Toggle attack phase logging (quiet, soldier-specific)\n" +
+            "  log damage [on|off] - Toggle damage and gun integration logging\n" +
+            "  log suppression [on|off] - Toggle suppression and incoming-fire logging\n" +
             "  log spacing [on|off] - Toggle formation spacing logging\n" +
             "  log holerescue [on|off] - Toggle hole rescue diagnostic logging\n" +
             "  render soldiers     - Toggle soldier cover visualization lines/labels\n" +
@@ -246,10 +262,12 @@ public class CombatDebugCommand {
             "  Peek candidate visualization: ON\n" +
             "  Cover behavior logging: ON\n" +
             "  Attack phase logging: ON\n" +
+            "  Damage logging: ON\n" +
+            "  Suppression logging: ON\n" +
             "  Spacing logging: ON\n" +
             "  Hole rescue logging: ON\n" +
             "Use /stevesarmy_debug render mode minimal for compact display\n" +
-            "Use /stevesarmy_debug log cover off to disable console logs"
+            "Use /stevesarmy_debug none to disable all diagnostics"
         ), true);
         return 1;
     }
@@ -302,6 +320,24 @@ public class CombatDebugCommand {
         DiagnosticLogManager.setAttackLoggingEnabled(newState);
         context.getSource().sendSuccess(() -> Component.literal(
             "Attack phase logging: " + (newState ? "ON" : "OFF")
+        ), true);
+        return 1;
+    }
+
+    private static int toggleDamageLogging(CommandContext<CommandSourceStack> context, Boolean enable) {
+        boolean newState = enable != null ? enable : !DiagnosticLogManager.isDamageLoggingEnabled();
+        DiagnosticLogManager.setDamageLoggingEnabled(newState);
+        context.getSource().sendSuccess(() -> Component.literal(
+            "Damage logging: " + (newState ? "ON" : "OFF")
+        ), true);
+        return 1;
+    }
+
+    private static int toggleSuppressionLogging(CommandContext<CommandSourceStack> context, Boolean enable) {
+        boolean newState = enable != null ? enable : !DiagnosticLogManager.isSuppressionLoggingEnabled();
+        DiagnosticLogManager.setSuppressionLoggingEnabled(newState);
+        context.getSource().sendSuccess(() -> Component.literal(
+            "Suppression logging: " + (newState ? "ON" : "OFF")
         ), true);
         return 1;
     }
@@ -1083,6 +1119,8 @@ public class CombatDebugCommand {
             "=== DEBUG STATUS ===\n" +
             "  Cover logging: " + (DiagnosticLogManager.isCoverLoggingEnabled() ? "ON" : "OFF") + "\n" +
             "  Attack logging: " + (DiagnosticLogManager.isAttackLoggingEnabled() ? "ON" : "OFF") + "\n" +
+            "  Damage logging: " + (DiagnosticLogManager.isDamageLoggingEnabled() ? "ON" : "OFF") + "\n" +
+            "  Suppression logging: " + (DiagnosticLogManager.isSuppressionLoggingEnabled() ? "ON" : "OFF") + "\n" +
             "  Spacing logging: " + (DiagnosticLogManager.isSpacingLoggingEnabled() ? "ON" : "OFF") + "\n" +
             "  Hole rescue logging: " + (DiagnosticLogManager.isHoleRescueLoggingEnabled() ? "ON" : "OFF") + "\n" +
             "  Combat overlay: " + CombatDebugRenderer.getDebugModeName() + "\n" +

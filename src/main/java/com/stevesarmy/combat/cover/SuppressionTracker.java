@@ -1,6 +1,7 @@
 package com.stevesarmy.combat.cover;
 
 import com.stevesarmy.StevesArmyMod;
+import com.stevesarmy.debug.DiagnosticLogManager;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.phys.Vec3;
@@ -248,6 +249,6 @@ public class SuppressionTracker {
     }
 
     private boolean debugLog() {
-        return com.stevesarmy.entity.ai.CoverTacticalGoal.isDebugLoggingEnabled();
+        return DiagnosticLogManager.isSuppressionLoggingEnabled();
     }
 }

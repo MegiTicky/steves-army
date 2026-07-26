@@ -14,6 +14,7 @@ import com.stevesarmy.combat.cover.CoverBehaviorManager;
 import com.stevesarmy.combat.cover.CoverFinder;
 import com.stevesarmy.combat.cover.CoverPoint;
 import com.stevesarmy.combat.cover.CoverType;
+import com.stevesarmy.debug.DiagnosticLogManager;
 import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.entity.TargetEntity;
 import com.stevesarmy.inventory.SoldierInventory;
@@ -70,11 +71,7 @@ public class SoldierCombatGoal extends Goal {
     private static final int DEBUG_SYNC_INTERVAL = 20;
     private int targetReevaluateCounter = 0;
     
-    private static final int PEEK_CYCLE_LOG_INTERVAL = 100;
-    private int peekCycleLogCounter = 0;
     private int findNewTargetLogCounter = 0;
-
-    private static boolean combatDebugLogging = false;
 
     private boolean isSuppressing = false;
     private BlockPos suppressionTargetPos = null;
@@ -116,11 +113,19 @@ public class SoldierCombatGoal extends Goal {
     private int burstInitialDelayTicks = 0;
 
     public static void setDebugLoggingEnabled(boolean enabled) {
-        combatDebugLogging = enabled;
+        DiagnosticLogManager.setAttackLoggingEnabled(enabled);
     }
 
     private static boolean isDebugLogging() {
-        return combatDebugLogging || CoverTacticalGoal.isDebugLoggingEnabled();
+        return DiagnosticLogManager.isAttackLoggingEnabled();
+    }
+
+    private static boolean isDamageDebugLogging() {
+        return DiagnosticLogManager.isDamageLoggingEnabled();
+    }
+
+    private static boolean isSuppressionDebugLogging() {
+        return DiagnosticLogManager.isSuppressionLoggingEnabled();
     }
 
     public SoldierCombatGoal(SoldierEntity soldier) {
@@ -308,7 +313,7 @@ public class SoldierCombatGoal extends Goal {
         } else {
             tickScanning(potentialTargets);
             CoverBehaviorManager coverManager = soldier.getCoverBehaviorManager();
-            if (++debugSyncTickCounter % PEEK_CYCLE_LOG_INTERVAL == 0) {
+            if (DiagnosticLogManager.isAttackLoggingEnabled() && soldier.tickCount % 100 == 0) {
                 StevesArmyMod.LOGGER.info("[CombatGoal] Soldier {} tick: target=null, inCover={}, peekState={}, coverState={}",
                     soldier.getId(), inCover, soldier.getPeekController().getState(), coverManager.getState());
             }
@@ -446,7 +451,7 @@ boolean isBolting = GunIntegration.isBolting(soldier);
         boolean isBolting = GunIntegration.isBolting(soldier);
         boolean isReloading = GunIntegration.isReloading(soldier);
         
-        if (isDebugLogging()) {
+        if (isDamageDebugLogging()) {
             StevesArmyMod.LOGGER.info("[DAMAGE_DEBUG] tickGunCombat: soldier={}({}) target={}({}) isDrawing={} isBolting={} isReloading={}",
                 soldier.getName().getString(), soldier.getId(),
                 target != null ? target.getName().getString() + "(" + target.getId() + ")" : "null",
@@ -472,14 +477,14 @@ boolean isBolting = GunIntegration.isBolting(soldier);
 
         ExposureCalculator.AimPointResult aimPoint = getOrComputeAimPoint();
         if (aimPoint == null) {
-            if (isDebugLogging()) {
+            if (isDamageDebugLogging()) {
                 StevesArmyMod.LOGGER.info("[DAMAGE_DEBUG] tickGunCombat: aimPoint is null, can't shoot");
             }
             return;
         }
         
         if (!aimPoint.canShoot()) {
-            if (isDebugLogging()) {
+            if (isDamageDebugLogging()) {
                 StevesArmyMod.LOGGER.info("[DAMAGE_DEBUG] tickGunCombat: canShoot=false (pointVisible={} bulletPathClear={}) aimType={}", 
                     aimPoint.pointVisible, aimPoint.bulletPathClear, aimPoint.type.displayName);
             }
@@ -493,7 +498,7 @@ boolean isBolting = GunIntegration.isBolting(soldier);
                 ? CQB_PATH_BLOCKED_SWITCH_TICKS : PATH_BLOCKED_SWITCH_TICKS;
             pathBlockedCounter++;
             if (pathBlockedCounter >= maxBlockedTicks) {
-                if (isDebugLogging()) {
+                if (isDamageDebugLogging()) {
                     StevesArmyMod.LOGGER.info("Path blocked for {} ticks (CQB={}), switching target", pathBlockedCounter, soldier.isCQB() || soldier.hasCloseRangeTarget());
                 }
                 pathBlockedCounter = 0;
@@ -505,7 +510,7 @@ boolean isBolting = GunIntegration.isBolting(soldier);
         }
         
         if (!FriendlyFireChecker.isSafeToShoot(soldier, aimPoint.position, aimQuality)) {
-            if (isDebugLogging()) {
+            if (isDamageDebugLogging()) {
                 StevesArmyMod.LOGGER.info("[FriendlyFire] Soldier {} blocked shot - friendly in cone", 
                     soldier.getId());
             }
@@ -551,7 +556,7 @@ boolean isBolting = GunIntegration.isBolting(soldier);
                     threatTracker.reportThreatDirect(target);
                     detectionSystem.forceDetect(target);
                     resetAim(target);
-                    if (isDebugLogging()) {
+                    if (isDamageDebugLogging()) {
                         StevesArmyMod.LOGGER.info("Switched to better target: {} (higher hit probability)", 
                             target.getName().getString());
                     }
@@ -563,7 +568,7 @@ boolean isBolting = GunIntegration.isBolting(soldier);
         
         GunIntegration.ShootResult result;
         
-        if (isDebugLogging()) {
+        if (isDamageDebugLogging()) {
             StevesArmyMod.LOGGER.info("[DAMAGE_DEBUG] tickGunCombat: ABOUT TO SHOOT at target={}({}) aimPoint=({},{},{}) aimType={} aimQuality={} hitChance={}",
                 target.getName().getString(), target.getId(),
                 String.format("%.2f", aimPoint.position.x),
@@ -591,7 +596,7 @@ boolean isBolting = GunIntegration.isBolting(soldier);
                 float recoilMagnitude = Math.abs(recoil[0]) + Math.abs(recoil[1]);
                 float recoilLoss = recoilMagnitude * StevesArmyConfig.getAimQualityRecoilScale();
                 aimQuality = Math.max(0.0f, aimQuality - recoilLoss);
-                if (isDebugLogging()) {
+                if (isDamageDebugLogging()) {
                     StevesArmyMod.LOGGER.info("[Recoil] pitch={}, yaw={}, magnitude={}, recoilLoss={}, aimQuality={}",
                         String.format("%.3f", recoil[0]), String.format("%.3f", recoil[1]),
                         String.format("%.3f", recoilMagnitude), String.format("%.3f", recoilLoss),
@@ -600,7 +605,7 @@ boolean isBolting = GunIntegration.isBolting(soldier);
             }
         }
         
-        if (isDebugLogging()) {
+        if (isDamageDebugLogging()) {
             StevesArmyMod.LOGGER.info("[DAMAGE_DEBUG] tickGunCombat: ShootResult={}", result);
         }
         
@@ -628,24 +633,9 @@ boolean isBolting = GunIntegration.isBolting(soldier);
         }
     }
     
-private void tickCoverPeekCycle(CoverBehaviorManager coverManager) {
+    private void tickCoverPeekCycle(CoverBehaviorManager coverManager) {
         PeekController peekCtrl = soldier.getPeekController();
         PeekController.State peekState = peekCtrl.getState();
-
-        if (++peekCycleLogCounter >= PEEK_CYCLE_LOG_INTERVAL) {
-            peekCycleLogCounter = 0;
-            StevesArmyMod.LOGGER.info("[PeekCycle] Soldier {} tick: peekState={}, target={}, inCover={}, hasThreat={}",
-                soldier.getId(), peekState,
-                (target != null ? target.getName().getString() : "null"),
-                coverManager.isInCover(), soldier.getThreatAwareness().hasActiveThreat());
-        }
-        
-        if (isDebugLogging()) {
-            StevesArmyMod.LOGGER.info("[PeekCycle] Soldier {} tick: peekState={}, target={}, suppressed={}, canPeek={}",
-                soldier.getId(), peekState,
-                (target != null ? target.getName().getString() : "null"),
-                coverManager.isSuppressed(), coverManager.getSuppressionTracker().canPeek());
-        }
         
         if (target != null && target.isAlive()) {
             soldier.setTarget(target);
@@ -1393,15 +1383,19 @@ private void tickCoverPeekCycle(CoverBehaviorManager coverManager) {
             }
             
             if (!intel.tryMarkThreatSuppressed(pendingSuppressionThreat.threatEntityId, soldier.getUUID())) {
-                StevesArmyMod.LOGGER.info("[Suppression] Soldier {} failed to claim threat {} (already suppressed by another)",
-                    soldier.getId(), pendingSuppressionThreat.threatEntityId.toString().substring(0, 8));
+                if (isSuppressionDebugLogging()) {
+                    StevesArmyMod.LOGGER.info("[Suppression] Soldier {} failed to claim threat {} (already suppressed by another)",
+                        soldier.getId(), pendingSuppressionThreat.threatEntityId.toString().substring(0, 8));
+                }
                 pendingSuppressionThreat = null;
                 return;
             }
             
-            StevesArmyMod.LOGGER.info("[Suppression] Soldier {} claimed threat {} at {}, starting suppression",
-                soldier.getId(), pendingSuppressionThreat.threatEntityId.toString().substring(0, 8),
-                pendingSuppressionThreat.lastKnownPosition);
+            if (isSuppressionDebugLogging()) {
+                StevesArmyMod.LOGGER.info("[Suppression] Soldier {} claimed threat {} at {}, starting suppression",
+                    soldier.getId(), pendingSuppressionThreat.threatEntityId.toString().substring(0, 8),
+                    pendingSuppressionThreat.lastKnownPosition);
+            }
             
             suppressionTargetUUID = pendingSuppressionThreat.threatEntityId;
             suppressionTargetPos = pendingSuppressionThreat.lastKnownPosition;
@@ -1426,8 +1420,10 @@ private void tickCoverPeekCycle(CoverBehaviorManager coverManager) {
         
         suppressionRemainingTicks--;
         if (suppressionRemainingTicks <= 0) {
-            StevesArmyMod.LOGGER.info("[Suppression] Soldier {} finished suppression duration ({}s), stopping",
-                soldier.getId(), String.format("%.1f", suppressionDurationTicks / 20.0));
+            if (isSuppressionDebugLogging()) {
+                StevesArmyMod.LOGGER.info("[Suppression] Soldier {} finished suppression duration ({}s), stopping",
+                    soldier.getId(), String.format("%.1f", suppressionDurationTicks / 20.0));
+            }
             if (intel != null && suppressionTargetUUID != null) {
                 intel.clearThreatSuppression(suppressionTargetUUID);
             }
@@ -1441,8 +1437,10 @@ private void tickCoverPeekCycle(CoverBehaviorManager coverManager) {
         Vec3 targetPos = Vec3.atCenterOf(suppressionTargetPos).add(0, 1.0, 0);
         
         if (!TargetAcquisition.hasNearLineOfSightToPosition(soldier, targetPos, SUPPRESSION_LOS_TOLERANCE)) {
-            StevesArmyMod.LOGGER.info("[Suppression] Soldier {} has no LOS to suppression target at {}, clearing assignment",
-                soldier.getId(), suppressionTargetPos);
+            if (isSuppressionDebugLogging()) {
+                StevesArmyMod.LOGGER.info("[Suppression] Soldier {} has no LOS to suppression target at {}, clearing assignment",
+                    soldier.getId(), suppressionTargetPos);
+            }
             if (intel != null && suppressionTargetUUID != null) {
                 intel.clearThreatSuppression(suppressionTargetUUID);
             }
@@ -1463,7 +1461,7 @@ private void tickCoverPeekCycle(CoverBehaviorManager coverManager) {
         
         float adsProgress = GunIntegration.getAimProgress(soldier);
         if (adsProgress < SUPPRESSION_ADS_THRESHOLD) {
-            if (suppressionRemainingTicks % 20 == 0) {
+            if (isSuppressionDebugLogging() && suppressionRemainingTicks % 20 == 0) {
                 StevesArmyMod.LOGGER.info("[Suppression] Soldier {} waiting for ADS ({}%)", 
                     soldier.getId(), (int)(adsProgress * 100));
             }
@@ -1472,7 +1470,7 @@ private void tickCoverPeekCycle(CoverBehaviorManager coverManager) {
         
         if (burstCooldownTicks > 0) {
             burstCooldownTicks--;
-            if (burstCooldownTicks % 20 == 0) {
+            if (isSuppressionDebugLogging() && burstCooldownTicks % 20 == 0) {
                 StevesArmyMod.LOGGER.info("[Suppression] Soldier {} burst cooldown: {} ticks remaining", 
                     soldier.getId(), burstCooldownTicks);
             }
@@ -1480,7 +1478,9 @@ private void tickCoverPeekCycle(CoverBehaviorManager coverManager) {
         }
         
         if (burstWaitingForBolt && GunIntegration.isBolting(soldier)) {
-            StevesArmyMod.LOGGER.info("[Suppression] Soldier {} waiting for bolt", soldier.getId());
+            if (isSuppressionDebugLogging() && suppressionRemainingTicks % 20 == 0) {
+                StevesArmyMod.LOGGER.info("[Suppression] Soldier {} waiting for bolt", soldier.getId());
+            }
             return;
         }
         burstWaitingForBolt = false;
@@ -1498,8 +1498,10 @@ private void tickCoverPeekCycle(CoverBehaviorManager coverManager) {
         Vec3 spreadPos = calculateSuppressionSpread(targetPos, aimInaccuracy);
         GunIntegration.ShootResult result = GunIntegration.shootAtPosition(soldier, spreadPos);
         
-        StevesArmyMod.LOGGER.info("[Suppression] Soldier {} SHOT burst {}/{} result={}", 
-            soldier.getId(), burstShotsFired + 1, burstTarget, result);
+        if (isSuppressionDebugLogging()) {
+            StevesArmyMod.LOGGER.info("[Suppression] Soldier {} SHOT burst {}/{} result={}",
+                soldier.getId(), burstShotsFired + 1, burstTarget, result);
+        }
         
         switch (result) {
             case SUCCESS -> {
@@ -1515,8 +1517,10 @@ private void tickCoverPeekCycle(CoverBehaviorManager coverManager) {
                 
                 if (burstShotsFired >= burstTarget) {
                     float burstInterval = getBurstIntervalSeconds();
-                    StevesArmyMod.LOGGER.info("[Suppression] Soldier {} burst complete, starting cooldown ({}s)", 
-                        soldier.getId(), burstInterval);
+                    if (isSuppressionDebugLogging()) {
+                        StevesArmyMod.LOGGER.info("[Suppression] Soldier {} burst complete, starting cooldown ({}s)",
+                            soldier.getId(), burstInterval);
+                    }
                     burstCooldownTicks = (int) (burstInterval * 20);
                     burstShotsFired = 0;
                 }
@@ -1524,10 +1528,14 @@ private void tickCoverPeekCycle(CoverBehaviorManager coverManager) {
             case NEED_BOLT -> {
                 GunIntegration.bolt(soldier);
                 burstWaitingForBolt = true;
-                StevesArmyMod.LOGGER.info("[Suppression] Soldier {} needs bolt", soldier.getId());
+                if (isSuppressionDebugLogging()) {
+                    StevesArmyMod.LOGGER.info("[Suppression] Soldier {} needs bolt", soldier.getId());
+                }
             }
             case NO_AMMO -> {
-                StevesArmyMod.LOGGER.info("[Suppression] Soldier {} out of ammo, reloading", soldier.getId());
+                if (isSuppressionDebugLogging()) {
+                    StevesArmyMod.LOGGER.info("[Suppression] Soldier {} out of ammo, reloading", soldier.getId());
+                }
                 GunIntegration.reload(soldier);
             }
             case IS_RELOADING, IS_BOLTING, IS_DRAWING -> {}
@@ -1577,7 +1585,7 @@ private void tickCoverPeekCycle(CoverBehaviorManager coverManager) {
     
     private boolean shouldSuppressPingTarget() {
         if (!soldier.hasValidPingSuppressPos()) {
-            if (isDebugLogging()) {
+            if (isSuppressionDebugLogging()) {
                 StevesArmyMod.LOGGER.info("[SuppressPing] Soldier {} shouldSuppressPingTarget: no valid ping suppress pos", soldier.getId());
             }
             return false;
@@ -1586,14 +1594,14 @@ private void tickCoverPeekCycle(CoverBehaviorManager coverManager) {
         if (GunIntegration.isReloading(soldier) ||
             GunIntegration.isBolting(soldier) ||
             GunIntegration.isDrawing(soldier)) {
-            if (isDebugLogging()) {
+            if (isSuppressionDebugLogging()) {
                 StevesArmyMod.LOGGER.info("[SuppressPing] Soldier {} shouldSuppressPingTarget: busy (reloading/bolting/drawing)", soldier.getId());
             }
             return false;
         }
         
         if (!GunIntegration.isTaczLoaded() || !GunIntegration.hasGun(soldier)) {
-            if (isDebugLogging()) {
+            if (isSuppressionDebugLogging()) {
                 StevesArmyMod.LOGGER.info("[SuppressPing] Soldier {} shouldSuppressPingTarget: no gun", soldier.getId());
             }
             return false;
@@ -1601,7 +1609,7 @@ private void tickCoverPeekCycle(CoverBehaviorManager coverManager) {
         
         int totalAmmo = getTotalAmmo();
         if (totalAmmo == 0) {
-            if (isDebugLogging()) {
+            if (isSuppressionDebugLogging()) {
                 StevesArmyMod.LOGGER.info("[SuppressPing] Soldier {} shouldSuppressPingTarget: no ammo", soldier.getId());
             }
             return false;
@@ -1610,7 +1618,7 @@ private void tickCoverPeekCycle(CoverBehaviorManager coverManager) {
         BlockPos suppressPos = soldier.getPingSuppressPos();
         double dist = soldier.position().distanceTo(suppressPos.getCenter());
         if (dist > SUPPRESSION_MAX_RANGE) {
-            if (isDebugLogging()) {
+            if (isSuppressionDebugLogging()) {
                 StevesArmyMod.LOGGER.info("[SuppressPing] Soldier {} shouldSuppressPingTarget: too far (dist={}, max={})",
                     soldier.getId(), String.format("%.1f", dist), SUPPRESSION_MAX_RANGE);
             }
@@ -1623,13 +1631,13 @@ private void tickCoverPeekCycle(CoverBehaviorManager coverManager) {
                 soldier, suppressPos, SoldierEntity.SUPPRESSION_ZONE_RADIUS);
             soldier.setSuppressionAimPoints(aimPoints);
             
-            if (isDebugLogging()) {
+            if (isSuppressionDebugLogging()) {
                 StevesArmyMod.LOGGER.info("[SuppressPing] Soldier {} found {} aim points in zone",
                     soldier.getId(), aimPoints.size());
             }
             
             if (aimPoints.isEmpty()) {
-                if (isDebugLogging()) {
+                if (isSuppressionDebugLogging()) {
                     StevesArmyMod.LOGGER.info("[SuppressPing] Soldier {} no aim points found, will use horizontal spread fallback",
                         soldier.getId());
                 }
@@ -1668,7 +1676,7 @@ private void tickCoverPeekCycle(CoverBehaviorManager coverManager) {
             burstInitialDelayTicks = soldier.level().random.nextInt(40); // 0-2 seconds
             
             boolean isMG = GunIntegration.isMachineGun(soldier);
-            if (isDebugLogging()) {
+            if (isSuppressionDebugLogging()) {
                 StevesArmyMod.LOGGER.info("[SuppressPing] Soldier {} starting suppression at {} (duration={}s, isMG={}, initialDelay={}ticks)",
                     soldier.getId(), soldier.getPingSuppressPos(), pingSuppressDurationTicks / 20.0, isMG, burstInitialDelayTicks);
             }
@@ -1676,7 +1684,7 @@ private void tickCoverPeekCycle(CoverBehaviorManager coverManager) {
         
         pingSuppressRemainingTicks--;
         if (pingSuppressRemainingTicks <= 0 || !soldier.hasValidPingSuppressPos()) {
-            if (isDebugLogging()) {
+            if (isSuppressionDebugLogging()) {
                 StevesArmyMod.LOGGER.info("[SuppressPing] Soldier {} finished suppression", soldier.getId());
             }
             soldier.clearPingSuppressPos();
@@ -1690,7 +1698,7 @@ private void tickCoverPeekCycle(CoverBehaviorManager coverManager) {
         if (coverManager.isInCover()) {
             PeekController.State peekState = soldier.getPeekController().getState();
             if (peekState != PeekController.State.EXPOSED) {
-                if (isDebugLogging() && pingSuppressRemainingTicks % 20 == 0) {
+                if (isSuppressionDebugLogging() && pingSuppressRemainingTicks % 20 == 0) {
                     StevesArmyMod.LOGGER.info("[SuppressPing] Soldier {} waiting for peek (state={}, remaining={}ticks)",
                         soldier.getId(), peekState, pingSuppressRemainingTicks);
                 }
@@ -1742,7 +1750,7 @@ private void tickCoverPeekCycle(CoverBehaviorManager coverManager) {
         
         GunIntegration.ShootResult result = GunIntegration.shootAtPosition(soldier, finalTarget);
         
-        if (isDebugLogging()) {
+        if (isSuppressionDebugLogging()) {
             StevesArmyMod.LOGGER.info("[SuppressPing] Soldier {} SHOT burst {}/{} result={}",
                 soldier.getId(), burstShotsFired + 1, burstTarget, result);
         }
@@ -1761,7 +1769,7 @@ private void tickCoverPeekCycle(CoverBehaviorManager coverManager) {
                 
                 if (burstShotsFired >= burstTarget) {
                     float burstInterval = getBurstIntervalSeconds();
-                    if (isDebugLogging()) {
+                    if (isSuppressionDebugLogging()) {
                         StevesArmyMod.LOGGER.info("[SuppressPing] Soldier {} burst complete, starting cooldown ({}s)",
                             soldier.getId(), burstInterval);
                     }

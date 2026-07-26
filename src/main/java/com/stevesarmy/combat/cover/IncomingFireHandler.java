@@ -1,6 +1,7 @@
 package com.stevesarmy.combat.cover;
 
 import com.stevesarmy.StevesArmyMod;
+import com.stevesarmy.debug.DiagnosticLogManager;
 import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.entity.ai.CoverTacticalGoal;
 import com.stevesarmy.entity.ai.SoldierCombatGoal;
@@ -217,7 +218,7 @@ public class IncomingFireHandler {
             if (intel.hasThreat(deadEntity.getUUID())) {
                 intel.markThreatDead(deadEntity.getUUID());
                 
-                if (CoverTacticalGoal.isDebugLoggingEnabled()) {
+                if (DiagnosticLogManager.isSuppressionLoggingEnabled()) {
                     StevesArmyMod.LOGGER.info("[IncomingFireHandler] Threat {} killed, marked dead in squad intel",
                         deadEntity.getName().getString());
                 }
@@ -283,6 +284,6 @@ public class IncomingFireHandler {
     }
 
     private static boolean debugLog() {
-        return com.stevesarmy.entity.ai.CoverTacticalGoal.isDebugLoggingEnabled();
+        return DiagnosticLogManager.isSuppressionLoggingEnabled();
     }
 }

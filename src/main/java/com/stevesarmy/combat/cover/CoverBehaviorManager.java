@@ -447,7 +447,7 @@ if (currentCover != null) {
         syncSuppression();
         lastSyncedSuppression = currentLevel;
 
-        if (debugLog()) {
+        if (suppressionDebugLog()) {
             StevesArmyMod.LOGGER.info("[ExplosionSuppression] soldier={} synced {} -> {}, suppressed={}, coverState={}, hasCover={}",
                 soldier.getId(), String.format("%.2f", previousLevel), String.format("%.2f", currentLevel),
                 suppressionTracker.isSuppressed(), state, currentCover != null);
@@ -458,7 +458,7 @@ if (currentCover != null) {
                 soldier.setLowCrouching(true);
             }
             setState(CoverState.SUPPRESSED_IN_COVER);
-            if (debugLog()) {
+            if (suppressionDebugLog()) {
                 StevesArmyMod.LOGGER.info("[ExplosionSuppression] soldier={} entered SUPPRESSED_IN_COVER", soldier.getId());
             }
         }
@@ -479,6 +479,10 @@ if (currentCover != null) {
     
     private boolean debugLog() {
         return soldier != null && com.stevesarmy.entity.ai.CoverTacticalGoal.isDebugLoggingEnabled();
+    }
+
+    private boolean suppressionDebugLog() {
+        return soldier != null && com.stevesarmy.debug.DiagnosticLogManager.isSuppressionLoggingEnabled();
     }
     
     // --- Peek position storage (used by PeekController) ---

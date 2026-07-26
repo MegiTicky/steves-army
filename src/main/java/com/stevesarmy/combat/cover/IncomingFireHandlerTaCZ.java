@@ -1,7 +1,7 @@
 package com.stevesarmy.combat.cover;
 
 import com.stevesarmy.StevesArmyMod;
-import com.stevesarmy.entity.ai.CoverTacticalGoal;
+import com.stevesarmy.debug.DiagnosticLogManager;
 import com.tacz.guns.api.event.common.EntityHurtByGunEvent;
 import com.tacz.guns.api.event.server.AmmoHitBlockEvent;
 import net.minecraft.world.entity.Entity;
@@ -52,6 +52,6 @@ public class IncomingFireHandlerTaCZ {
     }
 
     private static boolean debugLog() {
-        return CoverTacticalGoal.isDebugLoggingEnabled();
+        return DiagnosticLogManager.isSuppressionLoggingEnabled();
     }
 }

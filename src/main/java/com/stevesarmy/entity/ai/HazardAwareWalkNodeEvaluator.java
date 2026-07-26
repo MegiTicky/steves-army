@@ -1,5 +1,6 @@
 package com.stevesarmy.entity.ai;
 
+import com.stevesarmy.compat.VS2Compat;
 import com.stevesarmy.util.HazardBlockHelper;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -12,8 +13,9 @@ import net.minecraft.world.phys.shapes.VoxelShape;
 
 /**
  * Custom node evaluator that returns BLOCKED for any block position
- * matching a configured hazard block, preventing A* path generation from
- * routing soldiers through hazard blocks.
+ * matching a configured hazard block, a partial obstacle, or intersecting
+ * a VS2 ship bounding box, preventing A* path generation from routing
+ * soldiers through these obstacles.
  */
 public class HazardAwareWalkNodeEvaluator extends WalkNodeEvaluator {
 
@@ -26,7 +28,7 @@ public class HazardAwareWalkNodeEvaluator extends WalkNodeEvaluator {
     /**
      * Called by the pathfinder during A* neighbor evaluation.
      * Delegates to the parent, then overrides to BLOCKED if the position
-     * is a configured hazard block or a partial obstacle >= 3 layers.
+     * is a configured hazard block, a partial obstacle, or inside a VS2 ship.
      */
     @Override
     public BlockPathTypes getBlockPathType(BlockGetter level, int x, int y, int z, Mob mob) {
@@ -35,6 +37,10 @@ public class HazardAwareWalkNodeEvaluator extends WalkNodeEvaluator {
             return BlockPathTypes.BLOCKED;
         }
         if (type != BlockPathTypes.BLOCKED && isPartialObstacle(level, x, y, z)) {
+            return BlockPathTypes.BLOCKED;
+        }
+        if (type != BlockPathTypes.BLOCKED
+            && VS2Compat.isNodeBlockedByShip(mob.level(), new BlockPos(x, y, z), mob)) {
             return BlockPathTypes.BLOCKED;
         }
         return type;

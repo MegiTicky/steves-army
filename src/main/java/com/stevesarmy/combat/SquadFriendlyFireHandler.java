@@ -3,7 +3,7 @@ package com.stevesarmy.combat;
 import com.stevesarmy.StevesArmyConfig;
 import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.entity.SoldierEntity;
-import com.stevesarmy.entity.ai.CoverTacticalGoal;
+import com.stevesarmy.debug.DiagnosticLogManager;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.scores.Team;
@@ -19,7 +19,7 @@ public class SquadFriendlyFireHandler {
         LivingEntity victim = event.getEntity();
         Entity attackerEntity = event.getSource().getEntity();
         
-        boolean debug = CoverTacticalGoal.isDebugLoggingEnabled();
+        boolean debug = DiagnosticLogManager.isDamageLoggingEnabled();
         
         if (debug) {
             StevesArmyMod.LOGGER.info("[DAMAGE_DEBUG] onLivingHurt: victim={}({}) type={} attackerEntity={}({}) source={}",
@@ -109,9 +109,11 @@ public class SquadFriendlyFireHandler {
     }
     
     private static void debugLog(LivingEntity attacker, LivingEntity victim, String reason) {
-        StevesArmyMod.LOGGER.debug("[FriendlyFire] Blocked: {} → {} ({})", 
-            attacker.getName().getString(), 
-            victim.getName().getString(), 
-            reason);
+        if (DiagnosticLogManager.isDamageLoggingEnabled()) {
+            StevesArmyMod.LOGGER.debug("[FriendlyFire] Blocked: {} -> {} ({})",
+                attacker.getName().getString(),
+                victim.getName().getString(),
+                reason);
+        }
     }
 }

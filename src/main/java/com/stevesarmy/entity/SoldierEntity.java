@@ -9,6 +9,7 @@ import com.stevesarmy.combat.ThreatAwareness;
 import com.stevesarmy.combat.cover.CoverBehaviorManager;
 import com.stevesarmy.combat.cover.CoverType;
 import com.stevesarmy.combat.cover.IncomingFireHandler;
+import com.stevesarmy.debug.DiagnosticLogManager;
 import com.stevesarmy.entity.ai.SoldierAttackGoal;
 import com.stevesarmy.entity.ai.SoldierCombatGoal;
 import com.stevesarmy.entity.ai.SoldierFollowOwnerGoal;
@@ -873,13 +874,13 @@ public class SoldierEntity extends PathfinderMob implements Container {
     
     @Override
     public boolean hurt(DamageSource source, float amount) {
-        if (com.stevesarmy.entity.ai.CoverTacticalGoal.isDebugLoggingEnabled()) {
+        if (DiagnosticLogManager.isDamageLoggingEnabled()) {
             StevesArmyMod.LOGGER.info("[DAMAGE_DEBUG] SoldierEntity.hurt() called: entity={} id={} source={} amount={} sourceEntity={}",
                 this.getName().getString(), this.getId(), source.getMsgId(), amount,
                 source.getEntity() != null ? source.getEntity().getName().getString() + "(" + source.getEntity().getClass().getSimpleName() + ")" : "null");
         }
         boolean result = super.hurt(source, amount);
-        if (com.stevesarmy.entity.ai.CoverTacticalGoal.isDebugLoggingEnabled()) {
+        if (DiagnosticLogManager.isDamageLoggingEnabled()) {
             StevesArmyMod.LOGGER.info("[DAMAGE_DEBUG] SoldierEntity.hurt() result: {} (super.hurt returned {})", result ? "damage applied" : "damage blocked", result);
         }
 

@@ -1,6 +1,7 @@
 package com.stevesarmy.squad;
 
 import com.stevesarmy.StevesArmyMod;
+import com.stevesarmy.debug.DiagnosticLogManager;
 import com.stevesarmy.entity.ai.CoverTacticalGoal;
 import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
@@ -133,7 +134,7 @@ public class SquadThreatIntel {
             knowledge.isSuppressed = true;
             knowledge.suppressedBy = soldierId;
             
-            if (CoverTacticalGoal.isDebugLoggingEnabled()) {
+            if (DiagnosticLogManager.isSuppressionLoggingEnabled()) {
                 StevesArmyMod.LOGGER.info("[SquadThreatIntel] Threat {} now suppressed by {}", threatId, soldierId);
             }
         }

@@ -311,6 +311,7 @@ public class TransportCommand {
             }
 
             VS2Compat.clearShipDraggingStateDirect(soldier);
+            VS2Compat.clearTransportState(soldier);
 
             Vec3 postPos = soldier.position();
             source.sendSuccess(() -> Component.literal(

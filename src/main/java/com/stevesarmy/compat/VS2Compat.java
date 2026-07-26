@@ -6,12 +6,12 @@ import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.squad.SquadMode;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Vec3i;
-import net.minecraft.network.protocol.game.ClientboundRemoveEntitiesPacket;
 import net.minecraft.network.protocol.game.ClientboundSetPassengersPacket;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.Pose;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.state.BlockState;
@@ -38,8 +38,8 @@ public final class VS2Compat {
     private static final int[] ESCAPE_RADII = {2, 4, 6, 8, 12, 16, 24, 32};
     private static final int FULL_SEAT_RETRY_TICKS = 100;
 
-    private static boolean initialized;
-    private static boolean available;
+    private static volatile boolean initialized;
+    private static volatile boolean available;
     private static boolean reflectionFailureLogged;
     // VSGameUtilsKt methods: use MethodHandle to avoid ClientLevel class loading on dedicated server
     private static MethodHandle getShipMountedTo;
@@ -111,19 +111,37 @@ public final class VS2Compat {
         if (vehicle == null) {
             return false;
         }
+        // Ensure reflection classes are initialized before checking them.
+        // On the client (render thread), initialize() may not have been called yet.
+        initialize();
+        // Direct authorization: soldier has a pending authorized mount UUID.
         UUID vehicleId = authorizedMounts.get(soldier.getUUID());
         if (vehicleId != null && vehicleId.equals(vehicle.getUUID())) {
             return true;
         }
         // Static-seat authorization: the SeatEntity's block position must match the pending candidate.
         BlockPos pendingPos = authorizedStaticSeats.get(soldier.getUUID());
-        if (pendingPos != null && createSeatEntityClass.isInstance(vehicle)) {
+        if (pendingPos != null && createSeatEntityClass != null && createSeatEntityClass.isInstance(vehicle)) {
             return vehicle.blockPosition().equals(pendingPos);
         }
-        // Allow mounts on any Create SeatEntity on the client side.
-        // The server is authoritative for mounts; the client should apply server passenger packets.
-        if (soldier.level().isClientSide && createSeatEntityClass.isInstance(vehicle)) {
-            return true;
+        // On the client side, the server is authoritative. Accept any Create seat or contraption mount.
+        // Use class name string comparison as a safe fallback since reflection classes may not be
+        // loaded on a remote client's render thread before the mount event fires.
+        if (soldier.level().isClientSide) {
+            String vehicleClassName = vehicle.getClass().getName();
+            if ("com.simibubi.create.content.contraptions.actors.seat.SeatEntity".equals(vehicleClassName)
+                || (createSeatEntityClass != null && createSeatEntityClass.isInstance(vehicle))) {
+                return true;
+            }
+            if ("com.simibubi.create.content.contraptions.AbstractContraptionEntity".equals(vehicleClassName)
+                || (contraptionEntityClass != null && contraptionEntityClass.isInstance(vehicle))) {
+                return true;
+            }
+            String side = "CLIENT";
+            StevesArmyMod.LOGGER.info("[AuthorizeCl] {} isAuthorizedMount returning false for soldier={} vehicle={} vehicleClass={} createSeatClass={} contraptionClass={}",
+                side, soldier.getId(), vehicle.getId(), vehicle.getClass().getName(),
+                createSeatEntityClass == null ? "null" : createSeatEntityClass.getName(),
+                contraptionEntityClass == null ? "null" : contraptionEntityClass.getName());
         }
         return false;
     }
@@ -170,6 +188,12 @@ public final class VS2Compat {
 
             if (soldier.isPassenger() && soldier.getVehicle() != null) {
                 Entity vehicle = soldier.getVehicle();
+
+                // SeatEntity is at shipyard coordinates — VS2 handles world-space
+                // tracking and rider position transforms (see MixinChunkMap$TrackedEntity,
+                // MixinSeatBlock.wrapSitDownSetPos, MixinEntity.positionRider).
+                // Do NOT move the seat to world-space.
+
                 SoldierState state = getOrCreateState(soldier);
                 state.transportAnchorId = vehicle.getUUID();
                 state.transportOwnerId = null;
@@ -181,10 +205,8 @@ public final class VS2Compat {
                 soldier.getVehicle().positionRider(soldier);
                 Vec3 postPos = soldier.position();
 
-                // Synchronize the shipyard seat entity and passenger to tracking clients.
-                // Vanilla entity tracking does not cover shipyard entities, so we must
-                // explicitly send the spawn and passenger packets.
-                syncSeatEntityToClient(soldier, vehicle);
+                // Synchronize the seat entity and passenger to all relevant players.
+                syncTransportState(soldier, vehicle, true);
 
                 StevesArmyMod.LOGGER.info("[VS2] seatSoldierDirect: mounted soldier={} vehicle={} vehicleClass={} seat={} shipId={} soldierPos={} -> {}",
                     soldier.getId(), vehicle.getId(), vehicle.getClass().getSimpleName(),
@@ -216,6 +238,29 @@ public final class VS2Compat {
         clearShipDraggingState(soldier);
     }
 
+    /** Clears the transport state for a soldier. Used by the release command. */
+    public static void clearTransportState(SoldierEntity soldier) {
+        SoldierState state = states.get(soldier.getUUID());
+        if (state != null) {
+            clearTransportState(state);
+        }
+    }
+
+    /**
+     * Checks whether a single navigation node (block position) should be treated as
+     * blocked because it intersects a VS2 ship. Uses the mob's collision footprint
+     * for the AABB test.
+     */
+    public static boolean isNodeBlockedByShip(Level level, BlockPos node, Mob mob) {
+        if (!isEnabled()) {
+            return false;
+        }
+        double w = mob.getBbWidth() * 0.5 + 0.1;
+        double h = mob.getBbHeight() * 0.5 + 0.1;
+        AABB bounds = new AABB(node).inflate(w, h, w);
+        return intersectsShip(level, bounds);
+    }
+
     public static boolean shouldRejectNavigation(Level level, BlockPos position) {
         if (!isEnabled()) {
             return false;
@@ -240,23 +285,44 @@ public final class VS2Compat {
         }
     }
 
-    private static void syncSeatEntityToClient(SoldierEntity soldier, Entity seatEntity) {
+    private static void syncTransportState(SoldierEntity soldier, Entity anchor, boolean mounted) {
         if (!(soldier.level() instanceof ServerLevel serverLevel)) return;
-        // Use the entity's own getAddEntityPacket() which calls
-        // NetworkHooks.getEntitySpawningPacket() for Forge custom spawn data.
-        net.minecraft.network.protocol.Packet<?> spawnPacket = seatEntity.getAddEntityPacket();
-        // Send ClientboundSetPassengersPacket to set the soldier as passenger of the seat
-        ClientboundSetPassengersPacket passengersPacket = new ClientboundSetPassengersPacket(seatEntity);
-        int sentCount = 0;
-        for (ServerPlayer player : serverLevel.players()) {
-            if (player.distanceToSqr(soldier) < 16384.0) { // 128 block radius
-                player.connection.send(spawnPacket);
-                player.connection.send(passengersPacket);
-                sentCount++;
+
+        java.util.Set<ServerPlayer> recipients = new java.util.HashSet<>();
+
+        // Use the soldier's world-space position for recipient selection.
+        // The anchor is at shipyard coordinates, not world coordinates.
+        Vec3 refPos = soldier.position();
+
+        for (ServerPlayer player : serverLevel.getServer().getPlayerList().getPlayers()) {
+            if (player.distanceToSqr(refPos) < 16384.0) {
+                recipients.add(player);
             }
         }
-        StevesArmyMod.LOGGER.info("[VS2] syncSeatEntityToClient: sent seat spawn+passengers to {} players (seatId={} soldierId={})",
-            sentCount, seatEntity.getId(), soldier.getId());
+
+        if (recipients.isEmpty()) return;
+
+        if (mounted && anchor != null) {
+            // Shipyard entities are not tracked by vanilla chunk-based tracking, so we must
+            // explicitly send the add-entity packet before the passenger packet so the client
+            // has the anchor entity registered.
+            net.minecraft.network.protocol.Packet<?> spawnPacket = anchor.getAddEntityPacket();
+            ClientboundSetPassengersPacket passengersPacket = new ClientboundSetPassengersPacket(anchor);
+            for (ServerPlayer player : recipients) {
+                player.connection.send(spawnPacket);
+                player.connection.send(passengersPacket);
+            }
+            StevesArmyMod.LOGGER.info("[SyncTransport] Mounted: sent spawn+passengers for anchor={} soldier={} to {} players",
+                anchor.getId(), soldier.getId(), recipients.size());
+        } else if (anchor != null) {
+            // Soldier has already been dismounted; anchor now has empty passenger list.
+            ClientboundSetPassengersPacket passengersPacket = new ClientboundSetPassengersPacket(anchor);
+            for (ServerPlayer player : recipients) {
+                player.connection.send(passengersPacket);
+            }
+            StevesArmyMod.LOGGER.info("[SyncTransport] Unmounted: sent empty passengers for anchor={} soldier={}",
+                anchor.getId(), soldier.getId());
+        }
     }
 
     private static boolean isInsideShip(Entity entity) {
@@ -366,6 +432,9 @@ public final class VS2Compat {
                                 state.transportShipId = getShipId.invoke(reflect(getShipMountedTo, owner)) instanceof Number id
                                     ? id.longValue() : null;
                                 state.seatRetryCooldownTicks = 0;
+
+                                syncTransportState(soldier, vehicle, true);
+
                                 StevesArmyMod.LOGGER.info("[VS2] Assigned soldier={} to Create contraption seat={} vehicle={}",
                                     soldier.getId(), index, vehicle.getId());
                                 return true;
@@ -421,6 +490,9 @@ public final class VS2Compat {
                         state.transportShipId = getShipId.invoke(reflect(getShipMountedTo, owner)) instanceof Number id
                             ? id.longValue() : null;
                         state.seatRetryCooldownTicks = 0;
+
+                        syncTransportState(soldier, vehicle, true);
+
                         StevesArmyMod.LOGGER.info("[VS2] Assigned soldier={} to Create contraption seat={} vehicle={}",
                             soldier.getId(), index, vehicle.getId());
                         return true;
@@ -492,11 +564,20 @@ public final class VS2Compat {
                                 authorizedStaticSeats.remove(soldier.getUUID());
                             }
                             if (soldier.isPassenger() && soldier.getVehicle() != null) {
-                                state.transportAnchorId = soldier.getVehicle().getUUID();
+                                Entity vehicle = soldier.getVehicle();
+
+                                // SeatEntity is at shipyard coordinates — VS2 handles world-space
+                                // tracking and rider position transforms.
+                                // Do NOT move the seat to world-space.
+
+                                state.transportAnchorId = vehicle.getUUID();
                                 state.transportOwnerId = owner.getUUID();
                                 state.transportShipId = ownerShipId;
                                 state.transportSeatPosition = candidate;
                                 state.seatRetryCooldownTicks = 0;
+
+                                syncTransportState(soldier, soldier.getVehicle(), true);
+
                                 StevesArmyMod.LOGGER.info("[VS2] Static seat attached soldier={} seat={} vehicle={} soldierPos={} vehiclePos={}",
                                     soldier.getId(), candidate, soldier.getVehicle().getId(), soldier.position(),
                                     soldier.getVehicle().position());
@@ -544,56 +625,72 @@ public final class VS2Compat {
             }
             StevesArmyMod.LOGGER.info("[VS2] Command-driven transport lost soldier={} passenger={} expectedAnchor={}",
                 soldier.getId(), soldier.isPassenger(), state.transportAnchorId);
-            Vec3 preDismountPos = soldier.position();
-            if (state.transportAnchorId != null && soldier.level() instanceof ServerLevel serverLevel) {
-                Entity oldSeat = serverLevel.getEntity(state.transportAnchorId);
-                if (oldSeat != null) {
-                    ClientboundRemoveEntitiesPacket removePacket = new ClientboundRemoveEntitiesPacket(oldSeat.getId());
-                    for (ServerPlayer player : serverLevel.players()) {
-                        if (player.distanceToSqr(oldSeat) < 16384.0) {
-                            player.connection.send(removePacket);
-                        }
-                    }
-                    oldSeat.discard();
-                }
-            }
-            // Clear drag state before and after dismount to prevent VS2 ship dragging
+            Entity oldSeat = state.transportAnchorId != null && soldier.level() instanceof ServerLevel sl
+                ? sl.getEntity(state.transportAnchorId) : null;
             clearShipDraggingState(soldier);
             if (soldier.isPassenger()) {
                 soldier.stopRiding();
             }
             clearShipDraggingState(soldier);
             Vec3 postReleasePos = soldier.position();
-            StevesArmyMod.LOGGER.info("[VS2] Command transport release soldier={} prePos={} postPos={} dist={}",
-                soldier.getId(), formatVec3(preDismountPos), formatVec3(postReleasePos),
-                String.format("%.2f", preDismountPos.distanceTo(postReleasePos)));
-            state.transportAnchorId = null;
-            state.transportSeatPosition = null;
+            // Send empty passenger list after dismount.
+            if (oldSeat != null) {
+                syncTransportState(soldier, oldSeat, false);
+            }
+            StevesArmyMod.LOGGER.info("[VS2] Command transport release soldier={} postPos={}",
+                soldier.getId(), formatVec3(postReleasePos));
+            clearTransportState(state);
             return;
         }
 
         Entity anchor = getEntity(soldier, state.transportAnchorId);
+        if (anchor == null || !soldier.isPassenger() || soldier.getVehicle() != anchor) {
+            StevesArmyMod.LOGGER.info("[VS2] Releasing transport soldier={} anchor={} passenger={}",
+                soldier.getId(), anchor == null ? "missing" : anchor.getId(), soldier.isPassenger());
+            releaseAndClear(soldier, state);
+            return;
+        }
+
+        // HOLD soldiers stay seated regardless of owner state.
+        // FOLLOW soldiers release when the owner is no longer on the ship.
+        if (soldier.getSquadMode() == SquadMode.HOLD) {
+            stopMovement(soldier);
+            return;
+        }
+
         LivingEntity owner = getOwner(soldier, state.transportOwnerId);
         boolean ownerOnShip = owner != null && owner.isAlive() && isTransportOwnerOnShip(owner, state);
-        if (anchor != null && soldier.isPassenger() && soldier.getVehicle() == anchor && ownerOnShip) {
+        if (ownerOnShip) {
             stopMovement(soldier);
             return;
         }
 
         StevesArmyMod.LOGGER.info("[VS2] Releasing transport soldier={} anchor={} passenger={} owner={} ownerOnShip={}",
-            soldier.getId(), anchor == null ? "missing" : anchor.getId(), soldier.isPassenger(),
+            soldier.getId(), anchor.getId(), soldier.isPassenger(),
             owner == null ? "missing" : owner.getId(), ownerOnShip);
+        releaseAndClear(soldier, state);
+    }
+
+    private static void releaseAndClear(SoldierEntity soldier, SoldierState state) {
         Vec3 preDismountPos = soldier.position();
-        // Clear drag state before and after dismount to prevent VS2 ship dragging
+        Entity vehicle = soldier.isPassenger() ? soldier.getVehicle() : null;
         clearShipDraggingState(soldier);
         if (soldier.isPassenger()) {
             soldier.stopRiding();
         }
         clearShipDraggingState(soldier);
         Vec3 postReleasePos = soldier.position();
+        // Send empty passenger list after dismount so the anchor now reports no passengers.
+        if (vehicle != null) {
+            syncTransportState(soldier, vehicle, false);
+        }
         StevesArmyMod.LOGGER.info("[VS2] Transport release soldier={} prePos={} postPos={} dist={}",
             soldier.getId(), formatVec3(preDismountPos), formatVec3(postReleasePos),
             String.format("%.2f", preDismountPos.distanceTo(postReleasePos)));
+        clearTransportState(state);
+    }
+
+    private static void clearTransportState(SoldierState state) {
         state.transportAnchorId = null;
         state.transportOwnerId = null;
         state.transportShipId = null;
@@ -770,7 +867,7 @@ private static boolean isTransportOwnerOnShip(LivingEntity owner, SoldierState s
         return entity instanceof LivingEntity living ? living : null;
     }
 
-    private static void initialize() {
+    private static synchronized void initialize() {
         if (initialized) {
             return;
         }

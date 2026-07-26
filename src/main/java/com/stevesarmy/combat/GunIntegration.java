@@ -1,6 +1,7 @@
 package com.stevesarmy.combat;
 
 import com.stevesarmy.StevesArmyMod;
+import com.stevesarmy.debug.DiagnosticLogManager;
 import com.stevesarmy.entity.SoldierEntity;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.entity.LivingEntity;
@@ -162,20 +163,26 @@ public class GunIntegration {
         @Override
         public ShootResult shoot(LivingEntity shooter, LivingEntity target) {
             if (!hasGun(shooter)) {
-                StevesArmyMod.LOGGER.info("[TaCZ] shoot() - No gun");
+                if (DiagnosticLogManager.isDamageLoggingEnabled()) {
+                    StevesArmyMod.LOGGER.info("[TaCZ] shoot() - No gun");
+                }
                 return ShootResult.NOT_GUN;
             }
             if (target == null || !target.isAlive()) {
-                StevesArmyMod.LOGGER.info("[TaCZ] shoot() - No target");
+                if (DiagnosticLogManager.isDamageLoggingEnabled()) {
+                    StevesArmyMod.LOGGER.info("[TaCZ] shoot() - No target");
+                }
                 return ShootResult.NO_TARGET;
             }
-            
-            StevesArmyMod.LOGGER.info("[DAMAGE_DEBUG] shoot(): shooter={}({}) id={} target={}({}) id={} targetPos=({},{},{})",
-                shooter.getName().getString(), shooter.getClass().getSimpleName(), shooter.getId(),
-                target.getName().getString(), target.getClass().getSimpleName(), target.getId(),
-                String.format("%.2f", target.getX()),
-                String.format("%.2f", target.getEyeY()),
-                String.format("%.2f", target.getZ()));
+
+            if (DiagnosticLogManager.isDamageLoggingEnabled()) {
+                StevesArmyMod.LOGGER.info("[DAMAGE_DEBUG] shoot(): shooter={}({}) id={} target={}({}) id={} targetPos=({},{},{})",
+                    shooter.getName().getString(), shooter.getClass().getSimpleName(), shooter.getId(),
+                    target.getName().getString(), target.getClass().getSimpleName(), target.getId(),
+                    String.format("%.2f", target.getX()),
+                    String.format("%.2f", target.getEyeY()),
+                    String.format("%.2f", target.getZ()));
+            }
 
             try {
                 ItemStack gunStack = shooter.getMainHandItem();
@@ -190,15 +197,11 @@ public class GunIntegration {
                 float pitch = (float) -Math.toDegrees(Math.atan2(dy, horizontalDist));
                 float yaw = (float) Math.toDegrees(Math.atan2(dz, dx)) - 90.0F;
 
-                long cooldown = getShootCoolDown(shooter);
-                int ammo = getCurrentAmmo(shooter);
-                boolean barrelAmmo = hasAmmoInBarrel(shooter);
-                String gunId = getGunId(shooter);
-                String ammoId = getAmmoId(shooter);
-                boolean useInvAmmo = useInventoryAmmo(shooter);
-                
-                StevesArmyMod.LOGGER.info("[TaCZ] Pre-shoot: gun={}, ammoId={}, useInvAmmo={}, cooldown={}ms, ammo={}, barrel={}", 
-                    gunId, ammoId, useInvAmmo, cooldown, ammo, barrelAmmo);
+                if (DiagnosticLogManager.isDamageLoggingEnabled()) {
+                    StevesArmyMod.LOGGER.info("[TaCZ] Pre-shoot: gun={}, ammoId={}, useInvAmmo={}, cooldown={}ms, ammo={}, barrel={}",
+                        getGunId(shooter), getAmmoId(shooter), useInventoryAmmo(shooter), getShootCoolDown(shooter),
+                        getCurrentAmmo(shooter), hasAmmoInBarrel(shooter));
+                }
 
                 Method shootMethod = gunOperatorClass.getMethod("shoot", java.util.function.Supplier.class, java.util.function.Supplier.class);
                 Object result = shootMethod.invoke(gunOperator, 
@@ -209,16 +212,14 @@ public class GunIntegration {
                 
                 play3pSound(shooter, resultName);
                 
-                ammo = getCurrentAmmo(shooter);
-                barrelAmmo = hasAmmoInBarrel(shooter);
-                cooldown = getShootCoolDown(shooter);
-                StevesArmyMod.LOGGER.info("[TaCZ] Post-shoot: result={}, cooldown={}ms, ammo={}, barrel={}", 
-                    resultName, cooldown, ammo, barrelAmmo);
+                if (DiagnosticLogManager.isDamageLoggingEnabled()) {
+                    StevesArmyMod.LOGGER.info("[TaCZ] Post-shoot: result={}, cooldown={}ms, ammo={}, barrel={}",
+                        resultName, getShootCoolDown(shooter), getCurrentAmmo(shooter), hasAmmoInBarrel(shooter));
+                }
                 
                 return mapShootResult(resultName);
             } catch (Exception e) {
-                StevesArmyMod.LOGGER.warn("[TaCZ] Shoot failed: " + e.getMessage());
-                e.printStackTrace();
+                StevesArmyMod.LOGGER.warn("[TaCZ] Shoot failed", e);
                 return ShootResult.UNKNOWN;
             }
         }
@@ -226,23 +227,29 @@ public class GunIntegration {
         @Override
         public ShootResult shootWithDeviation(LivingEntity shooter, ExposureCalculator.AimPointResult aimPoint, float pitchDeviation, float yawDeviation) {
             if (!hasGun(shooter)) {
-                StevesArmyMod.LOGGER.info("[TaCZ] shootWithDeviation() - No gun");
+                if (DiagnosticLogManager.isDamageLoggingEnabled()) {
+                    StevesArmyMod.LOGGER.info("[TaCZ] shootWithDeviation() - No gun");
+                }
                 return ShootResult.NOT_GUN;
             }
-            
-            StevesArmyMod.LOGGER.info("[DAMAGE_DEBUG] shootWithDeviation: shooter={}({}) id={} aimPoint={}({},{},{}) canShoot={} bulletPathClear={} pitchDev={} yawDev={}",
-                shooter.getName().getString(), shooter.getClass().getSimpleName(), shooter.getId(),
-                aimPoint.type.displayName,
-                String.format("%.2f", aimPoint.position.x),
-                String.format("%.2f", aimPoint.position.y),
-                String.format("%.2f", aimPoint.position.z),
-                aimPoint.canShoot(), aimPoint.bulletPathClear,
-                String.format("%.3f", pitchDeviation),
-                String.format("%.3f", yawDeviation));
+
+            if (DiagnosticLogManager.isDamageLoggingEnabled()) {
+                StevesArmyMod.LOGGER.info("[DAMAGE_DEBUG] shootWithDeviation: shooter={}({}) id={} aimPoint={}({},{},{}) canShoot={} bulletPathClear={} pitchDev={} yawDev={}",
+                    shooter.getName().getString(), shooter.getClass().getSimpleName(), shooter.getId(),
+                    aimPoint.type.displayName,
+                    String.format("%.2f", aimPoint.position.x),
+                    String.format("%.2f", aimPoint.position.y),
+                    String.format("%.2f", aimPoint.position.z),
+                    aimPoint.canShoot(), aimPoint.bulletPathClear,
+                    String.format("%.3f", pitchDeviation),
+                    String.format("%.3f", yawDeviation));
+            }
             
             if (!aimPoint.canShoot()) {
-                StevesArmyMod.LOGGER.info("[TaCZ] shootWithDeviation() - Path blocked, aimPoint={}, bulletPathClear={}", 
-                    aimPoint.type.displayName, aimPoint.bulletPathClear);
+                if (DiagnosticLogManager.isDamageLoggingEnabled()) {
+                    StevesArmyMod.LOGGER.info("[TaCZ] shootWithDeviation() - Path blocked, aimPoint={}, bulletPathClear={}",
+                        aimPoint.type.displayName, aimPoint.bulletPathClear);
+                }
                 return ShootResult.PATH_BLOCKED;
             }
 
@@ -264,12 +271,10 @@ public class GunIntegration {
                 float pitch = basePitch + pitchDeviation;
                 float yaw = baseYaw + yawDeviation;
 
-                String gunId = getGunId(shooter);
-                int ammo = getCurrentAmmo(shooter);
-                boolean barrelAmmo = hasAmmoInBarrel(shooter);
-                
-                StevesArmyMod.LOGGER.info("[TaCZ] Pre-shoot: gun={}, aimPoint={}, ammo={}, barrel={}", 
-                    gunId, aimPoint.type.displayName, ammo, barrelAmmo);
+                if (DiagnosticLogManager.isDamageLoggingEnabled()) {
+                    StevesArmyMod.LOGGER.info("[TaCZ] Pre-shoot: gun={}, aimPoint={}, ammo={}, barrel={}",
+                        getGunId(shooter), aimPoint.type.displayName, getCurrentAmmo(shooter), hasAmmoInBarrel(shooter));
+                }
 
                 Method shootMethod = gunOperatorClass.getMethod("shoot", java.util.function.Supplier.class, java.util.function.Supplier.class);
                 Object result = shootMethod.invoke(gunOperator, 
@@ -280,15 +285,14 @@ public class GunIntegration {
                 
                 play3pSound(shooter, resultName);
                 
-                ammo = getCurrentAmmo(shooter);
-                barrelAmmo = hasAmmoInBarrel(shooter);
-                StevesArmyMod.LOGGER.info("[TaCZ] Post-shoot: result={}, ammo={}, barrel={}", 
-                    resultName, ammo, barrelAmmo);
+                if (DiagnosticLogManager.isDamageLoggingEnabled()) {
+                    StevesArmyMod.LOGGER.info("[TaCZ] Post-shoot: result={}, ammo={}, barrel={}",
+                        resultName, getCurrentAmmo(shooter), hasAmmoInBarrel(shooter));
+                }
                 
                 return mapShootResult(resultName);
             } catch (Exception e) {
-                StevesArmyMod.LOGGER.warn("[TaCZ] Shoot with deviation failed: " + e.getMessage());
-                e.printStackTrace();
+                StevesArmyMod.LOGGER.warn("[TaCZ] Shoot with deviation failed", e);
                 return ShootResult.UNKNOWN;
             }
         }
@@ -364,77 +368,69 @@ public class GunIntegration {
         public void reload(LivingEntity entity) {
             if (!hasGun(entity)) return;
             try {
-                String gunId = getGunId(entity);
-                String ammoId = getAmmoId(entity);
-                boolean useInvAmmo = useInventoryAmmo(entity);
-                int currentAmmo = getCurrentAmmo(entity);
-                int magSize = getMagazineSize(entity);
-                
-                StevesArmyMod.LOGGER.info("[TaCZ] reload() called for gun={} ammoId={} useInvAmmo={} currentAmmo={}/{}", 
-                    gunId, ammoId, useInvAmmo, currentAmmo, magSize);
-                
                 Class<?> gunOperatorClass = Class.forName("com.tacz.guns.api.entity.IGunOperator");
                 Method fromLivingEntity = gunOperatorClass.getMethod("fromLivingEntity", LivingEntity.class);
                 Object gunOperator = fromLivingEntity.invoke(null, entity);
-                
-                Method needCheckAmmoMethod = gunOperatorClass.getMethod("needCheckAmmo");
-                boolean needCheckAmmo = (boolean) needCheckAmmoMethod.invoke(gunOperator);
-                StevesArmyMod.LOGGER.info("[TaCZ] needCheckAmmo={}", needCheckAmmo);
-                
-                long drawCoolDown = isDrawing(entity) ? 1 : 0;
-                long shootCoolDown = getShootCoolDown(entity);
-                boolean bolting = isBolting(entity);
-                boolean reloading = isReloading(entity);
-                StevesArmyMod.LOGGER.info("[TaCZ] State checks: drawCoolDown={} shootCoolDown={} isBolting={} isReloading={}", 
-                    drawCoolDown, shootCoolDown, bolting, reloading);
-                
-                if (needCheckAmmo) {
-                    StevesArmyMod.LOGGER.info("[TaCZ] Checking inventory for ammo items...");
-                    ItemStack gunStack = entity.getMainHandItem();
-                    try {
-                        Class<?> iAmmoClass = Class.forName("com.tacz.guns.api.item.IAmmo");
-                        Method getIAmmoOrNullMethod = iAmmoClass.getMethod("getIAmmoOrNull", ItemStack.class);
-                        Method getAmmoIdMethod = iAmmoClass.getMethod("getAmmoId", ItemStack.class);
-                        Method isAmmoOfGunMethod = iAmmoClass.getMethod("isAmmoOfGun", ItemStack.class, ItemStack.class);
-                        
-                        entity.getCapability(ForgeCapabilities.ITEM_HANDLER).ifPresent(cap -> {
-                            StevesArmyMod.LOGGER.info("[TaCZ] Inventory capability found with {} slots", cap.getSlots());
-                            for (int i = 0; i < cap.getSlots(); i++) {
-                                ItemStack slotStack = cap.getStackInSlot(i);
-                                if (!slotStack.isEmpty()) {
-                                    try {
-                                        Object iAmmo = getIAmmoOrNullMethod.invoke(null, slotStack);
-                                        if (iAmmo != null) {
-                                            Object itemAmmoId = getAmmoIdMethod.invoke(iAmmo, slotStack);
-                                            boolean matches = (boolean) isAmmoOfGunMethod.invoke(iAmmo, gunStack, slotStack);
-                                            StevesArmyMod.LOGGER.info("[TaCZ] Slot {}: ammoId={} isAmmoOfGun={}", i, itemAmmoId, matches);
+
+                if (DiagnosticLogManager.isDamageLoggingEnabled()) {
+                    StevesArmyMod.LOGGER.info("[TaCZ] reload() called for gun={} ammoId={} useInvAmmo={} currentAmmo={}/{}",
+                        getGunId(entity), getAmmoId(entity), useInventoryAmmo(entity), getCurrentAmmo(entity), getMagazineSize(entity));
+
+                    Method needCheckAmmoMethod = gunOperatorClass.getMethod("needCheckAmmo");
+                    boolean needCheckAmmo = (boolean) needCheckAmmoMethod.invoke(gunOperator);
+                    StevesArmyMod.LOGGER.info("[TaCZ] needCheckAmmo={}", needCheckAmmo);
+                    StevesArmyMod.LOGGER.info("[TaCZ] State checks: isDrawing={} shootCoolDown={} isBolting={} isReloading={}",
+                        isDrawing(entity), getShootCoolDown(entity), isBolting(entity), isReloading(entity));
+
+                    if (needCheckAmmo) {
+                        StevesArmyMod.LOGGER.info("[TaCZ] Checking inventory for ammo items...");
+                        ItemStack gunStack = entity.getMainHandItem();
+                        try {
+                            Class<?> iAmmoClass = Class.forName("com.tacz.guns.api.item.IAmmo");
+                            Method getIAmmoOrNullMethod = iAmmoClass.getMethod("getIAmmoOrNull", ItemStack.class);
+                            Method getAmmoIdMethod = iAmmoClass.getMethod("getAmmoId", ItemStack.class);
+                            Method isAmmoOfGunMethod = iAmmoClass.getMethod("isAmmoOfGun", ItemStack.class, ItemStack.class);
+
+                            entity.getCapability(ForgeCapabilities.ITEM_HANDLER).ifPresent(cap -> {
+                                StevesArmyMod.LOGGER.info("[TaCZ] Inventory capability found with {} slots", cap.getSlots());
+                                for (int i = 0; i < cap.getSlots(); i++) {
+                                    ItemStack slotStack = cap.getStackInSlot(i);
+                                    if (!slotStack.isEmpty()) {
+                                        try {
+                                            Object iAmmo = getIAmmoOrNullMethod.invoke(null, slotStack);
+                                            if (iAmmo != null) {
+                                                Object itemAmmoId = getAmmoIdMethod.invoke(iAmmo, slotStack);
+                                                boolean matches = (boolean) isAmmoOfGunMethod.invoke(iAmmo, gunStack, slotStack);
+                                                StevesArmyMod.LOGGER.info("[TaCZ] Slot {}: ammoId={} isAmmoOfGun={}", i, itemAmmoId, matches);
+                                            }
+                                        } catch (Exception ex) {
+                                            StevesArmyMod.LOGGER.warn("[TaCZ] Error checking slot {}: {}", i, ex.getMessage());
                                         }
-                                    } catch (Exception ex) {
-                                        StevesArmyMod.LOGGER.warn("[TaCZ] Error checking slot {}: {}", i, ex.getMessage());
                                     }
                                 }
-                            }
-                        });
-                    } catch (Exception capEx) {
-                        StevesArmyMod.LOGGER.warn("[TaCZ] Failed to check inventory capability: {}", capEx.getMessage());
+                            });
+                        } catch (Exception capEx) {
+                            StevesArmyMod.LOGGER.warn("[TaCZ] Failed to check inventory capability: {}", capEx.getMessage());
+                        }
                     }
                 }
-                
-                Method getReloadState = gunOperatorClass.getMethod("getSynReloadState");
-                Object reloadStateBefore = getReloadState.invoke(gunOperator);
-                StevesArmyMod.LOGGER.info("[TaCZ] Reload state before: {}", reloadStateBefore.toString());
-                
+
+                Object reloadStateBefore = null;
+                Method getReloadState = null;
+                if (DiagnosticLogManager.isDamageLoggingEnabled()) {
+                    getReloadState = gunOperatorClass.getMethod("getSynReloadState");
+                    reloadStateBefore = getReloadState.invoke(gunOperator);
+                }
                 Method reloadMethod = gunOperatorClass.getMethod("reload");
                 reloadMethod.invoke(gunOperator);
-                
-                Object reloadStateAfter = getReloadState.invoke(gunOperator);
-                StevesArmyMod.LOGGER.info("[TaCZ] Reload state after: {}", reloadStateAfter.toString());
-                
-                boolean isReloadingAfter = isReloading(entity);
-                StevesArmyMod.LOGGER.info("[TaCZ] isReloading after call: {}", isReloadingAfter);
+
+                if (DiagnosticLogManager.isDamageLoggingEnabled()) {
+                    Object reloadStateAfter = getReloadState.invoke(gunOperator);
+                    StevesArmyMod.LOGGER.info("[TaCZ] Reload state: {} -> {}, isReloading={}",
+                        reloadStateBefore, reloadStateAfter, isReloading(entity));
+                }
             } catch (Exception e) {
-                StevesArmyMod.LOGGER.warn("[TaCZ] Reload failed: " + e.getMessage());
-                e.printStackTrace();
+                StevesArmyMod.LOGGER.warn("[TaCZ] Reload failed", e);
             }
         }
 
@@ -497,13 +493,15 @@ public class GunIntegration {
                 Method getCountDown = reloadStateClass.getMethod("getCountDown");
                 long countDown = (long) getCountDown.invoke(reloadState);
                 
-                if (reloading) {
+                if (reloading && DiagnosticLogManager.isDamageLoggingEnabled()) {
                     StevesArmyMod.LOGGER.info("[TaCZ] isReloading: stateType={}, countDown={}ms", stateType.toString(), countDown);
                 }
                 
                 return reloading;
             } catch (Exception e) {
-                StevesArmyMod.LOGGER.warn("[TaCZ] isReloading exception: {}", e.getMessage());
+                if (DiagnosticLogManager.isDamageLoggingEnabled()) {
+                    StevesArmyMod.LOGGER.warn("[TaCZ] isReloading exception: {}", e.getMessage());
+                }
                 return false;
             }
         }
@@ -594,7 +592,9 @@ public class GunIntegration {
         public void draw(LivingEntity entity) {
             if (!hasGun(entity)) return;
             if (isReloading(entity)) {
-                StevesArmyMod.LOGGER.info("[TaCZ] draw() skipped - entity is reloading");
+                if (DiagnosticLogManager.isDamageLoggingEnabled()) {
+                    StevesArmyMod.LOGGER.info("[TaCZ] draw() skipped - entity is reloading");
+                }
                 return;
             }
             try {
@@ -603,7 +603,9 @@ public class GunIntegration {
                 Object gunOperator = fromLivingEntity.invoke(null, entity);
                 Method drawMethod = gunOperatorClass.getMethod("draw", java.util.function.Supplier.class);
                 drawMethod.invoke(gunOperator, (java.util.function.Supplier<ItemStack>) () -> entity.getMainHandItem());
-                StevesArmyMod.LOGGER.info("[TaCZ] draw() completed");
+                if (DiagnosticLogManager.isDamageLoggingEnabled()) {
+                    StevesArmyMod.LOGGER.info("[TaCZ] draw() completed");
+                }
             } catch (Exception e) {
                 StevesArmyMod.LOGGER.debug("[TaCZ] Draw failed: " + e.getMessage());
             }
@@ -1011,7 +1013,9 @@ public class GunIntegration {
                         Object type = getTypeMethod.invoke(gunIndex);
                         if (type != null) {
                             String typeName = type.toString().toLowerCase();
-                            StevesArmyMod.LOGGER.info("[TaCZ] Detected gun type via getType(): {} for gun {}", typeName, gunId);
+                            if (DiagnosticLogManager.isDamageLoggingEnabled()) {
+                                StevesArmyMod.LOGGER.info("[TaCZ] Detected gun type via getType(): {} for gun {}", typeName, gunId);
+                            }
                             return typeName;
                         }
                     } catch (NoSuchMethodException e1) {
@@ -1021,7 +1025,9 @@ public class GunIntegration {
                             Object tabType = getTabTypeMethod.invoke(gunIndex);
                             if (tabType != null) {
                                 String typeName = tabType.toString().toLowerCase();
-                                StevesArmyMod.LOGGER.info("[TaCZ] Detected gun type via getTabType(): {} for gun {}", typeName, gunId);
+                                if (DiagnosticLogManager.isDamageLoggingEnabled()) {
+                                    StevesArmyMod.LOGGER.info("[TaCZ] Detected gun type via getTabType(): {} for gun {}", typeName, gunId);
+                                }
                                 return typeName;
                             }
                         } catch (NoSuchMethodException e2) {
@@ -1043,7 +1049,9 @@ public class GunIntegration {
             boolean isBolt = isManualBolt(entity);
             
             if (!isBolt && magSize >= 30 && rpm >= 500) {
-                StevesArmyMod.LOGGER.info("[TaCZ] Detected machine gun via heuristic: magSize={}, rpm={}", magSize, rpm);
+                if (DiagnosticLogManager.isDamageLoggingEnabled()) {
+                    StevesArmyMod.LOGGER.info("[TaCZ] Detected machine gun via heuristic: magSize={}, rpm={}", magSize, rpm);
+                }
                 return "machine_gun";
             }
             return "rifle";
@@ -1056,7 +1064,9 @@ public class GunIntegration {
                           "mmg".equals(tabType) || "hmg".equals(tabType) || "smg".equals(tabType);
             
             if (isMG) {
-                StevesArmyMod.LOGGER.info("[TaCZ] Gun classified as machine gun: tabType={}", tabType);
+                if (DiagnosticLogManager.isDamageLoggingEnabled()) {
+                    StevesArmyMod.LOGGER.info("[TaCZ] Gun classified as machine gun: tabType={}", tabType);
+                }
             }
             
             return isMG;

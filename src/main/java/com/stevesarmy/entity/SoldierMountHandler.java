@@ -2,6 +2,7 @@ package com.stevesarmy.entity;
 
 import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.compat.VS2Compat;
+import net.minecraft.world.entity.Entity;
 import net.minecraftforge.event.entity.EntityMountEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
@@ -18,12 +19,16 @@ public final class SoldierMountHandler {
         if (!event.isMounting() || !(event.getEntityMounting() instanceof SoldierEntity soldier)) {
             return;
         }
-        if (VS2Compat.isAuthorizedMount(soldier, event.getEntityBeingMounted())) {
-            StevesArmyMod.LOGGER.info("[VS2] Allowed authorized soldier mount soldier={} vehicle={}",
-                soldier.getId(), event.getEntityBeingMounted().getId());
+        Entity vehicle = event.getEntityBeingMounted();
+        boolean authorized = VS2Compat.isAuthorizedMount(soldier, vehicle);
+        String vehicleClass = vehicle == null ? "null" : vehicle.getClass().getName();
+        String side = soldier.level().isClientSide ? "CLIENT" : "SERVER";
+        if (authorized) {
+            StevesArmyMod.LOGGER.info("[MountEvent] {} ALLOWED soldier={} vehicle={} vehicleClass={}",
+                side, soldier.getId(), vehicle == null ? -1 : vehicle.getId(), vehicleClass);
         } else {
-            StevesArmyMod.LOGGER.debug("[VS2] Canceled unsolicited soldier mount soldier={} vehicle={}",
-                soldier.getId(), event.getEntityBeingMounted().getId());
+            StevesArmyMod.LOGGER.info("[MountEvent] {} CANCELED soldier={} vehicle={} vehicleClass={}",
+                side, soldier.getId(), vehicle == null ? -1 : vehicle.getId(), vehicleClass);
             event.setCanceled(true);
         }
     }

@@ -3,7 +3,7 @@ package com.stevesarmy.combat.cover;
 import com.stevesarmy.StevesArmyConfig;
 import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.entity.SoldierEntity;
-import com.stevesarmy.entity.ai.CoverTacticalGoal;
+import com.stevesarmy.debug.DiagnosticLogManager;
 import net.minecraft.world.level.Explosion;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
@@ -67,6 +67,6 @@ public class ExplosionSuppressionHandler {
     }
 
     private static boolean debugLog() {
-        return CoverTacticalGoal.isDebugLoggingEnabled();
+        return DiagnosticLogManager.isSuppressionLoggingEnabled();
     }
 }

@@ -1,6 +1,7 @@
 package com.stevesarmy.squad;
 
 import com.stevesarmy.StevesArmyMod;
+import com.stevesarmy.debug.DiagnosticLogManager;
 import com.stevesarmy.entity.SoldierEntity;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.Entity;
@@ -26,12 +27,16 @@ public class SuppressireAssignmentManager {
                 Entity suppressor = level.getEntity(threat.suppressedBy);
                 if (suppressor == null || !suppressor.isAlive()) {
                     intel.clearThreatSuppression(threat.threatEntityId);
-                    StevesArmyMod.LOGGER.info("[SuppressAssign] Cleared stale suppression for threat {} (suppressor dead)",
-                        threat.threatEntityId);
+                    if (DiagnosticLogManager.isSuppressionLoggingEnabled()) {
+                        StevesArmyMod.LOGGER.info("[SuppressAssign] Cleared stale suppression for threat {} (suppressor dead)",
+                            threat.threatEntityId);
+                    }
                 } else if (intel.isSuppressionStale(threat.threatEntityId, currentTime)) {
                     intel.clearThreatSuppression(threat.threatEntityId);
-                    StevesArmyMod.LOGGER.info("[SuppressAssign] Cleared stale suppression for threat {} (heartbeat timeout)",
-                        threat.threatEntityId);
+                    if (DiagnosticLogManager.isSuppressionLoggingEnabled()) {
+                        StevesArmyMod.LOGGER.info("[SuppressAssign] Cleared stale suppression for threat {} (heartbeat timeout)",
+                            threat.threatEntityId);
+                    }
                 }
             }
         }
@@ -65,14 +70,18 @@ public class SuppressireAssignmentManager {
         List<SquadThreatIntel.ThreatKnowledge> unsuppressedThreats = intel.getUnsuppressedThreats();
         for (SquadThreatIntel.ThreatKnowledge threat : unsuppressedThreats) {
             if (intel.tryMarkThreatSuppressed(threat.threatEntityId, soldierId)) {
-                StevesArmyMod.LOGGER.info("[SuppressAssign] Soldier {} claimed suppression of threat {} (accuracy={})",
-                    soldierId, threat.threatEntityId, String.format("%.2f", threat.accuracy));
+                if (DiagnosticLogManager.isSuppressionLoggingEnabled()) {
+                    StevesArmyMod.LOGGER.info("[SuppressAssign] Soldier {} claimed suppression of threat {} (accuracy={})",
+                        soldierId, threat.threatEntityId, String.format("%.2f", threat.accuracy));
+                }
                 return;
             }
         }
         
-        StevesArmyMod.LOGGER.info("[SuppressAssign] Soldier {} failed to claim any threat (all already suppressed)",
-            soldierId);
+        if (DiagnosticLogManager.isSuppressionLoggingEnabled()) {
+            StevesArmyMod.LOGGER.info("[SuppressAssign] Soldier {} failed to claim any threat (all already suppressed)",
+                soldierId);
+        }
     }
 
     public static void clearAllAssignmentsForSoldier(SquadThreatIntel intel, UUID soldierId) {

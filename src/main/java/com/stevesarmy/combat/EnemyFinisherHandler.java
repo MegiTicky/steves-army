@@ -3,7 +3,7 @@ package com.stevesarmy.combat;
 import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.compat.PlayerReviveCompat;
 import com.stevesarmy.entity.EnemySoldierEntity;
-import com.stevesarmy.entity.ai.CoverTacticalGoal;
+import com.stevesarmy.debug.DiagnosticLogManager;
 import net.minecraft.world.entity.player.Player;
 import net.minecraftforge.event.entity.living.LivingHurtEvent;
 import net.minecraftforge.eventbus.api.EventPriority;
@@ -18,7 +18,7 @@ public class EnemyFinisherHandler {
         if (!event.isCanceled()) return;
         if (!(event.getEntity() instanceof Player victim)) return;
 
-        boolean debug = CoverTacticalGoal.isDebugLoggingEnabled();
+        boolean debug = DiagnosticLogManager.isDamageLoggingEnabled();
 
         // Only re-allow damage if the victim is currently bleeding (PlayerRevive downed state)
         if (!PlayerReviveCompat.isPlayerBleeding(victim)) return;
