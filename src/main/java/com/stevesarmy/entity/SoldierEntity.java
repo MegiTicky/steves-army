@@ -1185,7 +1185,7 @@ public BlockPos getPingMoveTarget() {
         Vec3 center = pingCenter.getCenter();
         return new Vec3(
             center.x + Math.cos(angle) * radius,
-            center.y,
+            center.y + 1.0,
             center.z + Math.sin(angle) * radius
         );
     }

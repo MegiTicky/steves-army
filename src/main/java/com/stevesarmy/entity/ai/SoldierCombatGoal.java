@@ -393,10 +393,9 @@ boolean isBolting = GunIntegration.isBolting(soldier);
         }
         
         if (hasGun) {
-            // Enforce EXPOSED-only firing while in cover
-            boolean inCover = coverManager.isInCover();
-            boolean canFireFromCover = !inCover || peekState == PeekController.State.EXPOSED;
-            boolean shouldShoot = canSee && canFireFromCover;
+            // Suppressed soldiers remain hidden in cover but can return fire when
+            // they have direct LOS; suppression controls posture and movement.
+            boolean shouldShoot = canSee;
             if (shouldShoot) {
                 tickGunCombat();
             } else if (shouldSuppressTarget()) {
@@ -1347,7 +1346,10 @@ boolean isBolting = GunIntegration.isBolting(soldier);
         double offsetY = (soldier.level().random.nextDouble() - 0.5) * spreadRadius * 0.5;
         double offsetZ = (soldier.level().random.nextDouble() - 0.5) * 2.0 * spreadRadius;
         
-        return targetPos.add(offsetX, offsetY + 1.0, offsetZ);
+        // Callers provide a complete world-space target. Do not add a generic
+        // vertical offset here: half-cover opening targets already include the
+        // cover top, while other suppression targets set their own height.
+        return targetPos.add(offsetX, offsetY, offsetZ);
     }
 
     private int getTicksBetweenBurstShots() {
@@ -1495,7 +1497,9 @@ boolean isBolting = GunIntegration.isBolting(soldier);
         }
         
         float aimInaccuracy = GunIntegration.getAimInaccuracy(soldier);
-        Vec3 spreadPos = calculateSuppressionSpread(targetPos, aimInaccuracy);
+        // Preserve the established last-known-position suppression height. Ping
+        // suppression points already contain their complete world-space height.
+        Vec3 spreadPos = calculateSuppressionSpread(targetPos.add(0, 1.0, 0), aimInaccuracy);
         GunIntegration.ShootResult result = GunIntegration.shootAtPosition(soldier, spreadPos);
         
         if (isSuppressionDebugLogging()) {
@@ -1706,13 +1710,10 @@ boolean isBolting = GunIntegration.isBolting(soldier);
             }
         }
         
-        Vec3 aimPoint = soldier.getNextSuppressionAimPoint();
-        if (aimPoint == null) {
-            aimPoint = soldier.getHorizontalSpreadFallbackTarget(soldier.getPingSuppressPos());
+        Vec3 finalTarget = getClearPingSuppressionTarget();
+        if (finalTarget == null) {
+            return;
         }
-        
-        float aimInaccuracy = GunIntegration.getAimInaccuracy(soldier);
-        Vec3 finalTarget = calculateSuppressionSpread(aimPoint, aimInaccuracy);
         
         soldier.getLookControl().setLookAt(finalTarget.x, finalTarget.y, finalTarget.z, 30.0F, 30.0F);
         GunIntegration.aim(soldier, true);
@@ -1788,6 +1789,56 @@ boolean isBolting = GunIntegration.isBolting(soldier);
             case NOT_DRAWN -> GunIntegration.draw(soldier);
             default -> {}
         }
+    }
+
+    /**
+     * Selects a suppression target whose actual spread-adjusted shot has clear LOS.
+     * The old code validated the unspread point but fired at a different point,
+     * allowing horizontal or vertical spread to send bullets into cover.
+     */
+    private Vec3 getClearPingSuppressionTarget() {
+        float aimInaccuracy = GunIntegration.getAimInaccuracy(soldier);
+        Vec3 selected = soldier.getNextSuppressionAimPoint();
+
+        if (selected == null) {
+            selected = soldier.getHorizontalSpreadFallbackTarget(soldier.getPingSuppressPos());
+        }
+
+        Vec3 finalTarget = calculateSuppressionSpread(selected, aimInaccuracy);
+        if (!aimPointsAreEmpty(soldier)) {
+            finalTarget = clampSuppressionTargetHeight(finalTarget, selected);
+        }
+        if (TargetAcquisition.hasLineOfSightToPosition(soldier, finalTarget)) {
+            return finalTarget;
+        }
+
+        // Try a bounded number of alternate opening samples before giving up this
+        // shot. Skipping a blocked shot is preferable to repeatedly firing into cover.
+        java.util.List<Vec3> aimPoints = soldier.getSuppressionAimPoints();
+        int attempts = Math.min(aimPoints.size(), 12);
+        for (int i = 0; i < attempts; i++) {
+            Vec3 candidate = aimPoints.get(i);
+            if (candidate.equals(selected)) {
+                continue;
+            }
+            finalTarget = calculateSuppressionSpread(candidate, aimInaccuracy);
+            finalTarget = clampSuppressionTargetHeight(finalTarget, candidate);
+            if (TargetAcquisition.hasLineOfSightToPosition(soldier, finalTarget)) {
+                return finalTarget;
+            }
+        }
+
+        return null;
+    }
+
+    private boolean aimPointsAreEmpty(SoldierEntity soldier) {
+        return soldier.getSuppressionAimPoints().isEmpty();
+    }
+
+    private Vec3 clampSuppressionTargetHeight(Vec3 target, Vec3 aimPoint) {
+        return target.y < aimPoint.y
+            ? new Vec3(target.x, aimPoint.y, target.z)
+            : target;
     }
     
     public void forceRestartPingSuppression() {

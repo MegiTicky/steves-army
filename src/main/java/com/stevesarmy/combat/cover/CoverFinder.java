@@ -38,6 +38,11 @@ public class CoverFinder {
     
     private static final float HALF_COVER_FIGHTABILITY_BONUS = 0.25f;
     private static final float FULL_COVER_FIGHTABILITY_BONUS = 0.15f;
+
+    // Suppression targets for half cover must be above the cover's collision shape.
+    // A block-center target is commonly inside the block and causes shots to hit cover.
+    private static final double[] HALF_COVER_OPENING_HEIGHTS = {0.12, 0.42};
+    private static final double[] HALF_COVER_LATERAL_OFFSETS = {-0.28, 0.0, 0.28};
     
     private static final double FOLLOW_MODE_MAX_OWNER_DISTANCE = 15.0;
 
@@ -1072,6 +1077,11 @@ return qualityScore + shootBonus - distancePenalty;
         
         for (CoverPoint cover : covers) {
             java.util.Set<Direction> protectedDirs = cover.getProtectedDirections();
+
+            if (cover.getType() == CoverType.HALF) {
+                addHalfCoverOpeningAimPoints(soldier, cover, aimPoints);
+                continue;
+            }
             
             for (Direction peekDir : Direction.Plane.HORIZONTAL) {
                 if (protectedDirs.contains(peekDir)) continue;
@@ -1079,7 +1089,9 @@ return qualityScore + shootBonus - distancePenalty;
                 BlockPos peekPos = cover.getPosition().relative(peekDir);
                 if (!isValidPeekPosition(peekPos, level)) continue;
                 
-                Vec3 peekTarget = peekPos.getCenter();
+                // Keep the existing non-half-cover target height. Half cover uses
+                // collision-shape-based opening points above instead.
+                Vec3 peekTarget = peekPos.getCenter().add(0, 1.0, 0);
                 
                 Vec3 soldierEye = soldier.getEyePosition();
                 ClipContext ctx = new ClipContext(
@@ -1097,5 +1109,48 @@ return qualityScore + shootBonus - distancePenalty;
         }
         
         return aimPoints;
+    }
+
+    /**
+     * Adds likely enemy exposure points above each half-cover wall. The points are
+     * validated from the real soldier eye position so suppression does not target
+     * the solid cover block itself.
+     */
+    private void addHalfCoverOpeningAimPoints(SoldierEntity soldier, CoverPoint cover,
+                                               java.util.List<Vec3> aimPoints) {
+        for (Direction wallDirection : cover.getProtectedDirections()) {
+            BlockPos coverBlock = cover.getPosition().relative(wallDirection);
+            VoxelShape shape = level.getBlockState(coverBlock).getCollisionShape(level, coverBlock);
+            if (shape.isEmpty()) {
+                continue;
+            }
+
+            double coverTop = coverBlock.getY() + shape.max(Direction.Axis.Y);
+            Direction.Axis lateralAxis = wallDirection.getAxis() == Direction.Axis.Z
+                ? Direction.Axis.X : Direction.Axis.Z;
+
+            for (double lateralOffset : HALF_COVER_LATERAL_OFFSETS) {
+                double x = coverBlock.getX() + 0.5;
+                double z = coverBlock.getZ() + 0.5;
+                if (lateralAxis == Direction.Axis.X) {
+                    x += lateralOffset;
+                } else {
+                    z += lateralOffset;
+                }
+
+                for (double openingHeight : HALF_COVER_OPENING_HEIGHTS) {
+                    Vec3 opening = new Vec3(x, coverTop + openingHeight, z);
+                    ClipContext context = new ClipContext(
+                        soldier.getEyePosition(), opening,
+                        ClipContext.Block.COLLIDER,
+                        ClipContext.Fluid.NONE,
+                        soldier
+                    );
+                    if (level.clip(context).getType() == HitResult.Type.MISS) {
+                        aimPoints.add(opening);
+                    }
+                }
+            }
+        }
     }
 }
