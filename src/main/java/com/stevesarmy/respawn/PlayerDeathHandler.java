@@ -36,6 +36,7 @@ public class PlayerDeathHandler {
         if (event.getEntity() instanceof SoldierEntity soldier && !soldier.level().isClientSide()) {
             if (soldier.level() instanceof ServerLevel serverLevel) {
                 SquadManager.get(serverLevel).removeMemberFromSquad(soldier.getUUID());
+                handleSelectedSoldierDeath(serverLevel, soldier.getUUID());
                 StevesArmyMod.LOGGER.info("[Respawn] Soldier {} removed from squad on death", soldier.getUUID().toString().substring(0, 8));
             }
             return;
@@ -115,6 +116,7 @@ public class PlayerDeathHandler {
         }
         
         pendingRespawns.put(player.getUUID(), new RespawnData(
+            player.getUUID(),
             nearestSoldier.getUUID(),
             nearestSoldier.position(),
             nearestSoldier.getYRot(),
@@ -140,6 +142,9 @@ public class PlayerDeathHandler {
             return;
         }
         
+        // A normal fallback respawn may not have pending soldier data, but it must
+        // still stop any old transition from moving the newly respawned player.
+        RespawnCameraController.cancelTransition(player.getUUID());
         RespawnData data = pendingRespawns.remove(player.getUUID());
         if (data == null) {
             return;
@@ -153,13 +158,75 @@ public class PlayerDeathHandler {
             return;
         }
         
-        SoldierEntity soldier = findSoldierByUUID(level, data.soldierId);
-        if (soldier == null || !soldier.isAlive()) {
-            StevesArmyMod.LOGGER.warn("[Respawn] Soldier {} not found or dead, fallback to normal respawn", data.soldierId);
+        SoldierEntity soldier = findLivingRespawnSoldier(level, squadManager, data, null);
+        if (soldier == null) {
+            StevesArmyMod.LOGGER.warn("[Respawn] No living soldier remains for {}, using normal respawn", player.getName().getString());
             return;
+        }
+
+        if (!soldier.getUUID().equals(data.soldierId)) {
+            StevesArmyMod.LOGGER.info("[Respawn] Selected soldier {} died; respawning {} as replacement soldier {}",
+                data.soldierId.toString().substring(0, 8),
+                player.getName().getString(),
+                soldier.getUUID().toString().substring(0, 8));
         }
         
         SoldierRespawnManager.initiateRespawn(player, soldier, squadManager, squadOpt.get(), level);
+    }
+
+    /**
+     * Called when a squad member dies so no player remains bound to an invalid
+     * respawn target while waiting on the vanilla death screen.
+     */
+    private static void handleSelectedSoldierDeath(ServerLevel level, UUID deadSoldierId) {
+        pendingRespawns.forEach((playerId, data) -> {
+            if (!data.soldierId.equals(deadSoldierId)) {
+                return;
+            }
+
+            ServerPlayer player = level.getServer().getPlayerList().getPlayer(playerId);
+            SquadManager squadManager = SquadManager.get(level);
+            SoldierEntity replacement = findLivingRespawnSoldier(level, squadManager, data, deadSoldierId);
+
+            if (player == null || replacement == null) {
+                if (pendingRespawns.remove(playerId, data)) {
+                    if (player != null) {
+                        player.sendSystemMessage(net.minecraft.network.chat.Component.literal(
+                            "Your selected respawn soldier was lost. Respawning normally."
+                        ));
+                    }
+                    StevesArmyMod.LOGGER.warn("[Respawn] Cleared invalid respawn target {} for player {}; transition will use normal respawn",
+                        deadSoldierId.toString().substring(0, 8), playerId.toString().substring(0, 8));
+                }
+                return;
+            }
+
+            RespawnData replacementData = new RespawnData(
+                playerId, replacement.getUUID(), replacement.position(), replacement.getYRot(), replacement.getXRot(), data.squadId
+            );
+            if (pendingRespawns.replace(playerId, data, replacementData)) {
+                Optional<SquadData> squadOpt = squadManager.getSquadById(data.squadId);
+                if (squadOpt.isEmpty()) {
+                    pendingRespawns.remove(playerId, replacementData);
+                    RespawnCameraController.cancelTransition(playerId);
+                    return;
+                }
+                RespawnCameraController.startTransition(player, replacement, squadManager, squadOpt.get(), level);
+                player.sendSystemMessage(net.minecraft.network.chat.Component.literal(
+                    "Selected respawn soldier was lost. Switching to another soldier."
+                ));
+                StevesArmyMod.LOGGER.info("[Respawn] Replaced dead respawn soldier {} with {} for player {}",
+                    deadSoldierId.toString().substring(0, 8),
+                    replacement.getUUID().toString().substring(0, 8),
+                    player.getName().getString());
+            }
+        });
+    }
+
+    public static void clearPendingRespawn(UUID playerId, UUID expectedSoldierId) {
+        pendingRespawns.computeIfPresent(playerId, (id, data) ->
+            data.soldierId.equals(expectedSoldierId) ? null : data
+        );
     }
     
     private static SoldierEntity findNearestSoldier(net.minecraft.world.phys.Vec3 deathPos, List<LivingEntity> soldiers) {
@@ -185,15 +252,34 @@ public class PlayerDeathHandler {
         net.minecraft.world.entity.Entity entity = level.getEntity(soldierId);
         return entity instanceof SoldierEntity soldier ? soldier : null;
     }
+
+    private static SoldierEntity findLivingRespawnSoldier(ServerLevel level, SquadManager squadManager,
+                                                           RespawnData data, UUID unavailableSoldierId) {
+        SoldierEntity selected = findSoldierByUUID(level, data.soldierId);
+        if (selected != null && selected.isAlive() && !selected.getUUID().equals(unavailableSoldierId)) {
+            return selected;
+        }
+
+        Optional<SquadData> squadOpt = squadManager.getSquadById(data.squadId);
+        if (squadOpt.isEmpty()) {
+            return null;
+        }
+
+        List<LivingEntity> livingSoldiers = squadManager.getSquadMembers(level, squadOpt.get().getSquadId(), data.playerId);
+        livingSoldiers.removeIf(entity -> !(entity instanceof SoldierEntity) || entity.getUUID().equals(unavailableSoldierId));
+        return findNearestSoldier(data.soldierPos, livingSoldiers);
+    }
     
     private static class RespawnData {
+        final UUID playerId;
         final UUID soldierId;
         final net.minecraft.world.phys.Vec3 soldierPos;
         final float soldierYRot;
         final float soldierXRot;
         final UUID squadId;
         
-        RespawnData(UUID soldierId, net.minecraft.world.phys.Vec3 soldierPos, float soldierYRot, float soldierXRot, UUID squadId) {
+        RespawnData(UUID playerId, UUID soldierId, net.minecraft.world.phys.Vec3 soldierPos, float soldierYRot, float soldierXRot, UUID squadId) {
+            this.playerId = playerId;
             this.soldierId = soldierId;
             this.soldierPos = soldierPos;
             this.soldierYRot = soldierYRot;

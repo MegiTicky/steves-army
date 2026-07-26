@@ -6,9 +6,8 @@ import com.stevesarmy.squad.SquadData;
 import com.stevesarmy.squad.SquadManager;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.network.protocol.game.ServerboundClientCommandPacket;
 import net.minecraft.world.phys.Vec3;
-import java.util.List;
-import java.util.Optional;
 import java.util.UUID;
 
 public class RespawnCameraController {
@@ -38,6 +37,12 @@ public class RespawnCameraController {
         StevesArmyMod.LOGGER.info("[CameraTransition] Started for player {} to soldier at {}", 
             player.getName().getString(), targetSoldier.blockPosition());
     }
+
+    public static void cancelTransition(UUID playerId) {
+        if (activeTransitions.remove(playerId) != null) {
+            StevesArmyMod.LOGGER.info("[CameraTransition] Cancelled for player {}", playerId.toString().substring(0, 8));
+        }
+    }
     
     public static void tick() {
         activeTransitions.entrySet().removeIf(entry -> {
@@ -46,18 +51,27 @@ public class RespawnCameraController {
             
             if (state.tickCount >= TRANSITION_TICKS) {
                 ServerPlayer player = state.level.getServer().getPlayerList().getPlayer(state.playerId);
-                if (player != null) {
+                if (player != null && !player.isAlive()) {
                     SoldierEntity soldier = findSoldierByUUID(state.level, state.soldierId);
-                    if (soldier != null && soldier.isAlive()) {
-                        SoldierRespawnManager.initiateRespawn(player, soldier, state.squadManager, state.squad, state.level);
+                    if (soldier == null || !soldier.isAlive()) {
+                        PlayerDeathHandler.clearPendingRespawn(state.playerId, state.soldierId);
+                        StevesArmyMod.LOGGER.warn("[CameraTransition] Target soldier {} was lost before transition completed for player {}; using normal respawn",
+                            state.soldierId.toString().substring(0, 8), player.getName().getString());
                     }
+
+                    // Use the same handler as the client's Respawn button. Calling PlayerList.respawn
+                    // directly leaves the player's connection bound to the old ServerPlayer instance.
+                    player.connection.handleClientCommand(new ServerboundClientCommandPacket(
+                        ServerboundClientCommandPacket.Action.PERFORM_RESPAWN
+                    ));
                 }
                 return true;
             }
             
             if (state.tickCount >= TICKS_BEFORE_TELEPORT) {
                 ServerPlayer player = state.level.getServer().getPlayerList().getPlayer(state.playerId);
-                if (player != null && !player.isSpectator()) {
+                SoldierEntity soldier = findSoldierByUUID(state.level, state.soldierId);
+                if (player != null && soldier != null && soldier.isAlive() && !player.isSpectator()) {
                     player.setCamera(null);
                     player.teleportTo(state.soldierPos.x, state.soldierPos.y + 0.5, state.soldierPos.z);
                     player.setYRot(state.soldierYRot);
