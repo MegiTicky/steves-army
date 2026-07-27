@@ -17,6 +17,15 @@ public class FireTeamWheelHandler {
 
     public static void tick() {
         Minecraft mc = Minecraft.getInstance();
+
+        if (!StevesArmyClientConfig.ENABLE_FIRE_TEAM_WHEEL.get()) {
+            if (isWheelActive) {
+                releaseMouse(mc);
+                isWheelActive = false;
+                wasKeyDown = false;
+            }
+            return;
+        }
         if (mc.player == null || mc.level == null) {
             if (isWheelActive) releaseMouse(mc);
             isWheelActive = false;

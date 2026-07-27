@@ -5,6 +5,7 @@ import net.minecraftforge.common.ForgeConfigSpec;
 public final class StevesArmyClientConfig {
     public static final ForgeConfigSpec SPEC;
     public static final ForgeConfigSpec.DoubleValue SOLDIER_HELD_ITEM_RENDER_DISTANCE;
+    public static final ForgeConfigSpec.BooleanValue ENABLE_FIRE_TEAM_WHEEL;
 
     static {
         ForgeConfigSpec.Builder builder = new ForgeConfigSpec.Builder();
@@ -16,6 +17,14 @@ public final class StevesArmyClientConfig {
                      "Set to 0 to hide all soldier-held items, or -1 to disable this optimization.",
                      "Default: 24 blocks")
             .defineInRange("soldierHeldItemRenderDistance", 24.0, -1.0, 128.0);
+        builder.pop();
+
+        builder.push("controls");
+        ENABLE_FIRE_TEAM_WHEEL = builder
+            .comment("Enable the fire-team selector wheel (G key).",
+                     "When disabled, use the cycle fire team key binding instead.",
+                     "Default: false")
+            .define("enableFireTeamWheel", false);
         builder.pop();
 
         SPEC = builder.build();
