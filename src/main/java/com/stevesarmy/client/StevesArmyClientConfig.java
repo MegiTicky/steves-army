@@ -6,7 +6,7 @@ public final class StevesArmyClientConfig {
     public static final ForgeConfigSpec SPEC;
     public static final ForgeConfigSpec.DoubleValue SOLDIER_HELD_ITEM_RENDER_DISTANCE;
     public static final ForgeConfigSpec.BooleanValue ENABLE_FIRE_TEAM_WHEEL;
-    public static final ForgeConfigSpec.IntValue PING_ICON_SIZE;
+    public static final ForgeConfigSpec.DoubleValue PING_SCALE;
 
     static {
         ForgeConfigSpec.Builder builder = new ForgeConfigSpec.Builder();
@@ -18,10 +18,10 @@ public final class StevesArmyClientConfig {
                      "Set to 0 to hide all soldier-held items, or -1 to disable this optimization.",
                      "Default: 24 blocks")
             .defineInRange("soldierHeldItemRenderDistance", 24.0, -1.0, 128.0);
-        PING_ICON_SIZE = builder
-            .comment("Base size of the ping icon in pixels.",
-                     "Default: 8")
-            .defineInRange("pingIconSize", 8, 4, 32);
+        PING_SCALE = builder
+            .comment("Global scale factor for ping icons and text.",
+                     "Default: 0.8")
+            .defineInRange("pingScale", 0.8, 0.25, 2.0);
         builder.pop();
 
         builder.push("controls");

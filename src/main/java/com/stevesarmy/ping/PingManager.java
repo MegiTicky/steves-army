@@ -1,5 +1,6 @@
 package com.stevesarmy.ping;
 
+import com.stevesarmy.client.StevesArmyClientConfig;
 import com.stevesarmy.client.WorldRenderContext;
 import com.stevesarmy.util.MathUtils;
 import com.stevesarmy.util.ScreenPos;
@@ -70,7 +71,7 @@ public class PingManager {
     
     private static float calculateScale(double distance) {
         double scale = 2.0 / Math.pow(distance, 0.3);
-        return (float) Math.max(0.5, Math.min(2.0, scale));
+        return (float) Math.max(0.5, Math.min(2.0, scale)) * StevesArmyClientConfig.PING_SCALE.get().floatValue();
     }
     
     public static boolean isEmpty() {
