@@ -43,11 +43,11 @@ public class PingWheelHandler {
         
         boolean isKeyDown = KeyBindings.isPingWheelKeyDown();
 
-        // Skip if Ctrl is held (fire team wheel takes priority)
+        // Skip if Ctrl is held and fire team wheel is enabled (it takes priority)
         long window = mc.getWindow().getWindow();
         boolean ctrlHeld = GLFW.glfwGetKey(window, GLFW.GLFW_KEY_LEFT_CONTROL) == GLFW.GLFW_PRESS
             || GLFW.glfwGetKey(window, GLFW.GLFW_KEY_RIGHT_CONTROL) == GLFW.GLFW_PRESS;
-        if (ctrlHeld && isKeyDown) {
+        if (StevesArmyClientConfig.ENABLE_FIRE_TEAM_WHEEL.get() && ctrlHeld && isKeyDown) {
             if (isWheelActive) {
                 releaseMouse(mc);
             }
