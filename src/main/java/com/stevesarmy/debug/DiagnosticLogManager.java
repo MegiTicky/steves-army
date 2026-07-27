@@ -3,6 +3,8 @@ package com.stevesarmy.debug;
 /** Server-wide diagnostic log toggles. All default to false, reset on restart. */
 public final class DiagnosticLogManager {
     private static boolean coverLoggingEnabled;
+    private static boolean coverScoreLoggingEnabled;
+    private static boolean coverPerformanceLoggingEnabled;
     private static boolean attackLoggingEnabled;
     private static boolean damageLoggingEnabled;
     private static boolean suppressionLoggingEnabled;
@@ -14,6 +16,14 @@ public final class DiagnosticLogManager {
     // Cover
     public static boolean isCoverLoggingEnabled() { return coverLoggingEnabled; }
     public static void setCoverLoggingEnabled(boolean v) { coverLoggingEnabled = v; }
+
+    // Expensive per-candidate scoring and peek-ray traces are separate from cover events.
+    public static boolean isCoverScoreLoggingEnabled() { return coverScoreLoggingEnabled; }
+    public static void setCoverScoreLoggingEnabled(boolean v) { coverScoreLoggingEnabled = v; }
+
+    // Cover search/path timing summaries without per-candidate traces.
+    public static boolean isCoverPerformanceLoggingEnabled() { return coverPerformanceLoggingEnabled; }
+    public static void setCoverPerformanceLoggingEnabled(boolean v) { coverPerformanceLoggingEnabled = v; }
 
     // Attack
     public static boolean isAttackLoggingEnabled() { return attackLoggingEnabled; }
@@ -48,6 +58,8 @@ public final class DiagnosticLogManager {
     /** Disable all diagnostic logging categories. */
     public static void disableAll() {
         coverLoggingEnabled = false;
+        coverScoreLoggingEnabled = false;
+        coverPerformanceLoggingEnabled = false;
         attackLoggingEnabled = false;
         damageLoggingEnabled = false;
         suppressionLoggingEnabled = false;

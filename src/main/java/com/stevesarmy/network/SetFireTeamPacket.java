@@ -9,10 +9,10 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.Entity;
 import net.minecraftforge.network.NetworkEvent;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import java.util.function.Supplier;
-import java.util.stream.Collectors;
 
 public class SetFireTeamPacket {
     private final Action action;
@@ -88,17 +88,16 @@ public class SetFireTeamPacket {
                     }
                 }
                 case REBALANCE -> {
-                    List<UUID> ownedIds = serverLevel.getEntitiesOfClass(
-                        SoldierEntity.class,
-                        player.getBoundingBox().inflate(100),
-                        s -> s.isOwnedBy(player)
-                    ).stream().map(s -> s.getUUID()).collect(Collectors.toList());
-                    fta.rebalance(ownedIds);
-                    for (UUID id : ownedIds) {
-                        Entity entity = serverLevel.getEntity(id);
-                        if (entity instanceof SoldierEntity soldier) {
-                            soldier.setFireTeam(fta.getTeamFor(id));
+                    // Include every loaded owned soldier, not only those near the player.
+                    List<SoldierEntity> ownedSoldiers = new ArrayList<>();
+                    for (Entity entity : serverLevel.getEntities().getAll()) {
+                        if (entity instanceof SoldierEntity soldier && soldier.isOwnedBy(player)) {
+                            ownedSoldiers.add(soldier);
                         }
+                    }
+                    fta.rebalance(ownedSoldiers, player.position());
+                    for (SoldierEntity soldier : ownedSoldiers) {
+                        soldier.setFireTeam(fta.getTeamFor(soldier.getUUID()));
                     }
                 }
             }

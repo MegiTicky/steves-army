@@ -45,6 +45,7 @@ public class CoverTacticalGoal extends Goal {
     private int stuckTicks = 0;
     private int reevaluateCounter = 0;
     private int noProgressTicks = 0;
+    private int seekingTicks = 0;
     private Vec3 lastSeekingPosition = null;
     
     private static final int COOLDOWN_TICKS = 40;
@@ -63,7 +64,7 @@ public class CoverTacticalGoal extends Goal {
     private static final float HYSTERESIS_THRESHOLD = 0.20f;
     private static final float BACKWARD_HYSTERESIS_THRESHOLD = 0.35f;
     private static final long MIN_PEEK_INTERVAL_MS = 2000;
-    private static final long MAX_SEEKING_TIME_MS = 10000;
+    private static final int MAX_SEEKING_TICKS = 200;
     private static final float LOW_HEALTH_THRESHOLD = 0.3f;
     private static final float FOLLOW_COVER_DISTANCE = 15.0f;
     
@@ -536,6 +537,10 @@ public class CoverTacticalGoal extends Goal {
         soldier.syncThreatDirection(threatDir);
         
         PeekController peekCtrl = getPeekController();
+
+        if (state != CoverBehaviorManager.CoverState.SEEKING_COVER) {
+            seekingTicks = 0;
+        }
         
         if (DiagnosticLogManager.isCoverLoggingEnabled()) {
             tickLogCounter++;
@@ -653,10 +658,13 @@ public class CoverTacticalGoal extends Goal {
         
         if (targetCover == null) {
             findAndMoveToCover();
+            seekingTicks = 0;
             noProgressTicks = 0;
             lastSeekingPosition = null;
             return;
         }
+
+        seekingTicks++;
         
         double distance = soldier.position().distanceTo(targetCover.getPosition().getCenter());
         
@@ -666,6 +674,7 @@ public class CoverTacticalGoal extends Goal {
                     soldier.getId(), soldier.getName().getString(), String.format("%.2f", distance), targetCover.getPosition());
             }
             onCoverReached(targetCover);
+            seekingTicks = 0;
             noProgressTicks = 0;
             lastSeekingPosition = null;
             return;
@@ -730,7 +739,7 @@ public class CoverTacticalGoal extends Goal {
             }
         }
         
-        if (getCoverManager().getTimeSeeking() > MAX_SEEKING_TIME_MS) {
+        if (seekingTicks > MAX_SEEKING_TICKS) {
             if (soldier.hasValidAttackTarget()) {
                 StevesArmyMod.LOGGER.info("[CoverNav] Soldier {} ({}) ATTACK seeking timeout, resetting. cover={}",
                     soldier.getId(), soldier.getName().getString(), targetCover != null ? targetCover.getPosition() : "null");
@@ -739,6 +748,7 @@ public class CoverTacticalGoal extends Goal {
             getPositionController().clear();
             getCoverManager().clearTargetCover();
             getCoverManager().setState(CoverBehaviorManager.CoverState.NO_COVER);
+            seekingTicks = 0;
             noProgressTicks = 0;
             lastSeekingPosition = null;
         }
@@ -1319,6 +1329,7 @@ private void startRepositioning() {
     }
     
     private CoverMoveResult findAndMoveToCover() {
+        long searchStarted = System.nanoTime();
         Level level = soldier.level();
         CoverFinder finder = new CoverFinder(level);
         
@@ -1471,7 +1482,8 @@ this.debugSearchCenter = searchCenter;
         if (bestCover.isPresent()) {
             CoverPoint cover = bestCover.get();
             
-            boolean wantsDebug = DiagnosticLogManager.isCoverLoggingEnabled() || CoverDebugManager.isShowSoldierCover();
+            boolean wantsDebug = DiagnosticLogManager.isCoverScoreLoggingEnabled()
+                || CoverDebugManager.isShowSoldierCover();
             if (wantsDebug) {
                 List<CoverFinder.ScoredCover> top = finder.findTopCovers(soldier, threatDirection, threats, searchRadius, 5, true);
                 cachedTopCovers = top.toArray(new CoverFinder.ScoredCover[0]);
@@ -1489,6 +1501,7 @@ this.debugSearchCenter = searchCenter;
                     if (DiagnosticLogManager.isCoverLoggingEnabled()) {
                         StevesArmyMod.LOGGER.info("[CoverGoal] Soldier {} no valid covers after filtering blacklist", soldier.getId());
                     }
+                    logCoverSearchPerformance(finder, searchStarted, CoverMoveResult.NO_ELIGIBLE_COVER, "blacklist");
                     return CoverMoveResult.NO_ELIGIBLE_COVER;
                 }
                 
@@ -1502,6 +1515,7 @@ this.debugSearchCenter = searchCenter;
             CoverPoint currentCover = getCoverManager().getCurrentCover();
             if (currentCover != null && cover.getPosition().equals(currentCover.getPosition())) {
                 onCoverReached(cover);
+                logCoverSearchPerformance(finder, searchStarted, CoverMoveResult.COVER_STARTED, "already-current");
                 return CoverMoveResult.COVER_STARTED;
             }
             
@@ -1515,6 +1529,7 @@ this.debugSearchCenter = searchCenter;
                     blacklistCover(cover.getPosition(), BlacklistReason.STUCK_REPOSITIONING);
                     getCoverManager().clearTargetCover();
                     getCoverManager().setState(CoverBehaviorManager.CoverState.SEEKING_COVER);
+                    logCoverSearchPerformance(finder, searchStarted, CoverMoveResult.NO_COVER_FOUND, "too-close");
                     return CoverMoveResult.NO_COVER_FOUND;
                 }
             }
@@ -1527,11 +1542,33 @@ this.debugSearchCenter = searchCenter;
                     attackExpectedCover = cover.getPosition();
                 }
                 moveToCover(cover);
+                logCoverSearchPerformance(finder, searchStarted, CoverMoveResult.COVER_STARTED, "selected");
                 return CoverMoveResult.COVER_STARTED;
             }
+            logCoverSearchPerformance(finder, searchStarted, CoverMoveResult.NO_COVER_FOUND, "reservation");
             return CoverMoveResult.NO_COVER_FOUND;
         }
+        logCoverSearchPerformance(finder, searchStarted, CoverMoveResult.NO_COVER_FOUND, "none");
         return CoverMoveResult.NO_COVER_FOUND;
+    }
+
+    private void logCoverSearchPerformance(CoverFinder finder, long started,
+                                            CoverMoveResult result, String phase) {
+        if (!DiagnosticLogManager.isCoverPerformanceLoggingEnabled()) return;
+
+        long totalNanos = System.nanoTime() - started;
+        StevesArmyMod.LOGGER.info(
+            "[CoverPerf] soldier={} tick={} phase={} result={} totalMs={} discoveryMs={} scoringMs={} candidates={} evaluated={} target={} pos={}",
+            soldier.getId(), soldier.tickCount, phase, result,
+            formatMillis(totalNanos), formatMillis(finder.getCandidateDiscoveryNanos()),
+            formatMillis(finder.getTacticalScoringNanos()), finder.getCandidatesDiscovered(),
+            finder.getCandidatesEvaluated(),
+            getCoverManager().getTargetCover() != null ? getCoverManager().getTargetCover().getPosition() : "null",
+            soldier.blockPosition());
+    }
+
+    private static String formatMillis(long nanos) {
+        return String.format(java.util.Locale.ROOT, "%.2f", nanos / 1_000_000.0);
     }
     
 private Optional<CoverPoint> findBetterCover() {
@@ -1578,7 +1615,8 @@ private Optional<CoverPoint> findBetterCover() {
         CoverPoint currentCover = getCoverManager().getCurrentCover();
         CoverPoint targetCover = getCoverManager().getTargetCover();
         
-        boolean wantsDebug = DiagnosticLogManager.isCoverLoggingEnabled() || CoverDebugManager.isShowSoldierCover() || CoverDebugManager.isVisualizationEnabled();
+        boolean wantsDebug = DiagnosticLogManager.isCoverScoreLoggingEnabled()
+            || CoverDebugManager.isShowSoldierCover() || CoverDebugManager.isVisualizationEnabled();
         if (wantsDebug && (cachedTopCovers.length == 0 || soldier.tickCount % 10 == 0)) {
             CoverFinder finder = new CoverFinder(soldier.level());
 Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
@@ -2241,10 +2279,15 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
 
     private void moveToCover(CoverPoint cover) {
         BlockPos wallPos = cover.getPosition();
+        long pathStarted = System.nanoTime();
         
         if (StevesArmyMod.teleportOnlyMode) {
             soldier.moveTo(wallPos.getX() + 0.5, wallPos.getY(), wallPos.getZ() + 0.5, soldier.getYRot(), soldier.getXRot());
             onCoverReached(cover);
+            if (DiagnosticLogManager.isCoverPerformanceLoggingEnabled()) {
+                StevesArmyMod.LOGGER.info("[CoverPerf] soldier={} tick={} path=teleport result=REACHED totalMs={} cover={}",
+                    soldier.getId(), soldier.tickCount, formatMillis(System.nanoTime() - pathStarted), wallPos);
+            }
             return;
         }
         
@@ -2289,17 +2332,29 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
         
         if (isReachable) {
             pendingRetryCover = null; // Clear any pending retry on success
-            navigation.moveTo(path, 1.2);
-            if (soldier.hasValidAttackTarget()) {
+            boolean accepted = navigation.moveTo(path, 1.2);
+            if (DiagnosticLogManager.isCoverPerformanceLoggingEnabled()) {
+                StevesArmyMod.LOGGER.info(
+                    "[CoverPerf] soldier={} tick={} path=accepted={} nodes={} buildMs={} cover={} from={}",
+                    soldier.getId(), soldier.tickCount, accepted, path.getNodeCount(),
+                    formatMillis(System.nanoTime() - pathStarted), wallPos, soldier.blockPosition());
+            }
+            if (accepted && soldier.hasValidAttackTarget()) {
                 StevesArmyMod.LOGGER.info("[CoverNav] Soldier {} ({}) ATTACK nav to cover {} from pos {} dist={}",
                     soldier.getId(), soldier.getName().getString(), wallPos, soldier.blockPosition(),
                     String.format("%.2f", soldier.position().distanceTo(standingPos)));
             }
             if (DiagnosticLogManager.isCoverLoggingEnabled()) {
-                StevesArmyMod.LOGGER.info("[PathDebug] Soldier {} started navigation to cover {} from pos {} (path nodes={})", 
-                    soldier.getId(), wallPos, soldier.blockPosition(), path.getNodeCount());
+                StevesArmyMod.LOGGER.info("[PathDebug] Soldier {} navigation {} to cover {} from pos {} (path nodes={})",
+                    soldier.getId(), accepted ? "started" : "rejected", wallPos, soldier.blockPosition(), path.getNodeCount());
             }
         } else {
+            if (DiagnosticLogManager.isCoverPerformanceLoggingEnabled()) {
+                StevesArmyMod.LOGGER.info(
+                    "[CoverPerf] soldier={} tick={} path=REJECTED reason={} buildMs={} cover={} from={}",
+                    soldier.getId(), soldier.tickCount, failReason,
+                    formatMillis(System.nanoTime() - pathStarted), wallPos, soldier.blockPosition());
+            }
             // If this is a null path and NOT already a retry, schedule retry for next tick
             if (path == null && !isRetryAttempt) {
                 if (DiagnosticLogManager.isCoverLoggingEnabled()) {

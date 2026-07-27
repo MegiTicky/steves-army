@@ -45,12 +45,17 @@ public class CoverQualityEvaluator {
         boolean anyBlocked = false;
         boolean allEyeBlocked = true;
 
-        StringBuilder debug = new StringBuilder();
-        debug.append("Threat dir: ").append(String.format("%.2f,%.2f,%.2f", threatDir.x, threatDir.y, threatDir.z)).append("\n");
+        boolean scoreLogging = com.stevesarmy.debug.DiagnosticLogManager.isCoverScoreLoggingEnabled();
+        StringBuilder debug = scoreLogging ? new StringBuilder() : null;
+        if (scoreLogging) {
+            debug.append("Threat dir: ").append(String.format("%.2f,%.2f,%.2f", threatDir.x, threatDir.y, threatDir.z)).append("\n");
+        }
 
         for (int hi = 0; hi < CONE_HEIGHTS; hi++) {
             double height = TEST_HEIGHTS[hi];
-            debug.append("  H=").append(String.format("%.1f", height)).append(": ");
+            if (scoreLogging) {
+                debug.append("  H=").append(String.format("%.1f", height)).append(": ");
+            }
 
             int heightBlocked = 0;
 
@@ -69,7 +74,7 @@ public class CoverQualityEvaluator {
                 if (blocked) heightBlocked++;
                 if (blocked) anyBlocked = true;
 
-                debug.append(blocked ? "B" : "C");
+                if (scoreLogging) debug.append(blocked ? "B" : "C");
             }
 
             boolean heightCovered = heightBlocked == RAYS_PER_HEIGHT;
@@ -80,7 +85,9 @@ public class CoverQualityEvaluator {
                 allEyeBlocked = heightBlocked == RAYS_PER_HEIGHT;
             }
 
-            debug.append(" ").append(heightBlocked).append("/").append(RAYS_PER_HEIGHT).append(heightCovered ? " COVERED" : "").append("\n");
+            if (scoreLogging) {
+                debug.append(" ").append(heightBlocked).append("/").append(RAYS_PER_HEIGHT).append(heightCovered ? " COVERED" : "").append("\n");
+            }
         }
 
         CoverType type = determineType(waistCovered, eyeCovered, anyBlocked);
@@ -93,11 +100,13 @@ public class CoverQualityEvaluator {
         float coverHeight = estimateCoverHeight(type);
         coverPoint.setCoverHeight(coverHeight);
 
-        coverPoint.setDebugInfo(String.format("Waist: %s | Eye: %s | Type: %s | Shoot: %s\n%s",
-            waistCovered ? "COVERED" : "EXPOSED",
-            eyeCovered ? "COVERED" : "EXPOSED",
-            type, coverPoint.canShootFrom() ? "YES" : "NO",
-            debug.toString()));
+        if (scoreLogging) {
+            coverPoint.setDebugInfo(String.format("Waist: %s | Eye: %s | Type: %s | Shoot: %s\n%s",
+                waistCovered ? "COVERED" : "EXPOSED",
+                eyeCovered ? "COVERED" : "EXPOSED",
+                type, coverPoint.canShootFrom() ? "YES" : "NO",
+                debug.toString()));
+        }
 
         return coverPoint;
     }

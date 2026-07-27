@@ -1,11 +1,15 @@
 package com.stevesarmy.squad;
 
 import com.stevesarmy.StevesArmyMod;
+import com.stevesarmy.entity.SoldierEntity;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.StringTag;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.level.saveddata.SavedData;
+import net.minecraftforge.registries.ForgeRegistries;
 
 import java.util.*;
 
@@ -77,21 +81,163 @@ public class FireTeamAssignment extends SavedData {
         setDirty();
     }
 
-    public void rebalance(List<UUID> allSoldierIds) {
+    /**
+     * Evenly distributes each exact main-hand item type, then uses soldier positions to
+     * keep the members assigned to each team close together wherever those quotas allow.
+     */
+    public void rebalance(List<SoldierEntity> soldiers, Vec3 leaderPosition) {
         for (List<UUID> list : teams.values()) {
             list.clear();
         }
         List<FireTeam> active = getActiveTeams();
         if (active.isEmpty()) return;
-        List<UUID> sorted = new ArrayList<>(allSoldierIds);
-        sorted.sort(Comparator.naturalOrder());
-        int idx = 0;
-        for (UUID id : sorted) {
-            teams.get(active.get(idx % active.size())).add(id);
-            idx++;
+
+        Map<String, List<SoldierEntity>> byWeapon = new TreeMap<>();
+        for (SoldierEntity soldier : soldiers) {
+            byWeapon.computeIfAbsent(getWeaponId(soldier), ignored -> new ArrayList<>()).add(soldier);
+        }
+
+        List<Map.Entry<String, List<SoldierEntity>>> weaponGroups = new ArrayList<>(byWeapon.entrySet());
+        weaponGroups.sort(Comparator
+            .<Map.Entry<String, List<SoldierEntity>>>comparingInt(entry -> entry.getValue().size())
+            .reversed()
+            .thenComparing(Map.Entry::getKey));
+
+        Map<FireTeam, List<SoldierEntity>> assigned = new EnumMap<>(FireTeam.class);
+        Map<FireTeam, Integer> teamSizes = new EnumMap<>(FireTeam.class);
+        for (FireTeam team : active) {
+            assigned.put(team, new ArrayList<>());
+            teamSizes.put(team, 0);
+        }
+
+        for (Map.Entry<String, List<SoldierEntity>> weaponGroup : weaponGroups) {
+            List<SoldierEntity> pending = new ArrayList<>(weaponGroup.getValue());
+            pending.sort(Comparator.comparing(SoldierEntity::getUUID));
+
+            Map<FireTeam, Integer> quotas = createWeaponQuotas(pending.size(), active, teamSizes);
+            while (!pending.isEmpty()) {
+                FireTeam team = selectTeamWithEmptyRoster(active, quotas, assigned);
+                SoldierEntity soldier;
+                if (team != null) {
+                    soldier = selectSeedSoldier(pending, assigned, leaderPosition);
+                } else {
+                    AssignmentCandidate candidate = selectClosestAssignment(pending, active, quotas, assigned, teamSizes);
+                    if (candidate == null) {
+                        throw new IllegalStateException("No eligible fire team while rebalancing weapon group " + weaponGroup.getKey());
+                    }
+                    team = candidate.team();
+                    soldier = candidate.soldier();
+                }
+
+                teams.get(team).add(soldier.getUUID());
+                assigned.get(team).add(soldier);
+                teamSizes.merge(team, 1, Integer::sum);
+                quotas.merge(team, -1, Integer::sum);
+                pending.remove(soldier);
+            }
         }
         setDirty();
     }
+
+    private static String getWeaponId(SoldierEntity soldier) {
+        ResourceLocation weaponId = ForgeRegistries.ITEMS.getKey(soldier.getMainHandItem().getItem());
+        return weaponId == null ? "minecraft:air" : weaponId.toString();
+    }
+
+    private static Map<FireTeam, Integer> createWeaponQuotas(
+        int groupSize, List<FireTeam> active, Map<FireTeam, Integer> teamSizes
+    ) {
+        Map<FireTeam, Integer> quotas = new EnumMap<>(FireTeam.class);
+        int baseQuota = groupSize / active.size();
+        int remainder = groupSize % active.size();
+        for (FireTeam team : active) {
+            quotas.put(team, baseQuota);
+        }
+
+        // Put remainder weapons in the least-populated teams to keep total team sizes balanced.
+        for (int i = 0; i < remainder; i++) {
+            FireTeam team = active.stream()
+                .min(Comparator
+                    .comparingInt((FireTeam candidate) -> teamSizes.get(candidate) + quotas.get(candidate))
+                    .thenComparingInt(Enum::ordinal))
+                .orElseThrow();
+            quotas.merge(team, 1, Integer::sum);
+        }
+        return quotas;
+    }
+
+    private static FireTeam selectTeamWithEmptyRoster(
+        List<FireTeam> active, Map<FireTeam, Integer> quotas, Map<FireTeam, List<SoldierEntity>> assigned
+    ) {
+        return active.stream()
+            .filter(team -> quotas.get(team) > 0 && assigned.get(team).isEmpty())
+            .findFirst()
+            .orElse(null);
+    }
+
+    private static SoldierEntity selectSeedSoldier(
+        List<SoldierEntity> pending, Map<FireTeam, List<SoldierEntity>> assigned, Vec3 leaderPosition
+    ) {
+        List<SoldierEntity> existing = assigned.values().stream()
+            .flatMap(Collection::stream)
+            .toList();
+        if (existing.isEmpty()) {
+            return pending.stream()
+                .min(Comparator
+                    .comparingDouble((SoldierEntity soldier) -> soldier.position().distanceToSqr(leaderPosition))
+                    .thenComparing(SoldierEntity::getUUID))
+                .orElseThrow();
+        }
+
+        // Seed a new team away from the existing clusters before filling teams by proximity.
+        return pending.stream()
+            .max(Comparator
+                .comparingDouble((SoldierEntity soldier) -> nearestDistanceSqr(soldier, existing))
+                .thenComparing(SoldierEntity::getUUID))
+            .orElseThrow();
+    }
+
+    private static AssignmentCandidate selectClosestAssignment(
+        List<SoldierEntity> pending,
+        List<FireTeam> active,
+        Map<FireTeam, Integer> quotas,
+        Map<FireTeam, List<SoldierEntity>> assigned,
+        Map<FireTeam, Integer> teamSizes
+    ) {
+        AssignmentCandidate best = null;
+        for (SoldierEntity soldier : pending) {
+            for (FireTeam team : active) {
+                if (quotas.get(team) <= 0) continue;
+                double distanceSqr = nearestDistanceSqr(soldier, assigned.get(team));
+                AssignmentCandidate candidate = new AssignmentCandidate(soldier, team, distanceSqr);
+                if (best == null || compareCandidates(candidate, best, teamSizes) < 0) {
+                    best = candidate;
+                }
+            }
+        }
+        return best;
+    }
+
+    private static int compareCandidates(
+        AssignmentCandidate first, AssignmentCandidate second, Map<FireTeam, Integer> teamSizes
+    ) {
+        int comparison = Double.compare(first.distanceSqr(), second.distanceSqr());
+        if (comparison != 0) return comparison;
+        comparison = Integer.compare(teamSizes.get(first.team()), teamSizes.get(second.team()));
+        if (comparison != 0) return comparison;
+        comparison = Integer.compare(first.team().ordinal(), second.team().ordinal());
+        if (comparison != 0) return comparison;
+        return first.soldier().getUUID().compareTo(second.soldier().getUUID());
+    }
+
+    private static double nearestDistanceSqr(SoldierEntity soldier, Collection<SoldierEntity> others) {
+        return others.stream()
+            .mapToDouble(other -> soldier.position().distanceToSqr(other.position()))
+            .min()
+            .orElse(Double.MAX_VALUE);
+    }
+
+    private record AssignmentCandidate(SoldierEntity soldier, FireTeam team, double distanceSqr) {}
 
     public List<UUID> getSoldiersInTeam(FireTeam team) {
         if (team == FireTeam.ALL) {

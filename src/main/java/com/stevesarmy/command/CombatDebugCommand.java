@@ -69,6 +69,20 @@ public class CombatDebugCommand {
                     .then(Commands.literal("off")
                         .executes(ctx -> toggleCoverLogging(ctx, false)))
                 )
+                .then(Commands.literal("coverscore")
+                    .executes(ctx -> toggleCoverScoreLogging(ctx, null))
+                    .then(Commands.literal("on")
+                        .executes(ctx -> toggleCoverScoreLogging(ctx, true)))
+                    .then(Commands.literal("off")
+                        .executes(ctx -> toggleCoverScoreLogging(ctx, false)))
+                )
+                .then(Commands.literal("coverperf")
+                    .executes(ctx -> toggleCoverPerformanceLogging(ctx, null))
+                    .then(Commands.literal("on")
+                        .executes(ctx -> toggleCoverPerformanceLogging(ctx, true)))
+                    .then(Commands.literal("off")
+                        .executes(ctx -> toggleCoverPerformanceLogging(ctx, false)))
+                )
                 .then(Commands.literal("attack")
                     .executes(ctx -> toggleAttackLogging(ctx, null))
                     .then(Commands.literal("on")
@@ -213,6 +227,8 @@ public class CombatDebugCommand {
             "  all                 - Enable ALL debug (logging + render + combat overlay)\n" +
             "  none                - Disable ALL debug (logging + render + overlays)\n" +
             "  log cover [on|off]  - Toggle cover behavior logging\n" +
+            "  log coverscore [on|off] - Toggle verbose per-candidate cover scoring traces\n" +
+            "  log coverperf [on|off] - Toggle compact cover search/path timing summaries\n" +
             "  log attack [on|off] - Toggle attack phase logging (quiet, soldier-specific)\n" +
             "  log damage [on|off] - Toggle damage and gun integration logging\n" +
             "  log suppression [on|off] - Toggle suppression and incoming-fire logging\n" +
@@ -261,6 +277,8 @@ public class CombatDebugCommand {
             "  Soldier cover visualization: ON\n" +
             "  Peek candidate visualization: ON\n" +
             "  Cover behavior logging: ON\n" +
+            "  Verbose cover score logging: OFF (use log coverscore on)\n" +
+            "  Cover performance logging: OFF (use log coverperf on)\n" +
             "  Attack phase logging: ON\n" +
             "  Damage logging: ON\n" +
             "  Suppression logging: ON\n" +
@@ -320,6 +338,24 @@ public class CombatDebugCommand {
         DiagnosticLogManager.setAttackLoggingEnabled(newState);
         context.getSource().sendSuccess(() -> Component.literal(
             "Attack phase logging: " + (newState ? "ON" : "OFF")
+        ), true);
+        return 1;
+    }
+
+    private static int toggleCoverScoreLogging(CommandContext<CommandSourceStack> context, Boolean enable) {
+        boolean newState = enable != null ? enable : !DiagnosticLogManager.isCoverScoreLoggingEnabled();
+        DiagnosticLogManager.setCoverScoreLoggingEnabled(newState);
+        context.getSource().sendSuccess(() -> Component.literal(
+            "Verbose cover score logging: " + (newState ? "ON" : "OFF")
+        ), true);
+        return 1;
+    }
+
+    private static int toggleCoverPerformanceLogging(CommandContext<CommandSourceStack> context, Boolean enable) {
+        boolean newState = enable != null ? enable : !DiagnosticLogManager.isCoverPerformanceLoggingEnabled();
+        DiagnosticLogManager.setCoverPerformanceLoggingEnabled(newState);
+        context.getSource().sendSuccess(() -> Component.literal(
+            "Cover performance logging: " + (newState ? "ON" : "OFF")
         ), true);
         return 1;
     }
@@ -1118,6 +1154,8 @@ public class CombatDebugCommand {
         context.getSource().sendSuccess(() -> Component.literal(
             "=== DEBUG STATUS ===\n" +
             "  Cover logging: " + (DiagnosticLogManager.isCoverLoggingEnabled() ? "ON" : "OFF") + "\n" +
+            "  Cover score logging: " + (DiagnosticLogManager.isCoverScoreLoggingEnabled() ? "ON" : "OFF") + "\n" +
+            "  Cover performance logging: " + (DiagnosticLogManager.isCoverPerformanceLoggingEnabled() ? "ON" : "OFF") + "\n" +
             "  Attack logging: " + (DiagnosticLogManager.isAttackLoggingEnabled() ? "ON" : "OFF") + "\n" +
             "  Damage logging: " + (DiagnosticLogManager.isDamageLoggingEnabled() ? "ON" : "OFF") + "\n" +
             "  Suppression logging: " + (DiagnosticLogManager.isSuppressionLoggingEnabled() ? "ON" : "OFF") + "\n" +

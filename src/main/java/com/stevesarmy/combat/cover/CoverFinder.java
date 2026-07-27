@@ -62,16 +62,36 @@ public class CoverFinder {
     }
 
     private final Level level;
+    private long candidateDiscoveryNanos;
+    private long tacticalScoringNanos;
+    private int candidatesDiscovered;
+    private int candidatesEvaluated;
+    private int candidatesScored;
     
     public CoverFinder(Level level) {
         this.level = level;
     }
+
+    public void resetPerformanceStats() {
+        candidateDiscoveryNanos = 0L;
+        tacticalScoringNanos = 0L;
+        candidatesDiscovered = 0;
+        candidatesEvaluated = 0;
+        candidatesScored = 0;
+    }
+
+    public long getCandidateDiscoveryNanos() { return candidateDiscoveryNanos; }
+    public long getTacticalScoringNanos() { return tacticalScoringNanos; }
+    public int getCandidatesDiscovered() { return candidatesDiscovered; }
+    public int getCandidatesEvaluated() { return candidatesEvaluated; }
+    public int getCandidatesScored() { return candidatesScored; }
     
     public List<CoverPoint> findCoverPoints(BlockPos center, int radius) {
         return findCoverPoints(center, radius, null);
     }
     
     public List<CoverPoint> findCoverPoints(BlockPos center, int radius, LivingEntity threat) {
+        long started = System.nanoTime();
         List<CoverPoint> coverPoints = new ArrayList<>();
         int searchRadius = Math.min(radius, MAX_SEARCH_RADIUS);
         int maxDistSq = searchRadius * searchRadius;
@@ -90,12 +110,18 @@ public class CoverFinder {
                     coverPoints.add(coverPoint);
 
                     if (coverPoints.size() >= MAX_COVER_POINTS) {
-                        return coverPoints;
+                        return finishCoverPointSearch(coverPoints, started);
                     }
                 }
             }
         }
 
+        return finishCoverPointSearch(coverPoints, started);
+    }
+
+    private List<CoverPoint> finishCoverPointSearch(List<CoverPoint> coverPoints, long started) {
+        candidateDiscoveryNanos += System.nanoTime() - started;
+        candidatesDiscovered += coverPoints.size();
         return coverPoints;
     }
     
@@ -201,9 +227,12 @@ public class CoverFinder {
     }
 
     public List<ScoredCover> evaluateAndScoreAll(LivingEntity soldier, Vec3 threatDirection,
-                                                   List<LivingEntity> allThreats, int radius, boolean includeReserved) {
+                                                    List<LivingEntity> allThreats, int radius, boolean includeReserved) {
         List<CoverPoint> coverPoints = findCoverPoints(soldier.blockPosition(), radius);
-        if (coverPoints.isEmpty()) return Collections.emptyList();
+        if (coverPoints.isEmpty()) {
+            return Collections.emptyList();
+        }
+        long scoringStarted = System.nanoTime();
 
         LivingEntity primaryThreat = allThreats != null && !allThreats.isEmpty() ? allThreats.get(0) : null;
         CoverQualityEvaluator evaluator = new CoverQualityEvaluator(level);
@@ -215,6 +244,7 @@ public class CoverFinder {
             if (threatDirection != null && threatDirection.lengthSqr() > 0.001) {
                 evaluator.evaluateWithCone(coverPoint, threatDirection);
             }
+            candidatesEvaluated++;
             float score = calculateThreatAwareScore(coverPoint, soldier, threatDirection, allThreats, primaryThreat);
             coverPoint.setQuality(score);
             coverPoint.setCombatScore(score);
@@ -230,14 +260,19 @@ public class CoverFinder {
             .map(cp -> new ScoredCover(cp, cp.getCombatScore()))
             .sorted(Comparator.comparingDouble((ScoredCover s) -> s.score).reversed())
             .collect(java.util.stream.Collectors.toList());
+        tacticalScoringNanos += System.nanoTime() - scoringStarted;
+        candidatesScored += scored.size();
         return scored;
     }
 
     public List<ScoredCover> evaluateAndScoreAll(LivingEntity soldier, Vec3 threatDirection,
-                                                   List<LivingEntity> allThreats, int radius, boolean includeReserved,
-                                                   SquadCoverContext squadCtx) {
+                                                    List<LivingEntity> allThreats, int radius, boolean includeReserved,
+                                                    SquadCoverContext squadCtx) {
         List<CoverPoint> coverPoints = findCoverPoints(soldier.blockPosition(), radius);
-        if (coverPoints.isEmpty()) return Collections.emptyList();
+        if (coverPoints.isEmpty()) {
+            return Collections.emptyList();
+        }
+        long scoringStarted = System.nanoTime();
 
         LivingEntity primaryThreat = allThreats != null && !allThreats.isEmpty() ? allThreats.get(0) : null;
         CoverQualityEvaluator evaluator = new CoverQualityEvaluator(level);
@@ -249,6 +284,7 @@ public class CoverFinder {
             if (threatDirection != null && threatDirection.lengthSqr() > 0.001) {
                 evaluator.evaluateWithCone(coverPoint, threatDirection);
             }
+            candidatesEvaluated++;
             float score = calculateThreatAwareScore(coverPoint, soldier, threatDirection, allThreats, primaryThreat, squadCtx);
             coverPoint.setQuality(score);
             coverPoint.setCombatScore(score);
@@ -268,6 +304,8 @@ public class CoverFinder {
             .map(cp -> new ScoredCover(cp, cp.getCombatScore()))
             .sorted(Comparator.comparingDouble((ScoredCover s) -> s.score).reversed())
             .collect(java.util.stream.Collectors.toList());
+        tacticalScoringNanos += System.nanoTime() - scoringStarted;
+        candidatesScored += scored.size();
         return scored;
     }
 
@@ -279,7 +317,10 @@ public class CoverFinder {
                                                              Vec3 threatDirection, List<LivingEntity> allThreats,
                                                              int radius, SquadCoverContext squadCtx) {
         List<CoverPoint> coverPoints = findCoverPoints(searchCenter, radius);
-        if (coverPoints.isEmpty()) return Collections.emptyList();
+        if (coverPoints.isEmpty()) {
+            return Collections.emptyList();
+        }
+        long scoringStarted = System.nanoTime();
 
         LivingEntity primaryThreat = allThreats != null && !allThreats.isEmpty() ? allThreats.get(0) : null;
         CoverQualityEvaluator evaluator = new CoverQualityEvaluator(level);
@@ -291,6 +332,7 @@ public class CoverFinder {
             if (threatDirection != null && threatDirection.lengthSqr() > 0.001) {
                 evaluator.evaluateWithCone(coverPoint, threatDirection);
             }
+            candidatesEvaluated++;
             float score = calculateThreatAwareScore(coverPoint, soldier, threatDirection, allThreats, primaryThreat, squadCtx);
             coverPoint.setQuality(score);
             coverPoint.setCombatScore(score);
@@ -303,6 +345,8 @@ public class CoverFinder {
             .map(cp -> new ScoredCover(cp, cp.getCombatScore()))
             .sorted(Comparator.comparingDouble((ScoredCover s) -> s.score).reversed())
             .collect(java.util.stream.Collectors.toList());
+        tacticalScoringNanos += System.nanoTime() - scoringStarted;
+        candidatesScored += scored.size();
         return scored;
     }
 
@@ -317,7 +361,7 @@ public class CoverFinder {
     
     private float calculateThreatAwareScore(CoverPoint coverPoint, LivingEntity soldier,
                                             Vec3 threatDirection, List<LivingEntity> allThreats, LivingEntity primaryThreat) {
-        if (com.stevesarmy.entity.ai.CoverTacticalGoal.isDebugLoggingEnabled()) {
+        if (com.stevesarmy.debug.DiagnosticLogManager.isCoverScoreLoggingEnabled()) {
             StevesArmyMod.LOGGER.info("[ThreatAwareScore] coverPos={}, threatDirection=({}, {}, {}), primaryThreat={}",
                 coverPoint.getPosition(),
                 threatDirection != null ? String.format("%.2f", threatDirection.x) : "null",
@@ -377,7 +421,7 @@ public class CoverFinder {
                            peekAngleScore * PEEK_ANGLE_WEIGHT) + fightability - blindPenalty;
         }
         
-        if (com.stevesarmy.entity.ai.CoverTacticalGoal.isDebugLoggingEnabled()) {
+        if (com.stevesarmy.debug.DiagnosticLogManager.isCoverScoreLoggingEnabled()) {
             StevesArmyMod.LOGGER.info("[CoverScore] {} type={} q={} prim={} flank={} dist={} firing={} peek={} fight={} blindPen={} TOTAL={}",
                 coverPoint.getPosition(), coverPoint.getType(),
                 String.format("%.2f", coverPoint.getQuality()),
@@ -495,7 +539,7 @@ return weightedScore;
         Direction threatDir = getDirectionFromVector(threatDirection);
         boolean isProtected = protectedDirs.contains(threatDir);
         
-        if (com.stevesarmy.entity.ai.CoverTacticalGoal.isDebugLoggingEnabled()) {
+        if (com.stevesarmy.debug.DiagnosticLogManager.isCoverScoreLoggingEnabled()) {
             StevesArmyMod.LOGGER.info("[PrimaryProtection] coverPos={}, threatDirection=({}, {}, {}), threatDir={}, protectedDirs={}, isProtected={}",
                 coverPos,
                 String.format("%.2f", threatDirection.x),
@@ -606,24 +650,27 @@ return weightedScore;
         
         BlockPos coverPos = coverPoint.getPosition();
         float bestPeekScore = 0.0f;
-        StringBuilder debug = new StringBuilder();
-        debug.append("calculatePeekAngleScore for ").append(coverPos).append(" protectedDirs=").append(protectedDirs).append(":\n");
+        boolean scoreLogging = com.stevesarmy.debug.DiagnosticLogManager.isCoverScoreLoggingEnabled();
+        StringBuilder debug = scoreLogging ? new StringBuilder() : null;
+        if (scoreLogging) {
+            debug.append("calculatePeekAngleScore for ").append(coverPos).append(" protectedDirs=").append(protectedDirs).append(":\n");
+        }
         
         for (Direction peekDir : Direction.Plane.HORIZONTAL) {
             if (protectedDirs.contains(peekDir)) {
-                debug.append("  ").append(peekDir).append(": protected (wall blocks this direction)\n");
+                if (scoreLogging) debug.append("  ").append(peekDir).append(": protected (wall blocks this direction)\n");
                 continue;
             }
             
-            debug.append("  ").append(peekDir).append(": NOT protected, checking...\n");
+            if (scoreLogging) debug.append("  ").append(peekDir).append(": NOT protected, checking...\n");
             
             BlockPos peekPos = coverPos.relative(peekDir);
             if (!isValidPeekPosition(peekPos)) {
-                debug.append("    -> ").append(peekPos).append(": INVALID position (blocked or no ground)\n");
+                if (scoreLogging) debug.append("    -> ").append(peekPos).append(": INVALID position (blocked or no ground)\n");
                 continue;
             }
             
-            debug.append("    -> ").append(peekPos).append(": valid position\n");
+            if (scoreLogging) debug.append("    -> ").append(peekPos).append(": valid position\n");
             
             boolean losOk = true;
             float coneCoverageScore = 1.0f;
@@ -633,36 +680,36 @@ return weightedScore;
                 Vec3 peekEye = new Vec3(peekPos.getX() + 0.5, peekPos.getY() + 1.62, peekPos.getZ() + 0.5);
                 Vec3 targetEye = new Vec3(primaryThreat.getX(), primaryThreat.getEyeY(), primaryThreat.getZ());
                 losOk = hasLineOfSight(peekEye, targetEye);
-                debug.append("    Direct LOS to entity: ").append(losOk ? "SUCCESS" : "FAILED").append("\n");
+                if (scoreLogging) debug.append("    Direct LOS to entity: ").append(losOk ? "SUCCESS" : "FAILED").append("\n");
                 
                 if (!losOk) {
                     // Direct LOS failed - fallback to cone raycast to find openings
-                    debug.append("    Falling back to cone raycast...\n");
+                    if (scoreLogging) debug.append("    Falling back to cone raycast...\n");
                     coneCoverageScore = calculateConeCoverage(peekPos, threatDirection, debug);
                     if (coneCoverageScore <= 0.01f) {
-                        debug.append("    Cone raycast: NO OPENING FOUND, skipping this peek direction\n");
+                        if (scoreLogging) debug.append("    Cone raycast: NO OPENING FOUND, skipping this peek direction\n");
                         continue;
                     }
-                    debug.append("    Cone raycast found opening, coverage=").append(String.format("%.2f", coneCoverageScore)).append("\n");
+                    if (scoreLogging) debug.append("    Cone raycast found opening, coverage=").append(String.format("%.2f", coneCoverageScore)).append("\n");
                 }
             } else {
                 // No primaryThreat entity - always use cone raycast
-                debug.append("    No entity target, using cone raycast...\n");
+                if (scoreLogging) debug.append("    No entity target, using cone raycast...\n");
                 coneCoverageScore = calculateConeCoverage(peekPos, threatDirection, debug);
                 if (coneCoverageScore <= 0.01f) {
-                    debug.append("    Cone raycast: NO OPENING FOUND, skipping this peek direction\n");
+                    if (scoreLogging) debug.append("    Cone raycast: NO OPENING FOUND, skipping this peek direction\n");
                     continue;
                 }
-                debug.append("    Cone raycast: coverage=").append(String.format("%.2f", coneCoverageScore)).append("\n");
+                if (scoreLogging) debug.append("    Cone raycast: coverage=").append(String.format("%.2f", coneCoverageScore)).append("\n");
             }
             
             bestPeekScore = Math.max(bestPeekScore, coneCoverageScore);
-            debug.append("    -> SCORED ").append(String.format("%.3f", coneCoverageScore))
+            if (scoreLogging) debug.append("    -> SCORED ").append(String.format("%.3f", coneCoverageScore))
                 .append(" (cone coverage)\n");
         }
         
-        debug.append("  FINAL score=").append(String.format("%.3f", bestPeekScore)).append("\n");
-        if (com.stevesarmy.entity.ai.CoverTacticalGoal.isDebugLoggingEnabled()) {
+        if (scoreLogging) {
+            debug.append("  FINAL score=").append(String.format("%.3f", bestPeekScore)).append("\n");
             StevesArmyMod.LOGGER.info(debug.toString());
         }
         return bestPeekScore;
