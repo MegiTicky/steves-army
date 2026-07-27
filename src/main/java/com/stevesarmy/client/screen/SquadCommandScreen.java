@@ -17,14 +17,17 @@ import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 
 import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 public class SquadCommandScreen extends Screen {
     private static final int ROW_HEIGHT = 14;
     private static final int PANEL_LEFT = 8;
     private static final int ROW_START_Y = 22;
-    private static final int FOOTER_HEIGHT = 96;
+    private static final int FOOTER_HEIGHT = 114;
     private static final int LIST_FOOTER_GAP = 8;
 
     private static final int COL_HEALTH_WIDTH = 40;
@@ -105,19 +108,37 @@ public class SquadCommandScreen extends Screen {
         for (SquadStatusSyncPacket.SoldierStatusEntry entry : ClientSquadData.INSTANCE.getAllEntries()) {
             rows.add(new SoldierRow(entry));
         }
+        sortRows();
         clampScrollOffset();
     }
 
     private void updateRows() {
         List<SquadStatusSyncPacket.SoldierStatusEntry> entries = ClientSquadData.INSTANCE.getAllEntries();
-        if (entries.size() != rows.size()) {
-            rebuildRows();
-            return;
+        Map<UUID, SoldierRow> existingRows = new HashMap<>();
+        for (SoldierRow row : rows) {
+            existingRows.put(row.entityId, row);
         }
-        for (int i = 0; i < entries.size(); i++) {
-            rows.get(i).update(entries.get(i), font);
+
+        List<SoldierRow> updatedRows = new ArrayList<>(entries.size());
+        for (SquadStatusSyncPacket.SoldierStatusEntry entry : entries) {
+            SoldierRow row = existingRows.get(entry.entityId);
+            if (row == null) {
+                row = new SoldierRow(entry);
+            } else {
+                row.update(entry, font);
+            }
+            updatedRows.add(row);
         }
+        rows = updatedRows;
+        sortRows();
         clampScrollOffset();
+    }
+
+    private void sortRows() {
+        rows.sort(Comparator
+            .comparingInt((SoldierRow row) -> row.fireTeam.ordinal())
+            .thenComparing(row -> row.name, String.CASE_INSENSITIVE_ORDER)
+            .thenComparing(row -> row.entityId));
     }
 
     @Override
@@ -184,7 +205,7 @@ public class SquadCommandScreen extends Screen {
         drawScrollbar(graphics, contentX + contentWidth - 3, ROW_START_Y, listBottom, visibleRows);
 
         int footerY = getFooterY();
-        graphics.drawString(font, Component.literal("-- Squad Settings --"), contentX, footerY, 0xFFAAAAAA, false);
+        graphics.drawString(font, Component.literal("-- Squad Settings --  NPCs: " + rows.size()), contentX, footerY, 0xFFAAAAAA, false);
 
         int btnY = footerY + 12;
         int btnWidth = 60;
@@ -205,6 +226,9 @@ public class SquadCommandScreen extends Screen {
         btnY += btnHeight + 6;
         graphics.drawString(font, Component.literal("-- Fire Teams --"), contentX, btnY, 0xFFAAAAAA, false);
         btnY += 12;
+
+        graphics.drawString(font, Component.literal(getFireTeamCountLabel()), contentX, btnY + 2, 0xFFCCCCCC, false);
+        btnY += 14;
 
         graphics.drawString(font, Component.literal("Teams: " + teamCount), contentX, btnY + 2, 0xFFCCCCCC, false);
         dx = contentX + font.width("Teams: " + teamCount) + 4;
@@ -249,6 +273,25 @@ public class SquadCommandScreen extends Screen {
         });
 
         super.render(graphics, mouseX, mouseY, partialTick);
+    }
+
+    private String getFireTeamCountLabel() {
+        StringBuilder label = new StringBuilder("Members: ");
+        FireTeam[] teams = FireTeam.values();
+        for (int i = 0; i < teamCount; i++) {
+            if (i > 0) {
+                label.append("  ");
+            }
+            FireTeam team = teams[i + 1];
+            int count = 0;
+            for (SoldierRow row : rows) {
+                if (row.fireTeam == team) {
+                    count++;
+                }
+            }
+            label.append(team.getShortName()).append(": ").append(count);
+        }
+        return label.toString();
     }
 
     private int drawHealthBar(GuiGraphics graphics, int x, int y, float health, float maxHealth) {

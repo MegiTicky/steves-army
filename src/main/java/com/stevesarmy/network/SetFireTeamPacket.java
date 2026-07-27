@@ -103,6 +103,7 @@ public class SetFireTeamPacket {
                 }
             }
             NetworkHandler.sendTo(player, new FireTeamScopeSyncPacket(fta.getTeamCount()));
+            NetworkHandler.sendTo(player, SquadStatusSyncPacket.createForPlayer(player));
         });
         ctx.get().setPacketHandled(true);
     }

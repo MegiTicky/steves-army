@@ -15,6 +15,7 @@ import net.minecraft.world.level.Level;
 import net.minecraftforge.network.NetworkEvent;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.UUID;
 import java.util.function.Supplier;
@@ -89,6 +90,11 @@ public class SquadStatusSyncPacket {
                     soldiers.add(s);
                 }
             }
+            FireTeamAssignment fireTeamAssignment = FireTeamAssignment.get(serverLevel, player.getUUID());
+            soldiers.sort(Comparator
+                .comparingInt((SoldierEntity soldier) -> fireTeamAssignment.getTeamFor(soldier.getUUID()).ordinal())
+                .thenComparing(soldier -> soldier.getName().getString(), String.CASE_INSENSITIVE_ORDER)
+                .thenComparing(SoldierEntity::getUUID));
             for (SoldierEntity soldier : soldiers) {
 
                 String gunName = "";
@@ -114,7 +120,7 @@ public class SquadStatusSyncPacket {
                     gunName,
                     soldier.getSquadMode().ordinal(),
                     soldier.getFireDiscipline().ordinal(),
-                    FireTeamAssignment.get(serverLevel, player.getUUID()).getTeamFor(soldier.getUUID()).ordinal(),
+                    fireTeamAssignment.getTeamFor(soldier.getUUID()).ordinal(),
                     soldier.getSyncedCoverState(),
                     soldier.distanceTo(player),
                     soldier.getRecallTicks()
