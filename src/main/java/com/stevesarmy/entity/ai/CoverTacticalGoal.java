@@ -53,7 +53,7 @@ public class CoverTacticalGoal extends Goal {
     private static final int REEVALUATE_INTERVAL_TICKS = 60;
     
     private static final double COVER_REACHED_DISTANCE = 1.5D;
-    private static final double COVER_VALID_DISTANCE = 1.25D;
+    private static final double COVER_VALID_DISTANCE = 1.6D;
     private static final double COMBAT_COVER_VALID_DISTANCE = 6.0D;
     private static final double COVER_ABANDON_DISTANCE = 8.0D;
     
@@ -1558,8 +1558,8 @@ this.debugSearchCenter = searchCenter;
 
         long totalNanos = System.nanoTime() - started;
         StevesArmyMod.LOGGER.info(
-            "[CoverPerf] soldier={} tick={} phase={} result={} totalMs={} discoveryMs={} scoringMs={} candidates={} evaluated={} target={} pos={}",
-            soldier.getId(), soldier.tickCount, phase, result,
+            "[CoverPerf] soldier={} name={} tick={} phase={} result={} totalMs={} discoveryMs={} scoringMs={} candidates={} evaluated={} target={} pos={}",
+            soldier.getId(), soldier.getName().getString(), soldier.tickCount, phase, result,
             formatMillis(totalNanos), formatMillis(finder.getCandidateDiscoveryNanos()),
             formatMillis(finder.getTacticalScoringNanos()), finder.getCandidatesDiscovered(),
             finder.getCandidatesEvaluated(),
