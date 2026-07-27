@@ -25,6 +25,11 @@ public class SoldierHoldPositionGoal extends Goal {
 
     @Override
     public boolean canUse() {
+        // ATTACK uses CoverTacticalGoal as its sole movement owner.
+        if (soldier.hasValidAttackTarget()) {
+            return false;
+        }
+
         if (soldier.getSquadMode() != SquadMode.HOLD) {
             return false;
         }
@@ -55,6 +60,10 @@ public class SoldierHoldPositionGoal extends Goal {
 
     @Override
     public boolean canContinueToUse() {
+        if (soldier.hasValidAttackTarget()) {
+            return false;
+        }
+
         if (soldier.getSquadMode() != SquadMode.HOLD) {
             return false;
         }
@@ -95,6 +104,10 @@ public class SoldierHoldPositionGoal extends Goal {
 
     @Override
     public void tick() {
+        if (soldier.hasValidAttackTarget()) {
+            return;
+        }
+
         if (holdPos == null || holdPos.equals(BlockPos.ZERO)) {
             return;
         }
