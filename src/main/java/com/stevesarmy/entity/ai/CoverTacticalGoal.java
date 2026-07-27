@@ -1012,6 +1012,9 @@ public class CoverTacticalGoal extends Goal {
             if (currentCover != null && currentCover.getType() == CoverType.HALF) {
                 soldier.setLowCrouching(false);
             }
+            // A suppression interval may outlast the prior peek cooldown. Start a
+            // fresh hide interval so recovery cannot immediately expose the soldier.
+            peekCtrl.setLastPeekEndTime(System.currentTimeMillis());
             getCoverManager().setState(CoverBehaviorManager.CoverState.IN_COVER);
         }
         

@@ -15,6 +15,7 @@ import com.stevesarmy.squad.FireTeam;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
+import net.minecraft.world.item.ItemStack;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -52,7 +53,7 @@ public class SquadCommandScreen extends Screen {
         float health;
         float maxHealth;
         int totalAmmo;
-        String gunName;
+        ItemStack gunStack;
         FireDiscipline discipline;
         FireTeam fireTeam;
         double distance;
@@ -69,7 +70,7 @@ public class SquadCommandScreen extends Screen {
             this.health = entry.health;
             this.maxHealth = entry.maxHealth;
             this.totalAmmo = entry.totalAmmo;
-            this.gunName = entry.gunName;
+            this.gunStack = entry.gunStack;
             this.discipline = entry.getFireDiscipline();
             this.fireTeam = entry.getFireTeam();
             this.distance = entry.distance;
@@ -84,7 +85,7 @@ public class SquadCommandScreen extends Screen {
             this.health = entry.health;
             this.maxHealth = entry.maxHealth;
             this.totalAmmo = entry.totalAmmo;
-            this.gunName = entry.gunName;
+            this.gunStack = entry.gunStack;
             this.discipline = entry.getFireDiscipline();
             this.fireTeam = entry.getFireTeam();
             this.distance = entry.distance;
@@ -180,7 +181,7 @@ public class SquadCommandScreen extends Screen {
             x = drawName(graphics, x, y, row.name);
             x += COL_SPACING;
 
-            x = drawGunInfo(graphics, x, y, row.gunName);
+            x = drawGunInfo(graphics, x, y, row.gunStack);
             x += COL_SPACING;
 
             x = drawAmmoInfo(graphics, x, y, row.totalAmmo);
@@ -339,9 +340,9 @@ public class SquadCommandScreen extends Screen {
         return x + COL_NAME_WIDTH;
     }
 
-    private int drawGunInfo(GuiGraphics graphics, int x, int y, String gunName) {
-        String gunStr = gunName;
-        if (gunStr.isEmpty()) gunStr = "-";
+    private int drawGunInfo(GuiGraphics graphics, int x, int y, ItemStack gunStack) {
+        // Resolve the hover name on this client so TaCZ's client-only getName() is used.
+        String gunStr = gunStack.isEmpty() ? "-" : gunStack.getHoverName().getString();
         if (font.width(gunStr) > COL_GUN_WIDTH - 12) {
             while (font.width(gunStr + "...") > COL_GUN_WIDTH - 12 && gunStr.length() > 0) {
                 gunStr = gunStr.substring(0, gunStr.length() - 1);

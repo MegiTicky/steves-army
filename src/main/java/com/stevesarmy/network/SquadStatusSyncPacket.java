@@ -41,14 +41,14 @@ public class SquadStatusSyncPacket {
             float health = buf.readFloat();
             float maxHealth = buf.readFloat();
             int totalAmmo = buf.readVarInt();
-            String gunName = buf.readUtf(64);
+            ItemStack gunStack = buf.readItem();
             int squadModeOrdinal = buf.readVarInt();
             int fireDisciplineOrdinal = buf.readVarInt();
             int fireTeamOrdinal = buf.readVarInt();
             int coverState = buf.readVarInt();
             double distance = buf.readDouble();
             int recallTicks = buf.readVarInt();
-            entries.add(new SoldierStatusEntry(entityId, entityIntId, name, health, maxHealth, totalAmmo, gunName,
+            entries.add(new SoldierStatusEntry(entityId, entityIntId, name, health, maxHealth, totalAmmo, gunStack,
                 squadModeOrdinal, fireDisciplineOrdinal, fireTeamOrdinal, coverState, distance, recallTicks));
         }
         return new SquadStatusSyncPacket(entries);
@@ -63,7 +63,7 @@ public class SquadStatusSyncPacket {
             buf.writeFloat(entry.health);
             buf.writeFloat(entry.maxHealth);
             buf.writeVarInt(entry.totalAmmo);
-            buf.writeUtf(entry.gunName, 64);
+            buf.writeItem(entry.gunStack);
             buf.writeVarInt(entry.squadModeOrdinal);
             buf.writeVarInt(entry.fireDisciplineOrdinal);
             buf.writeVarInt(entry.fireTeamOrdinal);
@@ -97,13 +97,13 @@ public class SquadStatusSyncPacket {
                 .thenComparing(SoldierEntity::getUUID));
             for (SoldierEntity soldier : soldiers) {
 
-                String gunName = "";
+                ItemStack gunStack = ItemStack.EMPTY;
                 int totalAmmo = 0;
                 SoldierInventory inv = soldier.getSoldierInventory();
                 if (inv != null) {
                     ItemStack mainHand = inv.getItem(SoldierInventory.SLOT_MAIN_HAND);
                     if (!mainHand.isEmpty()) {
-                        gunName = mainHand.getHoverName().getString();
+                        gunStack = mainHand.copy();
                     }
                 }
                 if (soldier.getCombatGoal() != null) {
@@ -117,7 +117,7 @@ public class SquadStatusSyncPacket {
                     soldier.getHealth(),
                     soldier.getMaxHealth(),
                     totalAmmo,
-                    gunName,
+                    gunStack,
                     soldier.getSquadMode().ordinal(),
                     soldier.getFireDiscipline().ordinal(),
                     fireTeamAssignment.getTeamFor(soldier.getUUID()).ordinal(),
@@ -137,7 +137,7 @@ public class SquadStatusSyncPacket {
         public final float health;
         public final float maxHealth;
         public final int totalAmmo;
-        public final String gunName;
+        public final ItemStack gunStack;
         public final int squadModeOrdinal;
         public final int fireDisciplineOrdinal;
         public final int fireTeamOrdinal;
@@ -146,7 +146,7 @@ public class SquadStatusSyncPacket {
         public final int recallTicks;
 
         public SoldierStatusEntry(UUID entityId, int entityIntId, String name, float health, float maxHealth,
-                                   int totalAmmo, String gunName, int squadModeOrdinal,
+                                    int totalAmmo, ItemStack gunStack, int squadModeOrdinal,
                                    int fireDisciplineOrdinal, int fireTeamOrdinal,
                                    int coverState, double distance, int recallTicks) {
             this.entityId = entityId;
@@ -155,7 +155,7 @@ public class SquadStatusSyncPacket {
             this.health = health;
             this.maxHealth = maxHealth;
             this.totalAmmo = totalAmmo;
-            this.gunName = gunName;
+            this.gunStack = gunStack;
             this.squadModeOrdinal = squadModeOrdinal;
             this.fireDisciplineOrdinal = fireDisciplineOrdinal;
             this.fireTeamOrdinal = fireTeamOrdinal;

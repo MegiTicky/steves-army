@@ -755,22 +755,12 @@ public class SoldierEntity extends PathfinderMob implements Container {
             threatAwareness.tick();
         }
 
-        // Enforce correct pose every tick on BOTH Client and Server to fight vanilla overrides
-        float syncedSup = getSyncedSuppressionLevel();
+        // Enforce the server-synced posture every tick to fight vanilla pose overrides.
+        // Suppression recovery is owned by CoverTacticalGoal, not this entity tick.
         if (entityData.get(LOW_CROUCHING)) {
-            // If no longer suppressed, clear LOW_CROUCHING and stand up
-            if (syncedSup <= 0.5f) {
-                setLowCrouching(false);
-                if (this.getPose() != Pose.CROUCHING && this.getPose() != Pose.STANDING) {
-                    this.setPose(Pose.STANDING);
-                    this.refreshDimensions();
-                }
-            } else {
-                // Still suppressed → enforce SWIMMING
-                if (this.getPose() != Pose.SWIMMING) {
-                    this.setPose(Pose.SWIMMING);
-                    this.refreshDimensions();
-                }
+            if (this.getPose() != Pose.SWIMMING) {
+                this.setPose(Pose.SWIMMING);
+                this.refreshDimensions();
             }
         } else {
             // Read synced data so the client knows what the server is doing
@@ -1300,6 +1290,10 @@ public BlockPos getPingMoveTarget() {
     }
     
     public void setLowCrouching(boolean lowCrouch) {
+        if (this.level().isClientSide) {
+            return;
+        }
+
         boolean wasLowCrouching = entityData.get(LOW_CROUCHING);
         if (wasLowCrouching == lowCrouch) {
             return;
