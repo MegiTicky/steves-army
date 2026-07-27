@@ -10,8 +10,6 @@ import net.minecraft.client.gui.GuiGraphics;
 import java.util.List;
 
 public class PingOverlayRenderer {
-    private static final int PING_SIZE = 12;
-    
     public static void render(GuiGraphics guiGraphics, WorldRenderContext ctx) {
         Minecraft mc = Minecraft.getInstance();
         if (mc.player == null || mc.level == null) return;
@@ -43,7 +41,7 @@ public class PingOverlayRenderer {
         guiGraphics.pose().scale(scale, scale, 1.0f);
         
         int color = ping.getTeamColor();
-        int iconSize = PING_SIZE;
+        int iconSize = StevesArmyClientConfig.PING_ICON_SIZE.get();
         int halfSize = iconSize / 2;
         
         RenderSystem.enableBlend();
