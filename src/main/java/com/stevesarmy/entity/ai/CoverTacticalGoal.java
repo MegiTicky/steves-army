@@ -1743,9 +1743,6 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
         // Stagger for this command
         attackAdvanceStaggerTicks = Math.abs(soldier.getUUID().hashCode() % 60);
 
-        // Cancel final approach on the soldier
-        soldier.setAttackFinalApproach(false);
-
         // Preserve current occupied cover — don't call clearCover() here.
         // The soldier can start from where they are. If the current cover
         // is invalid for the new objective, SELECTING_COVER will find a new one.
@@ -1809,11 +1806,11 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
             objective.getX() + 0.5, objective.getY() + 0.5, objective.getZ() + 0.5);
         double objRadiusSq = ATTACK_OBJECTIVE_RADIUS * ATTACK_OBJECTIVE_RADIUS;
 
-        // Objective reached
+        // Objective reached — cover-to-cover advance is complete. No further
+        // final approach; soldiers hold the last cover near the objective.
         if (distToObjective <= objRadiusSq) {
             if (attackPhase != AttackPhase.COMPLETE) {
                 attackPhase = AttackPhase.COMPLETE;
-                soldier.setAttackFinalApproach(true);
                 updateAttackProgress(objective);
                 if (attackDebugLog()) {
                     StevesArmyMod.LOGGER.info("[AttackPhase] Soldier {} objective reached, completing", soldier.getId());

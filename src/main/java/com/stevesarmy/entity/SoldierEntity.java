@@ -10,7 +10,7 @@ import com.stevesarmy.combat.cover.CoverBehaviorManager;
 import com.stevesarmy.combat.cover.CoverType;
 import com.stevesarmy.combat.cover.IncomingFireHandler;
 import com.stevesarmy.debug.DiagnosticLogManager;
-import com.stevesarmy.entity.ai.SoldierAttackGoal;
+
 import com.stevesarmy.entity.ai.SoldierCombatGoal;
 import com.stevesarmy.entity.ai.SoldierFollowOwnerGoal;
 import com.stevesarmy.entity.ai.SoldierHoleRescueGoal;
@@ -184,20 +184,11 @@ public class SoldierEntity extends PathfinderMob implements Container {
     private boolean dispatchedBySend = false;
     private boolean inventorySyncingFromEntity = false;
     private boolean cqbMode = false;
-    private boolean attackFinalApproach = false;
 
     public static final double CQB_RANGE = 5.0;
 
     public boolean isDispatchedBySend() {
         return dispatchedBySend;
-    }
-
-    public boolean isAttackFinalApproach() {
-        return attackFinalApproach;
-    }
-
-    public void setAttackFinalApproach(boolean val) {
-        this.attackFinalApproach = val;
     }
 
     public boolean isCQB() {
@@ -295,7 +286,6 @@ public class SoldierEntity extends PathfinderMob implements Container {
         this.goalSelector.addGoal(1, new OpenDoorGoal(this, true));
         this.goalSelector.addGoal(1, new SoldierHealGoal(this));
         this.goalSelector.addGoal(1, new SoldierMoveToPingGoal(this));
-        this.goalSelector.addGoal(1, new SoldierAttackGoal(this));
         this.goalSelector.addGoal(2, (this.coverTacticalGoal = new CoverTacticalGoal(this)));
         this.goalSelector.addGoal(3, new SoldierFollowOwnerGoal(this));
         this.goalSelector.addGoal(3, new SoldierHoldPositionGoal(this));
@@ -1065,26 +1055,18 @@ public BlockPos getPingMoveTarget() {
         attackGeneration++;
         this.attackTargetPos = pos;
         this.attackTargetTimestamp = System.currentTimeMillis();
-        this.attackFinalApproach = false;
         // Clear incompatible ping move target
         clearPingMoveTarget();
-        // Seed objective direction into threat awareness for cover scoring
-        Vec3 toObjective = new Vec3(
-            pos.getX() - this.getX(), 0, pos.getZ() - this.getZ());
-        if (toObjective.lengthSqr() > 0.01) {
-            toObjective = toObjective.normalize();
-        }
-        if (!this.level().isClientSide) {
-            this.threatAwareness.onPingDirection(pos);
-            this.forcedTargetPos = pos;
-            this.forcedTargetTimestamp = System.currentTimeMillis();
-        }
+        // ATTACK is objective-only: it defines where the soldier should
+        // reposition (lateral/forward) but does NOT change the active threat
+        // direction or combat target. Use THREAT_DIRECTION pings for that.
+        // The existing threat (from entity detection, damage, or enemy pings)
+        // continues to drive cover-facing and peek decisions.
     }
 
     public void clearAttackTarget() {
         this.attackTargetPos = null;
         this.attackTargetTimestamp = 0;
-        this.attackFinalApproach = false;
         if (squadId != null) {
             com.stevesarmy.util.SpacingHelper.clearAssignment(squadId);
         }
@@ -1094,7 +1076,6 @@ public BlockPos getPingMoveTarget() {
         if (attackGeneration == expectedGeneration) {
             this.attackTargetPos = null;
             this.attackTargetTimestamp = 0;
-            this.attackFinalApproach = false;
             if (squadId != null) {
                 com.stevesarmy.util.SpacingHelper.clearAssignment(squadId);
             }
