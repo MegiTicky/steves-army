@@ -93,6 +93,7 @@ public class CoverTacticalGoal extends Goal {
     // Attack corridor constants (search rectangle along objective direction)
     private static final int ATTACK_CORRIDOR_FORWARD_LENGTH = 24;
     private static final int ATTACK_CORRIDOR_HALF_WIDTH = 6;
+    private static final int ATTACK_WIDE_SECTOR_HALF_WIDTH = 16;
     private static final int ATTACK_CORRIDOR_SEARCH_RADIUS = 24;
     private static final double ATTACK_FRONTIER_TOLERANCE = 2.0;
     private static final int ATTACK_CORRIDOR_REFRESH_TICKS = 15;
@@ -770,8 +771,10 @@ public class CoverTacticalGoal extends Goal {
         CoverPoint targetCover = getCoverManager().getTargetCover();
         CoverPoint currentCover = getCoverManager().getCurrentCover();
 
-        // Mid-move organic decision making (50% chance to even consider, 50% chance to cancel if threat shifted)
-        if (soldier.getRandom().nextFloat() < 0.5f) {
+        // ATTACK owns the chosen bound until deterministic path recovery rejects it.
+        // Its path may temporarily lead away from the objective to exit a structure,
+        // so the generic threat-shift reconsideration must not replace it mid-route.
+        if (!soldier.hasValidAttackTarget() && soldier.getRandom().nextFloat() < 0.5f) {
             Vec3 currentThreatDir = getThreats().getPrimaryDirection(soldier.position());
             Vec3 entryThreatDir = getCoverManager().getEntryThreatDirection();
             
@@ -1494,6 +1497,14 @@ this.debugSearchCenter = searchCenter;
                     bestCover = Optional.of(cover);
                     break;
                 }
+
+                // The preferred assault lane may be blocked by a structure.
+                // Before walking uncovered, accept a reachable forward cover in
+                // a wider sector even when its protection is not an exact match.
+                if (bestCover.isEmpty()) {
+                    bestCover = findWideForwardAttackCover(localScored, currentCover,
+                        soldier.getAttackTargetPos(), objectiveDir, threatDir);
+                }
             }
         } else {
             bestCover = finder.findBestCover(
@@ -1754,6 +1765,49 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
         double forward = displacement.x * objectiveDir.x + displacement.z * objectiveDir.z;
         double lateral = Math.abs(displacement.x * objectiveDir.z - displacement.z * objectiveDir.x);
         return forward <= ATTACK_CORRIDOR_FORWARD_LENGTH && lateral <= ATTACK_CORRIDOR_HALF_WIDTH;
+    }
+
+    /**
+     * Finds a path-reachable forward cover outside the preferred narrow corridor.
+     * Protection is a preference here so a structure cannot trap an ATTACK soldier
+     * when its usable exit cover is not aligned with the current threat direction.
+     */
+    private Optional<CoverPoint> findWideForwardAttackCover(List<CoverFinder.ScoredCover> scored,
+                                                              CoverPoint currentCover, BlockPos objective,
+                                                              Vec3 objectiveDir, Direction threatDir) {
+        CoverPoint bestCover = null;
+        int bestPathNodes = Integer.MAX_VALUE;
+        boolean bestProtected = false;
+
+        for (CoverFinder.ScoredCover sc : scored) {
+            CoverPoint cover = sc.cover;
+            if (currentCover != null && cover.getPosition().equals(currentCover.getPosition())) continue;
+            if (failedCoverPositions.contains(cover.getPosition())) continue;
+            if (!isForwardCoverCandidate(cover.getPosition(), objective, objectiveDir)) continue;
+            if (cover.getPosition().distSqr(objective) <= ATTACK_OBJECTIVE_RADIUS * ATTACK_OBJECTIVE_RADIUS) continue;
+
+            Vec3 displacement = cover.getPosition().getCenter().subtract(soldier.position());
+            double forward = displacement.x * objectiveDir.x + displacement.z * objectiveDir.z;
+            double lateral = Math.abs(displacement.x * objectiveDir.z - displacement.z * objectiveDir.x);
+            if (forward > ATTACK_CORRIDOR_FORWARD_LENGTH || lateral > ATTACK_WIDE_SECTOR_HALF_WIDTH) continue;
+
+            Vec3 standingPos = getCoverStandingPosition(cover.getPosition());
+            Path path = navigation.createPath(standingPos.x, standingPos.y, standingPos.z, 1);
+            if (path == null || !path.canReach()) continue;
+
+            boolean protectedFromThreat = threatDir != null
+                && cover.getProtectedDirections() != null
+                && cover.getProtectedDirections().contains(threatDir);
+            int pathNodes = path.getNodeCount();
+            if (bestCover == null || (protectedFromThreat && !bestProtected)
+                || (protectedFromThreat == bestProtected && pathNodes < bestPathNodes)) {
+                bestCover = cover;
+                bestPathNodes = pathNodes;
+                bestProtected = protectedFromThreat;
+            }
+        }
+
+        return Optional.ofNullable(bestCover);
     }
 
     private void logRejectedAttackCover(CoverPoint cover, BlockPos objective, Vec3 objectiveDir) {
@@ -2226,6 +2280,19 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
                 }
                 return true;
             }
+        }
+
+        List<CoverFinder.ScoredCover> localScored = finder.evaluateAndScoreAll(
+            soldier, threatDirection, threats, ATTACK_CORRIDOR_SEARCH_RADIUS, true, squadCtx);
+        Optional<CoverPoint> wideCover = findWideForwardAttackCover(localScored, currentCover,
+            objective, objectiveDir, threatDir);
+        if (wideCover.isPresent() && startRepositioning(wideCover.get())) {
+            attackExpectedCover = wideCover.get().getPosition();
+            if (attackDebugLog()) {
+                StevesArmyMod.LOGGER.info("[AttackForward] Soldier {} selected wide-sector cover {}",
+                    soldier.getId(), wideCover.get().getPosition());
+            }
+            return true;
         }
 
         return false;
