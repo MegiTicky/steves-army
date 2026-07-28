@@ -16,6 +16,7 @@ import com.stevesarmy.combat.cover.CoverPoint;
 import com.stevesarmy.combat.cover.CoverType;
 import com.stevesarmy.debug.DiagnosticLogManager;
 import com.stevesarmy.entity.SoldierEntity;
+import com.stevesarmy.entity.EnemySoldierEntity;
 import com.stevesarmy.entity.TargetEntity;
 import com.stevesarmy.inventory.SoldierInventory;
 import com.stevesarmy.network.NetworkHandler;
@@ -426,7 +427,7 @@ public class SoldierCombatGoal extends Goal {
             return true;
         }
 
-        if (reloadRetryTicks > 0 || GunIntegration.useInventoryAmmo(soldier)) {
+        if (reloadRetryTicks > 0 || usesInventoryAmmoWithoutReserve()) {
             return false;
         }
 
@@ -445,7 +446,7 @@ public class SoldierCombatGoal extends Goal {
 
     private void requestReload(boolean tactical) {
         if (reloadPending || GunIntegration.isReloading(soldier)
-            || GunIntegration.useInventoryAmmo(soldier)
+            || usesInventoryAmmoWithoutReserve()
             || !GunIntegration.canReload(soldier)) {
             return;
         }
@@ -474,7 +475,7 @@ public class SoldierCombatGoal extends Goal {
     }
 
     private boolean shouldTacticalReload() {
-        if (GunIntegration.useInventoryAmmo(soldier)
+        if (usesInventoryAmmoWithoutReserve()
             || !GunIntegration.canReload(soldier)
             || !soldier.getCoverBehaviorManager().isInCover() || isDirectlyEngaging()) {
             return false;
@@ -485,6 +486,11 @@ public class SoldierCombatGoal extends Goal {
         return magazineSize > 0
             && currentAmmo * 2 < magazineSize
             && getTotalAmmo() > currentAmmo;
+    }
+
+    private boolean usesInventoryAmmoWithoutReserve() {
+        return GunIntegration.useInventoryAmmo(soldier)
+            && !(soldier instanceof EnemySoldierEntity enemy && enemy.hasInfiniteReserveAmmo());
     }
 
     private boolean isDirectlyEngaging() {

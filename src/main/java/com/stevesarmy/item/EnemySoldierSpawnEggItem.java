@@ -73,6 +73,7 @@ public class EnemySoldierSpawnEggItem extends ForgeSpawnEggItem {
         } else {
             StevesArmyMod.LOGGER.info("[EnemySpawnEgg] Enemy soldier {} already has item from EntityTag, skipping AK47 equipment", enemy.getId());
         }
+        enemy.configureInfiniteReserveAmmo();
 
         return InteractionResult.SUCCESS;
     }

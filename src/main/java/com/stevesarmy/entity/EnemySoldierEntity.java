@@ -13,7 +13,6 @@ import com.stevesarmy.squad.SquadManager;
 import com.stevesarmy.squad.SquadMode;
 import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
-import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.*;
 import net.minecraft.world.entity.ai.goal.FloatGoal;
@@ -38,8 +37,8 @@ public class EnemySoldierEntity extends SoldierEntity {
 
     private static final double DEFEND_RADIUS = 20.0;
     private static final UUID ENEMY_SQUAD_LEADER_ID = UUID.fromString("00000000-0000-0000-0000-000000000001");
+    private static final int INFINITE_RESERVE_AMMO = 1_000_000;
     private BlockPos defendPosition = null;
-    private boolean ammoRefillFailureLogged = false;
 
     public EnemySoldierEntity(EntityType<? extends SoldierEntity> type, Level level) {
         super(type, level);
@@ -60,12 +59,6 @@ public class EnemySoldierEntity extends SoldierEntity {
 
     @Override
     public void tick() {
-        // PathfinderMob.tick() runs AI, including reload decisions. Keep enemy magazines
-        // full first so TaCZ never enters its inventory-ammo reload path.
-        if (!this.level().isClientSide) {
-            refillAmmo();
-        }
-
         super.tick();
 
         if (!this.level().isClientSide) {
@@ -168,7 +161,7 @@ public class EnemySoldierEntity extends SoldierEntity {
             }
             setItemSlot(equipmentSlot, equipmentStack.copyWithCount(1));
             if (equippingGun) {
-                loadAndChamberGun();
+                configureInfiniteReserveAmmo();
                 GunIntegration.initialData(this);
                 GunIntegration.draw(this);
             }
@@ -225,53 +218,27 @@ public class EnemySoldierEntity extends SoldierEntity {
         }
     }
 
-    private void refillAmmo() {
-        if (!GunIntegration.isTaczLoaded()) return;
+    public boolean hasInfiniteReserveAmmo() {
+        if (!GunIntegration.isTaczLoaded()) return false;
         try {
             ItemStack gunStack = this.getMainHandItem();
-            if (gunStack.isEmpty()) return;
+            if (!GunIntegration.isGun(gunStack)) return false;
 
             Class<?> iGunClass = Class.forName("com.tacz.guns.api.item.IGun");
             Method getIGunOrNull = iGunClass.getMethod("getIGunOrNull", ItemStack.class);
             Object iGun = getIGunOrNull.invoke(null, gunStack);
-            if (iGun == null) return;
+            if (iGun == null) return false;
 
-            Method getCurrentAmmoCount = iGunClass.getMethod("getCurrentAmmoCount", ItemStack.class);
-            int currentAmmo = (int) getCurrentAmmoCount.invoke(iGun, gunStack);
-
-            Method getGunId = iGunClass.getMethod("getGunId", ItemStack.class);
-            Object gunId = getGunId.invoke(iGun, gunStack);
-
-            Class<?> timelessApiClass = Class.forName("com.tacz.guns.api.TimelessAPI");
-            Method getCommonGunIndex = timelessApiClass.getMethod("getCommonGunIndex", ResourceLocation.class);
-            Object indexOpt = getCommonGunIndex.invoke(null, gunId);
-
-            if (indexOpt instanceof java.util.Optional<?> opt && opt.isPresent()) {
-                Object gunIndex = opt.get();
-                Method getGunData = gunIndex.getClass().getMethod("getGunData");
-                Object gunData = getGunData.invoke(gunIndex);
-                Method getAmmoAmount = gunData.getClass().getMethod("getAmmoAmount");
-                int magSize = (int) getAmmoAmount.invoke(gunData);
-
-                if (currentAmmo < magSize) {
-                    Method setAmmoCount = iGunClass.getMethod("setCurrentAmmoCount", ItemStack.class, int.class);
-                    setAmmoCount.invoke(iGun, gunStack, magSize);
-                }
-            }
+            boolean usesDummyAmmo = (boolean) iGunClass.getMethod("useDummyAmmo", ItemStack.class).invoke(iGun, gunStack);
+            int reserveAmmo = (int) iGunClass.getMethod("getDummyAmmoAmount", ItemStack.class).invoke(iGun, gunStack);
+            return usesDummyAmmo && reserveAmmo > 0;
         } catch (Exception e) {
-            if (!ammoRefillFailureLogged) {
-                ammoRefillFailureLogged = true;
-                StevesArmyMod.LOGGER.warn("[EnemyAmmo] Failed to refill enemy {} gun {}: {}",
-                    this.getId(), getMainHandItem(), e.toString());
-            }
+            return false;
         }
     }
 
-    /**
-     * Fully prepares a newly assigned weapon. Ongoing magazine refills intentionally
-     * do not force a chambered round, so manual-action guns retain their normal bolt cycle.
-     */
-    private void loadAndChamberGun() {
+    /** Gives the selected gun an internal TaCZ reserve without changing its magazine. */
+    public void configureInfiniteReserveAmmo() {
         if (!GunIntegration.isTaczLoaded()) return;
         try {
             ItemStack gunStack = getMainHandItem();
@@ -282,20 +249,12 @@ public class EnemySoldierEntity extends SoldierEntity {
             Object iGun = getIGunOrNull.invoke(null, gunStack);
             if (iGun == null) return;
 
-            Method getGunId = iGunClass.getMethod("getGunId", ItemStack.class);
-            Object gunId = getGunId.invoke(iGun, gunStack);
-            Class<?> timelessApiClass = Class.forName("com.tacz.guns.api.TimelessAPI");
-            Method getCommonGunIndex = timelessApiClass.getMethod("getCommonGunIndex", ResourceLocation.class);
-            Object indexOpt = getCommonGunIndex.invoke(null, gunId);
-
-            if (indexOpt instanceof java.util.Optional<?> opt && opt.isPresent()) {
-                Object gunData = opt.get().getClass().getMethod("getGunData").invoke(opt.get());
-                int magSize = (int) gunData.getClass().getMethod("getAmmoAmount").invoke(gunData);
-                iGunClass.getMethod("setCurrentAmmoCount", ItemStack.class, int.class).invoke(iGun, gunStack, magSize);
-            }
-            iGunClass.getMethod("setBulletInBarrel", ItemStack.class, boolean.class).invoke(iGun, gunStack, true);
+            iGunClass.getMethod("setMaxDummyAmmoAmount", ItemStack.class, int.class)
+                .invoke(iGun, gunStack, INFINITE_RESERVE_AMMO);
+            iGunClass.getMethod("setDummyAmmoAmount", ItemStack.class, int.class)
+                .invoke(iGun, gunStack, INFINITE_RESERVE_AMMO);
         } catch (Exception e) {
-            StevesArmyMod.LOGGER.warn("[EnemyAmmo] Failed to load and chamber enemy {} gun {}: {}",
+            StevesArmyMod.LOGGER.warn("[EnemyAmmo] Failed to configure infinite reserve for enemy {} gun {}: {}",
                 this.getId(), getMainHandItem(), e.toString());
         }
     }
