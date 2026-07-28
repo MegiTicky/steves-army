@@ -199,6 +199,8 @@ public class CoverTacticalGoal extends Goal {
     public CoverTacticalGoal(SoldierEntity soldier) {
         this.soldier = soldier;
         this.navigation = soldier.getNavigation();
+        // This goal remains active while occupying cover, so it must retain the
+        // scheduler's movement lock across every cover-state transition.
         this.setFlags(EnumSet.of(Flag.MOVE, Flag.LOOK));
     }
     
@@ -486,7 +488,6 @@ public class CoverTacticalGoal extends Goal {
         if (state == CoverBehaviorManager.CoverState.NO_COVER) {
             getCoverManager().setState(CoverBehaviorManager.CoverState.SEEKING_COVER);
             findAndMoveToCover();
-            setFlags(EnumSet.of(Flag.MOVE, Flag.LOOK));
         } else if (state == CoverBehaviorManager.CoverState.SEEKING_COVER || 
                    state == CoverBehaviorManager.CoverState.REPOSITIONING) {
             if (getCoverManager().getTargetCover() == null) {
@@ -494,10 +495,6 @@ public class CoverTacticalGoal extends Goal {
             } else {
                 moveToCover(getCoverManager().getTargetCover());
             }
-            setFlags(EnumSet.of(Flag.MOVE, Flag.LOOK));
-        } else if (state == CoverBehaviorManager.CoverState.IN_COVER ||
-                   state == CoverBehaviorManager.CoverState.SUPPRESSED_IN_COVER) {
-            setFlags(EnumSet.of(Flag.MOVE, Flag.LOOK));
         }
     }
     
@@ -572,34 +569,20 @@ public class CoverTacticalGoal extends Goal {
         
         switch (state) {
             case SEEKING_COVER:
-                setFlags(EnumSet.of(Flag.MOVE, Flag.LOOK));
                 tickSeekingCover();
                 break;
             case REPOSITIONING:
-                setFlags(EnumSet.of(Flag.MOVE, Flag.LOOK));
                 tickRepositioning();
                 break;
             case IN_COVER:
-                // Keep MOVE flags during ATTACK mode so cover goal owns movement
-                if (soldier.hasValidAttackTarget()) {
-                    setFlags(EnumSet.of(Flag.MOVE, Flag.LOOK));
-                } else {
-                    setFlags(EnumSet.noneOf(Flag.class));
-                }
                 tickInCover();
                 break;
             case SUPPRESSED_IN_COVER:
-                if (soldier.hasValidAttackTarget()) {
-                    setFlags(EnumSet.of(Flag.MOVE, Flag.LOOK));
-                } else {
-                    setFlags(EnumSet.noneOf(Flag.class));
-                }
                 tickSuppressedInCover();
                 break;
             case NO_COVER:
                 // Attack mode: trigger immediate cover search
                 if (soldier.hasValidAttackTarget() && attackPhase == AttackPhase.NONE) {
-                    setFlags(EnumSet.of(Flag.MOVE, Flag.LOOK));
                     initAttackPhase();
                 }
                 break;
@@ -924,7 +907,6 @@ public class CoverTacticalGoal extends Goal {
                 }
                 getCoverManager().clearCover();
                 getCoverManager().setState(CoverBehaviorManager.CoverState.SEEKING_COVER);
-                setFlags(EnumSet.of(Flag.MOVE, Flag.LOOK));
                 getPositionController().clear();
                 return;
             }
@@ -1212,7 +1194,6 @@ private boolean shouldSeekCover() {
         CoverPoint currentCover = getCoverManager().getCurrentCover();
         if (currentCover == null) {
             getCoverManager().setState(CoverBehaviorManager.CoverState.SEEKING_COVER);
-            setFlags(EnumSet.of(Flag.MOVE, Flag.LOOK));
             return;
         }
 
@@ -1322,10 +1303,8 @@ private void startRepositioning() {
         findAndMoveToCover();
         if (getCoverManager().getTargetCover() != null) {
             getCoverManager().setState(CoverBehaviorManager.CoverState.REPOSITIONING);
-            setFlags(EnumSet.of(Flag.MOVE, Flag.LOOK));
         } else {
             getCoverManager().setState(CoverBehaviorManager.CoverState.SEEKING_COVER);
-            setFlags(EnumSet.of(Flag.MOVE, Flag.LOOK));
         }
     }
     
@@ -1350,7 +1329,6 @@ private void startRepositioning() {
             }
             getCoverManager().setTargetCover(newCover);
             getCoverManager().setState(CoverBehaviorManager.CoverState.REPOSITIONING);
-            setFlags(EnumSet.of(Flag.MOVE, Flag.LOOK));
             moveToCover(newCover);
             return true;
         }
@@ -1919,7 +1897,6 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
                     result = findAndMoveToCover();
                     if (getCoverManager().getTargetCover() != null) {
                         getCoverManager().setState(CoverBehaviorManager.CoverState.REPOSITIONING);
-                        setFlags(EnumSet.of(Flag.MOVE, Flag.LOOK));
                     }
                 } else {
                     result = findAndMoveToCover();
@@ -1941,7 +1918,6 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
                     // stuck detection, and timeout handlers will run.
                     if (currentCover == null && getCoverManager().getTargetCover() != null) {
                         getCoverManager().setState(CoverBehaviorManager.CoverState.SEEKING_COVER);
-                        setFlags(EnumSet.of(Flag.MOVE, Flag.LOOK));
                     }
                     if (attackDebugLog()) {
                         StevesArmyMod.LOGGER.info("[AttackPhase] Soldier {} SELECTING_COVER -> MOVING_TO_COVER: cover found",
@@ -1960,7 +1936,6 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
                 if (coverState == CoverBehaviorManager.CoverState.NO_COVER &&
                     targetCover != null && currentCover == null) {
                     getCoverManager().setState(CoverBehaviorManager.CoverState.SEEKING_COVER);
-                    setFlags(EnumSet.of(Flag.MOVE, Flag.LOOK));
                     if (attackDebugLog()) {
                         StevesArmyMod.LOGGER.info("[AttackPhase] Soldier {} MOVING_TO_COVER restored NO_COVER -> SEEKING_COVER for target {}",
                             soldier.getId(), targetCover.getPosition());

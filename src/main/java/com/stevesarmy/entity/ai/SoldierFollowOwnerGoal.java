@@ -1,6 +1,7 @@
 package com.stevesarmy.entity.ai;
 
 import com.stevesarmy.combat.cover.CoverBehaviorManager;
+import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.squad.SquadMode;
 import com.stevesarmy.util.SpacingHelper;
@@ -103,6 +104,16 @@ public class SoldierFollowOwnerGoal extends Goal {
 
     @Override
     public void stop() {
+        CoverBehaviorManager.CoverState coverState = soldier.getCoverBehaviorManager().getState();
+        if (CoverTacticalGoal.isDebugLoggingEnabled()
+            && (coverState == CoverBehaviorManager.CoverState.SEEKING_COVER
+                || coverState == CoverBehaviorManager.CoverState.REPOSITIONING)) {
+            StevesArmyMod.LOGGER.warn("[CoverOwnership] FOLLOW stopping navigation during {} for soldier {} ({}) targetCover={} navDone={}",
+                coverState, soldier.getId(), soldier.getName().getString(),
+                soldier.getCoverBehaviorManager().getTargetCover() != null
+                    ? soldier.getCoverBehaviorManager().getTargetCover().getPosition() : null,
+                soldier.getNavigation().isDone());
+        }
         owner = null;
         soldier.getNavigation().stop();
     }
