@@ -1,6 +1,7 @@
 package com.stevesarmy.combat.cover;
 
 import com.stevesarmy.StevesArmyMod;
+import com.stevesarmy.combat.GunIntegration;
 import com.stevesarmy.debug.DiagnosticLogManager;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.LivingEntity;
@@ -34,12 +35,17 @@ public class SuppressionTracker {
     private static final float MAX_SPEED_MULTIPLIER = 3.0f;
     private static final float MIN_SPEED_MULTIPLIER = 0.5f;
     private static final long BURST_WINDOW_MS = 150;
+    private static final float MACHINE_GUN_SUPPRESSION_MULTIPLIER = 1.6f;
 
     public void onNearMiss(Vec3 bulletPath, LivingEntity soldier) {
         onNearMiss(bulletPath, soldier, 1.0f);
     }
 
     public void onNearMiss(Vec3 bulletPath, LivingEntity soldier, float bulletSpeed) {
+        onNearMiss(bulletPath, soldier, bulletSpeed, null);
+    }
+
+    public void onNearMiss(Vec3 bulletPath, LivingEntity soldier, float bulletSpeed, LivingEntity shooter) {
         double distance = soldier.position().distanceTo(bulletPath);
         if (distance >= NEAR_MISS_THRESHOLD) return;
 
@@ -55,14 +61,16 @@ public class SuppressionTracker {
         lastBurstTime = now;
         float burstMultiplier = 1.0f - (Math.min(burstCount - 1, 3)) * 0.15f;
 
-        float add = distanceFactor * NEAR_MISS_SUPPRESSION * speedMultiplier * burstMultiplier;
+        float weaponMultiplier = shooter != null && GunIntegration.isMachineGun(shooter)
+            ? MACHINE_GUN_SUPPRESSION_MULTIPLIER : 1.0f;
+        float add = distanceFactor * NEAR_MISS_SUPPRESSION * speedMultiplier * burstMultiplier * weaponMultiplier;
         suppressionLevel = Math.min(MAX_SUPPRESSION, suppressionLevel + add);
         if (suppressionLevel > peakSuppression) peakSuppression = suppressionLevel;
         lastSuppressionTime = now;
         nearMissCount++;
 
         if (debugLog()) {
-            StevesArmyMod.LOGGER.info("[Suppression] Soldier {} near miss: dist=" + String.format("%.1f", distance) + ", speedMult=" + String.format("%.2f", speedMultiplier) + ", burstMult=" + String.format("%.2f", burstMultiplier) + ", +" + String.format("%.2f", add) + " sup -> " + String.format("%.2f", suppressionLevel),
+            StevesArmyMod.LOGGER.info("[Suppression] Soldier {} near miss: dist=" + String.format("%.1f", distance) + ", speedMult=" + String.format("%.2f", speedMultiplier) + ", burstMult=" + String.format("%.2f", burstMultiplier) + ", weaponMult=" + String.format("%.2f", weaponMultiplier) + ", +" + String.format("%.2f", add) + " sup -> " + String.format("%.2f", suppressionLevel),
                 soldier.getId());
         }
     }
@@ -90,13 +98,14 @@ public class SuppressionTracker {
 
     public void onIncomingFire(LivingEntity shooter, float bulletSpeed) {
         float speedMultiplier = Mth.clamp(bulletSpeed / BASE_SPEED, MIN_SPEED_MULTIPLIER, MAX_SPEED_MULTIPLIER);
-        float add = DIRECT_FIRE_SUPPRESSION * speedMultiplier;
+        float weaponMultiplier = GunIntegration.isMachineGun(shooter) ? MACHINE_GUN_SUPPRESSION_MULTIPLIER : 1.0f;
+        float add = DIRECT_FIRE_SUPPRESSION * speedMultiplier * weaponMultiplier;
         suppressionLevel = Math.min(MAX_SUPPRESSION, suppressionLevel + add);
         if (suppressionLevel > peakSuppression) peakSuppression = suppressionLevel;
         lastSuppressionTime = System.currentTimeMillis();
 
         if (debugLog()) {
-            StevesArmyMod.LOGGER.info("[Suppression] incoming fire from {}: speedMult=" + String.format("%.2f", speedMultiplier) + ", +" + String.format("%.2f", add) + " sup -> " + String.format("%.2f", suppressionLevel),
+            StevesArmyMod.LOGGER.info("[Suppression] incoming fire from {}: speedMult=" + String.format("%.2f", speedMultiplier) + ", weaponMult=" + String.format("%.2f", weaponMultiplier) + ", +" + String.format("%.2f", add) + " sup -> " + String.format("%.2f", suppressionLevel),
                 shooter.getName().getString());
         }
     }

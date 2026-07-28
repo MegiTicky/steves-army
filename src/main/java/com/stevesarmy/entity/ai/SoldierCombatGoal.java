@@ -87,6 +87,10 @@ public class SoldierCombatGoal extends Goal {
     private static final int SUPPRESSION_MIN_DURATION_TICKS = 100;  // 5 seconds
     private static final int SUPPRESSION_MAX_DURATION_TICKS = 160;  // 8 seconds
     private static final double SUPPRESSION_LOS_TOLERANCE = 2.0;  // blocks
+    private static final double SUPPRESSION_SPREAD_MIN_RADIUS = 0.12;
+    private static final double SUPPRESSION_SPREAD_PER_BLOCK = 0.0075;
+    private static final double SUPPRESSION_SPREAD_MAX_RADIUS = 0.85;
+    private static final double SUPPRESSION_VERTICAL_SPREAD_RATIO = 0.45;
     private int suppressionDurationTicks = 0;
     private int suppressionRemainingTicks = 0;
     
@@ -104,10 +108,18 @@ public class SoldierCombatGoal extends Goal {
     private UUID cachedAimPointTargetUUID = null;
 
     private int getBurstTarget() {
-        return soldier.getFireDiscipline() == FireDiscipline.SUPPRESSIVE ? 6 : BURST_SHOTS_TARGET;
+        if (GunIntegration.isMachineGun(soldier)) {
+            return soldier.getFireDiscipline() == FireDiscipline.SUPPRESSIVE
+                ? MACHINE_GUN_SUPPRESSIVE_BURST_SHOTS : MACHINE_GUN_STANDARD_BURST_SHOTS;
+        }
+        return soldier.getFireDiscipline() == FireDiscipline.SUPPRESSIVE
+            ? SUPPRESSIVE_BURST_SHOTS : BURST_SHOTS_TARGET;
     }
 
     private static final int BURST_SHOTS_TARGET = 3;
+    private static final int SUPPRESSIVE_BURST_SHOTS = 6;
+    private static final int MACHINE_GUN_STANDARD_BURST_SHOTS = 8;
+    private static final int MACHINE_GUN_SUPPRESSIVE_BURST_SHOTS = 12;
     private static final float BURST_INTERVAL_RIFLE_SECONDS = 0.8f;
     private static final float BURST_INTERVAL_MG_SECONDS = 0.35f;
     private int burstShotsFired = 0;
@@ -1450,19 +1462,39 @@ public class SoldierCombatGoal extends Goal {
 
     private Vec3 calculateSuppressionSpread(Vec3 targetPos, float aimInaccuracy) {
         double distance = soldier.position().distanceTo(targetPos);
-        double spreadRadius = distance * Math.tan(Math.toRadians(aimInaccuracy));
-        
-        double offsetX = (soldier.level().random.nextDouble() - 0.5) * 2.0 * spreadRadius;
-        double offsetY = (soldier.level().random.nextDouble() - 0.5) * spreadRadius * 0.5;
-        double offsetZ = (soldier.level().random.nextDouble() - 0.5) * 2.0 * spreadRadius;
+        double gunSpread = distance * Math.tan(Math.toRadians(aimInaccuracy));
+        double spreadRadius = Mth.clamp(
+            SUPPRESSION_SPREAD_MIN_RADIUS + distance * SUPPRESSION_SPREAD_PER_BLOCK + gunSpread,
+            SUPPRESSION_SPREAD_MIN_RADIUS,
+            SUPPRESSION_SPREAD_MAX_RADIUS
+        );
+
+        // Spread perpendicular to the firing direction so shots form a small, believable
+        // beaten zone around the selected last-known position or cover opening.
+        Vec3 toTarget = targetPos.subtract(soldier.getEyePosition());
+        Vec3 horizontalDirection = new Vec3(toTarget.x, 0.0, toTarget.z).normalize();
+        Vec3 lateralDirection = new Vec3(-horizontalDirection.z, 0.0, horizontalDirection.x);
+        double lateralOffset = (soldier.level().random.nextDouble() - 0.5) * 2.0 * spreadRadius;
+        double depthOffset = (soldier.level().random.nextDouble() - 0.5) * spreadRadius * 0.35;
+        double verticalOffset = (soldier.level().random.nextDouble() - 0.5)
+            * 2.0 * spreadRadius * SUPPRESSION_VERTICAL_SPREAD_RATIO;
         
         // Callers provide a complete world-space target. Do not add a generic
         // vertical offset here: half-cover opening targets already include the
         // cover top, while other suppression targets set their own height.
-        return targetPos.add(offsetX, offsetY, offsetZ);
+        return targetPos.add(lateralDirection.scale(lateralOffset))
+            .add(horizontalDirection.scale(depthOffset))
+            .add(0.0, verticalOffset, 0.0);
     }
 
     private int getTicksBetweenBurstShots() {
+        // TaCZ owns the real gun cooldown. Polling it every tick lets automatic
+        // weapons fire at their native RPM instead of rounding RPM down to a
+        // coarse multi-tick interval.
+        if (GunIntegration.isMachineGun(soldier)) {
+            return 1;
+        }
+
         int rpm = GunIntegration.getRPM(soldier);
         double shotsPerSecond = rpm / 60.0;
         int baseTicks = (int) Math.ceil(20.0 / shotsPerSecond);

@@ -396,7 +396,7 @@ if (currentCover != null) {
         if (shooter != null && soldier instanceof com.stevesarmy.entity.SoldierEntity s && s.isFriendlyTo(shooter)) {
             return;
         }
-        suppressionTracker.onNearMiss(bulletPath, soldier, bulletSpeed);
+        suppressionTracker.onNearMiss(bulletPath, soldier, bulletSpeed, shooter);
     }
 
     /**
