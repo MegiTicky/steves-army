@@ -984,6 +984,17 @@ private static void renderSoldierCoverLabels(PoseStack poseStack, Vec3 cameraPos
             String modeLabel = soldier.getSquadMode().name();
             font.drawInBatch(modeLabel, -font.width(modeLabel) / 2.0f, lineOffset, 0xFFAAAAAA, false,
                              poseStack.last().pose(), bufferSource, net.minecraft.client.gui.Font.DisplayMode.NORMAL, 0, 15728880);
+            lineOffset += 10;
+
+            if (soldier.isTacticalReloading()) {
+                String reloadLabel = "TACTICAL RELOAD";
+                font.drawInBatch(reloadLabel, -font.width(reloadLabel) / 2.0f, lineOffset, 0xFFFF00, false,
+                                 poseStack.last().pose(), bufferSource, net.minecraft.client.gui.Font.DisplayMode.NORMAL, 0, 15728880);
+            } else if (soldier.isPreparingOrReloading()) {
+                String reloadLabel = "RELOAD";
+                font.drawInBatch(reloadLabel, -font.width(reloadLabel) / 2.0f, lineOffset, 0xFF8800, false,
+                                 poseStack.last().pose(), bufferSource, net.minecraft.client.gui.Font.DisplayMode.NORMAL, 0, 15728880);
+            }
             
             poseStack.popPose();
         }

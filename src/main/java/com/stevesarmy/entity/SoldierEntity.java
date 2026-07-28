@@ -119,6 +119,10 @@ public class SoldierEntity extends PathfinderMob implements Container {
         SynchedEntityData.defineId(SoldierEntity.class, EntityDataSerializers.BLOCK_POS);
     private static final EntityDataAccessor<Boolean> LOW_CROUCHING =
         SynchedEntityData.defineId(SoldierEntity.class, EntityDataSerializers.BOOLEAN);
+    private static final EntityDataAccessor<Boolean> RELOAD_PENDING =
+        SynchedEntityData.defineId(SoldierEntity.class, EntityDataSerializers.BOOLEAN);
+    private static final EntityDataAccessor<Boolean> TACTICAL_RELOADING =
+        SynchedEntityData.defineId(SoldierEntity.class, EntityDataSerializers.BOOLEAN);
     
     private static final EntityDataAccessor<Float> THREAT_DIR_X =
         SynchedEntityData.defineId(SoldierEntity.class, EntityDataSerializers.FLOAT);
@@ -269,6 +273,8 @@ public class SoldierEntity extends PathfinderMob implements Container {
         this.entityData.define(PEEK_STATE, 0);
         this.entityData.define(PEEK_POSITION, BlockPos.ZERO);
         this.entityData.define(LOW_CROUCHING, false);
+        this.entityData.define(RELOAD_PENDING, false);
+        this.entityData.define(TACTICAL_RELOADING, false);
         this.entityData.define(THREAT_DIR_X, 0f);
         this.entityData.define(THREAT_DIR_Y, 0f);
         this.entityData.define(THREAT_DIR_Z, 0f);
@@ -1163,6 +1169,20 @@ public BlockPos getPingMoveTarget() {
     
     public SoldierCombatGoal getCombatGoal() {
         return combatGoal;
+    }
+
+    public boolean isPreparingOrReloading() {
+        return entityData.get(RELOAD_PENDING)
+            || (GunIntegration.isTaczLoaded() && GunIntegration.isReloading(this));
+    }
+
+    public boolean isTacticalReloading() {
+        return entityData.get(TACTICAL_RELOADING);
+    }
+
+    public void setReloadStatus(boolean reloadPending, boolean tacticalReloading) {
+        entityData.set(RELOAD_PENDING, reloadPending);
+        entityData.set(TACTICAL_RELOADING, tacticalReloading);
     }
 
     public CoverTacticalGoal getCoverTacticalGoal() {

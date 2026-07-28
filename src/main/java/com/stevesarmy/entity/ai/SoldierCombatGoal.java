@@ -74,6 +74,10 @@ public class SoldierCombatGoal extends Goal {
     private int findNewTargetLogCounter = 0;
 
     private boolean isSuppressing = false;
+    private boolean reloadPending = false;
+    private boolean tacticalReloadPending = false;
+    private boolean reloadStartRequested = false;
+    private int reloadRetryTicks = 0;
     private BlockPos suppressionTargetPos = null;
     private UUID suppressionTargetUUID = null;
     private SquadThreatIntel.ThreatKnowledge pendingSuppressionThreat = null;
@@ -171,7 +175,7 @@ public class SoldierCombatGoal extends Goal {
             return true;
         }
         if (GunIntegration.isTaczLoaded() && GunIntegration.hasGun(soldier)) {
-            if (GunIntegration.isReloading(soldier)) {
+            if (reloadPending || GunIntegration.isReloading(soldier)) {
                 return true;
             }
             if (GunIntegration.getCurrentAmmo(soldier) == 0) {
@@ -276,6 +280,9 @@ public class SoldierCombatGoal extends Goal {
         }
         
         boolean hasGun = GunIntegration.isTaczLoaded() && GunIntegration.hasGun(soldier);
+        if (!hasGun && reloadPending) {
+            clearReloadStatus();
+        }
         
         if (hasGun) {
             handleGunInitialization();
@@ -301,6 +308,11 @@ public class SoldierCombatGoal extends Goal {
                     findNewTarget();
                 }
             }
+        }
+
+        if (hasGun && tickReloadState()) {
+            updateDebugSync();
+            return;
         }
         
         if (target != null && target.isAlive()) {
@@ -358,13 +370,118 @@ public class SoldierCombatGoal extends Goal {
             lastGunStack = currentGun.copy();
         }
         
-boolean isBolting = GunIntegration.isBolting(soldier);
-        boolean isReloading = GunIntegration.isReloading(soldier);
-        boolean isDrawing = GunIntegration.isDrawing(soldier);
+    }
 
-        if (GunIntegration.getCurrentAmmo(soldier) == 0 && !isReloading && !isBolting && !isDrawing) {
-            GunIntegration.reload(soldier);
+    private boolean tickReloadState() {
+        if (reloadRetryTicks > 0) {
+            reloadRetryTicks--;
         }
+
+        if (GunIntegration.isReloading(soldier)) {
+            reloadPending = false;
+            reloadStartRequested = false;
+            soldier.setReloadStatus(false, tacticalReloadPending);
+            wasReloading = true;
+            return true;
+        }
+
+        if (wasReloading) {
+            GunIntegration.initialData(soldier);
+            GunIntegration.draw(soldier);
+            clearReloadStatus();
+            wasReloading = false;
+            return true;
+        }
+
+        // TaCZ syncs reload state at the end of the entity tick. Confirm the
+        // request on the following tick; otherwise release cover immediately.
+        if (reloadStartRequested) {
+            clearReloadStatus();
+            reloadRetryTicks = 20;
+            return false;
+        }
+
+        if (reloadPending) {
+            if (tacticalReloadPending && isDirectlyEngaging()) {
+                clearReloadStatus();
+                return false;
+            }
+
+            if (isReadyToReload()) {
+                GunIntegration.reload(soldier);
+                reloadStartRequested = true;
+            }
+            return true;
+        }
+
+        if (reloadRetryTicks > 0 || GunIntegration.useInventoryAmmo(soldier)) {
+            return false;
+        }
+
+        if (GunIntegration.getCurrentAmmo(soldier) == 0) {
+            requestReload(false);
+            return reloadPending;
+        }
+
+        if (shouldTacticalReload()) {
+            requestReload(true);
+            return true;
+        }
+
+        return false;
+    }
+
+    private void requestReload(boolean tactical) {
+        if (reloadPending || GunIntegration.isReloading(soldier)
+            || GunIntegration.useInventoryAmmo(soldier)
+            || !GunIntegration.canReload(soldier)) {
+            return;
+        }
+
+        cancelAllSuppression();
+        reloadPending = true;
+        tacticalReloadPending = tactical;
+        soldier.setReloadStatus(true, tactical);
+    }
+
+    private void clearReloadStatus() {
+        reloadPending = false;
+        tacticalReloadPending = false;
+        reloadStartRequested = false;
+        soldier.setReloadStatus(false, false);
+    }
+
+    private boolean isReadyToReload() {
+        if (GunIntegration.isBolting(soldier) || GunIntegration.isDrawing(soldier)
+            || GunIntegration.getShootCoolDown(soldier) != 0) {
+            return false;
+        }
+
+        CoverBehaviorManager coverManager = soldier.getCoverBehaviorManager();
+        return !coverManager.isInCover() || soldier.getPeekController().isHiding();
+    }
+
+    private boolean shouldTacticalReload() {
+        if (GunIntegration.useInventoryAmmo(soldier)
+            || !GunIntegration.canReload(soldier)
+            || !soldier.getCoverBehaviorManager().isInCover() || isDirectlyEngaging()) {
+            return false;
+        }
+
+        int magazineSize = GunIntegration.getMagazineSize(soldier);
+        int currentAmmo = GunIntegration.getCurrentAmmo(soldier);
+        return magazineSize > 0
+            && currentAmmo * 2 < magazineSize
+            && getTotalAmmo() > currentAmmo;
+    }
+
+    private boolean isDirectlyEngaging() {
+        return (target != null && target.isAlive() && TargetAcquisition.hasLineOfSight(soldier, target))
+            || isSuppressing
+            || suppressionTargetPos != null
+            || isPingSuppressing
+            || pingSuppressRemainingTicks > 0
+            || soldier.hasValidPingSuppressPos();
     }
     
     private void tickCombat(boolean hasGun) {
@@ -456,13 +573,6 @@ boolean isBolting = GunIntegration.isBolting(soldier);
                 target != null ? target.getName().getString() + "(" + target.getId() + ")" : "null",
                 target != null ? target.getClass().getSimpleName() : "null",
                 isDrawing, isBolting, isReloading);
-        }
-        
-        if (wasReloading && !isReloading) {
-            GunIntegration.initialData(soldier);
-            GunIntegration.draw(soldier);
-            wasReloading = false;
-            return;
         }
         
         if (isReloading) {
@@ -614,7 +724,7 @@ boolean isBolting = GunIntegration.isBolting(soldier);
                 GunIntegration.bolt(soldier);
                 lastShotNeededBolt = true;
             }
-            case NO_AMMO -> GunIntegration.reload(soldier);
+            case NO_AMMO -> requestReload(false);
             case COOLDOWN -> {}
             case IS_BOLTING, IS_RELOADING, IS_DRAWING -> {}
             case NOT_DRAWN -> GunIntegration.draw(soldier);
@@ -1540,7 +1650,8 @@ boolean isBolting = GunIntegration.isBolting(soldier);
                 if (isSuppressionDebugLogging()) {
                     StevesArmyMod.LOGGER.info("[Suppression] Soldier {} out of ammo, reloading", soldier.getId());
                 }
-                GunIntegration.reload(soldier);
+                requestReload(false);
+                return;
             }
             case IS_RELOADING, IS_BOLTING, IS_DRAWING -> {}
             case NOT_DRAWN -> GunIntegration.draw(soldier);
@@ -1783,7 +1894,7 @@ boolean isBolting = GunIntegration.isBolting(soldier);
                 burstWaitingForBolt = true;
             }
             case NO_AMMO -> {
-                GunIntegration.reload(soldier);
+                requestReload(false);
             }
             case IS_RELOADING, IS_BOLTING, IS_DRAWING -> {}
             case NOT_DRAWN -> GunIntegration.draw(soldier);

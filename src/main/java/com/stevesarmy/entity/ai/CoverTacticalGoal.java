@@ -881,6 +881,16 @@ public class CoverTacticalGoal extends Goal {
     
     private void tickInCover() {
         CoverPoint currentCover = getCoverManager().getCurrentCover();
+        if (soldier.isPreparingOrReloading()) {
+            holdForReload(currentCover);
+            return;
+        }
+
+        if (currentCover != null && currentCover.getType() == CoverType.HALF
+            && soldier.isLowCrouching() && !getCoverManager().isSuppressed()) {
+            soldier.setLowCrouching(false);
+        }
+
         if (currentCover != null) {
             double distance = soldier.position().distanceTo(currentCover.getPosition().getCenter());
             PeekController peekCtrl = getPeekController();
@@ -983,6 +993,25 @@ public class CoverTacticalGoal extends Goal {
         if (reevaluateCounter >= REEVALUATE_INTERVAL_TICKS) {
             reevaluateCounter = 0;
             evaluateCoverState();
+        }
+    }
+
+    private void holdForReload(CoverPoint currentCover) {
+        if (currentCover == null) {
+            return;
+        }
+
+        PeekController peekCtrl = getPeekController();
+        if (peekCtrl.isExposed() || peekCtrl.isMovingToPeek()) {
+            peekCtrl.forceReturnToCover(soldier, currentCover, getPositionController());
+        }
+
+        if (peekCtrl.isReturning()) {
+            peekCtrl.tick(soldier, currentCover, getPositionController());
+        }
+
+        if (currentCover.getType() == CoverType.HALF) {
+            soldier.setLowCrouching(true);
         }
     }
     

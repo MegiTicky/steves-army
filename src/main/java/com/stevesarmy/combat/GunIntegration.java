@@ -35,6 +35,7 @@ public class GunIntegration {
     public static ShootResult shoot(LivingEntity shooter, LivingEntity target) { return gunHandler.shoot(shooter, target); }
     public static ShootResult shootWithDeviation(LivingEntity shooter, ExposureCalculator.AimPointResult aimPoint, float pitchDeviation, float yawDeviation) { return gunHandler.shootWithDeviation(shooter, aimPoint, pitchDeviation, yawDeviation); }
     public static ShootResult shootAtPosition(LivingEntity shooter, Vec3 targetPosition) { return gunHandler.shootAtPosition(shooter, targetPosition); }
+    public static boolean canReload(LivingEntity entity) { return gunHandler.canReload(entity); }
     public static void reload(LivingEntity entity) { gunHandler.reload(entity); }
     public static void bolt(LivingEntity entity) { gunHandler.bolt(entity); }
     public static void aim(LivingEntity entity, boolean isAiming) { gunHandler.aim(entity, isAiming); }
@@ -77,6 +78,7 @@ public class GunIntegration {
         ShootResult shoot(LivingEntity shooter, LivingEntity target);
         ShootResult shootWithDeviation(LivingEntity shooter, ExposureCalculator.AimPointResult aimPoint, float pitchDeviation, float yawDeviation);
         ShootResult shootAtPosition(LivingEntity shooter, Vec3 targetPosition);
+        boolean canReload(LivingEntity entity);
         void reload(LivingEntity entity);
         void bolt(LivingEntity entity);
         void aim(LivingEntity entity, boolean isAiming);
@@ -114,6 +116,7 @@ public class GunIntegration {
         @Override public ShootResult shoot(LivingEntity shooter, LivingEntity target) { return ShootResult.NOT_GUN; }
         @Override public ShootResult shootWithDeviation(LivingEntity shooter, ExposureCalculator.AimPointResult aimPoint, float pitchDeviation, float yawDeviation) { return ShootResult.NOT_GUN; }
         @Override public ShootResult shootAtPosition(LivingEntity shooter, Vec3 targetPosition) { return ShootResult.NOT_GUN; }
+        @Override public boolean canReload(LivingEntity entity) { return false; }
         @Override public void reload(LivingEntity entity) {}
         @Override public void bolt(LivingEntity entity) {}
         @Override public void aim(LivingEntity entity, boolean isAiming) {}
@@ -361,6 +364,28 @@ public class GunIntegration {
                 }
             } catch (Exception e) {
                 StevesArmyMod.LOGGER.debug("[TaCZ] Failed to send 3p sound: {}", e.getMessage());
+            }
+        }
+
+        @Override
+        public boolean canReload(LivingEntity entity) {
+            if (!hasGun(entity)) return false;
+            try {
+                ItemStack gunStack = entity.getMainHandItem();
+                Class<?> iGunClass = Class.forName("com.tacz.guns.api.item.IGun");
+                Method getIGunOrNull = iGunClass.getMethod("getIGunOrNull", ItemStack.class);
+                Object iGun = getIGunOrNull.invoke(null, gunStack);
+                if (iGun == null) return false;
+
+                Class<?> abstractGunItemClass = Class.forName("com.tacz.guns.api.item.gun.AbstractGunItem");
+                if (!abstractGunItemClass.isInstance(iGun)) return false;
+                Method canReloadMethod = abstractGunItemClass.getMethod("canReload", LivingEntity.class, ItemStack.class);
+                return (boolean) canReloadMethod.invoke(iGun, entity, gunStack);
+            } catch (Exception e) {
+                if (DiagnosticLogManager.isDamageLoggingEnabled()) {
+                    StevesArmyMod.LOGGER.warn("[TaCZ] canReload failed: {}", e.getMessage());
+                }
+                return false;
             }
         }
 
