@@ -1003,10 +1003,11 @@ public class CoverTacticalGoal extends Goal {
 
         PeekController peekCtrl = getPeekController();
         if (peekCtrl.isExposed() || peekCtrl.isMovingToPeek()) {
-            peekCtrl.forceReturnToCover(soldier, currentCover, getPositionController());
+            peekCtrl.forceReturnToCoverDuringReload(soldier, currentCover, getPositionController());
         }
 
         if (peekCtrl.isReturning()) {
+            peekCtrl.forceReturnToCoverDuringReload(soldier, currentCover, getPositionController());
             peekCtrl.tick(soldier, currentCover, getPositionController());
         }
 
@@ -2093,6 +2094,15 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
                 boolean dwellMet = dwellTime >= minDwell;
                 boolean maxDwellReached = dwellTime >= maxDwell && recovered && !peeking;
                 boolean canAdvance = dwellMet && recovered && !peeking;
+
+                // The next bound must begin from cover. A delayed peek ducks back
+                // at maximum dwell instead of blocking attack progression forever.
+                if (dwellTime >= maxDwell && recovered && peeking) {
+                    if (!peekCtrl.isReturning()) {
+                        peekCtrl.forceReturnToCover(soldier, currentCover, getPositionController());
+                    }
+                    break;
+                }
 
                 if (attackDebugLog() && dwellMet && (!recovered || peeking)) {
                     StevesArmyMod.LOGGER.info("[AttackPhase] Soldier {} dwell met but blocked: recovered={}, peeking={}, suppression={}",

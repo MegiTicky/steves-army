@@ -47,6 +47,7 @@ public class PeekController {
     private int peekCountSameCover = 0;
     private BlockPos lastCoverPosition = null;
     private long currentMaxExposureTime = 3000;
+    private boolean returnAllowedDuringReload;
     
     private long getRandomExposureTime() {
         return EXPOSURE_TIME_MIN_MS + (long)(Math.random() * (EXPOSURE_TIME_MAX_MS - EXPOSURE_TIME_MIN_MS));
@@ -80,6 +81,7 @@ public class PeekController {
         setState(soldier, State.HIDING);
         stateStartTime = 0;
         currentPeekPos = null;
+        returnAllowedDuringReload = false;
         nonPeekableTicks = 0;
         currentMaxExposureTime = getRandomExposureTime();
     }
@@ -88,6 +90,7 @@ public class PeekController {
         state = State.HIDING;
         stateStartTime = 0;
         currentPeekPos = null;
+        returnAllowedDuringReload = false;
         nonPeekableTicks = 0;
         currentMaxExposureTime = getRandomExposureTime();
     }
@@ -147,7 +150,24 @@ public class PeekController {
 
     public void forceReturnToCover(SoldierEntity soldier, CoverPoint cover, CoverPositionController mover) {
         if (cover == null || state == State.HIDING || state == State.RETURNING_TO_COVER) return;
-        enterReturning(soldier, cover, mover);
+        enterReturning(soldier, cover, mover, false);
+    }
+
+    /** Allows the full-cover duck-back to complete while reload blocks all other movement. */
+    public void forceReturnToCoverDuringReload(SoldierEntity soldier, CoverPoint cover, CoverPositionController mover) {
+        if (cover == null || state == State.HIDING) return;
+
+        if (state == State.RETURNING_TO_COVER) {
+            returnAllowedDuringReload = true;
+            if (cover.getType() == CoverType.FULL) {
+                coverReturnTarget = CoverTacticalGoal.getCoverStandingPositionStatic(cover.getPosition());
+                mover.returnToCoverDuringReload(coverReturnTarget, RETURN_TOLERANCE, RETURN_SPEED,
+                    "PeekController", "return to cover during reload");
+            }
+            return;
+        }
+
+        enterReturning(soldier, cover, mover, true);
     }
 
     private void tickHiding(SoldierEntity soldier, CoverPoint cover, CoverPositionController mover) {
@@ -266,12 +286,12 @@ public class PeekController {
     private void tickExposed(SoldierEntity soldier, CoverPoint cover, CoverPositionController mover) {
         long timeInState = getTimeInCurrentState();
 
-        if (cover.getType() != CoverType.HALF && timeInState > currentMaxExposureTime) {
+        if (timeInState > currentMaxExposureTime) {
             if (CoverTacticalGoal.isDebugLoggingEnabled()) {
                 StevesArmyMod.LOGGER.info("[PeekController] Soldier {} exposure time exceeded ({}ms), ducking back",
                     soldier.getId(), currentMaxExposureTime);
             }
-            enterReturning(soldier, cover, mover);
+            enterReturning(soldier, cover, mover, false);
             return;
         }
 
@@ -281,7 +301,7 @@ public class PeekController {
                 StevesArmyMod.LOGGER.info("[PeekController] Soldier {} target dead, ducking back sooner",
                     soldier.getId());
             }
-            enterReturning(soldier, cover, mover);
+            enterReturning(soldier, cover, mover, false);
             return;
         }
 
@@ -290,7 +310,7 @@ public class PeekController {
                 StevesArmyMod.LOGGER.info("[PeekController] Soldier {} suppressed while exposed, ducking back",
                     soldier.getId());
             }
-            enterReturning(soldier, cover, mover);
+            enterReturning(soldier, cover, mover, false);
             return;
         }
     }
@@ -299,6 +319,7 @@ public class PeekController {
         if (cover == null) {
             setState(soldier, State.HIDING);
             stateStartTime = 0;
+            returnAllowedDuringReload = false;
             return;
         }
 
@@ -325,8 +346,13 @@ public class PeekController {
         } else if (result == CoverPositionController.MovementResult.NONE) {
             // Not moving — start return
             coverReturnTarget = CoverTacticalGoal.getCoverStandingPositionStatic(cover.getPosition());
-            mover.returnToCoverDuringReload(coverReturnTarget, RETURN_TOLERANCE, RETURN_SPEED,
-                "PeekController", "return to cover");
+            if (returnAllowedDuringReload) {
+                mover.returnToCoverDuringReload(coverReturnTarget, RETURN_TOLERANCE, RETURN_SPEED,
+                    "PeekController", "return to cover during reload");
+            } else {
+                mover.moveTo(coverReturnTarget, RETURN_TOLERANCE, RETURN_SPEED,
+                    "PeekController", "return to cover");
+            }
         }
         // IN_PROGRESS — wait
     }
@@ -353,9 +379,11 @@ public class PeekController {
         }
     }
 
-    private void enterReturning(SoldierEntity soldier, CoverPoint cover, CoverPositionController mover) {
+    private void enterReturning(SoldierEntity soldier, CoverPoint cover, CoverPositionController mover,
+                                boolean allowDuringReload) {
         setState(soldier, State.RETURNING_TO_COVER);
         stateStartTime = System.currentTimeMillis();
+        returnAllowedDuringReload = allowDuringReload;
         
         boolean isHalf = cover.getType() == CoverType.HALF;
         if (isHalf) {
@@ -364,8 +392,13 @@ public class PeekController {
         } else {
             // Full cover: start slide movement back to cover position
             coverReturnTarget = CoverTacticalGoal.getCoverStandingPositionStatic(cover.getPosition());
-            mover.returnToCoverDuringReload(coverReturnTarget, RETURN_TOLERANCE, RETURN_SPEED,
-                "PeekController", "return to cover");
+            if (allowDuringReload) {
+                mover.returnToCoverDuringReload(coverReturnTarget, RETURN_TOLERANCE, RETURN_SPEED,
+                    "PeekController", "return to cover during reload");
+            } else {
+                mover.moveTo(coverReturnTarget, RETURN_TOLERANCE, RETURN_SPEED,
+                    "PeekController", "return to cover");
+            }
         }
         
         soldier.refreshDimensions();
@@ -382,6 +415,7 @@ public class PeekController {
         setState(soldier, State.HIDING);
         stateStartTime = 0;
         currentPeekPos = null;
+        returnAllowedDuringReload = false;
         soldier.refreshDimensions();
         
         if (CoverTacticalGoal.isDebugLoggingEnabled()) {
