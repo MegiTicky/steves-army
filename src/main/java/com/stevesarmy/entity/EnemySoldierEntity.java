@@ -21,7 +21,11 @@ import net.minecraft.world.entity.ai.goal.LookAtPlayerGoal;
 import net.minecraft.world.entity.ai.goal.OpenDoorGoal;
 import net.minecraft.world.entity.ai.goal.RandomLookAroundGoal;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.InteractionResult;
+import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.ArmorItem;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
@@ -126,6 +130,64 @@ public class EnemySoldierEntity extends SoldierEntity {
         if (other == this) return false;
         if (other instanceof EnemySoldierEntity) return true;
         return false;
+    }
+
+    @Override
+    public InteractionResult mobInteract(Player player, InteractionHand hand) {
+        ItemStack mainHandStack = player.getMainHandItem();
+        ItemStack equipmentStack = player.getOffhandItem();
+        boolean hasEmptyMainHand = mainHandStack.isEmpty();
+        boolean isSneaking = player.isShiftKeyDown();
+        boolean equippingGun = GunIntegration.isGun(equipmentStack);
+        EquipmentSlot equipmentSlot = equippingGun ? EquipmentSlot.MAINHAND : getArmorSlot(equipmentStack);
+
+        StevesArmyMod.LOGGER.info("[EnemyEquipment] Interaction: side={}, enemy={}, player={}, hand={}, sneaking={}, mainHand={}, offHand={}, offHandGun={}, armorSlot={}",
+            this.level().isClientSide ? "client" : "server", this.getId(), player.getGameProfile().getName(), hand,
+            isSneaking, mainHandStack, equipmentStack, equippingGun, equipmentSlot);
+
+        // The equipped item is always read from the offhand. An empty main hand prevents
+        // TaCZ from treating the configuration gesture as an attempt to aim or fire.
+        if (!isSneaking || !hasEmptyMainHand || equipmentSlot == null) {
+            StevesArmyMod.LOGGER.info("[EnemyEquipment] Ignored: sneaking={}, emptyMainHand={}, validEquipment={}",
+                isSneaking, hasEmptyMainHand, equipmentSlot != null);
+            return super.mobInteract(player, hand);
+        }
+
+        if (!this.level().isClientSide) {
+            ItemStack replacedStack = getItemBySlot(equipmentSlot).copy();
+            if (equippingGun) {
+                // TaCZ keeps reload state on the shooter, so stop it before the old gun leaves the hand.
+                GunIntegration.cancelReload(this);
+                GunIntegration.aim(this, false);
+            }
+            setItemSlot(equipmentSlot, equipmentStack.copyWithCount(1));
+            if (equippingGun) {
+                GunIntegration.initialData(this);
+                GunIntegration.draw(this);
+            }
+
+            if (!player.getAbilities().instabuild) {
+                equipmentStack.shrink(1);
+            }
+
+            if (!replacedStack.isEmpty() && !player.getInventory().add(replacedStack)) {
+                player.drop(replacedStack, false);
+            }
+
+            StevesArmyMod.LOGGER.info("[EnemyEquipment] Equipped: enemy={}, slot={}, newItem={}, replacedItem={}, creative={}",
+                this.getId(), equipmentSlot, getItemBySlot(equipmentSlot), replacedStack, player.getAbilities().instabuild);
+        }
+
+        return InteractionResult.sidedSuccess(this.level().isClientSide);
+    }
+
+    private EquipmentSlot getArmorSlot(ItemStack stack) {
+        if (!(stack.getItem() instanceof ArmorItem armorItem)) {
+            return null;
+        }
+
+        EquipmentSlot slot = armorItem.getEquipmentSlot();
+        return slot.getType() == EquipmentSlot.Type.ARMOR ? slot : null;
     }
 
     @Override

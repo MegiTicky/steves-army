@@ -31,12 +31,23 @@ public class GunIntegration {
     }
 
     public static boolean isTaczLoaded() { return taczLoaded; }
+    public static boolean isGun(ItemStack stack) {
+        if (!taczLoaded || stack.isEmpty()) return false;
+        try {
+            Class<?> gunInterface = Class.forName("com.tacz.guns.api.item.IGun");
+            Method getIGunOrNull = gunInterface.getMethod("getIGunOrNull", ItemStack.class);
+            return getIGunOrNull.invoke(null, stack) != null;
+        } catch (Exception e) {
+            return false;
+        }
+    }
     public static boolean hasGun(LivingEntity entity) { return gunHandler.hasGun(entity); }
     public static ShootResult shoot(LivingEntity shooter, LivingEntity target) { return gunHandler.shoot(shooter, target); }
     public static ShootResult shootWithDeviation(LivingEntity shooter, ExposureCalculator.AimPointResult aimPoint, float pitchDeviation, float yawDeviation) { return gunHandler.shootWithDeviation(shooter, aimPoint, pitchDeviation, yawDeviation); }
     public static ShootResult shootAtPosition(LivingEntity shooter, Vec3 targetPosition) { return gunHandler.shootAtPosition(shooter, targetPosition); }
     public static boolean canReload(LivingEntity entity) { return gunHandler.canReload(entity); }
     public static void reload(LivingEntity entity) { gunHandler.reload(entity); }
+    public static void cancelReload(LivingEntity entity) { gunHandler.cancelReload(entity); }
     public static void bolt(LivingEntity entity) { gunHandler.bolt(entity); }
     public static void aim(LivingEntity entity, boolean isAiming) { gunHandler.aim(entity, isAiming); }
     public static boolean isBolting(LivingEntity entity) { return gunHandler.isBolting(entity); }
@@ -80,6 +91,7 @@ public class GunIntegration {
         ShootResult shootAtPosition(LivingEntity shooter, Vec3 targetPosition);
         boolean canReload(LivingEntity entity);
         void reload(LivingEntity entity);
+        void cancelReload(LivingEntity entity);
         void bolt(LivingEntity entity);
         void aim(LivingEntity entity, boolean isAiming);
         boolean isBolting(LivingEntity entity);
@@ -118,6 +130,7 @@ public class GunIntegration {
         @Override public ShootResult shootAtPosition(LivingEntity shooter, Vec3 targetPosition) { return ShootResult.NOT_GUN; }
         @Override public boolean canReload(LivingEntity entity) { return false; }
         @Override public void reload(LivingEntity entity) {}
+        @Override public void cancelReload(LivingEntity entity) {}
         @Override public void bolt(LivingEntity entity) {}
         @Override public void aim(LivingEntity entity, boolean isAiming) {}
         @Override public boolean isBolting(LivingEntity entity) { return false; }
@@ -456,6 +469,19 @@ public class GunIntegration {
                 }
             } catch (Exception e) {
                 StevesArmyMod.LOGGER.warn("[TaCZ] Reload failed", e);
+            }
+        }
+
+        @Override
+        public void cancelReload(LivingEntity entity) {
+            if (!hasGun(entity)) return;
+            try {
+                Class<?> gunOperatorClass = Class.forName("com.tacz.guns.api.entity.IGunOperator");
+                Method fromLivingEntity = gunOperatorClass.getMethod("fromLivingEntity", LivingEntity.class);
+                Object gunOperator = fromLivingEntity.invoke(null, entity);
+                gunOperatorClass.getMethod("cancelReload").invoke(gunOperator);
+            } catch (Exception e) {
+                StevesArmyMod.LOGGER.warn("[TaCZ] Failed to cancel reload during gun swap: {}", e.toString());
             }
         }
 
