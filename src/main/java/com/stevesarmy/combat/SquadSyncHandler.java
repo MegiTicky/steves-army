@@ -22,9 +22,7 @@ public class SquadSyncHandler {
 
         for (ServerPlayer player : event.getServer().getPlayerList().getPlayers()) {
             SquadStatusSyncPacket packet = SquadStatusSyncPacket.createForPlayer(player);
-            if (!packet.getEntries().isEmpty()) {
-                NetworkHandler.sendTo(player, packet);
-            }
+            NetworkHandler.sendTo(player, packet);
         }
     }
 }

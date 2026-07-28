@@ -96,6 +96,16 @@ public class FireTeamAssignment extends SavedData {
         setDirty();
     }
 
+    public void removeSoldier(UUID soldierId) {
+        boolean removed = false;
+        for (List<UUID> list : teams.values()) {
+            removed |= list.remove(soldierId);
+        }
+        if (removed) {
+            setDirty();
+        }
+    }
+
     /**
      * Evenly distributes each exact main-hand item type, then uses soldier positions to
      * keep the members assigned to each team close together wherever those quotas allow.

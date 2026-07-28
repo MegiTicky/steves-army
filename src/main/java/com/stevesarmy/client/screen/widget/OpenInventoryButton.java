@@ -35,7 +35,8 @@ public class OpenInventoryButton implements SquadControlWidget {
         graphics.fill(x, y, x + 1, y + HEIGHT, borderColor);
         graphics.fill(x + WIDTH - 1, y, x + WIDTH, y + HEIGHT, borderColor);
 
-        graphics.drawString(font, Component.literal("Inventory"), x + 2, y + 2, textColor, false);
+        String label = "Inventory";
+        graphics.drawString(font, Component.literal(label), x + (WIDTH - font.width(label)) / 2, y + 2, textColor, false);
     }
 
     @Override
