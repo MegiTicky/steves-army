@@ -325,7 +325,8 @@ public class PeekController {
         } else if (result == CoverPositionController.MovementResult.NONE) {
             // Not moving — start return
             coverReturnTarget = CoverTacticalGoal.getCoverStandingPositionStatic(cover.getPosition());
-            mover.moveTo(coverReturnTarget, RETURN_TOLERANCE, RETURN_SPEED, "PeekController", "return to cover");
+            mover.returnToCoverDuringReload(coverReturnTarget, RETURN_TOLERANCE, RETURN_SPEED,
+                "PeekController", "return to cover");
         }
         // IN_PROGRESS — wait
     }
@@ -363,7 +364,8 @@ public class PeekController {
         } else {
             // Full cover: start slide movement back to cover position
             coverReturnTarget = CoverTacticalGoal.getCoverStandingPositionStatic(cover.getPosition());
-            mover.moveTo(coverReturnTarget, RETURN_TOLERANCE, RETURN_SPEED, "PeekController", "return to cover");
+            mover.returnToCoverDuringReload(coverReturnTarget, RETURN_TOLERANCE, RETURN_SPEED,
+                "PeekController", "return to cover");
         }
         
         soldier.refreshDimensions();

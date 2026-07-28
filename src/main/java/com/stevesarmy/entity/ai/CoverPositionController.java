@@ -1,6 +1,7 @@
 package com.stevesarmy.entity.ai;
 
 import com.stevesarmy.StevesArmyMod;
+import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.util.HazardBlockHelper;
 import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.ai.control.MoveControl;
@@ -25,6 +26,8 @@ public class CoverPositionController extends MoveControl {
     private String debugMoveSource = "none";
     private String debugMoveReason = "";
     private Vec3 debugLastSetVelocity = Vec3.ZERO;
+    // Reloading only permits the full-cover duck-back movement.
+    private boolean controlledReturnToCover;
 
     public CoverPositionController(Mob mob) {
         super(mob);
@@ -35,6 +38,22 @@ public class CoverPositionController extends MoveControl {
     }
 
     public void moveTo(Vec3 pos, double tolerance, double speed, String source, String reason) {
+        if (isPreparingOrReloading()) {
+            if (!controlledReturnToCover) {
+                stopForReload();
+                this.lastResult = MovementResult.FAILED;
+            }
+            return;
+        }
+        beginMove(pos, tolerance, speed, source, reason, false);
+    }
+
+    public void returnToCoverDuringReload(Vec3 pos, double tolerance, double speed, String source, String reason) {
+        beginMove(pos, tolerance, speed, source, reason, true);
+    }
+
+    private void beginMove(Vec3 pos, double tolerance, double speed, String source, String reason,
+                           boolean controlledReturn) {
         // Reject movement that would enter a hazard, but allow escape if already inside one
         if (HazardBlockHelper.sweptPathCrossesHazard(this.mob, this.mob.position(), pos)) {
             boolean alreadyInside = HazardBlockHelper.boundingBoxOverlapsHazard(this.mob.level(), this.mob.getBoundingBox());
@@ -43,6 +62,7 @@ public class CoverPositionController extends MoveControl {
                     ((net.minecraft.world.entity.LivingEntity)this.mob).getId(),
                     pos.x, pos.y, pos.z);
                 this.lastResult = MovementResult.FAILED;
+                this.controlledReturnToCover = false;
                 return;
             }
         }
@@ -52,6 +72,7 @@ public class CoverPositionController extends MoveControl {
         this.targetSpeed = speed;
         this.lastResult = MovementResult.IN_PROGRESS;
         this.stuckTicks = 0;
+        this.controlledReturnToCover = controlledReturn;
 
         this.setWantedPosition(pos.x, pos.y, pos.z, speed);
 
@@ -65,11 +86,18 @@ public class CoverPositionController extends MoveControl {
 
     public void clear() {
         this.lastResult = MovementResult.NONE;
+        this.controlledReturnToCover = false;
         this.operation = MoveControl.Operation.WAIT;
         this.mob.getNavigation().stop();
         this.mob.setZza(0.0F);
         this.mob.setXxa(0.0F);
         this.mob.setDeltaMovement(0, this.mob.getDeltaMovement().y, 0);
+    }
+
+    public void stopForReload() {
+        if (!controlledReturnToCover) {
+            clear();
+        }
     }
 
     public Vec3 getDebugTargetPos() {
@@ -86,6 +114,14 @@ public class CoverPositionController extends MoveControl {
 
     @Override
     public void tick() {
+        if (isPreparingOrReloading() && !controlledReturnToCover) {
+            clear();
+            this.debugMoveSource = "reload";
+            this.debugMoveReason = "movement held while reloading";
+            this.debugLastSetVelocity = Vec3.ZERO;
+            return;
+        }
+
         if (lastResult != MovementResult.IN_PROGRESS) {
             super.tick();
             this.debugLastSetVelocity = this.mob.getDeltaMovement();
@@ -97,6 +133,7 @@ public class CoverPositionController extends MoveControl {
         if (StevesArmyMod.teleportOnlyMode) {
             mob.moveTo(targetPos.x, targetPos.y, targetPos.z, mob.getYRot(), mob.getXRot());
             lastResult = MovementResult.REACHED_TARGET;
+            controlledReturnToCover = false;
             return;
         }
 
@@ -112,6 +149,7 @@ public class CoverPositionController extends MoveControl {
             this.mob.setDeltaMovement(0, this.mob.getDeltaMovement().y, 0);
             this.debugLastSetVelocity = Vec3.ZERO;
             lastResult = MovementResult.REACHED_TARGET;
+            controlledReturnToCover = false;
             return;
         }
 
@@ -121,6 +159,7 @@ public class CoverPositionController extends MoveControl {
             stuckTicks++;
             if (stuckTicks > 40) {
                 lastResult = MovementResult.FAILED;
+                controlledReturnToCover = false;
                 return;
             }
         } else {
@@ -132,5 +171,9 @@ public class CoverPositionController extends MoveControl {
 
         super.tick();
         this.debugLastSetVelocity = this.mob.getDeltaMovement();
+    }
+
+    private boolean isPreparingOrReloading() {
+        return this.mob instanceof SoldierEntity soldier && soldier.isPreparingOrReloading();
     }
 }

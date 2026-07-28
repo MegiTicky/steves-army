@@ -1,6 +1,7 @@
 package com.stevesarmy.entity.ai;
 
 import com.stevesarmy.compat.VS2Compat;
+import com.stevesarmy.entity.SoldierEntity;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.Mob;
@@ -29,6 +30,10 @@ public class SoldierGroundNavigation extends GroundPathNavigation {
 
     @Override
     public boolean moveTo(double x, double y, double z, double speedModifier) {
+        if (isPreparingOrReloading()) {
+            this.stop();
+            return false;
+        }
         if (VS2Compat.shouldRejectNavigation(this.level, BlockPos.containing(x, y, z))) {
             this.stop();
             return false;
@@ -38,6 +43,10 @@ public class SoldierGroundNavigation extends GroundPathNavigation {
 
     @Override
     public boolean moveTo(Entity entity, double speedModifier) {
+        if (isPreparingOrReloading()) {
+            this.stop();
+            return false;
+        }
         if (VS2Compat.shouldRejectNavigation(entity)) {
             this.stop();
             return false;
@@ -47,6 +56,10 @@ public class SoldierGroundNavigation extends GroundPathNavigation {
 
     @Override
     public boolean moveTo(Path path, double speedModifier) {
+        if (isPreparingOrReloading()) {
+            this.stop();
+            return false;
+        }
         if (path != null) {
             for (int index = 0; index < path.getNodeCount(); index++) {
                 if (VS2Compat.shouldRejectNavigation(this.level, path.getNode(index).asBlockPos())) {
@@ -56,5 +69,9 @@ public class SoldierGroundNavigation extends GroundPathNavigation {
             }
         }
         return super.moveTo(path, speedModifier);
+    }
+
+    private boolean isPreparingOrReloading() {
+        return this.mob instanceof SoldierEntity soldier && soldier.isPreparingOrReloading();
     }
 }

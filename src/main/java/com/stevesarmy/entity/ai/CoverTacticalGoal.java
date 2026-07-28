@@ -133,6 +133,7 @@ public class CoverTacticalGoal extends Goal {
     
     private CoverPoint pendingRetryCover = null;
     private boolean isRetryAttempt = false;
+    private boolean reloadHoldActive;
 
     private CoverFinder.ScoredCover[] cachedTopCovers = new CoverFinder.ScoredCover[0];
     private BlockPos debugSearchCenter = null;
@@ -534,6 +535,21 @@ public class CoverTacticalGoal extends Goal {
         soldier.syncThreatDirection(threatDir);
         
         PeekController peekCtrl = getPeekController();
+
+        // Reloading owns movement. The only exception is the controlled
+        // full-cover return below, so attack and cover relocation cannot carry
+        // a low-crouching soldier away from its cover.
+        if (soldier.isPreparingOrReloading()) {
+            reloadHoldActive = true;
+            holdForReload(getCoverManager().getCurrentCover());
+            populateCoverDebugData();
+            return;
+        }
+
+        if (reloadHoldActive) {
+            reloadHoldActive = false;
+            resumeMovementAfterReload();
+        }
 
         if (state != CoverBehaviorManager.CoverState.SEEKING_COVER) {
             seekingTicks = 0;
@@ -980,6 +996,8 @@ public class CoverTacticalGoal extends Goal {
 
     private void holdForReload(CoverPoint currentCover) {
         if (currentCover == null) {
+            soldier.setLowCrouching(false);
+            soldier.holdMovementForReload();
             return;
         }
 
@@ -994,6 +1012,24 @@ public class CoverTacticalGoal extends Goal {
 
         if (currentCover.getType() == CoverType.HALF) {
             soldier.setLowCrouching(true);
+        } else {
+            soldier.setLowCrouching(false);
+        }
+
+        soldier.holdMovementForReload();
+    }
+
+    private void resumeMovementAfterReload() {
+        CoverBehaviorManager.CoverState state = getCoverManager().getState();
+        if (state != CoverBehaviorManager.CoverState.SEEKING_COVER &&
+            state != CoverBehaviorManager.CoverState.REPOSITIONING) {
+            return;
+        }
+
+        soldier.setLowCrouching(false);
+        CoverPoint targetCover = getCoverManager().getTargetCover();
+        if (targetCover != null) {
+            moveToCover(targetCover);
         }
     }
     

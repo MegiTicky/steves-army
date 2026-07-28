@@ -762,6 +762,7 @@ public class SoldierEntity extends PathfinderMob implements Container {
         
         if (!this.level().isClientSide) {
             threatAwareness.tick();
+            holdMovementForReload();
         }
 
         // Enforce the server-synced posture every tick to fight vanilla pose overrides.
@@ -1371,6 +1372,19 @@ public BlockPos getPingMoveTarget() {
     public void cancelCoverMovement() {
         if (moveControl instanceof com.stevesarmy.entity.ai.CoverPositionController ctrl) {
             ctrl.clear();
+        }
+    }
+
+    /** Stops ordinary movement while a reload is pending or active. */
+    public void holdMovementForReload() {
+        if (!isPreparingOrReloading()) {
+            return;
+        }
+
+        this.getNavigation().stop();
+        if (moveControl instanceof com.stevesarmy.entity.ai.CoverPositionController ctrl) {
+            // A tactical goal may deliberately preserve a full-cover duck-back.
+            ctrl.stopForReload();
         }
     }
 }
