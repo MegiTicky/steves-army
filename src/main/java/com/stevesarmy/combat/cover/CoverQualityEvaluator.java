@@ -1,6 +1,7 @@
 package com.stevesarmy.combat.cover;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.block.state.BlockState;
@@ -90,14 +91,17 @@ public class CoverQualityEvaluator {
             }
         }
 
-        CoverType type = determineType(waistCovered, eyeCovered, anyBlocked);
+        Direction threatBlockDirection = CoverFinder.getDirectionFromVector(threatDir);
+        float coverHeight = coverPoint.getCoverHeight(threatBlockDirection);
+        CoverType type = coverHeight < 0.8f
+            ? CoverType.CONCEALMENT
+            : determineType(waistCovered, eyeCovered, anyBlocked);
         coverPoint.setType(type);
 
         coverPoint.setCanShootFrom(determineCanShoot(type, allEyeBlocked));
 
         coverPoint.setQuality(type.getBaseQuality());
 
-        float coverHeight = estimateCoverHeight(type);
         coverPoint.setCoverHeight(coverHeight);
 
         if (scoreLogging) {
@@ -173,15 +177,6 @@ public class CoverQualityEvaluator {
         if (type == CoverType.HALF) return true;
         if (type == CoverType.FULL) return !allEyeBlocked;
         return false;
-    }
-
-    private float estimateCoverHeight(CoverType type) {
-        switch (type) {
-            case FULL: return 2.0f;
-            case HALF: return 1.0f;
-            case CONCEALMENT: return 0.5f;
-            default: return 0.0f;
-        }
     }
 
     public boolean isDirectionProtected(CoverPoint coverPoint, Vec3 threatDirection) {

@@ -3,6 +3,8 @@ package com.stevesarmy.combat.cover;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.entity.LivingEntity;
+import java.util.EnumMap;
+import java.util.Map;
 import java.util.Set;
 
 public class CoverPoint {
@@ -13,6 +15,7 @@ public class CoverPoint {
     private Set<Direction> protectedDirections;
     private boolean canShootFrom;
     private float coverHeight;
+    private final Map<Direction, Float> coverHeights;
     private LivingEntity reservedBy;
     private String debugInfo;
 
@@ -24,6 +27,7 @@ public class CoverPoint {
         this.protectedDirections = Set.of();
         this.canShootFrom = false;
         this.coverHeight = 0.0f;
+        this.coverHeights = new EnumMap<>(Direction.class);
         this.reservedBy = null;
         this.debugInfo = "";
     }
@@ -78,6 +82,14 @@ public class CoverPoint {
 
     public void setCoverHeight(float height) {
         this.coverHeight = height;
+    }
+
+    public void setCoverHeight(Direction direction, float height) {
+        coverHeights.put(direction, height);
+    }
+
+    public float getCoverHeight(Direction direction) {
+        return coverHeights.getOrDefault(direction, 0.0f);
     }
 
     public LivingEntity getReservedBy() {

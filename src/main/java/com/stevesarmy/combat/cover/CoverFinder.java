@@ -19,6 +19,8 @@ import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.squad.SquadCoverContext;
 
 public class CoverFinder {
+    private static final float MIN_EFFECTIVE_COVER_HEIGHT = 0.8f;
+    private static final float STANDING_EYE_HEIGHT = 1.6f;
     private static final int DEFAULT_SEARCH_RADIUS = 12;
     private static final int MAX_SEARCH_RADIUS = 24;
     private static final int MAX_COVER_POINTS = 50;
@@ -877,10 +879,13 @@ return qualityScore + shootBonus - distancePenalty;
         
         Set<Direction> protectedDirs = new HashSet<>();
         Map<Direction, Float> coverHeights = new EnumMap<>(Direction.class);
+        float maxMeasuredHeight = 0.0f;
         
         for (Direction horizontal : Direction.Plane.HORIZONTAL) {
             float coverHeight = calculateCoverHeight(pos, horizontal);
-            if (coverHeight >= 0.4f) {
+            coverPoint.setCoverHeight(horizontal, coverHeight);
+            maxMeasuredHeight = Math.max(maxMeasuredHeight, coverHeight);
+            if (coverHeight >= MIN_EFFECTIVE_COVER_HEIGHT) {
                 protectedDirs.add(horizontal);
                 coverHeights.put(horizontal, coverHeight);
             }
@@ -889,8 +894,15 @@ return qualityScore + shootBonus - distancePenalty;
         coverPoint.setProtectedDirections(protectedDirs);
         
         if (protectedDirs.isEmpty()) {
-            coverPoint.setType(CoverType.NONE);
-            coverPoint.setQuality(0.0f);
+            coverPoint.setCoverHeight(maxMeasuredHeight);
+            if (maxMeasuredHeight > 0.0f) {
+                coverPoint.setType(CoverType.CONCEALMENT);
+                coverPoint.setQuality(CoverType.CONCEALMENT.getBaseQuality());
+                coverPoint.setDebugInfo(String.format("Height: %.2f | Concealment only", maxMeasuredHeight));
+            } else {
+                coverPoint.setType(CoverType.NONE);
+                coverPoint.setQuality(0.0f);
+            }
             return coverPoint;
         }
         
@@ -905,7 +917,7 @@ return qualityScore + shootBonus - distancePenalty;
             coverPoint.setCoverHeight(maxHeight);
             coverPoint.setType(determineCoverType(maxHeight));
             coverPoint.setQuality(calculateGenericQuality(maxHeight, protectedDirs.size()));
-            coverPoint.setCanShootFrom(maxHeight >= 0.4f && maxHeight < 1.5f);
+            coverPoint.setCanShootFrom(maxHeight >= MIN_EFFECTIVE_COVER_HEIGHT && maxHeight < STANDING_EYE_HEIGHT);
             coverPoint.setDebugInfo(String.format("Height: %.2f | Dirs: %d | No threat", maxHeight, protectedDirs.size()));
         }
         
@@ -1042,9 +1054,9 @@ return qualityScore + shootBonus - distancePenalty;
     }
     
     private CoverType determineCoverType(float coverHeight) {
-        if (coverHeight >= 1.5f) {
+        if (coverHeight >= STANDING_EYE_HEIGHT) {
             return CoverType.FULL;
-        } else if (coverHeight >= 0.4f) {
+        } else if (coverHeight >= MIN_EFFECTIVE_COVER_HEIGHT) {
             return CoverType.HALF;
         } else if (coverHeight > 0.0f) {
             return CoverType.CONCEALMENT;

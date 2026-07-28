@@ -66,10 +66,11 @@ public class CoverBehaviorManager {
                 soldier.syncCoverCurrent(
                     currentCover.getPosition(),
                     currentCover.getType().ordinal(),
-                    currentCover.getCombatScore()
+                    currentCover.getCombatScore(),
+                    currentCover.getCoverHeight()
                 );
             } else {
-                soldier.syncCoverCurrent(BlockPos.ZERO, 0, 0f);
+                soldier.syncCoverCurrent(BlockPos.ZERO, 0, 0f, 0f);
             }
         }
     }

@@ -103,6 +103,8 @@ public class SoldierEntity extends PathfinderMob implements Container {
         SynchedEntityData.defineId(SoldierEntity.class, EntityDataSerializers.INT);
     private static final EntityDataAccessor<Float> COVER_CURRENT_QUALITY =
         SynchedEntityData.defineId(SoldierEntity.class, EntityDataSerializers.FLOAT);
+    private static final EntityDataAccessor<Float> COVER_CURRENT_HEIGHT =
+        SynchedEntityData.defineId(SoldierEntity.class, EntityDataSerializers.FLOAT);
     private static final EntityDataAccessor<BlockPos> COVER_TARGET_POS =
         SynchedEntityData.defineId(SoldierEntity.class, EntityDataSerializers.BLOCK_POS);
     private static final EntityDataAccessor<Integer> COVER_TARGET_TYPE =
@@ -265,6 +267,7 @@ public class SoldierEntity extends PathfinderMob implements Container {
         this.entityData.define(COVER_CURRENT_POS, BlockPos.ZERO);
         this.entityData.define(COVER_CURRENT_TYPE, 0);
         this.entityData.define(COVER_CURRENT_QUALITY, 0f);
+        this.entityData.define(COVER_CURRENT_HEIGHT, 0f);
         this.entityData.define(COVER_TARGET_POS, BlockPos.ZERO);
         this.entityData.define(COVER_TARGET_TYPE, 0);
         this.entityData.define(COVER_TARGET_QUALITY, 0f);
@@ -776,10 +779,10 @@ public class SoldierEntity extends PathfinderMob implements Container {
             boolean isHalfCover = getSyncedCoverCurrentType() == CoverType.HALF.ordinal();
 
             if (inCover && isHalfCover) {
-                // Always crouch in half-cover when not suppressed (LOW_CROUCHING=false)
-                // Suppressed state is handled by LOW_CROUCHING flag above
-                if (this.getPose() != Pose.CROUCHING) {
-                    this.setPose(Pose.CROUCHING);
+                Pose coverPose = getSyncedCoverCurrentHeight() >= 1.3f
+                    ? Pose.STANDING : Pose.CROUCHING;
+                if (this.getPose() != coverPose) {
+                    this.setPose(coverPose);
                     this.refreshDimensions();
                 }
             } else {
@@ -1241,10 +1244,11 @@ public BlockPos getPingMoveTarget() {
         return this.entityData.get(COVER_STATE);
     }
     
-    public void syncCoverCurrent(BlockPos pos, int typeOrdinal, float quality) {
+    public void syncCoverCurrent(BlockPos pos, int typeOrdinal, float quality, float height) {
         this.entityData.set(COVER_CURRENT_POS, pos);
         this.entityData.set(COVER_CURRENT_TYPE, typeOrdinal);
         this.entityData.set(COVER_CURRENT_QUALITY, quality);
+        this.entityData.set(COVER_CURRENT_HEIGHT, height);
     }
     
     public BlockPos getSyncedCoverCurrentPos() {
@@ -1257,6 +1261,10 @@ public BlockPos getPingMoveTarget() {
     
     public float getSyncedCoverCurrentQuality() {
         return this.entityData.get(COVER_CURRENT_QUALITY);
+    }
+
+    public float getSyncedCoverCurrentHeight() {
+        return this.entityData.get(COVER_CURRENT_HEIGHT);
     }
     
     public void syncCoverTarget(BlockPos pos, int typeOrdinal, float quality) {

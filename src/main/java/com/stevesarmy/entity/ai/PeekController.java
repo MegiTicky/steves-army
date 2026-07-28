@@ -266,7 +266,7 @@ public class PeekController {
     private void tickExposed(SoldierEntity soldier, CoverPoint cover, CoverPositionController mover) {
         long timeInState = getTimeInCurrentState();
 
-        if (timeInState > currentMaxExposureTime) {
+        if (cover.getType() != CoverType.HALF && timeInState > currentMaxExposureTime) {
             if (CoverTacticalGoal.isDebugLoggingEnabled()) {
                 StevesArmyMod.LOGGER.info("[PeekController] Soldier {} exposure time exceeded ({}ms), ducking back",
                     soldier.getId(), currentMaxExposureTime);
