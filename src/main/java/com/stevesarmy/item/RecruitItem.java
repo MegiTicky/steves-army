@@ -4,6 +4,7 @@ import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.registry.ModEntities;
 import com.stevesarmy.squad.SquadData;
 import com.stevesarmy.squad.SquadManager;
+import com.stevesarmy.squad.FireTeamAssignment;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.InteractionResult;
@@ -45,6 +46,10 @@ public class RecruitItem extends Item {
         soldier.moveTo(spawnPos.x, spawnPos.y, spawnPos.z, player.getYRot(), 0.0F);
         soldier.setOwnerUUID(player.getUUID());
         soldier.setSquadId(squad.getSquadId());
+
+        FireTeamAssignment fireTeams = FireTeamAssignment.get(serverLevel, player.getUUID());
+        soldier.setFireTeam(fireTeams.getSelectedSpawnTeam());
+        fireTeams.assignToTeam(soldier.getUUID(), soldier.getFireTeam());
         
         serverLevel.addFreshEntity(soldier);
         squadManager.addMemberToSquad(squad.getSquadId(), soldier.getUUID());

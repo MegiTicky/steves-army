@@ -18,6 +18,7 @@ public class FireTeamAssignment extends SavedData {
 
     private final UUID leaderId;
     private int teamCount = 2;
+    private FireTeam selectedSpawnTeam = FireTeam.ALPHA;
     private final Map<FireTeam, List<UUID>> teams = new HashMap<>();
 
     public FireTeamAssignment(UUID leaderId) {
@@ -41,6 +42,9 @@ public class FireTeamAssignment extends SavedData {
                     teams.get(getActiveTeams().get(0)).addAll(moved);
                 }
             }
+        }
+        if (!isActive(selectedSpawnTeam)) {
+            selectedSpawnTeam = getActiveTeams().get(0);
         }
         setDirty();
     }
@@ -67,6 +71,17 @@ public class FireTeamAssignment extends SavedData {
             }
         }
         return getActiveTeams().get(0);
+    }
+
+    public FireTeam getSelectedSpawnTeam() {
+        return isActive(selectedSpawnTeam) ? selectedSpawnTeam : getActiveTeams().get(0);
+    }
+
+    public void setSelectedSpawnTeam(FireTeam team) {
+        if (isActive(team)) {
+            selectedSpawnTeam = team;
+            setDirty();
+        }
     }
 
     public void assignToTeam(UUID soldierId, FireTeam team) {
@@ -261,6 +276,7 @@ public class FireTeamAssignment extends SavedData {
     @Override
     public CompoundTag save(CompoundTag tag) {
         tag.putInt("TeamCount", teamCount);
+        tag.putInt("SelectedSpawnTeam", getSelectedSpawnTeam().ordinal());
         for (Map.Entry<FireTeam, List<UUID>> entry : teams.entrySet()) {
             ListTag list = new ListTag();
             for (UUID uuid : entry.getValue()) {
@@ -273,7 +289,16 @@ public class FireTeamAssignment extends SavedData {
 
     private static FireTeamAssignment load(CompoundTag tag, UUID leaderId) {
         FireTeamAssignment fta = new FireTeamAssignment(leaderId);
-        fta.teamCount = tag.getInt("TeamCount");
+        fta.teamCount = Math.max(1, Math.min(4, tag.getInt("TeamCount")));
+        if (tag.contains("SelectedSpawnTeam")) {
+            int ordinal = tag.getInt("SelectedSpawnTeam");
+            if (ordinal >= 0 && ordinal < FireTeam.values().length) {
+                fta.selectedSpawnTeam = FireTeam.values()[ordinal];
+            }
+        }
+        if (!fta.isActive(fta.selectedSpawnTeam)) {
+            fta.selectedSpawnTeam = fta.getActiveTeams().get(0);
+        }
         for (FireTeam ft : fta.getActiveTeams()) {
             ListTag list = tag.getList("Team_" + ft.name(), 8);
             List<UUID> uuids = new ArrayList<>();

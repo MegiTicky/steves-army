@@ -1,6 +1,8 @@
 package com.stevesarmy.client;
 
 import com.stevesarmy.StevesArmyMod;
+import com.stevesarmy.network.NetworkHandler;
+import com.stevesarmy.network.SetSelectedFireTeamPacket;
 import com.stevesarmy.squad.FireTeam;
 
 public class FireTeamScopeState {
@@ -23,6 +25,9 @@ public class FireTeamScopeState {
         if (scope == null || scope == currentScope) return;
         StevesArmyMod.LOGGER.info("[FireTeamScope] {} -> {} ({})", currentScope, scope, source);
         this.currentScope = scope;
+        if (scope != FireTeam.ALL) {
+            NetworkHandler.INSTANCE.sendToServer(new SetSelectedFireTeamPacket(scope));
+        }
     }
 
     public int getTeamCount() {

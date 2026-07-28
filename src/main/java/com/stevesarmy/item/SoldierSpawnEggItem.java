@@ -7,6 +7,7 @@ import com.stevesarmy.registry.ModEntities;
 import com.stevesarmy.squad.SquadData;
 import com.stevesarmy.squad.SquadManager;
 import com.stevesarmy.squad.SquadMode;
+import com.stevesarmy.squad.FireTeamAssignment;
 import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
@@ -103,6 +104,12 @@ public class SoldierSpawnEggItem extends ForgeSpawnEggItem {
                 soldier.setOwnerUUID(player.getUUID());
                 StevesArmyMod.LOGGER.info("[SoldierSpawnEgg] Set owner to player: {}", player.getUUID());
             }
+        }
+
+        if (player != null && soldier.isOwnedBy(player)) {
+            FireTeamAssignment fireTeams = FireTeamAssignment.get(serverLevel, player.getUUID());
+            soldier.setFireTeam(fireTeams.getSelectedSpawnTeam());
+            fireTeams.assignToTeam(soldier.getUUID(), soldier.getFireTeam());
         }
         
         soldier.setPersistenceRequired();

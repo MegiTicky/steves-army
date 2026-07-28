@@ -9,7 +9,7 @@ import net.minecraftforge.network.PacketDistributor;
 import net.minecraftforge.network.simple.SimpleChannel;
 
 public class NetworkHandler {
-    private static final String PROTOCOL_VERSION = "3";
+    private static final String PROTOCOL_VERSION = "4";
     
     public static final SimpleChannel INSTANCE = NetworkRegistry.newSimpleChannel(
         new ResourceLocation(StevesArmyMod.MODID, "main"),
@@ -80,6 +80,10 @@ public class NetworkHandler {
             FireTeamScopeSyncPacket::encode,
             FireTeamScopeSyncPacket::decode,
             FireTeamScopeSyncPacket::handle);
+        INSTANCE.registerMessage(id++, SetSelectedFireTeamPacket.class,
+            SetSelectedFireTeamPacket::encode,
+            SetSelectedFireTeamPacket::decode,
+            SetSelectedFireTeamPacket::handle);
     }
 
     public static void sendTo(ServerPlayer player, Object message) {
