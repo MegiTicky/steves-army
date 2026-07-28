@@ -421,6 +421,7 @@ public class SoldierCombatGoal extends Goal {
             }
 
             if (isReadyToReload()) {
+                prepareEnemyReserveAmmo();
                 GunIntegration.reload(soldier);
                 reloadStartRequested = true;
             }
@@ -445,6 +446,7 @@ public class SoldierCombatGoal extends Goal {
     }
 
     private void requestReload(boolean tactical) {
+        prepareEnemyReserveAmmo();
         if (reloadPending || GunIntegration.isReloading(soldier)
             || usesInventoryAmmoWithoutReserve()
             || !GunIntegration.canReload(soldier)) {
@@ -491,6 +493,12 @@ public class SoldierCombatGoal extends Goal {
     private boolean usesInventoryAmmoWithoutReserve() {
         return GunIntegration.useInventoryAmmo(soldier)
             && !(soldier instanceof EnemySoldierEntity enemy && enemy.hasInfiniteReserveAmmo());
+    }
+
+    private void prepareEnemyReserveAmmo() {
+        if (soldier instanceof EnemySoldierEntity enemy) {
+            enemy.ensureInfiniteReserveAmmo();
+        }
     }
 
     private boolean isDirectlyEngaging() {
@@ -735,7 +743,6 @@ public class SoldierCombatGoal extends Goal {
         if (isDamageDebugLogging()) {
             StevesArmyMod.LOGGER.info("[DAMAGE_DEBUG] tickGunCombat: ShootResult={}", result);
         }
-        
         switch (result) {
             case SUCCESS -> lastShotNeededBolt = false;
             case NEED_BOLT -> {
@@ -1802,6 +1809,10 @@ public class SoldierCombatGoal extends Goal {
     }
     
     public int getTotalAmmo() {
+        if (soldier instanceof EnemySoldierEntity enemy && enemy.hasInfiniteReserveAmmo()) {
+            return 1_000_000;
+        }
+
         int magazineAmmo = GunIntegration.getCurrentAmmo(soldier);
         int inventoryAmmo = 0;
         

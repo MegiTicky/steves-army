@@ -231,7 +231,8 @@ public class EnemySoldierEntity extends SoldierEntity {
 
             boolean usesDummyAmmo = (boolean) iGunClass.getMethod("useDummyAmmo", ItemStack.class).invoke(iGun, gunStack);
             int reserveAmmo = (int) iGunClass.getMethod("getDummyAmmoAmount", ItemStack.class).invoke(iGun, gunStack);
-            return usesDummyAmmo && reserveAmmo > 0;
+            int maxReserveAmmo = (int) iGunClass.getMethod("getMaxDummyAmmoAmount", ItemStack.class).invoke(iGun, gunStack);
+            return usesDummyAmmo && reserveAmmo > 0 && maxReserveAmmo > 0;
         } catch (Exception e) {
             return false;
         }
@@ -239,23 +240,34 @@ public class EnemySoldierEntity extends SoldierEntity {
 
     /** Gives the selected gun an internal TaCZ reserve without changing its magazine. */
     public void configureInfiniteReserveAmmo() {
-        if (!GunIntegration.isTaczLoaded()) return;
+        ensureInfiniteReserveAmmo();
+    }
+
+    /**
+     * Restores virtual reserve before TaCZ validates a reload. This intentionally does
+     * not touch the current magazine or chamber, so each reload remains a normal TaCZ reload.
+     */
+    public boolean ensureInfiniteReserveAmmo() {
+        if (!GunIntegration.isTaczLoaded()) return false;
         try {
             ItemStack gunStack = getMainHandItem();
-            if (!GunIntegration.isGun(gunStack)) return;
+            if (!GunIntegration.isGun(gunStack)) return false;
 
             Class<?> iGunClass = Class.forName("com.tacz.guns.api.item.IGun");
             Method getIGunOrNull = iGunClass.getMethod("getIGunOrNull", ItemStack.class);
             Object iGun = getIGunOrNull.invoke(null, gunStack);
-            if (iGun == null) return;
+            if (iGun == null) return false;
 
             iGunClass.getMethod("setMaxDummyAmmoAmount", ItemStack.class, int.class)
                 .invoke(iGun, gunStack, INFINITE_RESERVE_AMMO);
             iGunClass.getMethod("setDummyAmmoAmount", ItemStack.class, int.class)
                 .invoke(iGun, gunStack, INFINITE_RESERVE_AMMO);
+
+            return (boolean) iGunClass.getMethod("useDummyAmmo", ItemStack.class).invoke(iGun, gunStack);
         } catch (Exception e) {
             StevesArmyMod.LOGGER.warn("[EnemyAmmo] Failed to configure infinite reserve for enemy {} gun {}: {}",
                 this.getId(), getMainHandItem(), e.toString());
+            return false;
         }
     }
 }
