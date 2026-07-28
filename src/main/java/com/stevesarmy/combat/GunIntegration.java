@@ -682,8 +682,8 @@ public class GunIntegration {
                     Object gunIndex = opt.get();
                     Method getGunData = gunIndex.getClass().getMethod("getGunData");
                     Object gunData = getGunData.invoke(gunIndex);
-                    Method getMagazineSizeMethod = gunData.getClass().getMethod("getMagazineSize");
-                    return (int) getMagazineSizeMethod.invoke(gunData);
+                    Method getAmmoAmountMethod = gunData.getClass().getMethod("getAmmoAmount");
+                    return (int) getAmmoAmountMethod.invoke(gunData);
                 }
             } catch (Exception e) {
                 StevesArmyMod.LOGGER.debug("[TaCZ] Failed to get magazine size: " + e.getMessage());
