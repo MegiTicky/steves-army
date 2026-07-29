@@ -92,8 +92,20 @@ public class SoldierCombatGoal extends Goal {
     private static final double SUPPRESSION_SPREAD_PER_BLOCK = 0.0075;
     private static final double SUPPRESSION_SPREAD_MAX_RADIUS = 0.85;
     private static final double SUPPRESSION_VERTICAL_SPREAD_RATIO = 0.45;
+    private static final float PRONE_FIRING_ARC_DEGREES = 30.0f;
+    private static final float FIRING_ALIGNMENT_DEGREES = 7.0f;
+    private static final float TURN_RATE_DEGREES = 30.0f;
+    private static final double EMERGENCY_FLANK_DISTANCE = 6.0;
     private int suppressionDurationTicks = 0;
     private int suppressionRemainingTicks = 0;
+
+    private enum EngagementPostureState {
+        READY,
+        EXITING_LOW_CROUCH,
+        ROTATING
+    }
+
+    private EngagementPostureState engagementPostureState = EngagementPostureState.READY;
     
     private boolean isPingSuppressing = false;
     private int pingSuppressDurationTicks = 0;
@@ -224,6 +236,8 @@ public class SoldierCombatGoal extends Goal {
         soldier.setTarget(null);
         this.target = null;
         this.wasAiming = false;
+        this.engagementPostureState = EngagementPostureState.READY;
+        soldier.clearEmergencyEngagementPosture();
         resetAim(null);
     }
     
@@ -588,6 +602,15 @@ public class SoldierCombatGoal extends Goal {
 
     private void tickGunCombat() {
         CoverBehaviorManager coverManager = soldier.getCoverBehaviorManager();
+
+        if (coverManager.isInCover() && soldier.getPeekController().getState() != PeekController.State.EXPOSED) {
+            // A close visible flanker may interrupt a suppressed half-cover posture,
+            // but still has to transition through the exposed state before firing.
+            if (target != null && target.isAlive()) {
+                prepareToFire(target.getEyePosition(), true);
+            }
+            return;
+        }
         
         boolean isDrawing = GunIntegration.isDrawing(soldier);
         boolean isBolting = GunIntegration.isBolting(soldier);
@@ -641,6 +664,10 @@ public class SoldierCombatGoal extends Goal {
                     resetAim(target);
                 }
             }
+            return;
+        }
+
+        if (!prepareToFire(aimPoint.position, true)) {
             return;
         }
         
@@ -1510,6 +1537,101 @@ public class SoldierCombatGoal extends Goal {
             .add(0.0, verticalOffset, 0.0);
     }
 
+    private boolean prepareToFire(Vec3 targetPos, boolean isDirectTarget) {
+        float targetYaw = getYawTo(targetPos);
+        float targetPitch = getPitchTo(targetPos);
+
+        if (engagementPostureState != EngagementPostureState.READY
+            && !canUseEmergencyEngagementPosture(isDirectTarget)) {
+            engagementPostureState = EngagementPostureState.READY;
+            soldier.clearEmergencyEngagementPosture();
+            return false;
+        }
+
+        if (soldier.isLowCrouching()) {
+            float proneAngle = Math.abs(Mth.wrapDegrees(targetYaw - soldier.getYRot()));
+            if (proneAngle <= PRONE_FIRING_ARC_DEGREES) {
+                return turnHeadToward(targetYaw, targetPitch) <= FIRING_ALIGNMENT_DEGREES;
+            }
+
+            if (!canUseEmergencyEngagementPosture(isDirectTarget)) {
+                return false;
+            }
+
+            soldier.requestEmergencyEngagementPosture();
+            soldier.setLowCrouching(false);
+            engagementPostureState = EngagementPostureState.EXITING_LOW_CROUCH;
+            return false;
+        }
+
+        if (engagementPostureState == EngagementPostureState.EXITING_LOW_CROUCH) {
+            // Let the changed pose and eye height settle before calculating a shot.
+            engagementPostureState = EngagementPostureState.ROTATING;
+            return false;
+        }
+
+        float remainingYaw = turnToward(targetYaw, targetPitch);
+        if (remainingYaw > FIRING_ALIGNMENT_DEGREES) {
+            return false;
+        }
+
+        if (engagementPostureState == EngagementPostureState.ROTATING) {
+            CoverPoint cover = soldier.getCoverBehaviorManager().getCurrentCover();
+            if (cover != null && cover.getType() == CoverType.HALF
+                && soldier.getPeekController().exposeForEmergencyEngagement(soldier, cover)) {
+                engagementPostureState = EngagementPostureState.READY;
+                return false;
+            }
+        }
+
+        engagementPostureState = EngagementPostureState.READY;
+        return true;
+    }
+
+    private boolean canUseEmergencyEngagementPosture(boolean isDirectTarget) {
+        if (!isDirectTarget || target == null || !target.isAlive()
+            || soldier.distanceToSqr(target) > EMERGENCY_FLANK_DISTANCE * EMERGENCY_FLANK_DISTANCE) {
+            return false;
+        }
+
+        CoverBehaviorManager coverManager = soldier.getCoverBehaviorManager();
+        CoverPoint cover = coverManager.getCurrentCover();
+        return coverManager.isSuppressed() && cover != null && cover.getType() == CoverType.HALF;
+    }
+
+    private float turnToward(float targetYaw, float targetPitch) {
+        float yaw = approachAngle(soldier.getYRot(), targetYaw, TURN_RATE_DEGREES);
+        float pitch = approachAngle(soldier.getXRot(), targetPitch, TURN_RATE_DEGREES);
+        soldier.setYRot(yaw);
+        soldier.setYBodyRot(yaw);
+        soldier.setYHeadRot(yaw);
+        soldier.setXRot(pitch);
+        return Math.abs(Mth.wrapDegrees(targetYaw - yaw));
+    }
+
+    private float turnHeadToward(float targetYaw, float targetPitch) {
+        float headYaw = approachAngle(soldier.getYHeadRot(), targetYaw, TURN_RATE_DEGREES);
+        float pitch = approachAngle(soldier.getXRot(), targetPitch, TURN_RATE_DEGREES);
+        soldier.setYHeadRot(headYaw);
+        soldier.setXRot(pitch);
+        return Math.abs(Mth.wrapDegrees(targetYaw - headYaw));
+    }
+
+    private static float approachAngle(float current, float target, float maxChange) {
+        return current + Mth.clamp(Mth.wrapDegrees(target - current), -maxChange, maxChange);
+    }
+
+    private float getYawTo(Vec3 targetPos) {
+        Vec3 toTarget = targetPos.subtract(soldier.getEyePosition());
+        return (float) Math.toDegrees(Math.atan2(-toTarget.x, toTarget.z));
+    }
+
+    private float getPitchTo(Vec3 targetPos) {
+        Vec3 toTarget = targetPos.subtract(soldier.getEyePosition());
+        double horizontalDistance = Math.sqrt(toTarget.x * toTarget.x + toTarget.z * toTarget.z);
+        return (float) -Math.toDegrees(Math.atan2(toTarget.y, horizontalDistance));
+    }
+
     private int getTicksBetweenBurstShots() {
         // TaCZ owns the real gun cooldown. Polling it every tick lets automatic
         // weapons fire at their native RPM instead of rounding RPM down to a
@@ -1542,6 +1664,11 @@ public class SoldierCombatGoal extends Goal {
     }
 
     private void trySuppressireFire() {
+        if (soldier.getCoverBehaviorManager().isInCover()
+            && soldier.getPeekController().getState() != PeekController.State.EXPOSED) {
+            return;
+        }
+
         if (suppressionTargetPos == null && pendingSuppressionThreat != null) {
             SquadThreatIntel intel = getSquadIntel();
             if (intel == null) {
@@ -1615,6 +1742,10 @@ public class SoldierCombatGoal extends Goal {
             suppressionTargetPos = null;
             isSuppressing = false;
             resetBurstState();
+            return;
+        }
+
+        if (!prepareToFire(targetPos, false)) {
             return;
         }
         
@@ -1917,6 +2048,10 @@ public class SoldierCombatGoal extends Goal {
             if (ticksSinceLastBurstShot < ticksBetweenShots) {
                 return;
             }
+        }
+
+        if (!prepareToFire(finalTarget, false)) {
+            return;
         }
 
         // Friendly-fire check: skip this shot to avoid hitting the player or allies.

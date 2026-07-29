@@ -456,7 +456,9 @@ if (currentCover != null) {
 
         if (suppressionTracker.isSuppressed() && currentCover != null) {
             if (currentCover.getType() == CoverType.HALF) {
-                soldier.setLowCrouching(true);
+                if (!soldier.hasEmergencyEngagementPosture()) {
+                    soldier.setLowCrouching(true);
+                }
             }
             setState(CoverState.SUPPRESSED_IN_COVER);
             if (suppressionDebugLog()) {

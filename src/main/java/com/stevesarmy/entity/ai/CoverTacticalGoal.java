@@ -961,9 +961,11 @@ public class CoverTacticalGoal extends Goal {
         // and state transition even if a reposition request is pending.
         if (getCoverManager().isSuppressed()) {
             if (currentCover != null && currentCover.getType() == CoverType.HALF) {
-                soldier.setLowCrouching(true);
+                if (!soldier.hasEmergencyEngagementPosture()) {
+                    soldier.setLowCrouching(true);
+                }
             }
-            if (getPeekController().isExposed()) {
+            if (getPeekController().isExposed() && !soldier.hasEmergencyEngagementPosture()) {
                 getPeekController().tick(soldier, currentCover, getPositionController());
             }
             getCoverManager().setState(CoverBehaviorManager.CoverState.SUPPRESSED_IN_COVER);
@@ -1015,6 +1017,7 @@ public class CoverTacticalGoal extends Goal {
         }
 
         if (currentCover.getType() == CoverType.HALF) {
+            soldier.clearEmergencyEngagementPosture();
             soldier.setLowCrouching(true);
         } else {
             soldier.setLowCrouching(false);
@@ -1054,7 +1057,9 @@ public class CoverTacticalGoal extends Goal {
         // Force duck-back if soldier was exposed or moving to peek when suppressed
         PeekController peekCtrl = getPeekController();
         if (peekCtrl.isExposed() || peekCtrl.isMovingToPeek()) {
-            peekCtrl.forceReturnToCover(soldier, currentCover, getPositionController());
+            if (!soldier.hasEmergencyEngagementPosture()) {
+                peekCtrl.forceReturnToCover(soldier, currentCover, getPositionController());
+            }
         }
 
         // Let peek controller handle ongoing duck back
@@ -2562,7 +2567,7 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
         if (cover != null && cover.getType() == CoverType.HALF) {
             if (!getCoverManager().isSuppressed()) {
                 soldier.setLowCrouching(false);
-            } else {
+            } else if (!soldier.hasEmergencyEngagementPosture()) {
                 soldier.setLowCrouching(true);
             }
             soldier.refreshDimensions();

@@ -303,7 +303,7 @@ public class PeekController {
             return;
         }
 
-        if (soldier.getCoverBehaviorManager().isSuppressed()) {
+        if (soldier.getCoverBehaviorManager().isSuppressed() && !soldier.hasEmergencyEngagementPosture()) {
             if (CoverTacticalGoal.isDebugLoggingEnabled()) {
                 StevesArmyMod.LOGGER.info("[PeekController] Soldier {} suppressed while exposed, ducking back",
                     soldier.getId());
@@ -377,6 +377,17 @@ public class PeekController {
         }
     }
 
+    /** Exposes only half cover after combat has completed an emergency posture change. */
+    public boolean exposeForEmergencyEngagement(SoldierEntity soldier, CoverPoint cover) {
+        if (state != State.HIDING || cover.getType() != CoverType.HALF) {
+            return false;
+        }
+
+        currentMaxExposureTime = getRandomExposureTime();
+        enterExposed(soldier, cover);
+        return true;
+    }
+
     private void enterReturning(SoldierEntity soldier, CoverPoint cover, CoverPositionController mover,
                                 boolean allowDuringReload) {
         setState(soldier, State.RETURNING_TO_COVER);
@@ -448,6 +459,7 @@ public class PeekController {
         
         float finalYaw = Mth.wrapDegrees(baseYaw + offset);
         
+        soldier.setYRot(finalYaw);
         soldier.setYBodyRot(finalYaw);
         soldier.setYHeadRot(finalYaw);
         soldier.yBodyRotO = finalYaw;

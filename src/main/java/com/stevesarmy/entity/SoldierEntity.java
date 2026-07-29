@@ -1318,6 +1318,8 @@ public BlockPos getPingMoveTarget() {
         return this.entityData.get(PEEK_POSITION);
     }
     
+    private int emergencyEngagementPostureUntilTick = -1;
+
     public void setLowCrouching(boolean lowCrouch) {
         if (this.level().isClientSide) {
             return;
@@ -1335,6 +1337,19 @@ public BlockPos getPingMoveTarget() {
     
     public boolean isLowCrouching() {
         return entityData.get(LOW_CROUCHING);
+    }
+
+    /** Lets a close flanker briefly interrupt defensive low-crouch posture. */
+    public void requestEmergencyEngagementPosture() {
+        emergencyEngagementPostureUntilTick = tickCount + 20;
+    }
+
+    public boolean hasEmergencyEngagementPosture() {
+        return tickCount <= emergencyEngagementPostureUntilTick;
+    }
+
+    public void clearEmergencyEngagementPosture() {
+        emergencyEngagementPostureUntilTick = -1;
     }
 
     /**
