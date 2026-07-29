@@ -1750,7 +1750,7 @@ public class SoldierCombatGoal extends Goal {
         }
         
         soldier.getLookControl().setLookAt(
-            targetPos.x, targetPos.y + 1.0, targetPos.z,
+            targetPos.x, targetPos.y, targetPos.z,
             30.0F, 30.0F
         );
         
@@ -1793,9 +1793,8 @@ public class SoldierCombatGoal extends Goal {
         }
         
         float aimInaccuracy = GunIntegration.getAimInaccuracy(soldier);
-        // Preserve the established last-known-position suppression height. Ping
-        // suppression points already contain their complete world-space height.
-        Vec3 spreadPos = calculateSuppressionSpread(targetPos.add(0, 1.0, 0), aimInaccuracy);
+        // targetPos already converts the remembered feet block into a chest-height point.
+        Vec3 spreadPos = calculateSuppressionSpread(targetPos, aimInaccuracy);
         GunIntegration.ShootResult result = GunIntegration.shootAtPosition(soldier, spreadPos);
         
         if (isSuppressionDebugLogging()) {
