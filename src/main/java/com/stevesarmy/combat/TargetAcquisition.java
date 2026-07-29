@@ -83,6 +83,11 @@ public class TargetAcquisition {
         return VisibilityRay.trace(observer.level(), observer.getEyePosition(), targetPos, observer).hasContact();
     }
 
+    public static boolean hasLineOfSightToPositionIgnoringSmoke(LivingEntity observer, Vec3 targetPos) {
+        return VisibilityRay.traceIgnoringSmoke(
+            observer.level(), observer.getEyePosition(), targetPos, observer).hasContact();
+    }
+
     public static boolean hasNearLineOfSightToPosition(LivingEntity observer, Vec3 targetPos, double distanceThreshold) {
         VisibilityRay.Result visibility = VisibilityRay.trace(
             observer.level(), observer.getEyePosition(), targetPos, observer);

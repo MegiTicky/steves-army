@@ -16,28 +16,19 @@ import net.minecraft.world.phys.shapes.VoxelShape;
 
 import java.util.HashSet;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 
-/** Shared block-aware visibility traversal for soldier vision and firing checks. */
 public final class VisibilityRay {
     private static final double EPSILON = 1.0e-7;
     private static final double MAX_CONCEALMENT = 1.0;
-    private static final double SMOKE_SEARCH_INFLATE = 12.0;
 
-    /** Lazily-resolved smoke emitter type from Create Big Cannons. Null if CBC is not loaded. */
+    private static boolean smokeTypeResolved;
     private static EntityType<?> smokeEmitterType;
 
     private VisibilityRay() {}
 
-    private static EntityType<?> getSmokeEmitterType() {
-        if (smokeEmitterType == null) {
-            EntityType<?> resolved = BuiltInRegistries.ENTITY_TYPE.get(
-                new ResourceLocation("createbigcannons", "smoke_emitter"));
-            smokeEmitterType = resolved != BuiltInRegistries.ENTITY_TYPE.get(
-                new ResourceLocation("air")) ? resolved : null;
-        }
-        return smokeEmitterType;
-    }
+    public enum SmokePolicy { BLOCK, IGNORE }
 
     public record Result(boolean clear, double concealment, double blockedDistance) {
         public boolean hasContact() {
@@ -45,14 +36,12 @@ public final class VisibilityRay {
         }
 
         public double spottingMultiplier() {
-            // One wheat block is still visible, but it should not permit rapid
-            // target acquisition. Two wheat blocks reach full concealment.
             return Math.max(0.05, 1.0 - 1.6 * concealment);
         }
     }
 
     public static Result trace(Level level, Vec3 from, Vec3 to, LivingEntity observer) {
-        return trace(level, from, to, observer, Set.of());
+        return trace(level, from, to, observer, SmokePolicy.BLOCK, Set.of());
     }
 
     public static Result trace(Level level, Vec3 from, Vec3 to, LivingEntity observer,
@@ -63,11 +52,15 @@ public final class VisibilityRay {
                 ignored.add(ignoredBlock);
             }
         }
-        return trace(level, from, to, observer, ignored);
+        return trace(level, from, to, observer, SmokePolicy.BLOCK, ignored);
+    }
+
+    public static Result traceIgnoringSmoke(Level level, Vec3 from, Vec3 to, LivingEntity observer) {
+        return trace(level, from, to, observer, SmokePolicy.IGNORE, Set.of());
     }
 
     private static Result trace(Level level, Vec3 from, Vec3 to, LivingEntity observer,
-                                Set<BlockPos> ignoredBlocks) {
+                                SmokePolicy smokePolicy, Set<BlockPos> ignoredBlocks) {
         if (from.distanceToSqr(to) < EPSILON) {
             return new Result(true, 0.0, Double.POSITIVE_INFINITY);
         }
@@ -77,6 +70,7 @@ public final class VisibilityRay {
         Vec3 unit = direction.scale(1.0 / length);
         Set<BlockPos> visited = new HashSet<>();
         double concealment = 0.0;
+        double nearestObstruction = Double.POSITIVE_INFINITY;
 
         int x = floor(from.x);
         int y = floor(from.y);
@@ -99,10 +93,13 @@ public final class VisibilityRay {
                     }
                 } else if (intersectsBlock(level, state, pos, from, to)) {
                     BlockHitResult hit = blockHit(level, state, pos, from, to);
-                    double blockedDistance = hit == null
-                        ? from.distanceTo(to)
-                        : from.distanceTo(hit.getLocation());
-                    return new Result(false, concealment, blockedDistance);
+                    double blocked = hit == null ? from.distanceTo(to) : from.distanceTo(hit.getLocation());
+                    nearestObstruction = Math.min(nearestObstruction, blocked);
+                    // If smoke is blocking, we still need to find the nearest obstruction.
+                    // If smoke is ignored, we return immediately on solid block hit.
+                    if (smokePolicy == SmokePolicy.IGNORE) {
+                        return new Result(false, concealment, blocked);
+                    }
                 }
             }
 
@@ -124,22 +121,57 @@ public final class VisibilityRay {
             t = next;
         }
 
-        // Check for smoke clouds from Create Big Cannons (or Small Arms smoke grenades).
-        // Smoke is visually opaque, so any intersection fully blocks vision.
-        EntityType<?> smokeType = getSmokeEmitterType();
-        if (smokeType != null) {
-            AABB rayBounds = new AABB(from, to).inflate(SMOKE_SEARCH_INFLATE);
-            List<? extends Entity> smokeClouds = level.getEntities(
-                (Entity) null, rayBounds, e -> e.getType() == smokeType && e.isAlive());
-            for (Entity cloud : smokeClouds) {
-                if (cloud.getBoundingBox().intersects(from, to)) {
-                    double blocked = from.distanceTo(cloud.position());
-                    return new Result(false, MAX_CONCEALMENT, blocked);
+        // Check for smoke clouds when smoke is not ignored.
+        if (smokePolicy == SmokePolicy.BLOCK) {
+            double smokeEntry = findSmokeIntersection(level, from, to);
+            if (smokeEntry >= 0) {
+                // If smoke is closer than nearestObstruction, the smoke wins.
+                if (smokeEntry < nearestObstruction) {
+                    return new Result(false, MAX_CONCEALMENT, smokeEntry);
                 }
+                // Otherwise the solid block is closer, so report that.
+                return new Result(false, concealment, nearestObstruction);
             }
         }
 
+        if (nearestObstruction < Double.POSITIVE_INFINITY) {
+            return new Result(false, concealment, nearestObstruction);
+        }
+
         return new Result(true, concealment, Double.POSITIVE_INFINITY);
+    }
+
+    private static double findSmokeIntersection(Level level, Vec3 from, Vec3 to) {
+        EntityType<?> type = getSmokeEmitterType();
+        if (type == null) {
+            return -1;
+        }
+        // Use a tight search box: the ray's AABB inflated by a tiny margin.
+        AABB rayBounds = new AABB(from, to).inflate(EPSILON);
+        List<? extends Entity> clouds = level.getEntities(
+            (Entity) null, rayBounds, e -> e.getType() == type && e.isAlive());
+        double nearest = Double.POSITIVE_INFINITY;
+        for (Entity cloud : clouds) {
+            Optional<Vec3> hit = cloud.getBoundingBox().clip(from, to);
+            if (hit.isPresent()) {
+                double entryDist = from.distanceTo(hit.get());
+                if (entryDist < nearest) {
+                    nearest = entryDist;
+                }
+            }
+        }
+        return nearest < Double.POSITIVE_INFINITY ? nearest : -1;
+    }
+
+    private static EntityType<?> getSmokeEmitterType() {
+        if (!smokeTypeResolved) {
+            smokeTypeResolved = true;
+            EntityType<?> resolved = BuiltInRegistries.ENTITY_TYPE.get(
+                new ResourceLocation("createbigcannons", "smoke_emitter"));
+            smokeEmitterType = resolved != BuiltInRegistries.ENTITY_TYPE.get(
+                new ResourceLocation("air")) ? resolved : null;
+        }
+        return smokeEmitterType;
     }
 
     private static boolean intersectsBlock(Level level, BlockState state, BlockPos pos,
@@ -153,15 +185,12 @@ public final class VisibilityRay {
         if (shape.isEmpty()) {
             return null;
         }
-
         BlockHitResult hit = shape.clip(from, to, pos);
         return hit != null && hit.getType() == HitResult.Type.BLOCK ? hit : null;
     }
 
     private static boolean outlineIntersectsRay(Level level, BlockState state, BlockPos pos,
                                                 Vec3 from, Vec3 to) {
-        // Crops have an empty collision shape but an age-dependent outline shape.
-        // This makes concealment depend on whether the actual plant reaches the ray.
         VoxelShape shape = state.getShape(level, pos);
         return !shape.isEmpty() && shape.clip(from, to, pos) != null;
     }
@@ -176,7 +205,6 @@ public final class VisibilityRay {
 
     private static double concealmentWeight(BlockState state) {
         if (state.is(ModBlockTags.VISION_CONCEALMENT_MEDIUM)) return 0.50;
-        // Direct additions to the aggregate tag are intentionally conservative.
         return 0.35;
     }
 

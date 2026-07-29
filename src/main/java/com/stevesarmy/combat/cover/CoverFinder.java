@@ -1134,7 +1134,7 @@ return qualityScore + shootBonus - distancePenalty;
                 // collision-shape-based opening points above instead.
                 Vec3 peekTarget = peekPos.getCenter().add(0, 1.0, 0);
                 
-                if (VisibilityRay.trace(level, soldier.getEyePosition(), peekTarget, soldier).hasContact()) {
+                if (VisibilityRay.traceIgnoringSmoke(level, soldier.getEyePosition(), peekTarget, soldier).hasContact()) {
                     aimPoints.add(peekTarget);
                 }
             }
@@ -1172,7 +1172,7 @@ return qualityScore + shootBonus - distancePenalty;
 
                 for (double openingHeight : HALF_COVER_OPENING_HEIGHTS) {
                     Vec3 opening = new Vec3(x, coverTop + openingHeight, z);
-                    if (VisibilityRay.trace(level, soldier.getEyePosition(), opening, soldier).hasContact()) {
+                    if (VisibilityRay.traceIgnoringSmoke(level, soldier.getEyePosition(), opening, soldier).hasContact()) {
                         aimPoints.add(opening);
                     }
                 }

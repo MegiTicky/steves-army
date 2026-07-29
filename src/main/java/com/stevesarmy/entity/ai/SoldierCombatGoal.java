@@ -1918,7 +1918,12 @@ public class SoldierCombatGoal extends Goal {
                 return;
             }
         }
-        
+
+        // Friendly-fire check: skip this shot to avoid hitting the player or allies.
+        if (!FriendlyFireChecker.isSafeToShoot(soldier, finalTarget, aimQuality)) {
+            return;
+        }
+
         GunIntegration.ShootResult result = GunIntegration.shootAtPosition(soldier, finalTarget);
         
         if (isSuppressionDebugLogging()) {
@@ -1978,7 +1983,7 @@ public class SoldierCombatGoal extends Goal {
         if (!aimPointsAreEmpty(soldier)) {
             finalTarget = clampSuppressionTargetHeight(finalTarget, selected);
         }
-        if (TargetAcquisition.hasLineOfSightToPosition(soldier, finalTarget)) {
+        if (TargetAcquisition.hasLineOfSightToPositionIgnoringSmoke(soldier, finalTarget)) {
             return finalTarget;
         }
 
@@ -1993,7 +1998,7 @@ public class SoldierCombatGoal extends Goal {
             }
             finalTarget = calculateSuppressionSpread(candidate, aimInaccuracy);
             finalTarget = clampSuppressionTargetHeight(finalTarget, candidate);
-            if (TargetAcquisition.hasLineOfSightToPosition(soldier, finalTarget)) {
+            if (TargetAcquisition.hasLineOfSightToPositionIgnoringSmoke(soldier, finalTarget)) {
                 return finalTarget;
             }
         }
