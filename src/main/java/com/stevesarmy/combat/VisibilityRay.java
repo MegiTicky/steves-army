@@ -1,23 +1,43 @@
 package com.stevesarmy.combat;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.shapes.VoxelShape;
 
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 
 /** Shared block-aware visibility traversal for soldier vision and firing checks. */
 public final class VisibilityRay {
     private static final double EPSILON = 1.0e-7;
     private static final double MAX_CONCEALMENT = 1.0;
+    private static final double SMOKE_SEARCH_INFLATE = 12.0;
+
+    /** Lazily-resolved smoke emitter type from Create Big Cannons. Null if CBC is not loaded. */
+    private static EntityType<?> smokeEmitterType;
 
     private VisibilityRay() {}
+
+    private static EntityType<?> getSmokeEmitterType() {
+        if (smokeEmitterType == null) {
+            EntityType<?> resolved = BuiltInRegistries.ENTITY_TYPE.get(
+                new ResourceLocation("createbigcannons", "smoke_emitter"));
+            smokeEmitterType = resolved != BuiltInRegistries.ENTITY_TYPE.get(
+                new ResourceLocation("air")) ? resolved : null;
+        }
+        return smokeEmitterType;
+    }
 
     public record Result(boolean clear, double concealment, double blockedDistance) {
         public boolean hasContact() {
@@ -102,6 +122,21 @@ public final class VisibilityRay {
             if (nextY <= next + EPSILON) y += step(unit.y);
             if (nextZ <= next + EPSILON) z += step(unit.z);
             t = next;
+        }
+
+        // Check for smoke clouds from Create Big Cannons (or Small Arms smoke grenades).
+        // Smoke is visually opaque, so any intersection fully blocks vision.
+        EntityType<?> smokeType = getSmokeEmitterType();
+        if (smokeType != null) {
+            AABB rayBounds = new AABB(from, to).inflate(SMOKE_SEARCH_INFLATE);
+            List<? extends Entity> smokeClouds = level.getEntities(
+                (Entity) null, rayBounds, e -> e.getType() == smokeType && e.isAlive());
+            for (Entity cloud : smokeClouds) {
+                if (cloud.getBoundingBox().intersects(from, to)) {
+                    double blocked = from.distanceTo(cloud.position());
+                    return new Result(false, MAX_CONCEALMENT, blocked);
+                }
+            }
         }
 
         return new Result(true, concealment, Double.POSITIVE_INFINITY);
