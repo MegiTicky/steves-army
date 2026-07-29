@@ -98,7 +98,9 @@ public class AimAccuracyManager {
         float baseRate = StevesArmyConfig.getAimQualityBuildRate();
         float exposureFactor = calculateExposureTrackingFactor(soldier, target);
         float distanceFactor = calculateDistanceTrackingFactor(distance, effectiveRange);
-        return baseRate * exposureFactor * distanceFactor;
+        double concealment = TargetAcquisition.getVisibility(soldier, target).concealment();
+        float concealmentFactor = (float) Math.max(0.25, 1.0 - concealment * 0.70);
+        return baseRate * exposureFactor * distanceFactor * concealmentFactor;
     }
 
     public static float calculateHitProbability(LivingEntity soldier, LivingEntity target) {

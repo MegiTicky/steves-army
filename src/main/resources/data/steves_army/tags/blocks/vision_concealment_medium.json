@@ -1,0 +1,30 @@
+{
+  "replace": false,
+  "values": [
+    "minecraft:wheat",
+    "minecraft:carrots",
+    "minecraft:potatoes",
+    "minecraft:beetroots",
+    "minecraft:nether_wart",
+    "minecraft:torchflower_crop",
+    "minecraft:pitcher_crop",
+    "minecraft:tall_grass",
+    "minecraft:large_fern",
+    "minecraft:tall_seagrass",
+    "minecraft:sunflower",
+    "minecraft:lilac",
+    "minecraft:rose_bush",
+    "minecraft:peony",
+    "minecraft:pitcher_plant",
+    "minecraft:sugar_cane",
+    "minecraft:bamboo",
+    "minecraft:kelp",
+    "minecraft:kelp_plant",
+    "minecraft:weeping_vines",
+    "minecraft:weeping_vines_plant",
+    "minecraft:twisting_vines",
+    "minecraft:twisting_vines_plant",
+    "minecraft:cave_vines",
+    "minecraft:cave_vines_plant"
+  ]
+}

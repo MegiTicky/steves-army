@@ -9,8 +9,6 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.LivingEntity;
-import net.minecraft.world.level.ClipContext;
-import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 
 import java.util.List;
@@ -427,9 +425,7 @@ public class PeekController {
     // --- LOS and target evaluation helpers (moved from CoverTacticalGoal) ---
 
     private boolean hasLineOfSight(SoldierEntity soldier, Vec3 from, Vec3 to) {
-        ClipContext context = new ClipContext(from, to, ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, soldier);
-        HitResult result = soldier.level().clip(context);
-        return result.getType() == HitResult.Type.MISS;
+        return com.stevesarmy.combat.VisibilityRay.trace(soldier.level(), from, to, soldier).hasContact();
     }
     
     private void lockRotationToCoverWall(SoldierEntity soldier, CoverPoint cover, LivingEntity target) {

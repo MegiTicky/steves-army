@@ -8,13 +8,13 @@ import net.minecraft.world.phys.shapes.VoxelShape;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.phys.Vec3;
-import net.minecraft.world.phys.HitResult;
-import net.minecraft.world.level.ClipContext;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
 import com.stevesarmy.StevesArmyMod;
+import com.stevesarmy.combat.ModBlockTags;
+import com.stevesarmy.combat.VisibilityRay;
 import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.squad.SquadCoverContext;
 
@@ -759,13 +759,7 @@ return qualityScore + shootBonus - distancePenalty;
     }
 
     public static boolean hasLineOfSightStatic(Vec3 from, Vec3 to, net.minecraft.world.level.Level level) {
-        ClipContext context = new ClipContext(
-            from, to,
-            ClipContext.Block.COLLIDER,
-            ClipContext.Fluid.NONE,
-            null
-        );
-        return level.clip(context).getType() == HitResult.Type.MISS;
+        return VisibilityRay.trace(level, from, to, null).hasContact();
     }
     
     private boolean hasLineOfSight(Vec3 from, Vec3 to) {
@@ -837,21 +831,8 @@ return qualityScore + shootBonus - distancePenalty;
      */
     public static double raycastDistanceStatic(Vec3 start, Vec3 direction, double maxDistance, net.minecraft.world.level.Level level) {
         Vec3 end = start.add(direction.scale(maxDistance));
-        
-        ClipContext context = new ClipContext(
-            start, end,
-            ClipContext.Block.COLLIDER,
-            ClipContext.Fluid.NONE,
-            null
-        );
-        
-        net.minecraft.world.phys.BlockHitResult result = level.clip(context);
-        
-        if (result.getType() == HitResult.Type.MISS) {
-            return maxDistance;
-        }
-        
-        return start.distanceTo(result.getLocation());
+        VisibilityRay.Result result = VisibilityRay.trace(level, start, end, null);
+        return Math.min(maxDistance, result.blockedDistance());
     }
     
     private double raycastDistance(Vec3 start, Vec3 direction, double maxDistance) {
@@ -1046,7 +1027,8 @@ return qualityScore + shootBonus - distancePenalty;
             block instanceof net.minecraft.world.level.block.StainedGlassBlock ||
             block instanceof net.minecraft.world.level.block.TintedGlassBlock ||
             block instanceof net.minecraft.world.level.block.FenceBlock ||
-            block instanceof net.minecraft.world.level.block.FenceGateBlock) {
+            block instanceof net.minecraft.world.level.block.FenceGateBlock ||
+            state.is(ModBlockTags.TRANSPARENT_PENETRABLE)) {
             return false;
         }
         
@@ -1152,16 +1134,7 @@ return qualityScore + shootBonus - distancePenalty;
                 // collision-shape-based opening points above instead.
                 Vec3 peekTarget = peekPos.getCenter().add(0, 1.0, 0);
                 
-                Vec3 soldierEye = soldier.getEyePosition();
-                ClipContext ctx = new ClipContext(
-                    soldierEye, peekTarget,
-                    ClipContext.Block.COLLIDER,
-                    ClipContext.Fluid.NONE,
-                    soldier
-                );
-                HitResult hit = level.clip(ctx);
-                
-                if (hit.getType() == HitResult.Type.MISS) {
+                if (VisibilityRay.trace(level, soldier.getEyePosition(), peekTarget, soldier).hasContact()) {
                     aimPoints.add(peekTarget);
                 }
             }
@@ -1199,13 +1172,7 @@ return qualityScore + shootBonus - distancePenalty;
 
                 for (double openingHeight : HALF_COVER_OPENING_HEIGHTS) {
                     Vec3 opening = new Vec3(x, coverTop + openingHeight, z);
-                    ClipContext context = new ClipContext(
-                        soldier.getEyePosition(), opening,
-                        ClipContext.Block.COLLIDER,
-                        ClipContext.Fluid.NONE,
-                        soldier
-                    );
-                    if (level.clip(context).getType() == HitResult.Type.MISS) {
+                    if (VisibilityRay.trace(level, soldier.getEyePosition(), opening, soldier).hasContact()) {
                         aimPoints.add(opening);
                     }
                 }

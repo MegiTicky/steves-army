@@ -1,0 +1,7 @@
+{
+  "replace": false,
+  "values": [
+    "#steves_army:vision_concealment_light",
+    "#steves_army:vision_concealment_medium"
+  ]
+}

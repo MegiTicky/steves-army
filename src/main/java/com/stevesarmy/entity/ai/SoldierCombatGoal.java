@@ -707,6 +707,10 @@ public class SoldierCombatGoal extends Goal {
         // The accuracy model is angular dispersion, not a hit/miss roll.
         float yawSigma = AimAccuracyManager.getYawSigma(aimQuality);
         float pitchSigma = AimAccuracyManager.getPitchSigma(aimQuality);
+        // Vegetation makes a partly visible target difficult to track rather
+        // than treating every visible silhouette as a clean shooting solution.
+        yawSigma += (float) aimPoint.concealment * 2.00f;
+        pitchSigma += (float) aimPoint.concealment * 0.75f;
         float[] deviation = AimAccuracyManager.sampleGaussianDeviation(aimQuality, yawSigma, pitchSigma, soldier.level());
         float pitchDev = deviation[0];
         float yawDev = deviation[1];

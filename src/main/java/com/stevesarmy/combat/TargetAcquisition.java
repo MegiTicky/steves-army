@@ -1,14 +1,9 @@
 package com.stevesarmy.combat;
 
-import com.stevesarmy.StevesArmyMod;
 import net.minecraft.core.BlockPos;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.player.Player;
-import net.minecraft.world.level.ClipContext;
-import net.minecraft.world.level.Level;
-import net.minecraft.world.phys.BlockHitResult;
-import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 
 import java.util.Map;
@@ -16,7 +11,7 @@ import java.util.concurrent.ConcurrentHashMap;
 
 public class TargetAcquisition {
     
-    private static final Map<Long, Boolean> losCache = new ConcurrentHashMap<>();
+    private static final Map<Long, VisibilityRay.Result> losCache = new ConcurrentHashMap<>();
     private static long lastCacheClearTick = -1;
     
     public static boolean canSeeTarget(LivingEntity observer, LivingEntity target) {
@@ -62,64 +57,38 @@ public class TargetAcquisition {
         
         long key = ((long) observer.getId() << 32) | (target.getId() & 0xFFFFFFFFL);
         
-        return losCache.computeIfAbsent(key, k -> computeHasLineOfSight(observer, target));
+        return losCache.computeIfAbsent(key, k -> computeVisibility(observer, target)).hasContact();
     }
-    
-    private static boolean computeHasLineOfSight(LivingEntity observer, LivingEntity target) {
-        Vec3 observerEye = observer.getEyePosition();
-        Vec3 targetEye = target.getEyePosition();
-        
-        ClipContext context = new ClipContext(
-            observerEye,
-            targetEye,
-            ClipContext.Block.COLLIDER,
-            ClipContext.Fluid.NONE,
-            observer
-        );
-        
-        HitResult result = observer.level().clip(context);
-        return result.getType() == HitResult.Type.MISS;
+
+    private static VisibilityRay.Result computeVisibility(LivingEntity observer, LivingEntity target) {
+        return VisibilityRay.trace(observer.level(), observer.getEyePosition(), target.getEyePosition(), observer);
     }
-    
+
+    public static VisibilityRay.Result getVisibility(LivingEntity observer, LivingEntity target) {
+        if (observer.level() != target.level()) {
+            return new VisibilityRay.Result(false, 1.0, 0.0);
+        }
+
+        long currentTick = observer.tickCount;
+        if (lastCacheClearTick != currentTick) {
+            losCache.clear();
+            lastCacheClearTick = currentTick;
+        }
+
+        long key = ((long) observer.getId() << 32) | (target.getId() & 0xFFFFFFFFL);
+        return losCache.computeIfAbsent(key, k -> computeVisibility(observer, target));
+    }
+
     public static boolean hasLineOfSightToPosition(LivingEntity observer, Vec3 targetPos) {
-        Vec3 observerEye = observer.getEyePosition();
-        
-        ClipContext context = new ClipContext(
-            observerEye,
-            targetPos,
-            ClipContext.Block.COLLIDER,
-            ClipContext.Fluid.NONE,
-            observer
-        );
-        
-        HitResult result = observer.level().clip(context);
-        return result.getType() == HitResult.Type.MISS;
+        return VisibilityRay.trace(observer.level(), observer.getEyePosition(), targetPos, observer).hasContact();
     }
-    
+
     public static boolean hasNearLineOfSightToPosition(LivingEntity observer, Vec3 targetPos, double distanceThreshold) {
-        Vec3 observerEye = observer.getEyePosition();
-        
-        ClipContext context = new ClipContext(
-            observerEye,
-            targetPos,
-            ClipContext.Block.COLLIDER,
-            ClipContext.Fluid.NONE,
-            observer
-        );
-        
-        HitResult result = observer.level().clip(context);
-        
-        if (result.getType() == HitResult.Type.MISS) {
-            return true;
-        }
-        
-        if (result.getType() == HitResult.Type.BLOCK) {
-            Vec3 hitLocation = result.getLocation();
-            double dist = hitLocation.distanceTo(targetPos);
-            return dist <= distanceThreshold;
-        }
-        
-        return false;
+        VisibilityRay.Result visibility = VisibilityRay.trace(
+            observer.level(), observer.getEyePosition(), targetPos, observer);
+        double targetDistance = observer.getEyePosition().distanceTo(targetPos);
+        return visibility.hasContact()
+            || (!visibility.clear() && targetDistance - visibility.blockedDistance() <= distanceThreshold);
     }
     
     public static boolean isValidTarget(LivingEntity observer, LivingEntity target) {

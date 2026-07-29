@@ -1,12 +1,11 @@
 package com.stevesarmy.combat.cover;
 
+import com.stevesarmy.combat.ModBlockTags;
+import com.stevesarmy.combat.VisibilityRay;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.level.Level;
-import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.phys.HitResult;
-import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
 
 public class CoverQualityEvaluator {
@@ -117,31 +116,8 @@ public class CoverQualityEvaluator {
 
     private double raycastDistance(Vec3 start, Vec3 direction, double maxDistance) {
         Vec3 end = start.add(direction.scale(maxDistance));
-
-        ClipContext context = new ClipContext(
-            start, end,
-            ClipContext.Block.COLLIDER,
-            ClipContext.Fluid.NONE,
-            null
-        );
-
-        HitResult result = level.clip(context);
-
-        if (result.getType() == HitResult.Type.MISS) {
-            return maxDistance;
-        }
-
-        if (result.getType() == HitResult.Type.BLOCK) {
-            BlockHitResult blockResult = (BlockHitResult) result;
-            BlockPos hitPos = blockResult.getBlockPos();
-            BlockState hitState = level.getBlockState(hitPos);
-
-            if (!isBlockValidCover(hitState, hitPos)) {
-                return maxDistance;
-            }
-        }
-
-        return start.distanceTo(result.getLocation());
+        VisibilityRay.Result result = VisibilityRay.trace(level, start, end, null);
+        return Math.min(maxDistance, result.blockedDistance());
     }
 
     private boolean isBlockValidCover(BlockState state, BlockPos pos) {
@@ -159,7 +135,8 @@ public class CoverQualityEvaluator {
             block instanceof net.minecraft.world.level.block.StainedGlassBlock ||
             block instanceof net.minecraft.world.level.block.TintedGlassBlock ||
             block instanceof net.minecraft.world.level.block.FenceBlock ||
-            block instanceof net.minecraft.world.level.block.FenceGateBlock) {
+            block instanceof net.minecraft.world.level.block.FenceGateBlock ||
+            state.is(ModBlockTags.TRANSPARENT_PENETRABLE)) {
             return false;
         }
 

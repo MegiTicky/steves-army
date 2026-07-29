@@ -42,10 +42,12 @@ public class DetectionSystem {
             double distance = soldier.distanceTo(target);
             
             boolean wasInLOS = state.wasInLOSLastCheck;
-            boolean nowInLOS = TargetAcquisition.hasLineOfSight(soldier, target);
+            VisibilityRay.Result visibility = TargetAcquisition.getVisibility(soldier, target);
+            boolean nowInLOS = visibility.hasContact();
             
             if (nowInLOS) {
-                double detectionPoints = calculateDetectionPoints(soldier, target, distance, state, wasInLOS);
+                double detectionPoints = calculateDetectionPoints(
+                    soldier, target, distance, state, wasInLOS, visibility.spottingMultiplier());
                 state.accumulatedPoints += detectionPoints;
                 state.ticksSinceLastSeen = 0;
             } else {
@@ -64,7 +66,8 @@ public class DetectionSystem {
         });
     }
     
-    private double calculateDetectionPoints(LivingEntity soldier, LivingEntity target, double distance, DetectionState state, boolean wasInLOS) {
+    private double calculateDetectionPoints(LivingEntity soldier, LivingEntity target, double distance,
+                                            DetectionState state, boolean wasInLOS, double visibilityMultiplier) {
         double baseRate;
         double maxRange;
         
@@ -109,7 +112,8 @@ public class DetectionSystem {
         lastMovementFactor = movementFactor;
         lastBrightnessFactor = brightnessFactor;
         
-        double points = baseRate * distanceFactor * exposureFactor * movementFactor * brightnessFactor;
+        double points = baseRate * distanceFactor * exposureFactor * movementFactor
+            * brightnessFactor * visibilityMultiplier;
         
         points *= (0.5 + soldier.level().random.nextDouble());
         

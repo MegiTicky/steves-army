@@ -4,10 +4,7 @@ import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.debug.DiagnosticLogManager;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.entity.LivingEntity;
-import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.Level;
-import net.minecraft.world.phys.BlockHitResult;
-import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 
 import java.util.ArrayList;
@@ -40,12 +37,15 @@ public class ExposureCalculator {
         public final AimPointType type;
         public final boolean bulletPathClear;
         public final boolean pointVisible;
+        public final double concealment;
         
-        public AimPointResult(Vec3 position, AimPointType type, boolean bulletPathClear, boolean pointVisible) {
+        public AimPointResult(Vec3 position, AimPointType type, boolean bulletPathClear,
+                              boolean pointVisible, double concealment) {
             this.position = position;
             this.type = type;
             this.bulletPathClear = bulletPathClear;
             this.pointVisible = pointVisible;
+            this.concealment = concealment;
         }
         
         public boolean canShoot() {
@@ -63,7 +63,7 @@ public class ExposureCalculator {
         
         int visiblePoints = 0;
         for (Vec3 point : targetPoints) {
-            if (canSeePoint(level, observerEye, point, observer)) {
+            if (getVisibility(level, observerEye, point, observer).hasContact()) {
                 visiblePoints++;
             }
         }
@@ -85,7 +85,7 @@ public class ExposureCalculator {
             if (DiagnosticLogManager.isDamageLoggingEnabled()) {
                 StevesArmyMod.LOGGER.info("[DAMAGE_DEBUG] getBestAimPoint: different levels, returning FALLBACK");
             }
-            return new AimPointResult(target.getEyePosition(), AimPointType.FALLBACK, false, false);
+            return new AimPointResult(target.getEyePosition(), AimPointType.FALLBACK, false, false, 1.0);
         }
         
         Level level = observer.level();
@@ -96,8 +96,8 @@ public class ExposureCalculator {
         TargetPoint bestVisible = null;
         
         for (TargetPoint point : targetPoints) {
-            boolean canReach = canSeePoint(level, observerEye, point.position, observer, skipBlock);
-            if (canReach) {
+            VisibilityRay.Result visibility = getVisibility(level, observerEye, point.position, observer, skipBlock);
+            if (visibility.hasContact()) {
                 if (bestVisible == null || point.type.priority > bestVisible.type.priority) {
                     bestVisible = point;
                 }
@@ -112,7 +112,9 @@ public class ExposureCalculator {
                     String.format("%.2f", bestVisible.position.y),
                     String.format("%.2f", bestVisible.position.z));
             }
-            return new AimPointResult(bestVisible.position, bestVisible.type, true, true);
+            VisibilityRay.Result visibility = getVisibility(
+                level, observerEye, bestVisible.position, observer, skipBlock);
+            return new AimPointResult(bestVisible.position, bestVisible.type, true, true, visibility.concealment());
         }
         
         if (DiagnosticLogManager.isDamageLoggingEnabled()) {
@@ -120,7 +122,7 @@ public class ExposureCalculator {
                 String.format("%.2f", observer.getX()), String.format("%.2f", observer.getEyeY()), String.format("%.2f", observer.getZ()),
                 String.format("%.2f", target.getX()), String.format("%.2f", target.getY()), String.format("%.2f", target.getZ()));
         }
-        return new AimPointResult(target.getEyePosition(), AimPointType.FALLBACK, false, false);
+        return new AimPointResult(target.getEyePosition(), AimPointType.FALLBACK, false, false, 1.0);
     }
     
     private static TargetPoint[] getTargetPointsWithPriority(LivingEntity target) {
@@ -181,32 +183,21 @@ public class ExposureCalculator {
         };
     }
     
-    private static boolean canSeePoint(Level level, Vec3 from, Vec3 to, LivingEntity observer) {
-        return canSeePoint(level, from, to, observer, null);
+    private static VisibilityRay.Result getVisibility(Level level, Vec3 from, Vec3 to,
+                                                       LivingEntity observer, BlockPos skipBlock) {
+        if (skipBlock == null) {
+            return VisibilityRay.trace(level, from, to, observer);
+        }
+
+        // Cover peeks intentionally ignore the selected cover block and the block above it.
+        BlockPos first = skipBlock;
+        BlockPos second = skipBlock.above();
+        return VisibilityRay.trace(level, from, to, observer, first, second);
     }
 
-    private static boolean canSeePoint(Level level, Vec3 from, Vec3 to, LivingEntity observer, BlockPos skipBlock) {
-        ClipContext context = new ClipContext(
-            from,
-            to,
-            ClipContext.Block.COLLIDER,
-            ClipContext.Fluid.NONE,
-            observer
-        );
-        
-        HitResult result = level.clip(context);
-        if (result.getType() == HitResult.Type.MISS) return true;
-        if (skipBlock != null && result.getType() == HitResult.Type.BLOCK) {
-            BlockHitResult blockResult = (BlockHitResult) result;
-            if (blockResult.getBlockPos().equals(skipBlock) || blockResult.getBlockPos().equals(skipBlock.above())) {
-                return true;
-            }
-        }
-        return false;
-    }
-    
-    private static boolean canBulletReach(Level level, Vec3 from, Vec3 to, LivingEntity shooter, BlockPos skipBlock) {
-        return canSeePoint(level, from, to, shooter, skipBlock);
+    private static VisibilityRay.Result getVisibility(Level level, Vec3 from, Vec3 to,
+                                                       LivingEntity observer) {
+        return VisibilityRay.trace(level, from, to, observer);
     }
     
     private static class TargetPoint {
