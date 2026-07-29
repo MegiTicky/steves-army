@@ -20,7 +20,7 @@ public class ExposureCalculator {
         HEAD(4, "HEAD"),
         NECK(3, "NECK"),
         CENTER_MASS(8, "CENTER"),
-        UPPER_TORSO(7, "UPPER"),
+        UPPER_TORSO(9, "UPPER"),
         LOWER_TORSO(6, "LOWER"),
         HIP(5, "HIP"),
         FEET(3, "FEET"),
@@ -131,7 +131,7 @@ public class ExposureCalculator {
         double headY = basePos.y + height * 0.92;
         double neckY = basePos.y + height * 0.82;
         double midTorsoY = basePos.y + height * 0.55;
-        double upperTorsoY = basePos.y + height * 0.70;
+        double upperTorsoY = basePos.y + height * 0.68;
         double lowerTorsoY = basePos.y + height * 0.40;
         double hipY = basePos.y + height * 0.25;
         double feetY = basePos.y + height * 0.10;
@@ -143,7 +143,7 @@ public class ExposureCalculator {
             new TargetPoint(new Vec3(basePos.x, headY, basePos.z), AimPointType.HEAD),
             new TargetPoint(new Vec3(basePos.x, neckY, basePos.z), AimPointType.NECK),
             new TargetPoint(new Vec3(basePos.x, midTorsoY, basePos.z), AimPointType.CENTER_MASS),
-            new TargetPoint(new Vec3(basePos.x, upperTorsoY, basePos.z), AimPointType.CENTER_MASS),
+            new TargetPoint(new Vec3(basePos.x, upperTorsoY, basePos.z), AimPointType.UPPER_TORSO),
             new TargetPoint(new Vec3(basePos.x, lowerTorsoY, basePos.z), AimPointType.CENTER_MASS),
             new TargetPoint(new Vec3(basePos.x, hipY, basePos.z), AimPointType.HIP),
             new TargetPoint(new Vec3(basePos.x - quarterWidth, headY, basePos.z), AimPointType.HEAD),

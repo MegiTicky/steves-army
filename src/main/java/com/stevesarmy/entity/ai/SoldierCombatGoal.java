@@ -703,23 +703,29 @@ public class SoldierCombatGoal extends Goal {
         
         GunIntegration.ShootResult result;
         
+        // Always fire through the aim point with angular deviation.
+        // The accuracy model is angular dispersion, not a hit/miss roll.
+        float yawSigma = AimAccuracyManager.getYawSigma(aimQuality);
+        float pitchSigma = AimAccuracyManager.getPitchSigma(aimQuality);
+        float[] deviation = AimAccuracyManager.sampleGaussianDeviation(aimQuality, yawSigma, pitchSigma, soldier.level());
+        float pitchDev = deviation[0];
+        float yawDev = deviation[1];
+        
         if (isDamageDebugLogging()) {
-            StevesArmyMod.LOGGER.info("[DAMAGE_DEBUG] tickGunCombat: ABOUT TO SHOOT at target={}({}) aimPoint=({},{},{}) aimType={} aimQuality={} hitChance={}",
+            StevesArmyMod.LOGGER.info("[DAMAGE_DEBUG] tickGunCombat: SHOOT target={}({}) aimPoint=({},{},{}) aimType={} aimQuality={} yawSigma={} pitchSigma={} yawDev={} pitchDev={}",
                 target.getName().getString(), target.getId(),
                 String.format("%.2f", aimPoint.position.x),
                 String.format("%.2f", aimPoint.position.y),
                 String.format("%.2f", aimPoint.position.z),
                 aimPoint.type.displayName,
                 String.format("%.3f", aimQuality),
-                String.format("%.3f", soldier.level().getRandom().nextFloat()));
+                String.format("%.3f", yawSigma),
+                String.format("%.3f", pitchSigma),
+                String.format("%.3f", yawDev),
+                String.format("%.3f", pitchDev));
         }
         
-        if (soldier.level().getRandom().nextFloat() < aimQuality) {
-            result = GunIntegration.shootWithDeviation(soldier, aimPoint, 0.0f, 0.0f);
-        } else {
-            Vec3 missPosition = AimAccuracyManager.calculateMissPosition(target, soldier.level());
-            result = GunIntegration.shootAtPosition(soldier, missPosition);
-        }
+        result = GunIntegration.shootWithDeviation(soldier, aimPoint, pitchDev, yawDev);
         
         if (result == GunIntegration.ShootResult.SUCCESS) {
             if (coverManager.isInCover()) {
