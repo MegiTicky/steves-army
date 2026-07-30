@@ -23,19 +23,14 @@ public class SuppressireAssignmentManager {
         long currentTime = level.getGameTime();
         
         for (SquadThreatIntel.ThreatKnowledge threat : intel.getAllThreats()) {
-            if (threat.isSuppressed && threat.suppressedBy != null) {
-                Entity suppressor = level.getEntity(threat.suppressedBy);
-                if (suppressor == null || !suppressor.isAlive()) {
-                    intel.clearThreatSuppression(threat.threatEntityId);
+            for (UUID suppressorId : new ArrayList<>(threat.suppressors)) {
+                Entity suppressor = level.getEntity(suppressorId);
+                long heartbeat = threat.suppressionHeartbeats.getOrDefault(suppressorId, 0L);
+                if (suppressor == null || !suppressor.isAlive() || currentTime - heartbeat > 20) {
+                    intel.releaseThreatSuppression(threat.threatEntityId, suppressorId);
                     if (DiagnosticLogManager.isSuppressionLoggingEnabled()) {
-                        StevesArmyMod.LOGGER.info("[SuppressAssign] Cleared stale suppression for threat {} (suppressor dead)",
-                            threat.threatEntityId);
-                    }
-                } else if (intel.isSuppressionStale(threat.threatEntityId, currentTime)) {
-                    intel.clearThreatSuppression(threat.threatEntityId);
-                    if (DiagnosticLogManager.isSuppressionLoggingEnabled()) {
-                        StevesArmyMod.LOGGER.info("[SuppressAssign] Cleared stale suppression for threat {} (heartbeat timeout)",
-                            threat.threatEntityId);
+                        StevesArmyMod.LOGGER.info("[SuppressAssign] Released stale suppressor {} for threat {}",
+                            suppressorId, threat.threatEntityId);
                     }
                 }
             }

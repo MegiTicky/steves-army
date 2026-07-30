@@ -78,6 +78,13 @@ public class GunIntegration {
     public static String getGunTabType(LivingEntity entity) { return gunHandler.getGunTabType(entity); }
     public static boolean isMachineGun(LivingEntity entity) { return gunHandler.isMachineGun(entity); }
 
+    /** True only for TaCZ's dedicated MG category; SMGs are not base-of-fire weapons. */
+    public static boolean isSuppressiveMachineGun(LivingEntity entity) {
+        String tabType = getGunTabType(entity);
+        return "mg".equals(tabType) || "machine_gun".equals(tabType)
+            || "lmg".equals(tabType) || "mmg".equals(tabType) || "hmg".equals(tabType);
+    }
+
     public enum ShootResult {
         SUCCESS, NO_AMMO, COOLDOWN, NOT_GUN, NO_TARGET, OUT_OF_RANGE,
         NEED_BOLT, IS_BOLTING, IS_RELOADING, IS_DRAWING, NOT_DRAWN, 

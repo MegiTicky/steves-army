@@ -9,6 +9,7 @@ import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.Tag;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.phys.Vec3;
 
 import javax.annotation.Nullable;
 import java.util.*;
@@ -18,7 +19,7 @@ public class SquadThreatIntel {
 
     private final Map<UUID, ThreatKnowledge> knownThreats = new HashMap<>();
     private static final long THREAT_MEMORY_TICKS = 600;
-    private static final long STALE_TIMEOUT_TICKS = 60;
+    private static final long STALE_TIMEOUT_TICKS = 120;
 
     public static class ThreatKnowledge {
         public final UUID threatEntityId;
@@ -30,6 +31,9 @@ public class SquadThreatIntel {
         public boolean isSuppressed;
         public UUID suppressedBy;
         public long lastSuppressionHeartbeat;
+        public final Set<UUID> suppressors = new HashSet<>();
+        public final Map<UUID, Long> suppressionHeartbeats = new HashMap<>();
+        @Nullable public Vec3 lastVisibleAimPoint;
 
         public ThreatKnowledge(UUID threatEntityId) {
             this.threatEntityId = threatEntityId;
@@ -58,6 +62,19 @@ public class SquadThreatIntel {
                 tag.putUUID("SuppressedBy", suppressedBy);
             }
             tag.putLong("LastSuppressionHeartbeat", lastSuppressionHeartbeat);
+            if (lastVisibleAimPoint != null) {
+                tag.putDouble("AimX", lastVisibleAimPoint.x);
+                tag.putDouble("AimY", lastVisibleAimPoint.y);
+                tag.putDouble("AimZ", lastVisibleAimPoint.z);
+            }
+            ListTag suppressorList = new ListTag();
+            for (UUID suppressor : suppressors) {
+                CompoundTag suppressorTag = new CompoundTag();
+                suppressorTag.putUUID("Id", suppressor);
+                suppressorTag.putLong("Heartbeat", suppressionHeartbeats.getOrDefault(suppressor, 0L));
+                suppressorList.add(suppressorTag);
+            }
+            tag.put("Suppressors", suppressorList);
             return tag;
         }
 
@@ -81,17 +98,41 @@ public class SquadThreatIntel {
                 knowledge.suppressedBy = tag.getUUID("SuppressedBy");
             }
             knowledge.lastSuppressionHeartbeat = tag.getLong("LastSuppressionHeartbeat");
+            if (tag.contains("AimX")) {
+                knowledge.lastVisibleAimPoint = new Vec3(
+                    tag.getDouble("AimX"), tag.getDouble("AimY"), tag.getDouble("AimZ"));
+            }
+            ListTag suppressorList = tag.getList("Suppressors", Tag.TAG_COMPOUND);
+            for (int i = 0; i < suppressorList.size(); i++) {
+                CompoundTag suppressorTag = suppressorList.getCompound(i);
+                UUID suppressor = suppressorTag.getUUID("Id");
+                knowledge.suppressors.add(suppressor);
+                knowledge.suppressionHeartbeats.put(suppressor, suppressorTag.getLong("Heartbeat"));
+            }
+            // Keep legacy single-owner saves as a single active assignment.
+            if (knowledge.suppressors.isEmpty() && knowledge.suppressedBy != null) {
+                knowledge.suppressors.add(knowledge.suppressedBy);
+                knowledge.suppressionHeartbeats.put(knowledge.suppressedBy, knowledge.lastSuppressionHeartbeat);
+            }
             return knowledge;
         }
     }
 
     public void reportThreat(UUID reporterId, LivingEntity threat, BlockPos pos, float accuracy) {
+        reportThreat(reporterId, threat, pos, null, accuracy);
+    }
+
+    public void reportThreat(UUID reporterId, LivingEntity threat, BlockPos pos,
+                             @Nullable Vec3 aimPoint, float accuracy) {
         ThreatKnowledge knowledge = knownThreats.getOrDefault(threat.getUUID(), 
             new ThreatKnowledge(threat.getUUID()));
         
         knowledge.lastKnownPosition = pos;
         knowledge.lastSeenTime = threat.level().getGameTime();
         knowledge.lastSeenBySoldier = reporterId;
+        if (aimPoint != null) {
+            knowledge.lastVisibleAimPoint = aimPoint;
+        }
         knowledge.accuracy = Math.max(knowledge.accuracy, accuracy);
         knowledge.isAlive = true;
         
@@ -121,6 +162,8 @@ public class SquadThreatIntel {
             knowledge.isAlive = false;
             knowledge.isSuppressed = false;
             knowledge.suppressedBy = null;
+            knowledge.suppressors.clear();
+            knowledge.suppressionHeartbeats.clear();
             
             if (CoverTacticalGoal.isDebugLoggingEnabled()) {
                 StevesArmyMod.LOGGER.info("[SquadThreatIntel] Threat marked dead: {}", threatId);
@@ -133,6 +176,7 @@ public class SquadThreatIntel {
         if (knowledge != null && knowledge.isAlive) {
             knowledge.isSuppressed = true;
             knowledge.suppressedBy = soldierId;
+            knowledge.suppressors.add(soldierId);
             
             if (DiagnosticLogManager.isSuppressionLoggingEnabled()) {
                 StevesArmyMod.LOGGER.info("[SquadThreatIntel] Threat {} now suppressed by {}", threatId, soldierId);
@@ -141,20 +185,35 @@ public class SquadThreatIntel {
     }
     
     public synchronized boolean tryMarkThreatSuppressed(UUID threatId, UUID soldierId) {
+        return tryClaimThreatSuppression(threatId, soldierId, 0L, 1);
+    }
+
+    public synchronized boolean tryClaimThreatSuppression(UUID threatId, UUID soldierId,
+                                                           long currentGameTime, int maxSuppressors) {
         ThreatKnowledge knowledge = knownThreats.get(threatId);
-        if (knowledge != null && knowledge.isAlive && !knowledge.isSuppressed) {
+        if (knowledge != null && knowledge.isAlive
+            && (knowledge.suppressors.contains(soldierId) || knowledge.suppressors.size() < maxSuppressors)) {
             knowledge.isSuppressed = true;
-            knowledge.suppressedBy = soldierId;
-            knowledge.lastSuppressionHeartbeat = 0;
+            knowledge.suppressors.add(soldierId);
+            knowledge.suppressedBy = knowledge.suppressors.iterator().next();
+            knowledge.suppressionHeartbeats.put(soldierId, currentGameTime);
+            knowledge.lastSuppressionHeartbeat = currentGameTime;
             return true;
         }
         return false;
     }
     
     public void updateSuppressionHeartbeat(UUID threatId, long currentGameTime) {
+        updateSuppressionHeartbeat(threatId, null, currentGameTime);
+    }
+
+    public void updateSuppressionHeartbeat(UUID threatId, @Nullable UUID soldierId, long currentGameTime) {
         ThreatKnowledge knowledge = knownThreats.get(threatId);
         if (knowledge != null && knowledge.isSuppressed) {
             knowledge.lastSuppressionHeartbeat = currentGameTime;
+            if (soldierId != null && knowledge.suppressors.contains(soldierId)) {
+                knowledge.suppressionHeartbeats.put(soldierId, currentGameTime);
+            }
         }
     }
     
@@ -171,15 +230,34 @@ public class SquadThreatIntel {
         if (knowledge != null) {
             knowledge.isSuppressed = false;
             knowledge.suppressedBy = null;
+            knowledge.suppressors.clear();
+            knowledge.suppressionHeartbeats.clear();
         }
+    }
+
+    public void releaseThreatSuppression(UUID threatId, UUID soldierId) {
+        ThreatKnowledge knowledge = knownThreats.get(threatId);
+        if (knowledge == null) return;
+
+        knowledge.suppressors.remove(soldierId);
+        knowledge.suppressionHeartbeats.remove(soldierId);
+        knowledge.isSuppressed = !knowledge.suppressors.isEmpty();
+        knowledge.suppressedBy = knowledge.isSuppressed ? knowledge.suppressors.iterator().next() : null;
+    }
+
+    public boolean hasSuppressionAssignment(UUID threatId, UUID soldierId) {
+        ThreatKnowledge knowledge = knownThreats.get(threatId);
+        return knowledge != null && knowledge.suppressors.contains(soldierId);
+    }
+
+    public int getSuppressionCount(UUID threatId) {
+        ThreatKnowledge knowledge = knownThreats.get(threatId);
+        return knowledge != null ? knowledge.suppressors.size() : 0;
     }
 
     public void clearSuppressionBySoldier(UUID soldierId) {
         for (ThreatKnowledge knowledge : knownThreats.values()) {
-            if (soldierId.equals(knowledge.suppressedBy)) {
-                knowledge.isSuppressed = false;
-                knowledge.suppressedBy = null;
-            }
+            releaseThreatSuppression(knowledge.threatEntityId, soldierId);
         }
     }
 
@@ -210,7 +288,7 @@ public class SquadThreatIntel {
 
     public Optional<ThreatKnowledge> getAssignedThreatForSoldier(UUID soldierId) {
         return knownThreats.values().stream()
-            .filter(t -> t.isSuppressed && soldierId.equals(t.suppressedBy))
+            .filter(t -> t.suppressors.contains(soldierId))
             .findFirst();
     }
 
