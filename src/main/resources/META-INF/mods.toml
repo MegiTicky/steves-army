@@ -78,6 +78,13 @@ description='''${mod_description}'''
 [[dependencies.${mod_id}]]
     modId="valkyrienskies"
     mandatory=false
+    versionRange="[2.3.0,)"
+    ordering="AFTER"
+    side="BOTH"
+
+[[dependencies.${mod_id}]]
+    modId="playerrevive"
+    mandatory=false
     versionRange="[2.0,)"
     ordering="AFTER"
     side="BOTH"
