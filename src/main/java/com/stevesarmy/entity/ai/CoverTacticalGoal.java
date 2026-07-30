@@ -1220,6 +1220,7 @@ private void tickRepositioning() {
         // Delegate peek to PeekController
         if (currentCover != null) {
             getPeekController().tick(soldier, currentCover, getPositionController());
+            maintainCoverAnchorIfHiding(currentCover);
         }
 
         reevaluateCounter++;
@@ -1296,6 +1297,8 @@ private void tickRepositioning() {
         if (peekCtrl.isReturning()) {
             peekCtrl.tick(soldier, currentCover, getPositionController());
         }
+
+        maintainCoverAnchorIfHiding(currentCover);
 
 // Flank detection is deferred while suppressed: the soldier will
         // evaluate flank repositioning after recovery in tickInCover()
@@ -2666,6 +2669,12 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
 
     private CoverPositionController getPositionController() {
         return (CoverPositionController) soldier.getMoveControl();
+    }
+
+    private void maintainCoverAnchorIfHiding(CoverPoint cover) {
+        if (cover != null && getPeekController().isHiding()) {
+            getPositionController().maintainCoverAnchor(getCoverStandingPosition(cover.getPosition()));
+        }
     }
     
 public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {

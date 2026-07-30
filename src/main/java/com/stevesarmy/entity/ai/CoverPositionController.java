@@ -38,9 +38,13 @@ public class CoverPositionController extends MoveControl {
     private String debugMoveReason = "";
     private Vec3 debugLastSetVelocity = Vec3.ZERO;
     private boolean controlledReturnToCover;
+    private Vec3 coverAnchorTarget;
 
     // Max steps for swept-box collision check
     private static final int COLLISION_SWEEP_STEPS = 8;
+    private static final double COVER_ANCHOR_DEADZONE = 0.08;
+    private static final double COVER_ANCHOR_MAX_SPEED = 0.18;
+    private static final double COVER_ANCHOR_RESPONSE = 0.75;
 
     public CoverPositionController(Mob mob) {
         super(mob);
@@ -51,6 +55,7 @@ public class CoverPositionController extends MoveControl {
     }
 
     public void moveTo(Vec3 pos, double tolerance, double speed, String source, String reason) {
+        this.coverAnchorTarget = null;
         if (isPreparingOrReloading()) {
             if (!controlledReturnToCover) {
                 stopForReload();
@@ -152,6 +157,7 @@ public class CoverPositionController extends MoveControl {
         this.lastResult = MovementResult.NONE;
         this.lastFailureReason = FailureReason.NONE;
         this.controlledReturnToCover = false;
+        this.coverAnchorTarget = null;
         this.operation = MoveControl.Operation.WAIT;
         this.mob.getNavigation().stop();
         this.mob.setZza(0.0F);
@@ -177,8 +183,55 @@ public class CoverPositionController extends MoveControl {
     public String getDebugMoveReason() { return debugMoveReason; }
     public Vec3 getDebugLastSetVelocity() { return debugLastSetVelocity; }
 
+    /**
+     * Requests short-range position correction while the soldier is hiding in
+     * its current cover. The request is consumed by tick() so the correction
+     * happens after MoveControl has processed the normal movement command.
+     */
+    public void maintainCoverAnchor(Vec3 target) {
+        if (!isPreparingOrReloading()) {
+            this.coverAnchorTarget = target;
+        }
+    }
+
+    private void applyCoverAnchorVelocity(Vec3 target) {
+        if (target == null) return;
+
+        double dx = target.x - this.mob.getX();
+        double dz = target.z - this.mob.getZ();
+        double distance = Math.sqrt(dx * dx + dz * dz);
+        if (distance < 0.001) return;
+
+        double nx = dx / distance;
+        double nz = dz / distance;
+        Vec3 velocity = this.mob.getDeltaMovement();
+        double towardSpeed = velocity.x * nx + velocity.z * nz;
+
+        // Remove only radial velocity carrying the soldier away from cover.
+        // Tangential movement remains available for normal collision handling.
+        if (towardSpeed < 0.0) {
+            velocity = velocity.subtract(new Vec3(nx, 0.0, nz).scale(towardSpeed));
+            towardSpeed = 0.0;
+        }
+
+        double desiredSpeed = distance <= COVER_ANCHOR_DEADZONE
+            ? 0.0
+            : Math.min(COVER_ANCHOR_MAX_SPEED,
+                (distance - COVER_ANCHOR_DEADZONE) * COVER_ANCHOR_RESPONSE);
+        if (towardSpeed < desiredSpeed) {
+            velocity = velocity.add(new Vec3(nx, 0.0, nz).scale(desiredSpeed - towardSpeed));
+        } else if (distance <= COVER_ANCHOR_DEADZONE && towardSpeed > 0.0) {
+            velocity = velocity.subtract(new Vec3(nx, 0.0, nz).scale(towardSpeed));
+        }
+
+        this.mob.setDeltaMovement(velocity.x, velocity.y, velocity.z);
+    }
+
     @Override
     public void tick() {
+        Vec3 anchorTarget = this.coverAnchorTarget;
+        this.coverAnchorTarget = null;
+
         if (isPreparingOrReloading() && !controlledReturnToCover) {
             clear();
             this.debugMoveSource = "reload";
@@ -189,6 +242,7 @@ public class CoverPositionController extends MoveControl {
 
         if (lastResult != MovementResult.IN_PROGRESS) {
             super.tick();
+            applyCoverAnchorVelocity(anchorTarget);
             this.debugLastSetVelocity = this.mob.getDeltaMovement();
             this.debugMoveSource = "vanilla";
             this.debugMoveReason = "navigation";
@@ -236,6 +290,7 @@ public class CoverPositionController extends MoveControl {
         this.setWantedPosition(targetPos.x, targetPos.y, targetPos.z, targetSpeed);
 
         super.tick();
+        applyCoverAnchorVelocity(anchorTarget);
         this.debugLastSetVelocity = this.mob.getDeltaMovement();
     }
 
