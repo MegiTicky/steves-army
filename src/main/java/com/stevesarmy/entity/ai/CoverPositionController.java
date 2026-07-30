@@ -5,7 +5,9 @@ import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.util.HazardBlockHelper;
 import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.ai.control.MoveControl;
+import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
+import net.minecraft.world.phys.shapes.VoxelShape;
 
 public class CoverPositionController extends MoveControl {
 
@@ -16,18 +18,29 @@ public class CoverPositionController extends MoveControl {
         FAILED
     }
 
+    public enum FailureReason {
+        NONE,
+        BLOCKED_PATH,
+        HAZARD,
+        NO_PROGRESS,
+        RELOAD_INTERRUPTED
+    }
+
     private Vec3 targetPos = Vec3.ZERO;
     private double tolerance = 0.5;
     private double targetSpeed = 0.3;
     private MovementResult lastResult = MovementResult.NONE;
+    private FailureReason lastFailureReason = FailureReason.NONE;
     private int stuckTicks = 0;
     private Vec3 lastPos = Vec3.ZERO;
 
     private String debugMoveSource = "none";
     private String debugMoveReason = "";
     private Vec3 debugLastSetVelocity = Vec3.ZERO;
-    // Reloading only permits the full-cover duck-back movement.
     private boolean controlledReturnToCover;
+
+    // Max steps for swept-box collision check
+    private static final int COLLISION_SWEEP_STEPS = 8;
 
     public CoverPositionController(Mob mob) {
         super(mob);
@@ -42,6 +55,7 @@ public class CoverPositionController extends MoveControl {
             if (!controlledReturnToCover) {
                 stopForReload();
                 this.lastResult = MovementResult.FAILED;
+                this.lastFailureReason = FailureReason.RELOAD_INTERRUPTED;
             }
             return;
         }
@@ -54,23 +68,31 @@ public class CoverPositionController extends MoveControl {
 
     private void beginMove(Vec3 pos, double tolerance, double speed, String source, String reason,
                            boolean controlledReturn) {
-        // Reject movement that would enter a hazard, but allow escape if already inside one
         if (HazardBlockHelper.sweptPathCrossesHazard(this.mob, this.mob.position(), pos)) {
             boolean alreadyInside = HazardBlockHelper.boundingBoxOverlapsHazard(this.mob.level(), this.mob.getBoundingBox());
             if (!alreadyInside) {
                 StevesArmyMod.LOGGER.info("[MoveCtl] Soldier {} moveTo to ({}, {}, {}) blocked by hazard",
                     ((net.minecraft.world.entity.LivingEntity)this.mob).getId(),
                     pos.x, pos.y, pos.z);
-                this.lastResult = MovementResult.FAILED;
-                this.controlledReturnToCover = false;
+                failWithReason(FailureReason.HAZARD, false);
                 return;
             }
+        }
+
+        // Reject movement when the swept bounding box would collide with a solid block
+        if (sweptBoxCollidesWithSolid(pos)) {
+            StevesArmyMod.LOGGER.info("[MoveCtl] Soldier {} moveTo to ({}, {}, {}) blocked by solid collision",
+                ((net.minecraft.world.entity.LivingEntity)this.mob).getId(),
+                pos.x, pos.y, pos.z);
+            failWithReason(FailureReason.BLOCKED_PATH, false);
+            return;
         }
 
         this.targetPos = pos;
         this.tolerance = tolerance;
         this.targetSpeed = speed;
         this.lastResult = MovementResult.IN_PROGRESS;
+        this.lastFailureReason = FailureReason.NONE;
         this.stuckTicks = 0;
         this.controlledReturnToCover = controlledReturn;
 
@@ -80,12 +102,55 @@ public class CoverPositionController extends MoveControl {
         this.debugMoveReason = reason;
     }
 
+    /**
+     * Sweeps the mob's bounding box from current position toward targetPos.
+     * Returns true if any block collision shape is intersected along the path.
+     * Uses a stepped horizontal sweep; does not check vertical collision at
+     * the destination (the standing block is assumed to be solid ground).
+     */
+    private boolean sweptBoxCollidesWithSolid(Vec3 targetPos) {
+        AABB bb = this.mob.getBoundingBox();
+        double dx = targetPos.x - this.mob.getX();
+        double dz = targetPos.z - this.mob.getZ();
+        double dist = Math.sqrt(dx * dx + dz * dz);
+        if (dist < 0.01) {
+            return !this.mob.level().noCollision(this.mob, bb);
+        }
+
+        for (int i = 0; i <= COLLISION_SWEEP_STEPS; i++) {
+            double t = (double) i / COLLISION_SWEEP_STEPS;
+            AABB sample = bb.move(dx * t, 0, dz * t);
+            for (VoxelShape shape : this.mob.level().getBlockCollisions(this.mob, sample)) {
+                if (!shape.isEmpty()) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private void failWithReason(FailureReason reason, boolean controlledReturn) {
+        this.lastResult = MovementResult.FAILED;
+        this.lastFailureReason = reason;
+        this.controlledReturnToCover = controlledReturn;
+        this.operation = Operation.WAIT;
+        this.mob.setZza(0.0F);
+        this.mob.setXxa(0.0F);
+        this.mob.setSpeed(0.0F);
+        this.mob.setDeltaMovement(0, this.mob.getDeltaMovement().y, 0);
+    }
+
+    public FailureReason getLastFailureReason() {
+        return lastFailureReason;
+    }
+
     public MovementResult getLastResult() {
         return lastResult;
     }
 
     public void clear() {
         this.lastResult = MovementResult.NONE;
+        this.lastFailureReason = FailureReason.NONE;
         this.controlledReturnToCover = false;
         this.operation = MoveControl.Operation.WAIT;
         this.mob.getNavigation().stop();
@@ -133,6 +198,7 @@ public class CoverPositionController extends MoveControl {
         if (StevesArmyMod.teleportOnlyMode) {
             mob.moveTo(targetPos.x, targetPos.y, targetPos.z, mob.getYRot(), mob.getXRot());
             lastResult = MovementResult.REACHED_TARGET;
+            lastFailureReason = FailureReason.NONE;
             controlledReturnToCover = false;
             return;
         }
@@ -149,6 +215,7 @@ public class CoverPositionController extends MoveControl {
             this.mob.setDeltaMovement(0, this.mob.getDeltaMovement().y, 0);
             this.debugLastSetVelocity = Vec3.ZERO;
             lastResult = MovementResult.REACHED_TARGET;
+            lastFailureReason = FailureReason.NONE;
             controlledReturnToCover = false;
             return;
         }
@@ -158,8 +225,7 @@ public class CoverPositionController extends MoveControl {
         if (moved < 0.0001) {
             stuckTicks++;
             if (stuckTicks > 40) {
-                lastResult = MovementResult.FAILED;
-                controlledReturnToCover = false;
+                failWithReason(FailureReason.NO_PROGRESS, false);
                 return;
             }
         } else {
