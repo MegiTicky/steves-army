@@ -70,6 +70,16 @@ public class CoverTacticalGoal extends Goal {
     
     private static final double FOLLOW_COVER_SEARCH_RADIUS = 15.0D;
     private static final double FOLLOW_REGROUP_DISTANCE = 10.0D;
+    private static final int RELOCATION_SEARCH_RADIUS = 12;
+    private static final int FOLLOW_COVER_RETRY_TICKS = 40;
+    // Vanilla pathfinding is bounded by FOLLOW_RANGE. Far relocation targets need
+    // progressive paths until they enter this exact-path validation radius.
+    private static final double RELOCATION_EXACT_PATH_DISTANCE = 32.0D;
+    private static final double MIN_STAGED_PATH_PROGRESS = 1.0D;
+    // FOLLOW cover target is replaced when the owner has moved far enough
+    // from the selected cover's position (18 blocks ~= FOLLOW_COVER_SEARCH_RADIUS + margin).
+    private static final double FOLLOW_TARGET_STALE_DISTANCE = 18.0D;
+    private static final int FOLLOW_REPLAN_COOLDOWN_TICKS = 40;
     
     private static final double POSITIONING_TOLERANCE = 0.05;
     private static final double POSITIONING_SPEED = 1.0;
@@ -135,6 +145,15 @@ public class CoverTacticalGoal extends Goal {
     private CoverPoint pendingRetryCover = null;
     private boolean isRetryAttempt = false;
     private boolean reloadHoldActive;
+
+    private enum RelocationType { NONE, GO_TO, FOLLOW }
+
+    private RelocationType relocationType = RelocationType.NONE;
+    private BlockPos relocationCenter = null;
+    private int relocationCommandGeneration = -1;
+    private int failedGoToRelocationGeneration = -1;
+    private int nextFollowRelocationSearchTick = 0;
+    private int followReplanCooldownTicks = 0;
 
     private CoverFinder.ScoredCover[] cachedTopCovers = new CoverFinder.ScoredCover[0];
     private BlockPos debugSearchCenter = null;
@@ -209,6 +228,75 @@ public class CoverTacticalGoal extends Goal {
     
     private CoverBehaviorManager getCoverManager() {
         return soldier.getCoverBehaviorManager();
+    }
+
+    /**
+     * Gives a GO_TO command first claim on reachable cover near its assigned
+     * formation slot. False leaves the command's normal location movement intact.
+     */
+    public boolean requestGoToRelocation(BlockPos destination, int commandGeneration) {
+        if (destination == null || !soldier.hasValidPingMoveTarget()
+            || soldier.getPingMoveGeneration() != commandGeneration
+            || failedGoToRelocationGeneration == commandGeneration) {
+            return false;
+        }
+        if (relocationType == RelocationType.GO_TO
+            && relocationCommandGeneration == commandGeneration) {
+            return true;
+        }
+
+        clearRelocationTarget();
+        relocationType = RelocationType.GO_TO;
+        relocationCenter = destination.immutable();
+        relocationCommandGeneration = commandGeneration;
+        return true;
+    }
+
+    public boolean isHandlingGoToRelocation(int commandGeneration) {
+        return relocationType == RelocationType.GO_TO
+            && relocationCommandGeneration == commandGeneration;
+    }
+
+    private boolean beginFollowRelocationIfNeeded() {
+        if (relocationType != RelocationType.NONE || soldier.getSquadMode() != SquadMode.FOLLOW
+            || getCoverManager().isSuppressed() || soldier.tickCount < nextFollowRelocationSearchTick) {
+            return relocationType == RelocationType.FOLLOW;
+        }
+
+        LivingEntity owner = soldier.getOwner();
+        if (owner == null || !owner.isAlive() || owner.isSpectator()
+            || soldier.distanceToSqr(owner) < FOLLOW_COVER_DISTANCE * FOLLOW_COVER_DISTANCE) {
+            return false;
+        }
+
+        relocationType = RelocationType.FOLLOW;
+        relocationCenter = owner.blockPosition().immutable();
+        relocationCommandGeneration = -1;
+        return true;
+    }
+
+    private boolean isRelocationStillValid() {
+        if (relocationType == RelocationType.GO_TO) {
+            return soldier.hasValidPingMoveTarget()
+                && soldier.getPingMoveGeneration() == relocationCommandGeneration;
+        }
+        if (relocationType == RelocationType.FOLLOW) {
+            LivingEntity owner = soldier.getOwner();
+            return soldier.getSquadMode() == SquadMode.FOLLOW && owner != null
+                && owner.isAlive() && !owner.isSpectator();
+        }
+        return false;
+    }
+
+    private void clearRelocationTarget() {
+        CoverPoint targetCover = getCoverManager().getTargetCover();
+        if (targetCover != null && relocationType != RelocationType.NONE) {
+            CoverReservationManager.release(targetCover.getPosition(), soldier);
+            getCoverManager().clearTargetCover();
+        }
+        relocationType = RelocationType.NONE;
+        relocationCenter = null;
+        relocationCommandGeneration = -1;
     }
     
     private PeekController getPeekController() {
@@ -378,16 +466,24 @@ public class CoverTacticalGoal extends Goal {
     @Override
     public boolean canUse() {
         if (soldier.isHealing()) return false;
-        if (cooldown > 0) {
-            cooldown--;
-            return false;
-        }
-        
         if (!soldier.isAlive()) return false;
         
         // ATTACK mode: always try to use cover (cover-to-cover advance)
         if (soldier.hasValidAttackTarget()) {
             return true;
+        }
+
+        if (relocationType != RelocationType.NONE && !isRelocationStillValid()) {
+            clearRelocationTarget();
+        }
+        beginFollowRelocationIfNeeded();
+        if (relocationType != RelocationType.NONE) {
+            return true;
+        }
+
+        if (cooldown > 0) {
+            cooldown--;
+            return false;
         }
         
         if (soldier.hasValidPingMoveTarget() && !soldier.hasValidAttackTarget()) {
@@ -449,6 +545,14 @@ public class CoverTacticalGoal extends Goal {
     @Override
     public boolean canContinueToUse() {
         if (!soldier.isAlive() || soldier.isHealing()) return false;
+
+        if (relocationType != RelocationType.NONE && !isRelocationStillValid()) {
+            navigation.stop();
+            getPositionController().clear();
+            clearRelocationTarget();
+            getCoverManager().setState(CoverBehaviorManager.CoverState.NO_COVER);
+            return false;
+        }
         
         CoverBehaviorManager.CoverState state = getCoverManager().getState();
         
@@ -531,6 +635,39 @@ public class CoverTacticalGoal extends Goal {
     public void tick() {
         CoverBehaviorManager.CoverState state = getCoverManager().getState();
         getCoverManager().tickSuppression(getCoverManager().isInCover());
+
+        if (relocationType != RelocationType.NONE && !isRelocationStillValid()) {
+            navigation.stop();
+            getPositionController().clear();
+            clearRelocationTarget();
+            getCoverManager().setState(CoverBehaviorManager.CoverState.NO_COVER);
+            return;
+        }
+
+        if (relocationType == RelocationType.FOLLOW && relocationCenter != null) {
+            LivingEntity owner = soldier.getOwner();
+            if (owner != null) {
+                BlockPos ownerPos = owner.blockPosition().immutable();
+                relocationCenter = ownerPos;
+
+                CoverPoint targetCover = getCoverManager().getTargetCover();
+                if (targetCover != null && !getCoverManager().isInCover()
+                    && followReplanCooldownTicks <= 0
+                    && ownerPos.distSqr(targetCover.getPosition()) > FOLLOW_TARGET_STALE_DISTANCE * FOLLOW_TARGET_STALE_DISTANCE) {
+                    CoverReservationManager.release(targetCover.getPosition(), soldier);
+                    getCoverManager().clearTargetCover();
+                    getPositionController().clear();
+                    followReplanCooldownTicks = FOLLOW_REPLAN_COOLDOWN_TICKS;
+                    if (DiagnosticLogManager.isCoverLoggingEnabled()) {
+                        StevesArmyMod.LOGGER.info("[CoverRelocation] Soldier {} FOLLOW target stale (owner moved), replacing",
+                            soldier.getId());
+                    }
+                }
+                if (followReplanCooldownTicks > 0) {
+                    followReplanCooldownTicks--;
+                }
+            }
+        }
         
         // Sync threat direction to client for debug rendering
         Vec3 threatDir = getThreats().getThreatDirectionForProactivePeek(soldier.position());
@@ -734,6 +871,15 @@ public class CoverTacticalGoal extends Goal {
         Vec3 currentPos = soldier.position();
         
         if (navigation.isDone()) {
+            if (relocationType != RelocationType.NONE) {
+                // A staged path has ended. Recalculate immediately: the next route
+                // may now be short enough to require exact cover validation.
+                moveToCover(targetCover);
+                stuckTicks = 0;
+                noProgressTicks = 0;
+                lastSeekingPosition = currentPos;
+                return;
+            }
             stuckTicks++;
             noProgressTicks = 0;
             lastSeekingPosition = null;
@@ -775,7 +921,8 @@ public class CoverTacticalGoal extends Goal {
             }
         }
         
-        if (seekingTicks > MAX_SEEKING_TICKS) {
+        int seekingTimeout = relocationType != RelocationType.NONE ? MAX_SEEKING_TICKS * 3 : MAX_SEEKING_TICKS;
+        if (seekingTicks > seekingTimeout) {
             if (soldier.hasValidAttackTarget()) {
                 StevesArmyMod.LOGGER.info("[CoverNav] Soldier {} ({}) ATTACK seeking timeout, resetting. cover={}",
                     soldier.getId(), soldier.getName().getString(), targetCover != null ? targetCover.getPosition() : "null");
@@ -1217,8 +1364,12 @@ private void tickRepositioning() {
         return PendingRepositionResult.NONE;
     }
     
-private boolean shouldSeekCover() {
+    private boolean shouldSeekCover() {
         ThreatAwareness threats = getThreats();
+
+        if (relocationType != RelocationType.NONE) {
+            return true;
+        }
 
         if (soldier.hasValidAttackTarget()) {
             if (DiagnosticLogManager.isCoverLoggingEnabled()) {
@@ -1481,6 +1632,49 @@ private void startRepositioning() {
         Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
         List<LivingEntity> threats = getThreatList();
         SquadCoverContext squadCtx = buildSquadCoverContext();
+
+        if (relocationType != RelocationType.NONE && relocationCenter != null) {
+            debugSearchCenter = relocationCenter;
+            List<CoverFinder.ScoredCover> relocationCovers = finder.evaluateAndScoreAllFromCenter(
+                relocationCenter, soldier, threatDirection, threats,
+                relocationType == RelocationType.FOLLOW ? (int) FOLLOW_COVER_SEARCH_RADIUS : RELOCATION_SEARCH_RADIUS,
+                squadCtx);
+
+            CoverPoint currentCover = getCoverManager().getCurrentCover();
+            for (CoverFinder.ScoredCover scoredCover : relocationCovers) {
+                CoverPoint cover = scoredCover.cover;
+                if (failedCoverPositions.contains(cover.getPosition())
+                    || (currentCover != null && cover.getPosition().equals(currentCover.getPosition()))) {
+                    continue;
+                }
+                if (!isDistantRelocationCover(cover) && !isExactCoverPathReachable(cover)) {
+                    continue;
+                }
+                if (CoverReservationManager.reserve(cover.getPosition(), soldier)) {
+                    getCoverManager().clearCoverQualityPenalty();
+                    getCoverManager().setTargetCover(cover);
+                    if (DiagnosticLogManager.isCoverLoggingEnabled()) {
+                        StevesArmyMod.LOGGER.info("[CoverRelocation] Soldier {} selected {} cover={} score={} distance={} pathMode={}",
+                            soldier.getId(), relocationType, cover.getPosition(), String.format("%.2f", scoredCover.score),
+                            String.format("%.1f", horizontalDistanceToCover(cover)),
+                            isDistantRelocationCover(cover) ? "staged" : "exact");
+                    }
+                    moveToCover(cover);
+                    logCoverSearchPerformance(finder, searchStarted, CoverMoveResult.COVER_STARTED, "relocation");
+                    return CoverMoveResult.COVER_STARTED;
+                }
+            }
+
+            if (relocationType == RelocationType.GO_TO) {
+                failedGoToRelocationGeneration = relocationCommandGeneration;
+            } else {
+                nextFollowRelocationSearchTick = soldier.tickCount + FOLLOW_COVER_RETRY_TICKS;
+            }
+            clearRelocationTarget();
+            getCoverManager().setState(CoverBehaviorManager.CoverState.NO_COVER);
+            logCoverSearchPerformance(finder, searchStarted, CoverMoveResult.NO_COVER_FOUND, "relocation-none");
+            return CoverMoveResult.NO_COVER_FOUND;
+        }
         
         int searchRadius = SEARCH_RADIUS;
         BlockPos searchCenter = soldier.blockPosition();
@@ -2482,6 +2676,25 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
         return getCoverStandingPositionStatic(coverPos);
     }
 
+    private double horizontalDistanceToCover(CoverPoint cover) {
+        Vec3 standingPos = getCoverStandingPosition(cover.getPosition());
+        double x = soldier.getX() - standingPos.x;
+        double z = soldier.getZ() - standingPos.z;
+        return Math.sqrt(x * x + z * z);
+    }
+
+    private boolean isDistantRelocationCover(CoverPoint cover) {
+        return relocationType != RelocationType.NONE
+            && horizontalDistanceToCover(cover) > RELOCATION_EXACT_PATH_DISTANCE;
+    }
+
+    private boolean isExactCoverPathReachable(CoverPoint cover) {
+        Vec3 standingPos = getCoverStandingPosition(cover.getPosition());
+        Path path = navigation.createPath(standingPos.x, standingPos.y, standingPos.z, 0);
+        return path != null && path.canReach() && path.getNodeCount() > 0
+            && path.getNode(path.getNodeCount() - 1).asBlockPos().equals(cover.getPosition());
+    }
+
     private void moveToCover(CoverPoint cover) {
         BlockPos wallPos = cover.getPosition();
         long pathStarted = System.nanoTime();
@@ -2502,9 +2715,26 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
         Path path = navigation.createPath(standingPos.x, standingPos.y, standingPos.z, 0);
         
         boolean isReachable = false;
+        boolean isStagedPath = false;
         String failReason = "null path";
+
+        if (isDistantRelocationCover(cover)
+            && (path == null || !path.canReach() || path.getNodeCount() == 0
+                || !path.getNode(path.getNodeCount() - 1).asBlockPos().equals(wallPos))) {
+            Path stagedPath = createRelocationStagingPath(standingPos);
+            if (stagedPath != null && stagedPath.canReach() && stagedPath.getNodeCount() > 0) {
+                path = stagedPath;
+                isReachable = true;
+                isStagedPath = true;
+                BlockPos endPos = path.getNode(path.getNodeCount() - 1).asBlockPos();
+                if (DiagnosticLogManager.isCoverLoggingEnabled()) {
+                    StevesArmyMod.LOGGER.info("[CoverRelocation] Soldier {} staging toward {} via {}",
+                        soldier.getId(), wallPos, endPos);
+                }
+            }
+        }
         
-        if (path != null) {
+        if (!isReachable && path != null) {
             if (path.canReach()) {
                 // Verify the final node is the intended standing block, not an adjacent one
                 BlockPos endPos = path.getNode(path.getNodeCount() - 1).asBlockPos();
@@ -2523,9 +2753,26 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
                 }
             } else {
                 failReason = "path cannot reach";
-                if (DiagnosticLogManager.isCoverLoggingEnabled()) {
-                    StevesArmyMod.LOGGER.info("[PathDebug] Soldier {} at {} path FAILED: canReach=false for standing {}",
-                        soldier.getId(), soldier.blockPosition(), standingPos);
+                if (isDistantRelocationCover(cover) && path.getNodeCount() > 0) {
+                    BlockPos endPos = path.getNode(path.getNodeCount() - 1).asBlockPos();
+                    double currentDistance = horizontalDistanceToCover(cover);
+                    double endpointDistance = Math.sqrt(endPos.distSqr(wallPos));
+                    if (currentDistance - endpointDistance >= MIN_STAGED_PATH_PROGRESS) {
+                        isReachable = true;
+                        isStagedPath = true;
+                        if (DiagnosticLogManager.isCoverLoggingEnabled()) {
+                            StevesArmyMod.LOGGER.info("[CoverRelocation] Soldier {} staged path to {} endpoint={} distance={} -> {}",
+                                soldier.getId(), wallPos, endPos, String.format("%.1f", currentDistance),
+                                String.format("%.1f", endpointDistance));
+                        }
+                    } else {
+                        failReason = String.format("partial path endpoint %s makes insufficient progress (%.1f -> %.1f)",
+                            endPos, currentDistance, endpointDistance);
+                    }
+                }
+                if (!isReachable && DiagnosticLogManager.isCoverLoggingEnabled()) {
+                    StevesArmyMod.LOGGER.info("[PathDebug] Soldier {} at {} path FAILED: {} for standing {}",
+                        soldier.getId(), soldier.blockPosition(), failReason, standingPos);
                 }
             }
         }
@@ -2535,8 +2782,8 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
             boolean accepted = navigation.moveTo(path, 1.2);
             if (DiagnosticLogManager.isCoverPerformanceLoggingEnabled()) {
                 StevesArmyMod.LOGGER.info(
-                    "[CoverPerf] soldier={} tick={} path=accepted={} nodes={} buildMs={} cover={} from={}",
-                    soldier.getId(), soldier.tickCount, accepted, path.getNodeCount(),
+                    "[CoverPerf] soldier={} tick={} path={} accepted={} nodes={} buildMs={} cover={} from={}",
+                    soldier.getId(), soldier.tickCount, isStagedPath ? "staged" : "exact", accepted, path.getNodeCount(),
                     formatMillis(System.nanoTime() - pathStarted), wallPos, soldier.blockPosition());
             }
             if (accepted && soldier.hasValidAttackTarget()) {
@@ -2545,8 +2792,9 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
                     String.format("%.2f", soldier.position().distanceTo(standingPos)));
             }
             if (DiagnosticLogManager.isCoverLoggingEnabled()) {
-                StevesArmyMod.LOGGER.info("[PathDebug] Soldier {} navigation {} to cover {} from pos {} (path nodes={})",
-                    soldier.getId(), accepted ? "started" : "rejected", wallPos, soldier.blockPosition(), path.getNodeCount());
+                StevesArmyMod.LOGGER.info("[PathDebug] Soldier {} navigation {} {} path to cover {} from pos {} (path nodes={})",
+                    soldier.getId(), accepted ? "started" : "rejected", isStagedPath ? "staged" : "exact",
+                    wallPos, soldier.blockPosition(), path.getNodeCount());
             }
         } else {
             if (DiagnosticLogManager.isCoverPerformanceLoggingEnabled()) {
@@ -2618,6 +2866,28 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
         }
         soldier.refreshDimensions();
         doLowCrouchIfHalfCover();
+
+        if (relocationType == RelocationType.GO_TO) {
+            soldier.clearPingMoveTargetIfGeneration(relocationCommandGeneration);
+        }
+        if (relocationType != RelocationType.NONE) {
+            relocationType = RelocationType.NONE;
+            relocationCenter = null;
+            relocationCommandGeneration = -1;
+        }
+    }
+
+    private Path createRelocationStagingPath(Vec3 destination) {
+        Vec3 offset = destination.subtract(soldier.position());
+        double horizontalDistance = Math.sqrt(offset.x * offset.x + offset.z * offset.z);
+        if (horizontalDistance <= RELOCATION_EXACT_PATH_DISTANCE) {
+            return null;
+        }
+
+        double stageDistance = RELOCATION_EXACT_PATH_DISTANCE * 0.75D;
+        double scale = stageDistance / horizontalDistance;
+        Vec3 stage = soldier.position().add(offset.x * scale, offset.y * scale, offset.z * scale);
+        return navigation.createPath(stage.x, stage.y, stage.z, 1);
     }
     
     private void blacklistCover(BlockPos pos, BlacklistReason reason) {

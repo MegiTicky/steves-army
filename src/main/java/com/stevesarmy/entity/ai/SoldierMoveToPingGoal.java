@@ -29,6 +29,11 @@ public class SoldierMoveToPingGoal extends Goal {
         if (soldier.hasValidAttackTarget()) return false;
         if (!soldier.hasValidPingMoveTarget()) return false;
         captureCommand();
+        computeNavigationTarget();
+        if (navigationTarget != null && soldier.getCoverTacticalGoal()
+            .requestGoToRelocation(navigationTarget, commandGeneration)) {
+            return false;
+        }
         return rawTarget != null;
     }
 
@@ -37,6 +42,7 @@ public class SoldierMoveToPingGoal extends Goal {
         if (!soldier.isAlive()) return false;
         if (!soldier.hasValidPingMoveTarget()) return false;
         if (rawTarget == null) return false;
+        if (soldier.getCoverTacticalGoal().isHandlingGoToRelocation(commandGeneration)) return false;
         double distSq = soldier.distanceToSqr(
             rawTarget.getX() + 0.5, rawTarget.getY() + 0.5, rawTarget.getZ() + 0.5);
         return distSq > closeDistance * closeDistance;
@@ -53,8 +59,10 @@ public class SoldierMoveToPingGoal extends Goal {
 
     @Override
     public void stop() {
-        soldier.getNavigation().stop();
-        soldier.clearPingMoveTargetIfGeneration(commandGeneration);
+        if (!soldier.getCoverTacticalGoal().isHandlingGoToRelocation(commandGeneration)) {
+            soldier.getNavigation().stop();
+            soldier.clearPingMoveTargetIfGeneration(commandGeneration);
+        }
         rawTarget = null;
         navigationTarget = null;
     }
@@ -75,6 +83,11 @@ public class SoldierMoveToPingGoal extends Goal {
                 captureCommand();
                 soldier.clearFormationOffset();
                 computeNavigationTarget();
+                if (navigationTarget != null && soldier.getCoverTacticalGoal()
+                    .requestGoToRelocation(navigationTarget, commandGeneration)) {
+                    soldier.getNavigation().stop();
+                    return;
+                }
             }
 
             if (rawTarget == null) return;

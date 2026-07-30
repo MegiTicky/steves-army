@@ -287,7 +287,7 @@ public class CoverFinder {
                 evaluator.evaluateWithCone(coverPoint, threatDirection);
             }
             candidatesEvaluated++;
-            float score = calculateThreatAwareScore(coverPoint, soldier, threatDirection, allThreats, primaryThreat, squadCtx);
+            float score = calculateThreatAwareScore(coverPoint, soldier, threatDirection, allThreats, primaryThreat, squadCtx, null, 0);
             coverPoint.setQuality(score);
             coverPoint.setCombatScore(score);
         }
@@ -335,7 +335,8 @@ public class CoverFinder {
                 evaluator.evaluateWithCone(coverPoint, threatDirection);
             }
             candidatesEvaluated++;
-            float score = calculateThreatAwareScore(coverPoint, soldier, threatDirection, allThreats, primaryThreat, squadCtx);
+            float score = calculateThreatAwareScore(coverPoint, soldier, threatDirection, allThreats, primaryThreat, squadCtx,
+                searchCenter, radius);
             coverPoint.setQuality(score);
             coverPoint.setCombatScore(score);
         }
@@ -443,6 +444,13 @@ return weightedScore;
     private float calculateThreatAwareScore(CoverPoint coverPoint, LivingEntity soldier,
                                             Vec3 threatDirection, List<LivingEntity> allThreats,
                                             LivingEntity primaryThreat, SquadCoverContext squadCtx) {
+        return calculateThreatAwareScore(coverPoint, soldier, threatDirection, allThreats, primaryThreat, squadCtx, null, 0);
+    }
+
+    private float calculateThreatAwareScore(CoverPoint coverPoint, LivingEntity soldier,
+                                            Vec3 threatDirection, List<LivingEntity> allThreats,
+                                            LivingEntity primaryThreat, SquadCoverContext squadCtx,
+                                            BlockPos searchCenter, int searchRadius) {
         float primaryProtection = calculatePrimaryProtection(coverPoint, threatDirection);
         float flankingProtection = calculateFlankingProtection(coverPoint, allThreats);
         float firingQuality = calculateFiringQuality(coverPoint, threatDirection);
@@ -454,6 +462,9 @@ return weightedScore;
         if (isAttackMode) {
             SoldierEntity se = (SoldierEntity) soldier;
             distanceScore = calculateObjectiveProgressScore(coverPoint, soldier, se.getAttackTargetPos());
+            dispersionScore = calculateSquadDispersionScore(coverPoint, squadCtx);
+        } else if (searchCenter != null) {
+            distanceScore = calculateDistanceScore(coverPoint, searchCenter, searchRadius);
             dispersionScore = calculateSquadDispersionScore(coverPoint, squadCtx);
         } else {
             distanceScore = calculateDistanceScore(coverPoint, soldier);
@@ -588,6 +599,11 @@ return weightedScore;
         double distance = coverPoint.distanceTo(soldier);
         double maxDistance = DEFAULT_SEARCH_RADIUS * 2.0;
         return (float) (1.0 - Math.min(distance / maxDistance, 1.0));
+    }
+
+    private float calculateDistanceScore(CoverPoint coverPoint, BlockPos center, int searchRadius) {
+        double distance = Math.sqrt(coverPoint.getPosition().distSqr(center));
+        return (float) (1.0 - Math.min(distance / Math.max(1, searchRadius), 1.0));
     }
 
     private float calculateObjectiveProgressScore(CoverPoint coverPoint, LivingEntity soldier, BlockPos attackTarget) {
