@@ -8,7 +8,7 @@ import net.minecraft.client.model.geom.builders.LayerDefinition;
 import net.minecraft.client.model.geom.builders.MeshDefinition;
 import net.minecraft.util.Mth;
 
-public class SoldierModel extends HumanoidModel<SoldierEntity> {
+public class SoldierModel<T extends SoldierEntity> extends HumanoidModel<T> {
 
     private static final float EXIT_THRESHOLD = 0.15F;
 
@@ -22,7 +22,7 @@ public class SoldierModel extends HumanoidModel<SoldierEntity> {
     }
 
     @Override
-    public void setupAnim(SoldierEntity entity, float limbSwing, float limbSwingAmount,
+    public void setupAnim(T entity, float limbSwing, float limbSwingAmount,
                           float ageInTicks, float netHeadYaw, float headPitch) {
         super.setupAnim(entity, limbSwing, limbSwingAmount, ageInTicks, netHeadYaw, headPitch);
 

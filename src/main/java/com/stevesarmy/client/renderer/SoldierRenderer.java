@@ -14,11 +14,11 @@ import net.minecraft.util.Mth;
 import net.minecraft.world.phys.Vec3;
 import org.joml.Quaternionf;
 
-public class SoldierRenderer extends HumanoidMobRenderer<SoldierEntity, SoldierModel> {
+public class SoldierRenderer extends HumanoidMobRenderer<SoldierEntity, SoldierModel<SoldierEntity>> {
     private static final ResourceLocation TEXTURE = new ResourceLocation("minecraft", "textures/entity/player/wide/steve.png");
 
     public SoldierRenderer(EntityRendererProvider.Context context) {
-        super(context, new SoldierModel(context.bakeLayer(ModelLayers.PLAYER)), 0.5F);
+        super(context, new SoldierModel<SoldierEntity>(context.bakeLayer(ModelLayers.PLAYER)), 0.5F);
         this.addLayer(new HumanoidArmorLayer<>(this,
             new HumanoidModel<>(context.bakeLayer(ModelLayers.PLAYER_INNER_ARMOR)),
             new HumanoidModel<>(context.bakeLayer(ModelLayers.PLAYER_OUTER_ARMOR)),

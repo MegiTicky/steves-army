@@ -1,6 +1,7 @@
 package com.stevesarmy.client.renderer;
 
 import com.mojang.blaze3d.vertex.PoseStack;
+import com.stevesarmy.client.model.SoldierModel;
 import com.stevesarmy.entity.EnemySoldierEntity;
 import net.minecraft.client.model.HumanoidModel;
 import net.minecraft.client.model.geom.ModelLayers;
@@ -13,11 +14,11 @@ import net.minecraft.util.Mth;
 import net.minecraft.world.phys.Vec3;
 import org.joml.Quaternionf;
 
-public class EnemySoldierRenderer extends HumanoidMobRenderer<EnemySoldierEntity, HumanoidModel<EnemySoldierEntity>> {
+public class EnemySoldierRenderer extends HumanoidMobRenderer<EnemySoldierEntity, SoldierModel<EnemySoldierEntity>> {
     private static final ResourceLocation TEXTURE = new ResourceLocation("minecraft", "textures/entity/player/wide/steve.png");
 
     public EnemySoldierRenderer(EntityRendererProvider.Context context) {
-        super(context, new HumanoidModel<>(context.bakeLayer(ModelLayers.PLAYER)), 0.5F);
+        super(context, new SoldierModel<>(context.bakeLayer(ModelLayers.PLAYER)), 0.5F);
         this.addLayer(new HumanoidArmorLayer<>(this, 
             new HumanoidModel<>(context.bakeLayer(ModelLayers.PLAYER_INNER_ARMOR)),
             new HumanoidModel<>(context.bakeLayer(ModelLayers.PLAYER_OUTER_ARMOR)),
