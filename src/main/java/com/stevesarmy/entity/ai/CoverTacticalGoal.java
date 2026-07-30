@@ -59,7 +59,7 @@ public class CoverTacticalGoal extends Goal {
     
     private static final int SEARCH_RADIUS = 12;
     private static final long MIN_COVER_DWELL_TIME_MS = 4000;
-    private static final long MIN_COVER_DWELL_TIME_DAMAGE_MS = 2000;
+    private static final int SHOT_IN_COVER_RETRY_TICKS = 20;
     private static final long MIN_SUPPRESSED_DWELL_TIME_MS = 6000;
     private static final float HYSTERESIS_THRESHOLD = 0.20f;
     private static final float BACKWARD_HYSTERESIS_THRESHOLD = 0.35f;
@@ -140,6 +140,9 @@ public class CoverTacticalGoal extends Goal {
     private long lastBlacklistClearTime = 0;
     private BlockPos lastFailedCover = null;
     private int nonPeekableTicks = 0;
+    private int nextShotInCoverSearchTick = 0;
+    private BlockPos compromisedCoverPosition = null;
+    private boolean emergencyCoverSearchActive = false;
     private int peekCycleLogTick = 0;
     
     private CoverPoint pendingRetryCover = null;
@@ -1202,8 +1205,8 @@ private void tickRepositioning() {
             return;
         }
 
-        // Process pending reposition requests (shot-in-cover, non-peekable)
-        // Only acts when fully recovered — while suppressed, stays pending as BLOCKED.
+        // Process pending reposition requests. A compromised-cover request may move
+        // immediately; routine requests still wait for full suppression recovery.
         PendingRepositionResult requestResult = processPendingRepositionRequests();
         if (requestResult == PendingRepositionResult.MOVEMENT_STARTED) {
             return;
@@ -1274,10 +1277,10 @@ private void tickRepositioning() {
     private void tickSuppressedInCover() {
         CoverPoint currentCover = getCoverManager().getCurrentCover();
 
-        // Shot-in-cover trigger — keep the request pending while suppressed
-        // act on it after recovery (when transition to IN_COVER)
-        if (getCoverManager().isShotInCoverRepositionRequested()) {
-            // Request stays pending; do nothing
+        // A hit while hidden means this cover is compromised. Unlike routine cover
+        // changes, this relocation may start while suppressed.
+        if (processPendingRepositionRequests() == PendingRepositionResult.MOVEMENT_STARTED) {
+            return;
         }
 
         // Handle non-peekable cover reposition request — also keep pending while suppressed
@@ -1326,7 +1329,8 @@ private void tickRepositioning() {
      * Consolidated handling of pending reposition requests (shot-in-cover, non-peekable).
      * Returns NONE, BLOCKED (still waiting, but allow other cover processing),
      * or MOVEMENT_STARTED (soldier is now repositioning).
-     * While suppressed or not fully recovered, requests remain pending as BLOCKED.
+     * Routine requests remain pending while suppressed; a compromised cover is an
+     * emergency exception because remaining there has already failed.
      */
     private enum PendingRepositionResult { NONE, BLOCKED, MOVEMENT_STARTED }
 
@@ -1335,19 +1339,38 @@ private void tickRepositioning() {
 
         // Shot-in-cover request
         if (getCoverManager().isShotInCoverRepositionRequested()) {
-            if (!canLeaveCoverNow()) {
+            if (soldier.tickCount < nextShotInCoverSearchTick) {
                 return PendingRepositionResult.BLOCKED;
             }
             if (DiagnosticLogManager.isCoverLoggingEnabled()) {
-                StevesArmyMod.LOGGER.info("[CoverGoal] Soldier {} shot while hiding in cover, repositioning",
+                StevesArmyMod.LOGGER.info("[CoverGoal] Soldier {} hit while hiding in cover, seeking replacement",
                     soldier.getId());
             }
             if (currentCover != null) {
                 blacklistCover(currentCover.getPosition(), BlacklistReason.SHOT_IN_COVER);
+                compromisedCoverPosition = currentCover.getPosition();
             }
-            getCoverManager().clearShotInCoverRepositionRequest();
-            startRepositioning();
-            return PendingRepositionResult.MOVEMENT_STARTED;
+            getCoverManager().resetPeekState();
+            getCoverManager().setPeekPosition(null);
+            getPositionController().clear();
+            emergencyCoverSearchActive = true;
+            CoverMoveResult searchResult = findAndMoveToCover();
+            emergencyCoverSearchActive = false;
+            if (searchResult == CoverMoveResult.COVER_STARTED
+                && getCoverManager().getTargetCover() != null) {
+                getCoverManager().clearShotInCoverRepositionRequest();
+                nextShotInCoverSearchTick = 0;
+                compromisedCoverPosition = null;
+                getCoverManager().setState(CoverBehaviorManager.CoverState.REPOSITIONING);
+                return PendingRepositionResult.MOVEMENT_STARTED;
+            }
+
+            // No safe alternative yet: remain hidden at the current position and retry.
+            nextShotInCoverSearchTick = soldier.tickCount + SHOT_IN_COVER_RETRY_TICKS;
+            getCoverManager().setState(getCoverManager().isSuppressed()
+                ? CoverBehaviorManager.CoverState.SUPPRESSED_IN_COVER
+                : CoverBehaviorManager.CoverState.IN_COVER);
+            return PendingRepositionResult.BLOCKED;
         }
 
         // Non-peekable cover reposition request
@@ -1624,8 +1647,8 @@ private void startRepositioning() {
         
         long now = System.currentTimeMillis();
         if (now - lastBlacklistClearTime > BLACKLIST_CLEAR_INTERVAL_MS) {
-            failedCoverPositions.clear();
-            blacklistReasons.clear();
+            failedCoverPositions.removeIf(pos -> !pos.equals(compromisedCoverPosition));
+            blacklistReasons.entrySet().removeIf(entry -> !entry.getKey().equals(compromisedCoverPosition));
             lastBlacklistClearTime = now;
             if (DiagnosticLogManager.isCoverLoggingEnabled()) {
                 StevesArmyMod.LOGGER.info("[CoverGoal] Soldier {} cleared failed cover blacklist", soldier.getId());
@@ -1829,12 +1852,17 @@ this.debugSearchCenter = searchCenter;
                 cachedTopCovers = top.toArray(new CoverFinder.ScoredCover[0]);
             }
             
-            if (failedCoverPositions.contains(cover.getPosition())) {
+            CoverPoint currentCover = getCoverManager().getCurrentCover();
+            boolean excludesCurrentCover = emergencyCoverSearchActive && currentCover != null
+                && cover.getPosition().equals(currentCover.getPosition());
+            if (failedCoverPositions.contains(cover.getPosition()) || excludesCurrentCover) {
                 List<CoverFinder.ScoredCover> scored = finder.evaluateAndScoreAll(
                     soldier, threatDirection, threats, searchRadius, true);
                 
                 scored = scored.stream()
                     .filter(sc -> !failedCoverPositions.contains(sc.cover.getPosition()))
+                    .filter(sc -> !emergencyCoverSearchActive || currentCover == null
+                        || !sc.cover.getPosition().equals(currentCover.getPosition()))
                     .collect(java.util.stream.Collectors.toList());
                 
                 if (scored.isEmpty()) {
@@ -1852,8 +1880,11 @@ this.debugSearchCenter = searchCenter;
                 }
             }
             
-            CoverPoint currentCover = getCoverManager().getCurrentCover();
             if (currentCover != null && cover.getPosition().equals(currentCover.getPosition())) {
+                if (emergencyCoverSearchActive) {
+                    logCoverSearchPerformance(finder, searchStarted, CoverMoveResult.NO_ELIGIBLE_COVER, "emergency-current");
+                    return CoverMoveResult.NO_ELIGIBLE_COVER;
+                }
                 onCoverReached(cover);
                 logCoverSearchPerformance(finder, searchStarted, CoverMoveResult.COVER_STARTED, "already-current");
                 return CoverMoveResult.COVER_STARTED;
@@ -1881,7 +1912,14 @@ this.debugSearchCenter = searchCenter;
                 if (soldier.hasValidAttackTarget()) {
                     attackExpectedCover = cover.getPosition();
                 }
-                moveToCover(cover);
+                boolean movementStarted = moveToCover(cover);
+                if (emergencyCoverSearchActive && !movementStarted) {
+                    blacklistCover(cover.getPosition(), BlacklistReason.PATH_FAILED);
+                    CoverReservationManager.release(cover.getPosition(), soldier);
+                    getCoverManager().clearTargetCover();
+                    logCoverSearchPerformance(finder, searchStarted, CoverMoveResult.NO_COVER_FOUND, "emergency-path");
+                    return CoverMoveResult.NO_COVER_FOUND;
+                }
                 logCoverSearchPerformance(finder, searchStarted, CoverMoveResult.COVER_STARTED, "selected");
                 return CoverMoveResult.COVER_STARTED;
             }
@@ -2704,7 +2742,7 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
             && path.getNode(path.getNodeCount() - 1).asBlockPos().equals(cover.getPosition());
     }
 
-    private void moveToCover(CoverPoint cover) {
+    private boolean moveToCover(CoverPoint cover) {
         BlockPos wallPos = cover.getPosition();
         long pathStarted = System.nanoTime();
         
@@ -2715,7 +2753,7 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
                 StevesArmyMod.LOGGER.info("[CoverPerf] soldier={} tick={} path=teleport result=REACHED totalMs={} cover={}",
                     soldier.getId(), soldier.tickCount, formatMillis(System.nanoTime() - pathStarted), wallPos);
             }
-            return;
+            return true;
         }
         
         Vec3 standingPos = getCoverStandingPosition(wallPos);
@@ -2805,6 +2843,7 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
                     soldier.getId(), accepted ? "started" : "rejected", isStagedPath ? "staged" : "exact",
                     wallPos, soldier.blockPosition(), path.getNodeCount());
             }
+            return accepted;
         } else {
             if (DiagnosticLogManager.isCoverPerformanceLoggingEnabled()) {
                 StevesArmyMod.LOGGER.info(
@@ -2813,14 +2852,14 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
                     formatMillis(System.nanoTime() - pathStarted), wallPos, soldier.blockPosition());
             }
             // If this is a null path and NOT already a retry, schedule retry for next tick
-            if (path == null && !isRetryAttempt) {
+            if (path == null && !isRetryAttempt && !emergencyCoverSearchActive) {
                 if (DiagnosticLogManager.isCoverLoggingEnabled()) {
                     StevesArmyMod.LOGGER.info("[PathDebug] Soldier {} at {} null path to cover {}, scheduling retry next tick", 
                         soldier.getId(), soldier.blockPosition(), wallPos);
                 }
                 pendingRetryCover = cover;
                 getCoverManager().setTargetCover(cover);
-                return;
+                return false;
             }
             
             if (DiagnosticLogManager.isCoverLoggingEnabled()) {
@@ -2829,6 +2868,7 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
             }
             blacklistCover(wallPos, BlacklistReason.PATH_FAILED);
         }
+        return false;
     }
     
     private void onCoverReached(CoverPoint cover) {

@@ -883,21 +883,20 @@ public class SoldierEntity extends PathfinderMob implements Container {
             }
             if (coverBehaviorManager != null) {
                 CoverBehaviorManager.CoverState preState = coverBehaviorManager.getState();
-                long timeInCover = coverBehaviorManager.getTimeInCover();
                 PeekController.State prePeekState = peekController.getState();
                 
                 LivingEntity attacker = source.getEntity() instanceof LivingEntity a ? a : null;
                 coverBehaviorManager.onTakeDamage(attacker);
                 
-                if (attacker != null) {
+                if (attacker != null && attacker != this && !isFriendlyTo(attacker)) {
                     coverBehaviorManager.onIncomingFire(attacker);
-                }
-                
-                if ((preState == CoverBehaviorManager.CoverState.IN_COVER ||
-                     preState == CoverBehaviorManager.CoverState.SUPPRESSED_IN_COVER) &&
-                    timeInCover >= 2000 &&
-                    prePeekState == PeekController.State.HIDING) {
-                    coverBehaviorManager.requestShotInCoverReposition();
+
+                    // A hostile hit while fully hidden proves this position no longer protects us.
+                    if ((preState == CoverBehaviorManager.CoverState.IN_COVER ||
+                         preState == CoverBehaviorManager.CoverState.SUPPRESSED_IN_COVER) &&
+                        prePeekState == PeekController.State.HIDING) {
+                        coverBehaviorManager.requestShotInCoverReposition();
+                    }
                 }
                 
                 if (attacker != null && attacker != this) {
