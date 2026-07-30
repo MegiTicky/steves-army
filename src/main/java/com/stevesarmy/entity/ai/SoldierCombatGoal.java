@@ -116,6 +116,9 @@ public class SoldierCombatGoal extends Goal {
     private boolean isPingSuppressing = false;
     private int pingSuppressDurationTicks = 0;
     private int pingSuppressRemainingTicks = 0;
+    private Vec3 pingSuppressionTarget = null;
+    private Vec3 pingSuppressionSweepEnd = null;
+    private Vec3 pingSuppressionShotTarget = null;
     private static final int PING_SUPPRESS_MIN_DURATION_TICKS = 80;   // 4 seconds
     private static final int PING_SUPPRESS_MAX_DURATION_TICKS = 200; // 10 seconds
     
@@ -145,7 +148,6 @@ public class SoldierCombatGoal extends Goal {
     private int burstCooldownTicks = 0;
     private int ticksSinceLastBurstShot = 0;
     private boolean burstWaitingForBolt = false;
-    private int burstInitialDelayTicks = 0;
 
     // Direct fire must not share state with a last-known-position fire plan.
     private boolean directBurstActive = false;
@@ -1890,7 +1892,6 @@ public class SoldierCombatGoal extends Goal {
         burstCooldownTicks = 0;
         ticksSinceLastBurstShot = 0;
         burstWaitingForBolt = false;
-        burstInitialDelayTicks = 0;
     }
 
     private void trySuppressireFire(@javax.annotation.Nullable Vec3 visibleContactAimPoint) {
@@ -2240,15 +2241,15 @@ public class SoldierCombatGoal extends Goal {
             pingSuppressDurationTicks = PING_SUPPRESS_MIN_DURATION_TICKS +
                 soldier.level().random.nextInt(PING_SUPPRESS_MAX_DURATION_TICKS - PING_SUPPRESS_MIN_DURATION_TICKS);
             pingSuppressRemainingTicks = pingSuppressDurationTicks;
+            pingSuppressionTarget = null;
+            pingSuppressionSweepEnd = null;
+            pingSuppressionShotTarget = null;
             resetBurstState();
-            
-            // Add random initial delay to stagger burst timing across soldiers
-            burstInitialDelayTicks = soldier.level().random.nextInt(40); // 0-2 seconds
-            
+
             boolean isMG = GunIntegration.isMachineGun(soldier);
             if (isSuppressionDebugLogging()) {
-                StevesArmyMod.LOGGER.info("[SuppressPing] Soldier {} starting suppression at {} (duration={}s, isMG={}, initialDelay={}ticks)",
-                    soldier.getId(), soldier.getPingSuppressPos(), pingSuppressDurationTicks / 20.0, isMG, burstInitialDelayTicks);
+                StevesArmyMod.LOGGER.info("[SuppressPing] Soldier {} starting suppression at {} (duration={}s, isMG={})",
+                    soldier.getId(), soldier.getPingSuppressPos(), pingSuppressDurationTicks / 20.0, isMG);
             }
         }
         
@@ -2260,6 +2261,9 @@ public class SoldierCombatGoal extends Goal {
             soldier.clearPingSuppressPos();
             isPingSuppressing = false;
             pingSuppressRemainingTicks = 0;
+            pingSuppressionTarget = null;
+            pingSuppressionSweepEnd = null;
+            pingSuppressionShotTarget = null;
             resetBurstState();
             return;
         }
@@ -2276,10 +2280,17 @@ public class SoldierCombatGoal extends Goal {
             }
         }
         
-        Vec3 finalTarget = getClearPingSuppressionTarget();
-        if (finalTarget == null) {
-            return;
+        if (pingSuppressionTarget == null
+            || !TargetAcquisition.hasLineOfSightToPositionIgnoringSmoke(soldier, pingSuppressionTarget)) {
+            pingSuppressionTarget = getClearPingSuppressionTarget();
+            pingSuppressionSweepEnd = null;
+            pingSuppressionShotTarget = null;
+            if (pingSuppressionTarget == null) {
+                return;
+            }
         }
+        int burstTarget = getBurstTarget();
+        Vec3 finalTarget = getPingSuppressionBurstTarget(burstTarget);
         
         soldier.getLookControl().setLookAt(finalTarget.x, finalTarget.y, finalTarget.z, 30.0F, 30.0F);
         GunIntegration.aim(soldier, true);
@@ -2290,14 +2301,14 @@ public class SoldierCombatGoal extends Goal {
             return;
         }
         
-        // Apply initial delay before first burst
-        if (burstInitialDelayTicks > 0) {
-            burstInitialDelayTicks--;
-            return;
-        }
-        
         if (burstCooldownTicks > 0) {
             burstCooldownTicks--;
+            if (burstCooldownTicks == 0) {
+                // Re-evaluate the lane only between bursts, never while acquiring the opening shot.
+                pingSuppressionTarget = null;
+                pingSuppressionSweepEnd = null;
+                pingSuppressionShotTarget = null;
+            }
             return;
         }
         
@@ -2306,7 +2317,6 @@ public class SoldierCombatGoal extends Goal {
         }
         burstWaitingForBolt = false;
         
-        int burstTarget = getBurstTarget();
         int ticksBetweenShots = getTicksBetweenBurstShots();
         if (burstShotsFired > 0 && burstShotsFired < burstTarget) {
             ticksSinceLastBurstShot++;
@@ -2316,6 +2326,10 @@ public class SoldierCombatGoal extends Goal {
         }
 
         if (!prepareToFire(finalTarget, false)) {
+            return;
+        }
+
+        if (!TargetAcquisition.hasLineOfSightToPositionIgnoringSmoke(soldier, finalTarget)) {
             return;
         }
 
@@ -2335,6 +2349,7 @@ public class SoldierCombatGoal extends Goal {
             case SUCCESS -> {
                 burstShotsFired++;
                 ticksSinceLastBurstShot = 0;
+                pingSuppressionShotTarget = null;
                 
                 if (soldier.getCoverBehaviorManager().isInCover()) {
                     soldier.getCoverBehaviorManager().onPeekShot();
@@ -2406,6 +2421,69 @@ public class SoldierCombatGoal extends Goal {
         return null;
     }
 
+    private Vec3 getPingSuppressionBurstTarget(int burstTarget) {
+        if (pingSuppressionShotTarget != null) return pingSuppressionShotTarget;
+
+        if (pingSuppressionSweepEnd == null) {
+            pingSuppressionSweepEnd = findPingSuppressionSweepEnd(pingSuppressionTarget);
+        }
+
+        double progress = burstTarget <= 1 ? 0.0 : burstShotsFired / (double) (burstTarget - 1);
+        Vec3 target = pingSuppressionSweepEnd == null
+            ? pingSuppressionTarget
+            : pingSuppressionTarget.lerp(pingSuppressionSweepEnd, progress);
+
+        double verticalVariation = getPingSuppressionVerticalVariation();
+        Vec3 variedTarget = target.add(0.0, verticalVariation, 0.0);
+        pingSuppressionShotTarget = TargetAcquisition.hasLineOfSightToPositionIgnoringSmoke(soldier, variedTarget)
+            ? variedTarget
+            : target;
+        return pingSuppressionShotTarget;
+    }
+
+    private Vec3 findPingSuppressionSweepEnd(Vec3 start) {
+        double maxSweepDistance = getPingSuppressionSweepDistance();
+        if (maxSweepDistance <= 0.0) return null;
+
+        List<Vec3> candidates = soldier.getSuppressionAimPoints().stream()
+            .filter(point -> point.distanceToSqr(start) > 0.16)
+            .filter(point -> {
+                double dx = point.x - start.x;
+                double dz = point.z - start.z;
+                return dx * dx + dz * dz <= maxSweepDistance * maxSweepDistance;
+            })
+            .filter(point -> Math.abs(point.y - start.y) <= 0.75)
+            .filter(point -> hasClearPingSuppressionSweep(start, point))
+            .collect(Collectors.toList());
+        if (candidates.isEmpty()) return null;
+
+        return candidates.get(soldier.level().random.nextInt(candidates.size()));
+    }
+
+    private boolean hasClearPingSuppressionSweep(Vec3 start, Vec3 end) {
+        for (int sample = 1; sample <= 4; sample++) {
+            Vec3 point = start.lerp(end, sample / 4.0);
+            if (!TargetAcquisition.hasLineOfSightToPositionIgnoringSmoke(soldier, point)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private double getPingSuppressionSweepDistance() {
+        if (GunIntegration.isSuppressiveMachineGun(soldier)) return 3.5;
+        if (GunIntegration.isMachineGun(soldier)) return 2.5;
+        if (GunIntegration.getRPM(soldier) >= 600 && GunIntegration.getMagazineSize(soldier) >= 25) return 1.5;
+        if ("smg".equals(GunIntegration.getGunTabType(soldier))) return 1.2;
+        return 0.0;
+    }
+
+    private double getPingSuppressionVerticalVariation() {
+        double amplitude = GunIntegration.isSuppressiveMachineGun(soldier) ? 0.14
+            : GunIntegration.getRPM(soldier) >= 600 ? 0.09 : 0.05;
+        return (soldier.level().random.nextDouble() - 0.5) * 2.0 * amplitude;
+    }
+
     private boolean aimPointsAreEmpty(SoldierEntity soldier) {
         return soldier.getSuppressionAimPoints().isEmpty();
     }
@@ -2418,5 +2496,8 @@ public class SoldierCombatGoal extends Goal {
     
     public void forceRestartPingSuppression() {
         this.pingSuppressRemainingTicks = 0;
+        this.pingSuppressionTarget = null;
+        this.pingSuppressionSweepEnd = null;
+        this.pingSuppressionShotTarget = null;
     }
 }
