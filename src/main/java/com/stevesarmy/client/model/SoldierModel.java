@@ -11,6 +11,7 @@ import net.minecraft.util.Mth;
 public class SoldierModel<T extends SoldierEntity> extends HumanoidModel<T> {
 
     private static final float EXIT_THRESHOLD = 0.15F;
+    private static final float CRAWL_MOVEMENT_THRESHOLD = 0.05F;
 
     public SoldierModel(ModelPart root) {
         super(root);
@@ -31,6 +32,15 @@ public class SoldierModel<T extends SoldierEntity> extends HumanoidModel<T> {
         boolean applyProne = entity.isLowCrouching() || f > EXIT_THRESHOLD;
 
         if (!applyProne) {
+            return;
+        }
+
+        // Keep the custom prone gun-holding pose while stationary, but let the
+        // vanilla swim animation provide limb motion during land crawling.
+        boolean crawlingAndMoving = entity.isLowCrouching()
+            && (limbSwingAmount > CRAWL_MOVEMENT_THRESHOLD
+                || entity.getDeltaMovement().horizontalDistanceSqr() > 0.0004D);
+        if (crawlingAndMoving) {
             return;
         }
 

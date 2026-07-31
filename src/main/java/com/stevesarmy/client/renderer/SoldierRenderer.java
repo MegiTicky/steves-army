@@ -10,9 +10,9 @@ import net.minecraft.client.renderer.entity.EntityRendererProvider;
 import net.minecraft.client.renderer.entity.HumanoidMobRenderer;
 import net.minecraft.client.renderer.entity.layers.HumanoidArmorLayer;
 import net.minecraft.resources.ResourceLocation;
-import net.minecraft.util.Mth;
 import net.minecraft.world.phys.Vec3;
-import org.joml.Quaternionf;
+import com.mojang.math.Axis;
+import net.minecraft.util.Mth;
 
 public class SoldierRenderer extends HumanoidMobRenderer<SoldierEntity, SoldierModel<SoldierEntity>> {
     private static final ResourceLocation TEXTURE = new ResourceLocation("minecraft", "textures/entity/player/wide/steve.png");
@@ -51,13 +51,13 @@ public class SoldierRenderer extends HumanoidMobRenderer<SoldierEntity, SoldierM
     protected void setupRotations(SoldierEntity soldier, PoseStack poseStack, float ageInTicks, float bodyYaw, float partialTick) {
         float swim = soldier.getSwimAmount(partialTick);
         if (swim > 0.001F && soldier.isAlive()) {
+            super.setupRotations(soldier, poseStack, ageInTicks, bodyYaw, partialTick);
             float rotX = Mth.lerp(swim, 0.0F, -90.0F);
-            double transY = Mth.lerp(swim, 0.0D, -1.0D);
-            double transZ = Mth.lerp(swim, 0.0D, 0.25D);
-
-            poseStack.mulPose(new Quaternionf().rotationY(180.0F - bodyYaw * Mth.DEG_TO_RAD));
-            poseStack.mulPose(new Quaternionf().rotationX(rotX * Mth.DEG_TO_RAD));
-            poseStack.translate(0.0D, transY, transZ);
+            poseStack.mulPose(Axis.XP.rotationDegrees(rotX));
+            poseStack.translate(
+                0.0D,
+                Mth.lerp(swim, 0.0D, -1.0D),
+                Mth.lerp(swim, 0.0D, 0.3D));
             return;
         }
         super.setupRotations(soldier, poseStack, ageInTicks, bodyYaw, partialTick);

@@ -1748,9 +1748,16 @@ public class SoldierCombatGoal extends Goal {
         }
 
         if (soldier.isLowCrouching()) {
-            float proneAngle = Math.abs(Mth.wrapDegrees(targetYaw - soldier.getYRot()));
+            float proneYaw = soldier.isCrawlMoving() ? soldier.getCrawlFacingYaw() : soldier.getYRot();
+            float proneAngle = Math.abs(Mth.wrapDegrees(targetYaw - proneYaw));
             if (proneAngle <= PRONE_FIRING_ARC_DEGREES) {
                 return turnHeadToward(targetYaw, targetPitch) <= FIRING_ALIGNMENT_DEGREES;
+            }
+
+            // A moving crawl keeps the body aligned to travel. Do not stand or
+            // fire backward just to engage a target behind the soldier.
+            if (soldier.isCrawlMoving()) {
+                return false;
             }
 
             if (!canUseEmergencyEngagementPosture(isDirectTarget)) {

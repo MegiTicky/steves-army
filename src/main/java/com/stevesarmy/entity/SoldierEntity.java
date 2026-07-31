@@ -41,6 +41,7 @@ import net.minecraft.network.syncher.EntityDataAccessor;
 import net.minecraft.network.syncher.EntityDataSerializers;
 import net.minecraft.network.syncher.SynchedEntityData;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.util.Mth;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.Container;
 import net.minecraft.world.InteractionHand;
@@ -763,6 +764,7 @@ public class SoldierEntity extends PathfinderMob implements Container {
         if (!this.level().isClientSide) {
             threatAwareness.tick();
             holdMovementForReload();
+            updateCrawlFacing();
         }
 
         // Enforce the server-synced posture every tick to fight vanilla pose overrides.
@@ -1174,6 +1176,16 @@ public BlockPos getPingMoveTarget() {
         return combatGoal;
     }
 
+    @Override
+    public void onSyncedDataUpdated(EntityDataAccessor<?> accessor) {
+        super.onSyncedDataUpdated(accessor);
+        if (LOW_CROUCHING.equals(accessor)) {
+            // DATA_POSE and LOW_CROUCHING can arrive in either order. Refresh
+            // here so the client bounding box always uses the current posture.
+            this.refreshDimensions();
+        }
+    }
+
     public boolean isPreparingOrReloading() {
         return entityData.get(RELOAD_PENDING)
             || (GunIntegration.isTaczLoaded() && GunIntegration.isReloading(this));
@@ -1318,6 +1330,8 @@ public BlockPos getPingMoveTarget() {
     }
     
     private int emergencyEngagementPostureUntilTick = -1;
+    private static final double CRAWL_MOVEMENT_SPEED_SQR = 0.0004D;
+    private static final float CRAWL_TURN_RATE_DEGREES = 25.0F;
 
     public void setLowCrouching(boolean lowCrouch) {
         if (this.level().isClientSide) {
@@ -1336,6 +1350,38 @@ public BlockPos getPingMoveTarget() {
     
     public boolean isLowCrouching() {
         return entityData.get(LOW_CROUCHING);
+    }
+
+    /** True while low-crouching movement has a stable horizontal travel direction. */
+    public boolean isCrawlMoving() {
+        return isLowCrouching()
+            && getDeltaMovement().horizontalDistanceSqr() > CRAWL_MOVEMENT_SPEED_SQR;
+    }
+
+    /** Returns the yaw that points along the current crawl movement vector. */
+    public float getCrawlMovementYaw() {
+        Vec3 movement = getDeltaMovement();
+        return (float) Math.toDegrees(Math.atan2(-movement.x, movement.z));
+    }
+
+    /** Returns the stable body direction used while crawling. */
+    public float getCrawlFacingYaw() {
+        return this.yBodyRot;
+    }
+
+    private void updateCrawlFacing() {
+        if (!isCrawlMoving()) {
+            return;
+        }
+
+        float movementYaw = getCrawlMovementYaw();
+        float bodyYaw = approachAngle(this.yBodyRot, movementYaw, CRAWL_TURN_RATE_DEGREES);
+        this.setYRot(bodyYaw);
+        this.setYBodyRot(bodyYaw);
+    }
+
+    private static float approachAngle(float current, float target, float maxChange) {
+        return current + Mth.clamp(Mth.wrapDegrees(target - current), -maxChange, maxChange);
     }
 
     /** Lets a close flanker briefly interrupt defensive low-crouch posture. */
