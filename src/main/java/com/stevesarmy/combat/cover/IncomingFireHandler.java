@@ -47,7 +47,7 @@ public class IncomingFireHandler {
     private static boolean cbcChecked = false;
     private static boolean cbcLoaded = false;
 
-    private record BulletSnapshot(Vec3 pos, Vec3 delta) {}
+    private record BulletSnapshot(Vec3 pos, Vec3 delta, Vec3 firingOrigin) {}
 
     @SubscribeEvent
     public static void onLivingHurt(LivingHurtEvent event) {
@@ -90,10 +90,11 @@ public class IncomingFireHandler {
 
             if (prev != null) {
                 Vec3 prevEnd = prev.pos.add(prev.delta);
-                checkNearMissLineSegment(bullet.level(), prev.pos, prevEnd, speed, shooter);
+                checkNearMissLineSegment(bullet.level(), prev.pos, prevEnd, speed, shooter, prev.firingOrigin);
             }
 
-            entry.setValue(new BulletSnapshot(currentPos, currentDelta));
+            Vec3 firingOrigin = prev != null ? prev.firingOrigin : currentPos;
+            entry.setValue(new BulletSnapshot(currentPos, currentDelta, firingOrigin));
             return false;
         });
 
@@ -114,12 +115,12 @@ public class IncomingFireHandler {
             if (prev != null) {
                 // Normal two-tick segment check
                 Vec3 prevEnd = prev.pos.add(prev.delta);
-                checkNearMissCbcSegment(projectile.level(), prev.pos, prevEnd, speed * 2.0f, shooter);
+                checkNearMissCbcSegment(projectile.level(), prev.pos, prevEnd, speed * 2.0f, shooter, prev.firingOrigin);
             } else {
                 // First-tick: use currentPos - delta as pseudo-departure point
                 Vec3 estimatedPrevPos = currentPos.subtract(currentDelta);
                 double segmentLen = currentDelta.length();
-                checkNearMissCbcSegment(projectile.level(), estimatedPrevPos, currentPos, speed * 2.0f, shooter);
+                checkNearMissCbcSegment(projectile.level(), estimatedPrevPos, currentPos, speed * 2.0f, shooter, currentPos);
                 if (debugLog()) {
                     StevesArmyMod.LOGGER.info("[CBCSuppressionTrace] first-tick segment for {}: start={}, end={}, segmentLen={}",
                         projectile.getClass().getSimpleName(),
@@ -127,7 +128,8 @@ public class IncomingFireHandler {
                 }
             }
 
-            entry.setValue(new BulletSnapshot(currentPos, currentDelta));
+            Vec3 firingOrigin = prev != null ? prev.firingOrigin : currentPos;
+            entry.setValue(new BulletSnapshot(currentPos, currentDelta, firingOrigin));
             return false;
         });
     }
@@ -141,7 +143,12 @@ public class IncomingFireHandler {
     }
 
     public static void checkNearMissLineSegment(Level level, Vec3 start, Vec3 end, float bulletSpeed, @Nullable LivingEntity shooter) {
-        checkNearMissGeneric(level, start, end, bulletSpeed, shooter, false);
+        checkNearMissLineSegment(level, start, end, bulletSpeed, shooter, start);
+    }
+
+    private static void checkNearMissLineSegment(Level level, Vec3 start, Vec3 end, float bulletSpeed,
+                                                  @Nullable LivingEntity shooter, Vec3 firingOrigin) {
+        checkNearMissGeneric(level, start, end, bulletSpeed, shooter, firingOrigin, false);
     }
 
     /**
@@ -152,10 +159,16 @@ public class IncomingFireHandler {
      * fully suppress the soldier.
      */
     public static void checkNearMissCbcSegment(Level level, Vec3 start, Vec3 end, float bulletSpeed, @Nullable LivingEntity shooter) {
-        checkNearMissGeneric(level, start, end, bulletSpeed, shooter, true);
+        checkNearMissCbcSegment(level, start, end, bulletSpeed, shooter, start);
     }
 
-    private static void checkNearMissGeneric(Level level, Vec3 start, Vec3 end, float bulletSpeed, @Nullable LivingEntity shooter, boolean isCbc) {
+    private static void checkNearMissCbcSegment(Level level, Vec3 start, Vec3 end, float bulletSpeed,
+                                                 @Nullable LivingEntity shooter, Vec3 firingOrigin) {
+        checkNearMissGeneric(level, start, end, bulletSpeed, shooter, firingOrigin, true);
+    }
+
+    private static void checkNearMissGeneric(Level level, Vec3 start, Vec3 end, float bulletSpeed,
+                                             @Nullable LivingEntity shooter, Vec3 firingOrigin, boolean isCbc) {
         Vec3 segment = end.subtract(start);
         double segmentLenSq = segment.lengthSqr();
         if (segmentLenSq < 0.01) {
@@ -188,14 +201,14 @@ public class IncomingFireHandler {
 
             if (soldier.position().distanceTo(closestPoint) < NEAR_MISS_THRESHOLD) {
                 if (isCbc) {
-                    coverManager.onCbcNearMiss(closestPoint, soldier, shooter);
+                    coverManager.onCbcNearMiss(closestPoint, soldier, shooter, firingOrigin);
                     if (debugLog()) {
                         StevesArmyMod.LOGGER.info("[CBCSuppressionTrace] SUPPRESSED soldier {} at dist={}",
                             soldier.getId(),
                             String.format("%.2f", soldier.position().distanceTo(closestPoint)));
                     }
                 } else {
-                    coverManager.onNearMiss(closestPoint, soldier, bulletSpeed, shooter);
+                    coverManager.onNearMiss(closestPoint, soldier, bulletSpeed, shooter, firingOrigin);
                 }
                 matchCount++;
             }

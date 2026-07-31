@@ -39,6 +39,10 @@ public class CoverBehaviorManager {
     private float coverQualityPenalty = 0.0f;
     private Vec3 entryThreatDirection = null;
     private Vec3 coverFacingDirection = null;
+    private Vec3 recentSuppressionFiringOrigin = null;
+    private long recentSuppressionFiringOriginTime = 0L;
+
+    private static final long SUPPRESSION_FIRING_ORIGIN_MEMORY_MS = 15000L;
     
     private int peekCountSameCover = 0;
     private int savedPeekCount = 0;
@@ -395,20 +399,34 @@ if (currentCover != null) {
     }
 
     public void onNearMiss(net.minecraft.world.phys.Vec3 bulletPath, net.minecraft.world.entity.LivingEntity soldier, float bulletSpeed, @javax.annotation.Nullable net.minecraft.world.entity.LivingEntity shooter) {
+        onNearMiss(bulletPath, soldier, bulletSpeed, shooter, null);
+    }
+
+    public void onNearMiss(net.minecraft.world.phys.Vec3 bulletPath, net.minecraft.world.entity.LivingEntity soldier,
+                           float bulletSpeed, @javax.annotation.Nullable net.minecraft.world.entity.LivingEntity shooter,
+                           @javax.annotation.Nullable Vec3 firingOrigin) {
         if (shooter != null && soldier instanceof com.stevesarmy.entity.SoldierEntity s && s.isFriendlyTo(shooter)) {
             return;
         }
         suppressionTracker.onNearMiss(bulletPath, soldier, bulletSpeed, shooter);
+        recordSuppressionFiringOrigin(firingOrigin);
     }
 
     /**
      * CBC near-miss: always drives suppression to 1.0.
      */
     public void onCbcNearMiss(net.minecraft.world.phys.Vec3 bulletPath, net.minecraft.world.entity.LivingEntity soldier, @javax.annotation.Nullable net.minecraft.world.entity.LivingEntity shooter) {
+        onCbcNearMiss(bulletPath, soldier, shooter, null);
+    }
+
+    public void onCbcNearMiss(net.minecraft.world.phys.Vec3 bulletPath, net.minecraft.world.entity.LivingEntity soldier,
+                              @javax.annotation.Nullable net.minecraft.world.entity.LivingEntity shooter,
+                              @javax.annotation.Nullable Vec3 firingOrigin) {
         if (shooter != null && soldier instanceof com.stevesarmy.entity.SoldierEntity s && s.isFriendlyTo(shooter)) {
             return;
         }
         suppressionTracker.onCbcNearMiss(soldier);
+        recordSuppressionFiringOrigin(firingOrigin);
     }
 
     public void onIncomingFire(net.minecraft.world.entity.LivingEntity shooter) {
@@ -416,6 +434,7 @@ if (currentCover != null) {
             return;
         }
         suppressionTracker.onIncomingFire(shooter);
+        recordSuppressionFiringOrigin(shooter.getEyePosition());
     }
 
     public void onIncomingFire(net.minecraft.world.entity.LivingEntity shooter, float bulletSpeed) {
@@ -423,6 +442,7 @@ if (currentCover != null) {
             return;
         }
         suppressionTracker.onIncomingFire(shooter, bulletSpeed);
+        recordSuppressionFiringOrigin(shooter.getEyePosition());
     }
 
     public void onTakeDamage() {
@@ -434,6 +454,25 @@ if (currentCover != null) {
             return;
         }
         suppressionTracker.onTakeDamage();
+        if (attacker != null) {
+            recordSuppressionFiringOrigin(attacker.getEyePosition());
+        }
+    }
+
+    @javax.annotation.Nullable
+    public Vec3 getRecentSuppressionFiringOrigin() {
+        if (recentSuppressionFiringOrigin == null
+            || System.currentTimeMillis() - recentSuppressionFiringOriginTime > SUPPRESSION_FIRING_ORIGIN_MEMORY_MS) {
+            return null;
+        }
+        return recentSuppressionFiringOrigin;
+    }
+
+    private void recordSuppressionFiringOrigin(@javax.annotation.Nullable Vec3 firingOrigin) {
+        if (firingOrigin != null) {
+            recentSuppressionFiringOrigin = firingOrigin;
+            recentSuppressionFiringOriginTime = System.currentTimeMillis();
+        }
     }
 
     public void onExplosion(Vec3 explosionPosition, float exposure) {

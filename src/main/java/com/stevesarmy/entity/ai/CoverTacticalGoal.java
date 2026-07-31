@@ -2,6 +2,7 @@ package com.stevesarmy.entity.ai;
 
 import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.combat.ThreatAwareness;
+import com.stevesarmy.combat.VisibilityRay;
 import com.stevesarmy.combat.cover.*;
 import com.stevesarmy.debug.DiagnosticLogManager;
 import com.stevesarmy.entity.SoldierEntity;
@@ -74,6 +75,8 @@ public class CoverTacticalGoal extends Goal {
     private static final int RELOCATION_SEARCH_RADIUS = 12;
     private static final int FOLLOW_COVER_RETRY_TICKS = 40;
     private static final long CONTINUOUS_SUPPRESSION_REPOSITION_DELAY_MS = 8000L;
+    private static final int SUPPRESSION_ROUTE_CANDIDATE_LIMIT = 8;
+    private static final double CRAWL_ROUTE_SPEED = 0.65D;
     // Vanilla pathfinding is bounded by FOLLOW_RANGE. Far relocation targets need
     // progressive paths until they enter this exact-path validation radius.
     private static final double RELOCATION_EXACT_PATH_DISTANCE = 32.0D;
@@ -150,6 +153,11 @@ public class CoverTacticalGoal extends Goal {
     private boolean suppressionEpisodeActive = false;
     private long continuousSuppressionStartTime = 0L;
     private boolean continuousSuppressionRepositionStarted = false;
+    private boolean suppressionRouteSearchActive = false;
+    private Vec3 suppressionRouteFiringOrigin = null;
+    private SuppressionRoutePlan selectedSuppressionRoute = null;
+    private RouteMovement activeSuppressionRouteMovement = RouteMovement.NORMAL;
+    private int nextSuppressionRouteSearchTick = 0;
     private int peekCycleLogTick = 0;
     
     private CoverPoint pendingRetryCover = null;
@@ -157,6 +165,13 @@ public class CoverTacticalGoal extends Goal {
     private boolean reloadHoldActive;
 
     private enum RelocationType { NONE, GO_TO, FOLLOW }
+
+    private enum RouteNodeExposure { PROTECTED, CRAWL_SAFE, EXPOSED }
+
+    private enum RouteMovement { NORMAL, CRAWL }
+
+    private record SuppressionRoutePlan(CoverPoint cover, Path path, RouteMovement movement,
+                                        Vec3 firingOrigin) {}
 
     private RelocationType relocationType = RelocationType.NONE;
     private BlockPos relocationCenter = null;
@@ -1126,7 +1141,9 @@ private void tickRepositioning() {
                     soldier.getId(), soldier.getName().getString(), String.format("%.2f", horizontalDist), targetCover.getPosition());
             }
             navigation.stop();
-            moveControl.moveTo(standingPos, POSITIONING_TOLERANCE, POSITIONING_SPEED, "tickRepositioning", "recenter to target cover");
+            moveControl.moveTo(standingPos, POSITIONING_TOLERANCE,
+                activeSuppressionRouteMovement == RouteMovement.CRAWL ? CRAWL_ROUTE_SPEED : POSITIONING_SPEED,
+                "tickRepositioning", "recenter to target cover");
             return;
         }
         
@@ -1431,7 +1448,7 @@ private void tickRepositioning() {
             getCoverManager().setPeekPosition(null);
             getPositionController().clear();
             emergencyCoverSearchActive = true;
-            CoverMoveResult searchResult = findAndMoveToCover();
+            CoverMoveResult searchResult = findSuppressionMoveToCover();
             emergencyCoverSearchActive = false;
             if (searchResult == CoverMoveResult.COVER_STARTED
                 && getCoverManager().getTargetCover() != null) {
@@ -1453,14 +1470,20 @@ private void tickRepositioning() {
         // Continuous suppression is an emergency response. Unlike the normal
         // repeated-episode request, it may begin while the soldier is pinned.
         if (getCoverManager().isContinuousSuppressionRepositionRequested()) {
+            if (soldier.tickCount < nextSuppressionRouteSearchTick) {
+                return PendingRepositionResult.BLOCKED;
+            }
             if (DiagnosticLogManager.isCoverLoggingEnabled()) {
                 StevesArmyMod.LOGGER.info("[CoverGoal] Soldier {} continuously suppressed, starting immediate reposition",
                     soldier.getId());
             }
-            getCoverManager().clearContinuousSuppressionRepositionRequest();
-            resetSuppressionEpisodes();
-            startRepositioning();
-            return PendingRepositionResult.MOVEMENT_STARTED;
+            if (startSuppressionRepositioning()) {
+                getCoverManager().clearContinuousSuppressionRepositionRequest();
+                resetSuppressionEpisodes();
+                return PendingRepositionResult.MOVEMENT_STARTED;
+            }
+            nextSuppressionRouteSearchTick = soldier.tickCount + SHOT_IN_COVER_RETRY_TICKS;
+            return PendingRepositionResult.BLOCKED;
         }
 
         // Non-peekable cover reposition request
@@ -1468,20 +1491,24 @@ private void tickRepositioning() {
             if (!canLeaveCoverNow()) {
                 return PendingRepositionResult.BLOCKED;
             }
+            if (soldier.tickCount < nextSuppressionRouteSearchTick) {
+                return PendingRepositionResult.BLOCKED;
+            }
             if (DiagnosticLogManager.isCoverLoggingEnabled()) {
                 StevesArmyMod.LOGGER.info("[CoverGoal] Soldier {} reposition requested after suppression recovery, acting on it",
                     soldier.getId());
             }
-            getCoverManager().clearRepositionRequest();
-            resetSuppressionEpisodes();
-            startRepositioning();
-            if (getCoverManager().getTargetCover() != null) {
+            if (startSuppressionRepositioning()) {
+                getCoverManager().clearRepositionRequest();
+                resetSuppressionEpisodes();
                 if (DiagnosticLogManager.isCoverLoggingEnabled()) {
                     StevesArmyMod.LOGGER.info("[CoverSuppression] Soldier {} recovered and started queued reposition",
                         soldier.getId());
                 }
+                return PendingRepositionResult.MOVEMENT_STARTED;
             }
-            return PendingRepositionResult.MOVEMENT_STARTED;
+            nextSuppressionRouteSearchTick = soldier.tickCount + SHOT_IN_COVER_RETRY_TICKS;
+            return PendingRepositionResult.BLOCKED;
         }
 
         return PendingRepositionResult.NONE;
@@ -1701,6 +1728,8 @@ private boolean shouldExitCoverForFollow() {
     private void startRepositioning() {
         // Normal cover navigation uses standing/crouching dimensions. Do not
         // carry the suppressed half-cover prone posture into full-speed travel.
+        activeSuppressionRouteMovement = RouteMovement.NORMAL;
+        selectedSuppressionRoute = null;
         soldier.setLowCrouching(false);
         getCoverManager().resetPeekState();
         getCoverManager().setPeekPosition(null);
@@ -1720,6 +1749,8 @@ private boolean shouldExitCoverForFollow() {
 
         // This is the ordinary cover-to-cover path, not a protected low-crouch
         // trench shift. Restore normal movement dimensions before pathfinding.
+        activeSuppressionRouteMovement = RouteMovement.NORMAL;
+        selectedSuppressionRoute = null;
         soldier.setLowCrouching(false);
         
         // Release old target cover reservation (we're choosing a new target)
@@ -1839,11 +1870,37 @@ private boolean shouldExitCoverForFollow() {
                 }
             }
         }
-this.debugSearchCenter = searchCenter;
+        this.debugSearchCenter = searchCenter;
         
         Optional<CoverPoint> bestCover = Optional.empty();
 
-        if (soldier.hasValidAttackTarget()) {
+        if (suppressionRouteSearchActive && !soldier.hasValidAttackTarget()) {
+            if (suppressionRouteFiringOrigin == null) {
+                if (DiagnosticLogManager.isCoverLoggingEnabled()) {
+                    StevesArmyMod.LOGGER.info("[CoverSuppression] Soldier {} withheld reposition: no firing origin is available",
+                        soldier.getId());
+                }
+                logCoverSearchPerformance(finder, searchStarted, CoverMoveResult.NO_ELIGIBLE_COVER, "suppression-no-origin");
+                return CoverMoveResult.NO_ELIGIBLE_COVER;
+            }
+            SuppressionRoutePlan routePlan = selectSuppressionRoute(finder, threatDirection, threats,
+                searchRadius, squadCtx, suppressionRouteFiringOrigin);
+            if (routePlan != null) {
+                selectedSuppressionRoute = routePlan;
+                bestCover = Optional.of(routePlan.cover());
+            } else {
+                if (DiagnosticLogManager.isCoverLoggingEnabled()) {
+                    StevesArmyMod.LOGGER.info("[CoverSuppression] Soldier {} withheld reposition: no protected or crawl-safe route found",
+                        soldier.getId());
+                }
+                logCoverSearchPerformance(finder, searchStarted, CoverMoveResult.NO_ELIGIBLE_COVER, "suppression-no-safe-route");
+                return CoverMoveResult.NO_ELIGIBLE_COVER;
+            }
+        }
+
+        if (bestCover.isPresent()) {
+            // The suppression route pass has already selected and path-validated this cover.
+        } else if (soldier.hasValidAttackTarget()) {
             // ATTACK mode: forward-biased search from the beginning
             List<CoverFinder.ScoredCover> scored = finder.evaluateAndScoreAllFromCenter(
                 searchCenter, soldier, threatDirection, threats, ATTACK_CORRIDOR_SEARCH_RADIUS, squadCtx);
@@ -2846,6 +2903,111 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
             && path.getNode(path.getNodeCount() - 1).asBlockPos().equals(cover.getPosition());
     }
 
+    /**
+     * Evaluates only the highest-scoring suppression candidates. The exposure cache
+     * belongs to this search, so it is discarded before terrain or fire sources can
+     * make it stale.
+     */
+    @javax.annotation.Nullable
+    private SuppressionRoutePlan selectSuppressionRoute(CoverFinder finder, Vec3 threatDirection,
+                                                         List<LivingEntity> threats, int searchRadius,
+                                                         SquadCoverContext squadCtx, Vec3 firingOrigin) {
+        List<CoverFinder.ScoredCover> candidates = finder.evaluateAndScoreAll(
+            soldier, threatDirection, threats, searchRadius, true, squadCtx);
+        CoverPoint currentCover = getCoverManager().getCurrentCover();
+        Map<BlockPos, RouteNodeExposure> exposureCache = new HashMap<>();
+        SuppressionRoutePlan protectedPlan = null;
+        SuppressionRoutePlan crawlPlan = null;
+        int validPathsEvaluated = 0;
+
+        for (CoverFinder.ScoredCover scored : candidates) {
+            if (validPathsEvaluated >= SUPPRESSION_ROUTE_CANDIDATE_LIMIT) {
+                break;
+            }
+            CoverPoint cover = scored.cover;
+            if (failedCoverPositions.contains(cover.getPosition())
+                || (currentCover != null && cover.getPosition().equals(currentCover.getPosition()))
+                || (emergencyCoverSearchActive && currentCover != null
+                    && cover.getPosition().equals(currentCover.getPosition()))) {
+                continue;
+            }
+
+            Vec3 standingPos = getCoverStandingPosition(cover.getPosition());
+            Path path = navigation.createPath(standingPos.x, standingPos.y, standingPos.z, 0);
+            if (path == null || !path.canReach() || path.getNodeCount() == 0
+                || !path.getNode(path.getNodeCount() - 1).asBlockPos().equals(cover.getPosition())) {
+                continue;
+            }
+            validPathsEvaluated++;
+
+            RouteNodeExposure exposure = classifySuppressionRoute(path, firingOrigin, exposureCache);
+            SuppressionRoutePlan plan = new SuppressionRoutePlan(cover, path,
+                exposure == RouteNodeExposure.CRAWL_SAFE ? RouteMovement.CRAWL : RouteMovement.NORMAL,
+                firingOrigin);
+            if (exposure == RouteNodeExposure.PROTECTED && protectedPlan == null) {
+                protectedPlan = plan;
+            } else if (exposure == RouteNodeExposure.CRAWL_SAFE && crawlPlan == null) {
+                crawlPlan = plan;
+            }
+        }
+
+        SuppressionRoutePlan selected = protectedPlan != null ? protectedPlan
+            : crawlPlan;
+        if (selected != null && DiagnosticLogManager.isCoverLoggingEnabled()) {
+            StevesArmyMod.LOGGER.info("[CoverSuppression] Soldier {} selected {} route to {} after evaluating {} candidates",
+                soldier.getId(), selected.movement().name().toLowerCase(java.util.Locale.ROOT),
+                selected.cover().getPosition(), validPathsEvaluated);
+        }
+        return selected;
+    }
+
+    private RouteNodeExposure classifySuppressionRoute(Path path, Vec3 firingOrigin,
+                                                        Map<BlockPos, RouteNodeExposure> exposureCache) {
+        boolean hasCrawlSafeNode = false;
+        for (int i = 0; i < path.getNodeCount(); i++) {
+            BlockPos nodePos = path.getNode(i).asBlockPos();
+            RouteNodeExposure nodeExposure = exposureCache.computeIfAbsent(nodePos,
+                pos -> classifySuppressionNode(Vec3.atCenterOf(pos), firingOrigin));
+            if (nodeExposure == RouteNodeExposure.EXPOSED) {
+                return RouteNodeExposure.EXPOSED;
+            }
+            hasCrawlSafeNode |= nodeExposure == RouteNodeExposure.CRAWL_SAFE;
+            if (i > 0) {
+                Vec3 previous = Vec3.atCenterOf(path.getNode(i - 1).asBlockPos());
+                Vec3 current = Vec3.atCenterOf(nodePos);
+                Vec3 midpoint = previous.lerp(current, 0.5);
+                RouteNodeExposure midpointExposure = classifySuppressionNode(midpoint, firingOrigin);
+                if (midpointExposure == RouteNodeExposure.EXPOSED) {
+                    return RouteNodeExposure.EXPOSED;
+                }
+                if (midpointExposure == RouteNodeExposure.CRAWL_SAFE) {
+                    hasCrawlSafeNode = true;
+                }
+            }
+        }
+        return hasCrawlSafeNode ? RouteNodeExposure.CRAWL_SAFE : RouteNodeExposure.PROTECTED;
+    }
+
+    private RouteNodeExposure classifySuppressionNode(Vec3 pathPosition, Vec3 firingOrigin) {
+        Vec3 horizontal = new Vec3(pathPosition.x - firingOrigin.x, 0, pathPosition.z - firingOrigin.z);
+        Vec3 lateral = horizontal.lengthSqr() > 0.001
+            ? new Vec3(-horizontal.z, 0, horizontal.x).normalize().scale(0.25)
+            : Vec3.ZERO;
+        boolean allLowerBlocked = true;
+        boolean allEyeBlocked = true;
+        for (double offset : new double[] { -1.0, 0.0, 1.0 }) {
+            Vec3 sample = pathPosition.add(lateral.scale(offset));
+            Vec3 lowerBody = sample.add(0, -0.15, 0);
+            Vec3 standingEye = sample.add(0, 1.05, 0);
+            allLowerBlocked &= !VisibilityRay.trace(soldier.level(), firingOrigin, lowerBody, soldier).clear();
+            allEyeBlocked &= !VisibilityRay.trace(soldier.level(), firingOrigin, standingEye, soldier).clear();
+        }
+        if (allLowerBlocked && allEyeBlocked) {
+            return RouteNodeExposure.PROTECTED;
+        }
+        return allLowerBlocked ? RouteNodeExposure.CRAWL_SAFE : RouteNodeExposure.EXPOSED;
+    }
+
     private boolean moveToCover(CoverPoint cover) {
         BlockPos wallPos = cover.getPosition();
         long pathStarted = System.nanoTime();
@@ -2863,7 +3025,23 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
         Vec3 standingPos = getCoverStandingPosition(wallPos);
         // Use tolerance 0 so the pathfinder must route to the exact standing block,
         // not to an adjacent block that may be on the wrong side of cover.
-        Path path = navigation.createPath(standingPos.x, standingPos.y, standingPos.z, 0);
+        SuppressionRoutePlan routePlan = selectedSuppressionRoute != null
+            && selectedSuppressionRoute.cover().getPosition().equals(wallPos)
+            ? selectedSuppressionRoute : null;
+        Path path = routePlan != null ? routePlan.path()
+            : navigation.createPath(standingPos.x, standingPos.y, standingPos.z, 0);
+
+        if (routePlan != null
+            && classifySuppressionRoute(path, routePlan.firingOrigin(), new HashMap<>()) == RouteNodeExposure.EXPOSED) {
+            if (DiagnosticLogManager.isCoverLoggingEnabled()) {
+                StevesArmyMod.LOGGER.info("[CoverSuppression] Soldier {} withheld retry to {}: route is now exposed",
+                    soldier.getId(), wallPos);
+            }
+            selectedSuppressionRoute = null;
+            activeSuppressionRouteMovement = RouteMovement.NORMAL;
+            soldier.setLowCrouching(false);
+            return false;
+        }
         
         boolean isReachable = false;
         boolean isStagedPath = false;
@@ -2930,7 +3108,10 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
         
         if (isReachable) {
             pendingRetryCover = null; // Clear any pending retry on success
-            boolean accepted = navigation.moveTo(path, 1.2);
+            activeSuppressionRouteMovement = routePlan != null ? routePlan.movement() : RouteMovement.NORMAL;
+            soldier.setLowCrouching(activeSuppressionRouteMovement == RouteMovement.CRAWL);
+            boolean accepted = navigation.moveTo(path, activeSuppressionRouteMovement == RouteMovement.CRAWL
+                ? CRAWL_ROUTE_SPEED : 1.2D);
             if (DiagnosticLogManager.isCoverPerformanceLoggingEnabled()) {
                 StevesArmyMod.LOGGER.info(
                     "[CoverPerf] soldier={} tick={} path={} accepted={} nodes={} buildMs={} cover={} from={}",
@@ -2974,8 +3155,40 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
         }
         return false;
     }
+
+    private boolean startSuppressionRepositioning() {
+        CoverMoveResult result = findSuppressionMoveToCover();
+        if (getCoverManager().getTargetCover() != null) {
+            getCoverManager().setState(CoverBehaviorManager.CoverState.REPOSITIONING);
+            return true;
+        }
+        getCoverManager().setState(getCoverManager().isSuppressed()
+            ? CoverBehaviorManager.CoverState.SUPPRESSED_IN_COVER
+            : CoverBehaviorManager.CoverState.IN_COVER);
+        return result == CoverMoveResult.COVER_STARTED;
+    }
+
+    private CoverMoveResult findSuppressionMoveToCover() {
+        suppressionRouteFiringOrigin = getCoverManager().getRecentSuppressionFiringOrigin();
+        suppressionRouteSearchActive = true;
+        activeSuppressionRouteMovement = RouteMovement.NORMAL;
+        selectedSuppressionRoute = null;
+        soldier.setLowCrouching(false);
+        getCoverManager().resetPeekState();
+        getCoverManager().setPeekPosition(null);
+        getPositionController().clear();
+        try {
+            return findAndMoveToCover();
+        } finally {
+            suppressionRouteSearchActive = false;
+            suppressionRouteFiringOrigin = null;
+        }
+    }
     
     private void onCoverReached(CoverPoint cover) {
+        selectedSuppressionRoute = null;
+        activeSuppressionRouteMovement = RouteMovement.NORMAL;
+        soldier.setLowCrouching(false);
         // Promote target to current — releases old reservation, sets metadata
         getCoverManager().promoteTargetToCurrentCover();
         
