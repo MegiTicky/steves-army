@@ -272,6 +272,8 @@ if (currentCover != null) {
         this.state = CoverState.NO_COVER;
         syncState();
 
+        this.continuousSuppressionRepositionRequested = false;
+
         soldier.getPeekController().reset();
         // Preserve suppression during cover transitions - don't reset
         soldier.setLowCrouching(false);
@@ -557,6 +559,20 @@ if (currentCover != null) {
     
     public void clearShotInCoverRepositionRequest() {
         this.shotInCoverRepositionRequested = false;
+    }
+
+    private boolean continuousSuppressionRepositionRequested = false;
+
+    public boolean isContinuousSuppressionRepositionRequested() {
+        return continuousSuppressionRepositionRequested;
+    }
+
+    public void requestContinuousSuppressionReposition() {
+        this.continuousSuppressionRepositionRequested = true;
+    }
+
+    public void clearContinuousSuppressionRepositionRequest() {
+        this.continuousSuppressionRepositionRequested = false;
     }
     
     public boolean hasCurrentCover() {

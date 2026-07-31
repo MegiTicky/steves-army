@@ -67,11 +67,13 @@ public class CoverTacticalGoal extends Goal {
     private static final int MAX_SEEKING_TICKS = 200;
     private static final float LOW_HEALTH_THRESHOLD = 0.3f;
     private static final float FOLLOW_COVER_DISTANCE = 15.0f;
+    private static final int REPEATED_SUPPRESSION_EPISODE_THRESHOLD = 3;
     
     private static final double FOLLOW_COVER_SEARCH_RADIUS = 15.0D;
     private static final double FOLLOW_REGROUP_DISTANCE = 10.0D;
     private static final int RELOCATION_SEARCH_RADIUS = 12;
     private static final int FOLLOW_COVER_RETRY_TICKS = 40;
+    private static final long CONTINUOUS_SUPPRESSION_REPOSITION_DELAY_MS = 8000L;
     // Vanilla pathfinding is bounded by FOLLOW_RANGE. Far relocation targets need
     // progressive paths until they enter this exact-path validation radius.
     private static final double RELOCATION_EXACT_PATH_DISTANCE = 32.0D;
@@ -143,6 +145,11 @@ public class CoverTacticalGoal extends Goal {
     private int nextShotInCoverSearchTick = 0;
     private BlockPos compromisedCoverPosition = null;
     private boolean emergencyCoverSearchActive = false;
+    private BlockPos suppressionEpisodeCover = null;
+    private int suppressionEpisodeCount = 0;
+    private boolean suppressionEpisodeActive = false;
+    private long continuousSuppressionStartTime = 0L;
+    private boolean continuousSuppressionRepositionStarted = false;
     private int peekCycleLogTick = 0;
     
     private CoverPoint pendingRetryCover = null;
@@ -308,6 +315,75 @@ public class CoverTacticalGoal extends Goal {
     
     private ThreatAwareness getThreats() {
         return soldier.getThreatAwareness();
+    }
+
+    /**
+     * Counts entries into suppression while occupying the same cover. Individual
+     * rounds and ticks inside one suppressed state do not create extra episodes.
+     */
+    private void trackSuppressionEpisode() {
+        CoverBehaviorManager coverManager = getCoverManager();
+        CoverPoint currentCover = coverManager.getCurrentCover();
+        if (currentCover == null || !coverManager.isInCover()) {
+            resetSuppressionEpisodes();
+            return;
+        }
+
+        BlockPos coverPosition = currentCover.getPosition();
+        if (suppressionEpisodeCover == null || !suppressionEpisodeCover.equals(coverPosition)) {
+            suppressionEpisodeCover = coverPosition;
+            suppressionEpisodeCount = 0;
+            suppressionEpisodeActive = false;
+        }
+
+        boolean suppressed = coverManager.isSuppressed();
+        if (!suppressed) {
+            suppressionEpisodeActive = false;
+            continuousSuppressionStartTime = 0L;
+            continuousSuppressionRepositionStarted = false;
+            return;
+        }
+
+        if (continuousSuppressionStartTime == 0L) {
+            continuousSuppressionStartTime = System.currentTimeMillis();
+        } else if (!continuousSuppressionRepositionStarted
+            && System.currentTimeMillis() - continuousSuppressionStartTime >= CONTINUOUS_SUPPRESSION_REPOSITION_DELAY_MS
+            && !coverManager.isContinuousSuppressionRepositionRequested()) {
+            continuousSuppressionRepositionStarted = true;
+            coverManager.requestContinuousSuppressionReposition();
+            if (DiagnosticLogManager.isCoverLoggingEnabled()) {
+                StevesArmyMod.LOGGER.info("[CoverSuppression] Soldier {} continuously suppressed at {} for {}ms, queued immediate reposition",
+                    soldier.getId(), coverPosition, CONTINUOUS_SUPPRESSION_REPOSITION_DELAY_MS);
+            }
+        }
+
+        if (suppressionEpisodeActive) {
+            return;
+        }
+
+        suppressionEpisodeActive = true;
+        suppressionEpisodeCount++;
+        if (DiagnosticLogManager.isCoverLoggingEnabled()) {
+            StevesArmyMod.LOGGER.info("[CoverSuppression] Soldier {} suppression episode {}/{} at cover {}",
+                soldier.getId(), suppressionEpisodeCount, REPEATED_SUPPRESSION_EPISODE_THRESHOLD, coverPosition);
+        }
+
+        if (suppressionEpisodeCount >= REPEATED_SUPPRESSION_EPISODE_THRESHOLD
+            && !coverManager.isRepositionRequested()) {
+            coverManager.requestReposition();
+            if (DiagnosticLogManager.isCoverLoggingEnabled()) {
+                StevesArmyMod.LOGGER.info("[CoverSuppression] Soldier {} repeatedly suppressed at {}, queued reposition after recovery",
+                    soldier.getId(), coverPosition);
+            }
+        }
+    }
+
+    private void resetSuppressionEpisodes() {
+        suppressionEpisodeCover = null;
+        suppressionEpisodeCount = 0;
+        suppressionEpisodeActive = false;
+        continuousSuppressionStartTime = 0L;
+        continuousSuppressionRepositionStarted = false;
     }
 
     /**
@@ -638,6 +714,7 @@ public class CoverTacticalGoal extends Goal {
     public void tick() {
         CoverBehaviorManager.CoverState state = getCoverManager().getState();
         getCoverManager().tickSuppression(getCoverManager().isInCover());
+        trackSuppressionEpisode();
 
         if (relocationType != RelocationType.NONE && !isRelocationStillValid()) {
             navigation.stop();
@@ -1373,17 +1450,37 @@ private void tickRepositioning() {
             return PendingRepositionResult.BLOCKED;
         }
 
+        // Continuous suppression is an emergency response. Unlike the normal
+        // repeated-episode request, it may begin while the soldier is pinned.
+        if (getCoverManager().isContinuousSuppressionRepositionRequested()) {
+            if (DiagnosticLogManager.isCoverLoggingEnabled()) {
+                StevesArmyMod.LOGGER.info("[CoverGoal] Soldier {} continuously suppressed, starting immediate reposition",
+                    soldier.getId());
+            }
+            getCoverManager().clearContinuousSuppressionRepositionRequest();
+            resetSuppressionEpisodes();
+            startRepositioning();
+            return PendingRepositionResult.MOVEMENT_STARTED;
+        }
+
         // Non-peekable cover reposition request
         if (getCoverManager().isRepositionRequested()) {
             if (!canLeaveCoverNow()) {
                 return PendingRepositionResult.BLOCKED;
             }
             if (DiagnosticLogManager.isCoverLoggingEnabled()) {
-                StevesArmyMod.LOGGER.info("[CoverGoal] Soldier {} reposition requested, acting on it",
+                StevesArmyMod.LOGGER.info("[CoverGoal] Soldier {} reposition requested after suppression recovery, acting on it",
                     soldier.getId());
             }
             getCoverManager().clearRepositionRequest();
+            resetSuppressionEpisodes();
             startRepositioning();
+            if (getCoverManager().getTargetCover() != null) {
+                if (DiagnosticLogManager.isCoverLoggingEnabled()) {
+                    StevesArmyMod.LOGGER.info("[CoverSuppression] Soldier {} recovered and started queued reposition",
+                        soldier.getId());
+                }
+            }
             return PendingRepositionResult.MOVEMENT_STARTED;
         }
 
@@ -1601,7 +1698,10 @@ private boolean shouldExitCoverForFollow() {
         return true;
     }
 
-private void startRepositioning() {
+    private void startRepositioning() {
+        // Normal cover navigation uses standing/crouching dimensions. Do not
+        // carry the suppressed half-cover prone posture into full-speed travel.
+        soldier.setLowCrouching(false);
         getCoverManager().resetPeekState();
         getCoverManager().setPeekPosition(null);
         getPositionController().clear();
@@ -1617,6 +1717,10 @@ private void startRepositioning() {
         CoverPoint currentCover = getCoverManager().getCurrentCover();
         
         if (currentCover != null && newCover.getPosition().equals(currentCover.getPosition())) return false;
+
+        // This is the ordinary cover-to-cover path, not a protected low-crouch
+        // trench shift. Restore normal movement dimensions before pathfinding.
+        soldier.setLowCrouching(false);
         
         // Release old target cover reservation (we're choosing a new target)
         CoverPoint oldTarget = getCoverManager().getTargetCover();
@@ -2881,6 +2985,7 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
         getCoverManager().setNonPeekableCover(false);
         getCoverManager().clearRepositionRequest();
         getCoverManager().clearShotInCoverRepositionRequest();
+        getCoverManager().clearContinuousSuppressionRepositionRequest();
         nonPeekableTicks = 0;
         
         // Renew reservation for the new current cover
@@ -2892,6 +2997,7 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
         // so soldier settles before peeking — prevents immediate "jump out"
         getPeekController().resetForNewCover(cover.getPosition());
         getPeekController().setLastPeekEndTime(System.currentTimeMillis());
+        resetSuppressionEpisodes();
         
         // Compute peek position with LOS validation for full cover
         if (cover.getType() == CoverType.FULL) {
