@@ -78,7 +78,7 @@ description='''${mod_description}'''
 [[dependencies.${mod_id}]]
     modId="valkyrienskies"
     mandatory=false
-    versionRange="[2.3.0,)"
+    versionRange="[2.3.0-beta.5,)"
     ordering="AFTER"
     side="BOTH"
 
