@@ -377,6 +377,8 @@ public class CoverFinder {
         float flankingProtection = calculateFlankingProtection(coverPoint, allThreats);
         float firingQuality = calculateFiringQuality(coverPoint, threatDirection);
         float peekAngleScore = calculatePeekAngleScore(coverPoint, threatDirection, primaryThreat);
+        coverPoint.setFiringAccessScore(coverPoint.canShootFrom()
+            ? Math.max(0.75f, peekAngleScore) : peekAngleScore);
         
         boolean isAttackMode = (soldier instanceof SoldierEntity se && se.hasValidAttackTarget());
         float distanceScore;
@@ -455,6 +457,8 @@ return weightedScore;
         float flankingProtection = calculateFlankingProtection(coverPoint, allThreats);
         float firingQuality = calculateFiringQuality(coverPoint, threatDirection);
         float peekAngleScore = calculatePeekAngleScore(coverPoint, threatDirection, primaryThreat);
+        coverPoint.setFiringAccessScore(coverPoint.canShootFrom()
+            ? Math.max(0.75f, peekAngleScore) : peekAngleScore);
 
         boolean isAttackMode = (soldier instanceof SoldierEntity se && se.hasValidAttackTarget());
         float distanceScore;
@@ -915,6 +919,7 @@ return qualityScore + shootBonus - distancePenalty;
             coverPoint.setType(determineCoverType(maxHeight));
             coverPoint.setQuality(calculateGenericQuality(maxHeight, protectedDirs.size()));
             coverPoint.setCanShootFrom(maxHeight >= MIN_EFFECTIVE_COVER_HEIGHT && maxHeight < STANDING_EYE_HEIGHT);
+            coverPoint.setFiringAccessScore(coverPoint.canShootFrom() ? 0.75f : 0.0f);
             coverPoint.setDebugInfo(String.format("Height: %.2f | Dirs: %d | No threat", maxHeight, protectedDirs.size()));
         }
         

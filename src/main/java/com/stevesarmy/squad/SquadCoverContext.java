@@ -11,6 +11,7 @@ public record SquadCoverContext(
     int squadSize,
     int memberIndex,
     List<BlockPos> occupiedCovers,
+    List<BlockPos> defensivePositions,
     List<Vec3> squadThreatDirections,
     Vec3 ownerPosition
 ) {
@@ -31,6 +32,11 @@ public record SquadCoverContext(
 
     public List<BlockPos> getOccupiedCovers() {
         return occupiedCovers != null ? occupiedCovers : Collections.emptyList();
+    }
+
+    /** Physical cover and non-reservable open-ground defensive lanes selected by peers. */
+    public List<BlockPos> getDefensivePositions() {
+        return defensivePositions != null ? defensivePositions : Collections.emptyList();
     }
 
     public List<Vec3> getSquadThreatDirections() {

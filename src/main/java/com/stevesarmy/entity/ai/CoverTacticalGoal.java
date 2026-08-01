@@ -48,6 +48,9 @@ public class CoverTacticalGoal extends Goal {
     private int noProgressTicks = 0;
     private int seekingTicks = 0;
     private Vec3 lastSeekingPosition = null;
+    // A prone lane is intentionally not a CoverPoint: no reservation, peek state, or cover bonus.
+    private BlockPos proneFiringDestination;
+    private final ProneFiringController proneFiringController;
     
     private static final int COOLDOWN_TICKS = 40;
     private static final int MAX_STUCK_TICKS = 60;
@@ -246,6 +249,7 @@ public class CoverTacticalGoal extends Goal {
     public CoverTacticalGoal(SoldierEntity soldier) {
         this.soldier = soldier;
         this.navigation = soldier.getNavigation();
+        this.proneFiringController = new ProneFiringController(soldier);
         // This goal remains active while occupying cover, so it must retain the
         // scheduler's movement lock across every cover-state transition.
         this.setFlags(EnumSet.of(Flag.MOVE, Flag.LOOK));
@@ -710,6 +714,10 @@ public class CoverTacticalGoal extends Goal {
         if (soldier.hasValidAttackTarget()) {
             return;
         }
+
+        // A higher-priority behavior is taking over. Do not leave an orphaned
+        // prone plan active after this goal stops being ticked.
+        cancelProneFiringPlan();
         
         if (state == CoverBehaviorManager.CoverState.IN_COVER ||
             state == CoverBehaviorManager.CoverState.SUPPRESSED_IN_COVER) {
@@ -776,6 +784,14 @@ public class CoverTacticalGoal extends Goal {
         if (soldier.isPreparingOrReloading()) {
             reloadHoldActive = true;
             holdForReload(getCoverManager().getCurrentCover());
+            // Reloading freezes navigation but is compatible with reducing the
+            // soldier's silhouette at an already valid defensive position.
+            if (state == CoverBehaviorManager.CoverState.SEEKING_COVER
+                && getCoverManager().getCurrentCover() == null
+                && getCoverManager().getTargetCover() == null) {
+                findAndMoveToCover();
+            }
+            tickProneFiringPlan();
             populateCoverDebugData();
             return;
         }
@@ -837,6 +853,10 @@ public class CoverTacticalGoal extends Goal {
                 }
                 break;
         }
+
+        // Cover owns the defensive position, so its prone settling timer must
+        // continue even when CombatGoal has temporarily stopped for lack of a target.
+        tickProneFiringPlan();
         
         // Attack mode: run phase logic after state handling
         if (soldier.hasValidAttackTarget()) {
@@ -874,6 +894,10 @@ public class CoverTacticalGoal extends Goal {
     }
     
     private void tickSeekingCover() {
+        if (proneFiringDestination != null) {
+            tickProneFiringMovement();
+            return;
+        }
         // Handle pending retry from previous tick
         if (pendingRetryCover != null) {
             if (DiagnosticLogManager.isCoverLoggingEnabled()) {
@@ -1192,6 +1216,30 @@ private void tickRepositioning() {
             }
         }
     }
+
+    private void tickProneFiringMovement() {
+        Vec3 destination = proneFiringDestination.getCenter();
+        if (soldier.position().distanceToSqr(destination) <= POSITIONING_TOLERANCE * POSITIONING_TOLERANCE) {
+            navigation.stop();
+            proneFiringController.onReached();
+            if (DiagnosticLogManager.isCoverLoggingEnabled()) {
+                StevesArmyMod.LOGGER.info("[DefensivePosition] Soldier {} reached prone lane {}", soldier.getId(), proneFiringDestination);
+            }
+            proneFiringDestination = null;
+            return;
+        }
+        if (navigation.isDone()) {
+            proneFiringController.cancel("path_failed");
+            proneFiringDestination = null;
+            getCoverManager().setState(CoverBehaviorManager.CoverState.SEEKING_COVER);
+        }
+    }
+
+    private void tickProneFiringPlan() {
+        if (proneFiringDestination == null) {
+            proneFiringController.tick(soldier.getTarget());
+        }
+    }
     
     private void tickInCover() {
         CoverPoint currentCover = getCoverManager().getCurrentCover();
@@ -1329,7 +1377,8 @@ private void tickRepositioning() {
 
     private void holdForReload(CoverPoint currentCover) {
         if (currentCover == null) {
-            soldier.setLowCrouching(false);
+            // Reloading in the open must not visually cancel a selected firing-prone plan.
+            soldier.setLowCrouching(soldier.isFiringProne());
             soldier.holdMovementForReload();
             return;
         }
@@ -1348,7 +1397,7 @@ private void tickRepositioning() {
             soldier.clearEmergencyEngagementPosture();
             soldier.setLowCrouching(true);
         } else {
-            soldier.setLowCrouching(false);
+            soldier.setLowCrouching(soldier.isFiringProne());
         }
 
         soldier.holdMovementForReload();
@@ -2005,6 +2054,18 @@ private boolean shouldExitCoverForFollow() {
         
         if (bestCover.isPresent()) {
             CoverPoint cover = bestCover.get();
+
+            List<CoverFinder.ScoredCover> tacticalCovers = finder.evaluateAndScoreAll(
+                soldier, threatDirection, threats, searchRadius, true).stream()
+                .filter(sc -> isExactCoverPathReachable(sc.cover))
+                .collect(java.util.stream.Collectors.toList());
+            Optional<DefensivePositionCandidate.ProneFiringCandidate> prone =
+                DefensivePositionSelector.selectProne(soldier, soldier.getTarget(), getThreats(), tacticalCovers, squadCtx);
+            if (prone.isPresent() && relocationType == RelocationType.NONE) {
+                startProneFiringMovement(prone.get());
+                logCoverSearchPerformance(finder, searchStarted, CoverMoveResult.COVER_STARTED, "prone-lane");
+                return CoverMoveResult.COVER_STARTED;
+            }
             
             boolean wantsDebug = DiagnosticLogManager.isCoverScoreLoggingEnabled()
                 || CoverDebugManager.isShowSoldierCover();
@@ -2067,6 +2128,7 @@ private boolean shouldExitCoverForFollow() {
             }
             
             getCoverManager().clearCoverQualityPenalty();
+            cancelProneFiringPlan();
             
             if (CoverReservationManager.reserve(cover.getPosition(), soldier)) {
                 getCoverManager().setTargetCover(cover);
@@ -2087,8 +2149,59 @@ private boolean shouldExitCoverForFollow() {
             logCoverSearchPerformance(finder, searchStarted, CoverMoveResult.NO_COVER_FOUND, "reservation");
             return CoverMoveResult.NO_COVER_FOUND;
         }
+        List<CoverFinder.ScoredCover> tacticalCovers = finder.evaluateAndScoreAll(
+            soldier, threatDirection, threats, searchRadius, true).stream()
+            .filter(sc -> isExactCoverPathReachable(sc.cover))
+            .collect(java.util.stream.Collectors.toList());
+        Optional<DefensivePositionCandidate.ProneFiringCandidate> prone =
+            DefensivePositionSelector.selectProne(soldier, soldier.getTarget(), getThreats(), tacticalCovers, squadCtx);
+        if (prone.isPresent() && relocationType == RelocationType.NONE) {
+            startProneFiringMovement(prone.get());
+            logCoverSearchPerformance(finder, searchStarted, CoverMoveResult.COVER_STARTED, "prone-no-cover");
+            return CoverMoveResult.COVER_STARTED;
+        }
         logCoverSearchPerformance(finder, searchStarted, CoverMoveResult.NO_COVER_FOUND, "none");
         return CoverMoveResult.NO_COVER_FOUND;
+    }
+
+    private void startProneFiringMovement(DefensivePositionCandidate.ProneFiringCandidate candidate) {
+        if (candidate.destination().equals(soldier.blockPosition())) {
+            navigation.stop();
+            proneFiringDestination = null;
+            if (proneFiringController.begin(candidate, true) && DiagnosticLogManager.isCoverLoggingEnabled()) {
+                StevesArmyMod.LOGGER.info("[DefensivePosition] Soldier {} selected current prone lane {} ({})",
+                    soldier.getId(), candidate.destination(), candidate.diagnostics());
+            }
+            return;
+        }
+        if (!proneFiringController.begin(candidate, false)) {
+            return;
+        }
+        proneFiringDestination = candidate.destination();
+        Path path = navigation.createPath(candidate.destination(), 0);
+        if (path == null || !path.canReach()) {
+            proneFiringController.cancel("path_failed");
+            proneFiringDestination = null;
+            return;
+        }
+        navigation.moveTo(path, 1.0D);
+        getCoverManager().clearTargetCover();
+        getCoverManager().setState(CoverBehaviorManager.CoverState.SEEKING_COVER);
+        if (DiagnosticLogManager.isCoverLoggingEnabled()) {
+            StevesArmyMod.LOGGER.info("[DefensivePosition] Soldier {} selected prone lane {} access={} protection={} cost={} ({})",
+                soldier.getId(), candidate.destination(), candidate.firingAccess(), candidate.protection(),
+                candidate.movementCost(), candidate.diagnostics());
+        }
+    }
+
+    private void cancelProneFiringPlan() {
+        proneFiringDestination = null;
+        proneFiringController.cancel("physical_cover_selected");
+    }
+
+    /** Exposes the current non-reservable lane to squadmate cover searches. */
+    public BlockPos getProneDefensivePosition() {
+        return proneFiringDestination != null ? proneFiringDestination : proneFiringController.getDestination();
     }
 
     private void logCoverSearchPerformance(CoverFinder finder, long started,
@@ -3009,6 +3122,8 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
     }
 
     private boolean moveToCover(CoverPoint cover) {
+        // A concrete physical-cover destination always outranks prone firing.
+        cancelProneFiringPlan();
         BlockPos wallPos = cover.getPosition();
         long pathStarted = System.nanoTime();
         
@@ -3487,7 +3602,7 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
         Level level = soldier.level();
         UUID squadId = soldier.getSquadId();
         if (squadId == null || !(level instanceof ServerLevel serverLevel)) {
-            return new SquadCoverContext(false, 0, 0, List.of(), List.of(), null);
+            return new SquadCoverContext(false, 0, 0, List.of(), List.of(), List.of(), null);
         }
 
         SquadManager mgr = SquadManager.get(serverLevel);
@@ -3495,16 +3610,30 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
         List<LivingEntity> members = mgr.getSquadMembers(serverLevel, squadId, soldier.getUUID());
 
         List<BlockPos> occupiedCovers = new ArrayList<>();
+        List<BlockPos> defensivePositions = new ArrayList<>();
         List<Vec3> threatDirs = new ArrayList<>();
 
         for (LivingEntity member : members) {
             if (member instanceof SoldierEntity ms) {
                 CoverBehaviorManager cbm = ms.getCoverBehaviorManager();
                 CoverPoint current = cbm.getCurrentCover();
-                if (current != null) occupiedCovers.add(current.getPosition());
+                if (current != null) {
+                    addSquadPosition(occupiedCovers, current.getPosition());
+                    addSquadPosition(defensivePositions, current.getPosition());
+                }
                 CoverPoint target = cbm.getTargetCover();
-                if (target != null && !occupiedCovers.contains(target.getPosition())) {
-                    occupiedCovers.add(target.getPosition());
+                if (target != null) {
+                    addSquadPosition(occupiedCovers, target.getPosition());
+                    addSquadPosition(defensivePositions, target.getPosition());
+                }
+                CoverTacticalGoal peerGoal = ms.getCoverTacticalGoal();
+                BlockPos proneLane = peerGoal != null ? peerGoal.getProneDefensivePosition() : null;
+                if (proneLane != null) {
+                    addSquadPosition(defensivePositions, proneLane);
+                } else if (current == null && target == null) {
+                    // In open ground, a squadmate's current location is a temporary
+                    // spacing signal until it selects its own prone lane this tick.
+                    addSquadPosition(defensivePositions, ms.blockPosition());
                 }
                 Vec3 dir = ms.getThreatAwareness().getPrimaryDirection(member.position());
                 if (dir != null && dir.lengthSqr() > 0.001) {
@@ -3521,6 +3650,12 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
             }
         }
 
-        return new SquadCoverContext(true, 0, 0, occupiedCovers, threatDirs, ownerPos);
+        return new SquadCoverContext(true, 0, 0, occupiedCovers, defensivePositions, threatDirs, ownerPos);
+    }
+
+    private static void addSquadPosition(List<BlockPos> positions, BlockPos position) {
+        if (!positions.contains(position)) {
+            positions.add(position.immutable());
+        }
     }
 }

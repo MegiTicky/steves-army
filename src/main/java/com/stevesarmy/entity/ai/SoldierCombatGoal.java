@@ -10,6 +10,7 @@ import com.stevesarmy.combat.GunIntegration;
 import com.stevesarmy.combat.TargetAcquisition;
 import com.stevesarmy.combat.ThreatAwareness;
 import com.stevesarmy.combat.ThreatTracker;
+import com.stevesarmy.combat.VisibilityRay;
 import com.stevesarmy.combat.cover.CoverBehaviorManager;
 import com.stevesarmy.combat.cover.CoverFinder;
 import com.stevesarmy.combat.cover.CoverPoint;
@@ -32,6 +33,7 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.Pose;
 import net.minecraft.world.entity.ai.goal.Goal;
 import net.minecraft.world.entity.monster.Monster;
 import net.minecraft.world.entity.player.Player;
@@ -112,6 +114,39 @@ public class SoldierCombatGoal extends Goal {
     }
 
     private EngagementPostureState engagementPostureState = EngagementPostureState.READY;
+
+    // Firing-prone is a temporary combat stance, separate from cover crawling.
+    private static final int FIRING_PRONE_EVALUATION_INTERVAL = 10;
+    private static final int FIRING_PRONE_DELAY_MIN_TICKS = 30;
+    private static final int FIRING_PRONE_DELAY_MAX_TICKS = 70;
+    private static final int FIRING_PRONE_MIN_COMMIT_TICKS = 60;
+    private static final int FIRING_PRONE_COOLDOWN_MIN_TICKS = 200;
+    private static final int FIRING_PRONE_COOLDOWN_MAX_TICKS = 400;
+    private static final int FIRING_PRONE_INVALID_LOS_TICKS = 10;
+    private static final int FIRING_PRONE_TRACE_INTERVAL = 40;
+    private static final double FIRING_PRONE_MIN_RANGE = 16.0;
+    private static final double FIRING_PRONE_CLOSE_THREAT_RANGE = 10.0;
+    private static final double FIRING_PRONE_RECOIL_FLOOR = 0.50;
+    private static final double FIRING_PRONE_RECOIL_CEILING = 1.25;
+    private static final float FIRING_PRONE_RECOIL_WEIGHT = 0.55f;
+    private static final float FIRING_PRONE_RANGE_WEIGHT = 0.20f;
+    private static final float FIRING_PRONE_SUPPRESSION_WEIGHT = 0.15f;
+    private static final float FIRING_PRONE_STATIONARY_WEIGHT = 0.10f;
+    private static final float FIRING_PRONE_RECOIL_LOSS_MULTIPLIER = 0.45f;
+    private static final float FIRING_PRONE_AIM_BUILD_MULTIPLIER = 1.15f;
+
+    private int firingProneEligibleTicks;
+    private int firingProneDelayTicks = FIRING_PRONE_DELAY_MIN_TICKS;
+    private int firingProneCooldownTicks;
+    private int firingProneInvalidLosTicks;
+    private int firingProneCommitUntilTick = -1;
+    private float firingPronePreference;
+    private float firingProneEngagementJitter;
+    // Retains the useful range contribution while a selected lane waits for its next target.
+    private float firingProneLastRangeScore;
+    private int lastFiringProneTick = -1;
+    // CoverTacticalGoal owns selection and movement; combat only owns posture/aim.
+    private boolean firingPronePositionAuthorized;
     
     private boolean isPingSuppressing = false;
     private int pingSuppressDurationTicks = 0;
@@ -438,6 +473,346 @@ public class SoldierCombatGoal extends Goal {
             debugSyncTickCounter = 0;
             sendDebugPacketToOwner();
         }
+    }
+
+    private void tickFiringProne(boolean hasGun, boolean canSee) {
+        if (lastFiringProneTick == soldier.tickCount) {
+            return;
+        }
+        lastFiringProneTick = soldier.tickCount;
+        traceFiringProne(hasGun, canSee);
+
+        if (!hasGun) {
+            if (soldier.isFiringProne()) {
+                logFiringProneExit("gun_lost");
+            }
+            clearFiringProne(true, "gun_lost");
+            return;
+        }
+        boolean hasTarget = target != null && target.isAlive();
+
+        if (soldier.isFiringProne()) {
+            String blockReason = getFiringProneBlockReason(canSee);
+            if (blockReason != null) {
+                logFiringProneExit(blockReason);
+                clearFiringProne(true, blockReason);
+                return;
+            }
+
+            if (hasTarget && !isProneAimVisible()) {
+                firingProneInvalidLosTicks++;
+                if (firingProneInvalidLosTicks >= FIRING_PRONE_INVALID_LOS_TICKS
+                    && soldier.tickCount >= firingProneCommitUntilTick) {
+                    logFiringProneExit("prone_los_blocked");
+                    clearFiringProne(true, "prone_los_blocked");
+                }
+            } else {
+                firingProneInvalidLosTicks = 0;
+            }
+            return;
+        }
+
+        if (firingProneCooldownTicks > 0) {
+            firingProneCooldownTicks--;
+            return;
+        }
+
+        String blockReason = getFiringProneBlockReason(canSee);
+        if (blockReason != null) {
+            resetFiringProneOpportunity(blockReason);
+            return;
+        }
+
+        if (firingProneEligibleTicks == 0) {
+            startFiringProneOpportunity();
+        }
+        firingProneEligibleTicks++;
+        if (firingProneEligibleTicks < firingProneDelayTicks
+            || soldier.tickCount % FIRING_PRONE_EVALUATION_INTERVAL != 0) {
+            return;
+        }
+
+        // Cover selection has already decided this lane is tactically worth
+        // taking. Recoil affects the benefit of being prone, not whether an
+        // exposed soldier is allowed to reduce their silhouette.
+        float score = hasTarget ? getFiringProneScore() : getPositionOnlyFiringProneScore();
+        if (hasTarget && !isProneAimVisible()) {
+            return;
+        }
+
+        soldier.setFiringProne(true);
+        firingProneCommitUntilTick = soldier.tickCount + FIRING_PRONE_MIN_COMMIT_TICKS;
+        firingProneInvalidLosTicks = 0;
+        if (isDamageDebugLogging()) {
+            StevesArmyMod.LOGGER.info("[FiringProne] Soldier {} entered firing-prone stance score={} target={} distance={}",
+                soldier.getId(), String.format("%.2f", score), hasTarget ? target.getId() : -1,
+                hasTarget ? String.format("%.1f", soldier.distanceTo(target)) : "none");
+        }
+    }
+
+    private void traceFiringProne(boolean hasGun, boolean canSee) {
+        if (!isDamageDebugLogging() || soldier.tickCount % FIRING_PRONE_TRACE_INTERVAL != 0) {
+            return;
+        }
+
+        CoverBehaviorManager coverManager = soldier.getCoverBehaviorManager();
+        String blockReason;
+        if (!hasGun) {
+            blockReason = "no_gun";
+        } else if (target == null || !target.isAlive()) {
+            blockReason = "no_target";
+        } else if (soldier.isFiringProne()) {
+            blockReason = "active";
+        } else if (firingProneCooldownTicks > 0) {
+            blockReason = "cooldown";
+        } else {
+            blockReason = getFiringProneBlockReason(canSee);
+            if (blockReason == null && firingProneEligibleTicks < firingProneDelayTicks) {
+                blockReason = "settling_delay";
+            } else if (blockReason == null) {
+                if (!isProneAimVisible()) {
+                    blockReason = "prone_los_blocked";
+                } else {
+                    blockReason = "position_authorized";
+                }
+            }
+        }
+
+        double speed = soldier.getDeltaMovement().horizontalDistance();
+        double distance = target != null ? soldier.distanceTo(target) : -1.0;
+        double angle = target != null
+            ? Math.abs(Mth.wrapDegrees(getYawTo(target.getEyePosition()) - soldier.getYRot())) : -1.0;
+        double recoil = -1.0;
+        float score = -1.0f;
+        boolean proneLos = false;
+        if (hasGun && target != null && target.isAlive()) {
+            float[] recoilValues = GunIntegration.getGunRecoil(soldier);
+            recoil = Math.abs(recoilValues[0]) + Math.abs(recoilValues[1]);
+            score = getFiringProneScore();
+            proneLos = isProneAimVisible();
+        }
+
+        StevesArmyMod.LOGGER.info(
+            "[FiringProneTrace] soldier={} active={} reason={} gun={} target={} targetId={} canSee={} coverState={} currentCover={} targetCover={} pingMove={} speed={} distance={} angle={} cooldown={} eligible={}/{} recoil={} score={} threshold={} proneLos={}",
+            soldier.getId(), soldier.isFiringProne(), blockReason, hasGun,
+            target != null && target.isAlive(), target != null ? target.getId() : -1,
+            canSee, coverManager.getState(),
+            coverManager.getCurrentCover() != null, coverManager.getTargetCover() != null,
+            soldier.hasValidPingMoveTarget(), String.format("%.3f", speed),
+            String.format("%.1f", distance), String.format("%.1f", angle),
+            firingProneCooldownTicks, firingProneEligibleTicks, firingProneDelayTicks,
+            String.format("%.2f", recoil), String.format("%.2f", score),
+            "position-owned", proneLos);
+    }
+
+    private void logFiringProneExit(String reason) {
+        if (isDamageDebugLogging()) {
+            StevesArmyMod.LOGGER.info("[FiringProneExit] soldier={} reason={} target={} tick={}",
+                soldier.getId(), reason, target != null ? target.getId() : -1, soldier.tickCount);
+        }
+    }
+
+    @javax.annotation.Nullable
+    private String getFiringProneBlockReason(boolean canSee) {
+        CoverBehaviorManager coverManager = soldier.getCoverBehaviorManager();
+        CoverBehaviorManager.CoverState coverState = coverManager.getState();
+        boolean hasCurrentCover = coverManager.getCurrentCover() != null;
+        boolean hasSelectedCover = coverManager.getTargetCover() != null;
+        boolean coverMovementActive = hasCurrentCover || hasSelectedCover
+            || coverState == CoverBehaviorManager.CoverState.REPOSITIONING;
+
+        // SEEKING_COVER with no selected cover is the cover system's normal
+        // "search found nothing yet" state. Let firing-prone act as a
+        // temporary fallback; a selected cover or reposition still wins.
+        if (!firingPronePositionAuthorized) return "no_prone_position";
+        if (target != null && target.isAlive() && !canSee) return "no_direct_los";
+        if (coverMovementActive) return "cover_active";
+        if (soldier.hasValidPingMoveTarget()) return "ping_move";
+        if (soldier.isCrawlMoving()) return "crawl_moving";
+        if (soldier.getDeltaMovement().horizontalDistanceSqr() > 0.0025D) return "moving";
+
+        if (target == null || !target.isAlive()) return null;
+
+        double distance = soldier.distanceTo(target);
+        if (distance < FIRING_PRONE_MIN_RANGE) return "too_close";
+        if (distance <= FIRING_PRONE_CLOSE_THREAT_RANGE) return "close_threat";
+
+        for (LivingEntity potential : getPotentialTargets()) {
+            if (potential == target || !potential.isAlive() || soldier.isFriendlyTo(potential)) {
+                continue;
+            }
+            if (soldier.distanceTo(potential) <= FIRING_PRONE_CLOSE_THREAT_RANGE) {
+                return "nearby_threat";
+            }
+        }
+
+        float targetYaw = getYawTo(target.getEyePosition());
+        float proneAngle = Math.abs(Mth.wrapDegrees(targetYaw - soldier.getYRot()));
+        return proneAngle <= PRONE_FIRING_ARC_DEGREES ? null : "outside_prone_arc";
+    }
+
+    private boolean isProneAimVisible() {
+        if (target == null || !target.isAlive()) {
+            return false;
+        }
+
+        Vec3 aimPoint = target.getEyePosition();
+        ExposureCalculator.AimPointResult computed = getOrComputeAimPoint();
+        if (computed != null && computed.pointVisible) {
+            aimPoint = computed.position;
+        }
+
+        Vec3 proneEye = new Vec3(
+            soldier.getX(),
+            soldier.getY() + soldier.getEyeHeight(Pose.SWIMMING),
+            soldier.getZ()
+        );
+        return VisibilityRay.trace(soldier.level(), proneEye, aimPoint, soldier).hasContact();
+    }
+
+    /** The cover-position selector must use the same exposed target point as prone combat. */
+    public Vec3 getProneFiringAimPoint(LivingEntity requestedTarget) {
+        if (requestedTarget == target) {
+            ExposureCalculator.AimPointResult computed = getOrComputeAimPoint();
+            if (computed != null && computed.pointVisible) {
+                return computed.position;
+            }
+        }
+        return requestedTarget.getEyePosition();
+    }
+
+    private float getFiringProneScore() {
+        float[] recoil = GunIntegration.getGunRecoil(soldier);
+        double recoilMagnitude = Math.abs(recoil[0]) + Math.abs(recoil[1]);
+        float recoilScore = (float) Math.max(0.0, Math.min(1.0,
+            (recoilMagnitude - FIRING_PRONE_RECOIL_FLOOR)
+                / (FIRING_PRONE_RECOIL_CEILING - FIRING_PRONE_RECOIL_FLOOR)));
+
+        double range = soldier.distanceTo(target);
+        float rangeScore = (float) Math.max(0.0, Math.min(1.0,
+            (range - FIRING_PRONE_MIN_RANGE) / 32.0));
+        firingProneLastRangeScore = rangeScore * FIRING_PRONE_RANGE_WEIGHT;
+        float suppressiveScore = soldier.getFireDiscipline() == FireDiscipline.SUPPRESSIVE
+            ? FIRING_PRONE_SUPPRESSION_WEIGHT : 0.0f;
+        float stationaryScore = firingProneEligibleTicks >= firingProneDelayTicks
+            ? FIRING_PRONE_STATIONARY_WEIGHT : 0.0f;
+
+        return recoilScore * FIRING_PRONE_RECOIL_WEIGHT
+            + firingProneLastRangeScore
+            + suppressiveScore
+            + stationaryScore
+            + firingPronePreference
+            + firingProneEngagementJitter;
+    }
+
+    private float getPositionOnlyFiringProneScore() {
+        float[] recoil = GunIntegration.getGunRecoil(soldier);
+        double recoilMagnitude = Math.abs(recoil[0]) + Math.abs(recoil[1]);
+        float recoilScore = (float) Math.max(0.0, Math.min(1.0,
+            (recoilMagnitude - FIRING_PRONE_RECOIL_FLOOR)
+                / (FIRING_PRONE_RECOIL_CEILING - FIRING_PRONE_RECOIL_FLOOR)));
+        float suppressiveScore = soldier.getFireDiscipline() == FireDiscipline.SUPPRESSIVE
+            ? FIRING_PRONE_SUPPRESSION_WEIGHT : 0.0f;
+        float stationaryScore = firingProneEligibleTicks >= firingProneDelayTicks
+            ? FIRING_PRONE_STATIONARY_WEIGHT : 0.0f;
+        return recoilScore * FIRING_PRONE_RECOIL_WEIGHT + firingProneLastRangeScore
+            + suppressiveScore + stationaryScore + firingPronePreference + firingProneEngagementJitter;
+    }
+
+    private float getFiringProneRecoilLossMultiplier() {
+        return soldier.isFiringProne() ? FIRING_PRONE_RECOIL_LOSS_MULTIPLIER : 1.0f;
+    }
+
+    private void startFiringProneOpportunity() {
+        firingProneDelayTicks = FIRING_PRONE_DELAY_MIN_TICKS
+            + soldier.level().random.nextInt(FIRING_PRONE_DELAY_MAX_TICKS - FIRING_PRONE_DELAY_MIN_TICKS + 1);
+        firingProneEngagementJitter = (soldier.level().random.nextFloat() - 0.5f) * 0.16f;
+        int hash = soldier.getUUID().hashCode();
+        firingPronePreference = ((hash & 0xFFFF) / 65535.0f - 0.5f) * 0.16f;
+
+        if (isDamageDebugLogging()) {
+            StevesArmyMod.LOGGER.info(
+                "[FiringProneOpportunity] soldier={} event=start target={} delay={} jitter={} preference={}",
+                soldier.getId(), target != null ? target.getId() : -1, firingProneDelayTicks,
+                String.format("%.2f", firingProneEngagementJitter),
+                String.format("%.2f", firingPronePreference));
+        }
+    }
+
+    private void resetFiringProneOpportunity(String reason) {
+        if (firingProneEligibleTicks <= 0) {
+            return;
+        }
+
+        if (isDamageDebugLogging()) {
+            StevesArmyMod.LOGGER.info(
+                "[FiringProneOpportunity] soldier={} event=reset reason={} target={} eligible={}/{}",
+                soldier.getId(), reason, target != null ? target.getId() : -1,
+                firingProneEligibleTicks, firingProneDelayTicks);
+        }
+        firingProneEligibleTicks = 0;
+        firingProneEngagementJitter = 0.0f;
+        firingProneLastRangeScore = 0.0f;
+    }
+
+    private void validateFiringProneTargetHandoff(LivingEntity newTarget) {
+        if (!soldier.isFiringProne()) {
+            return;
+        }
+
+        boolean canSee = TargetAcquisition.hasLineOfSight(soldier, newTarget);
+        String blockReason = getFiringProneBlockReason(canSee);
+        if (blockReason == null && isProneAimVisible()) {
+            firingProneInvalidLosTicks = 0;
+            if (isDamageDebugLogging()) {
+                StevesArmyMod.LOGGER.info(
+                    "[FiringProneHandoff] soldier={} target={} result=retained",
+                    soldier.getId(), newTarget.getId());
+            }
+            return;
+        }
+
+        String exitReason = blockReason != null ? blockReason : "prone_los_blocked";
+        logFiringProneExit("target_handoff_" + exitReason);
+        clearFiringProne(true, "target_handoff_" + exitReason);
+    }
+
+    private void clearFiringProne(boolean startCooldown, String reason) {
+        boolean wasFiringProne = soldier.isFiringProne();
+        if (wasFiringProne) {
+            soldier.setFiringProne(false);
+            firingProneCommitUntilTick = -1;
+            firingProneInvalidLosTicks = 0;
+        }
+        resetFiringProneOpportunity(reason);
+        if (wasFiringProne && startCooldown) {
+            firingProneCooldownTicks = FIRING_PRONE_COOLDOWN_MIN_TICKS
+                + soldier.level().random.nextInt(FIRING_PRONE_COOLDOWN_MAX_TICKS - FIRING_PRONE_COOLDOWN_MIN_TICKS + 1);
+        }
+    }
+
+    /** Cover selection grants this only after choosing a real nearby firing lane. */
+    public void setFiringPronePositionAuthorized(boolean authorized) {
+        firingPronePositionAuthorized = authorized;
+        if (!authorized) {
+            if (soldier.isFiringProne()) {
+                clearFiringProne(true, "position_cancelled");
+            } else {
+                resetFiringProneOpportunity("position_cancelled");
+            }
+        }
+    }
+
+    public boolean isFiringPronePositionAuthorized() {
+        return firingPronePositionAuthorized;
+    }
+
+    /** Called by cover behavior when combat target acquisition is inactive. */
+    public void tickFiringPronePositionFromCover() {
+        boolean hasGun = GunIntegration.isTaczLoaded() && GunIntegration.hasGun(soldier);
+        boolean canSee = target != null && target.isAlive()
+            && TargetAcquisition.hasLineOfSight(soldier, target);
+        tickFiringProne(hasGun, canSee);
     }
     
     private void handleGunInitialization() {
@@ -875,7 +1250,8 @@ public class SoldierCombatGoal extends Goal {
             if (GunIntegration.isTaczLoaded() && GunIntegration.hasGun(soldier)) {
                 float[] recoil = AimAccuracyManager.getGunRecoil(soldier);
                 float recoilMagnitude = Math.abs(recoil[0]) + Math.abs(recoil[1]);
-                float recoilLoss = recoilMagnitude * StevesArmyConfig.getAimQualityRecoilScale();
+                float recoilLoss = recoilMagnitude * StevesArmyConfig.getAimQualityRecoilScale()
+                    * getFiringProneRecoilLossMultiplier();
                 aimQuality = Math.max(0.0f, aimQuality - recoilLoss);
                 if (isDamageDebugLogging()) {
                     StevesArmyMod.LOGGER.info("[Recoil] pitch={}, yaw={}, magnitude={}, recoilLoss={}, aimQuality={}",
@@ -1007,6 +1383,9 @@ public class SoldierCombatGoal extends Goal {
         if (inLOS) {
             float targetAimQuality = AimAccuracyManager.getTargetAimQuality(soldier, target);
             float buildRate = AimAccuracyManager.getBuildRate(soldier, target);
+            if (soldier.isFiringProne()) {
+                buildRate *= FIRING_PRONE_AIM_BUILD_MULTIPLIER;
+            }
 
             if (soldier.getDeltaMovement().horizontalDistanceSqr() > 0.01) {
                 aimQuality -= StevesArmyConfig.getAimQualityMoveDecayRate();
@@ -2061,7 +2440,9 @@ public class SoldierCombatGoal extends Goal {
                 }
                 float[] recoil = AimAccuracyManager.getGunRecoil(soldier);
                 float recoilMagnitude = Math.abs(recoil[0]) + Math.abs(recoil[1]);
-                aimQuality = Math.max(0.0f, aimQuality - recoilMagnitude * StevesArmyConfig.getAimQualityRecoilScale());
+                aimQuality = Math.max(0.0f, aimQuality - recoilMagnitude
+                    * StevesArmyConfig.getAimQualityRecoilScale()
+                    * getFiringProneRecoilLossMultiplier());
                 
                 if (burstShotsFired >= burstTarget) {
                     if (isSuppressionDebugLogging()) {
@@ -2363,7 +2744,9 @@ public class SoldierCombatGoal extends Goal {
                 }
                 float[] recoil = AimAccuracyManager.getGunRecoil(soldier);
                 float recoilMagnitude = Math.abs(recoil[0]) + Math.abs(recoil[1]);
-                aimQuality = Math.max(0.0f, aimQuality - recoilMagnitude * StevesArmyConfig.getAimQualityRecoilScale());
+                aimQuality = Math.max(0.0f, aimQuality - recoilMagnitude
+                    * StevesArmyConfig.getAimQualityRecoilScale()
+                    * getFiringProneRecoilLossMultiplier());
                 
                 if (burstShotsFired >= burstTarget) {
                     float burstInterval = getBurstIntervalSeconds();

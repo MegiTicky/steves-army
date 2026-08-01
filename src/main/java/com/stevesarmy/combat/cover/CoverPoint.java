@@ -14,6 +14,8 @@ public class CoverPoint {
     private CoverType type;
     private Set<Direction> protectedDirections;
     private boolean canShootFrom;
+    /** Best validated firing/peek access from this physical cover. */
+    private float firingAccessScore;
     private float coverHeight;
     private final Map<Direction, Float> coverHeights;
     private LivingEntity reservedBy;
@@ -26,6 +28,7 @@ public class CoverPoint {
         this.type = CoverType.NONE;
         this.protectedDirections = Set.of();
         this.canShootFrom = false;
+        this.firingAccessScore = 0.0f;
         this.coverHeight = 0.0f;
         this.coverHeights = new EnumMap<>(Direction.class);
         this.reservedBy = null;
@@ -74,6 +77,14 @@ public class CoverPoint {
 
     public void setCanShootFrom(boolean canShoot) {
         this.canShootFrom = canShoot;
+    }
+
+    public float getFiringAccessScore() {
+        return firingAccessScore;
+    }
+
+    public void setFiringAccessScore(float score) {
+        this.firingAccessScore = Math.max(0.0f, Math.min(1.0f, score));
     }
 
     public float getCoverHeight() {

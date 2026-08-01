@@ -161,6 +161,8 @@ public class SoldierEntity extends PathfinderMob implements Container {
     private final ThreatAwareness threatAwareness;
     
     private boolean healing = false;
+    /** True when combat, rather than cover movement, owns the low-prone posture. */
+    private boolean firingProne = false;
 
     private BlockPos pingMoveTarget = null;
     private long pingMoveTimestamp = 0;
@@ -765,6 +767,12 @@ public class SoldierEntity extends PathfinderMob implements Container {
             threatAwareness.tick();
             holdMovementForReload();
             updateCrawlFacing();
+            // Reload and cover helpers may hold navigation and update their own
+            // crouch state. A live firing-prone plan remains the authoritative
+            // posture until that plan explicitly cancels it.
+            if (firingProne && !entityData.get(LOW_CROUCHING)) {
+                setLowCrouching(true);
+            }
         }
 
         // Enforce the server-synced posture every tick to fight vanilla pose overrides.
@@ -1338,6 +1346,12 @@ public BlockPos getPingMoveTarget() {
             return;
         }
 
+        if (!lowCrouch) {
+            // Any explicit stand request (cover exit, movement, or combat) ends
+            // the firing-prone ownership before the shared pose is cleared.
+            this.firingProne = false;
+        }
+
         boolean wasLowCrouching = entityData.get(LOW_CROUCHING);
         if (wasLowCrouching == lowCrouch) {
             return;
@@ -1346,6 +1360,20 @@ public BlockPos getPingMoveTarget() {
         this.entityData.set(LOW_CROUCHING, lowCrouch);
         this.setPose(lowCrouch ? Pose.SWIMMING : Pose.CROUCHING);
         this.refreshDimensions();
+    }
+
+    /** Requests the shared low-prone pose for a direct-fire stabilization stance. */
+    public void setFiringProne(boolean active) {
+        if (this.level().isClientSide) {
+            return;
+        }
+
+        this.firingProne = active;
+        setLowCrouching(active);
+    }
+
+    public boolean isFiringProne() {
+        return firingProne;
     }
     
     public boolean isLowCrouching() {
