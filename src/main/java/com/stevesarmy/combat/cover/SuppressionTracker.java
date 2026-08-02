@@ -8,9 +8,16 @@ import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.phys.Vec3;
 
 public class SuppressionTracker {
+    public enum SuppressionState {
+        CLEAR,
+        PRESSURED,
+        PINNED
+    }
+
     private float suppressionLevel = 0.0f;
     private float peakSuppression = 0.0f;
     private long lastSuppressionTime = 0;
+    private long suppressionEventSequence = 0;
     private int nearMissCount = 0;
     private long lastBurstTime = 0;
     private int burstCount = 0;
@@ -27,8 +34,9 @@ public class SuppressionTracker {
     private static final float NEAR_MISS_THRESHOLD = 3.0f;
     private static final float NEAR_MISS_SUPPRESSION = 0.25f;
     private static final float DIRECT_FIRE_SUPPRESSION = 0.3f;
-    private static final float SUPPRESSED_THRESHOLD = 0.5f;
-    private static final long MIN_PEEK_TIME_MS = 2500;
+    private static final float PRESSURED_THRESHOLD = 0.5f;
+    private static final float PINNED_THRESHOLD = 0.9f;
+    private static final long MIN_PEEK_TIME_MS = 1000;
     private static final long MIN_RECOVERY_TIME_MS = 2500;
     private static final float MAX_SUPPRESSION = 1.0f;
     private static final float BASE_SPEED = 1.0f;
@@ -64,9 +72,7 @@ public class SuppressionTracker {
         float weaponMultiplier = shooter != null && GunIntegration.isMachineGun(shooter)
             ? MACHINE_GUN_SUPPRESSION_MULTIPLIER : 1.0f;
         float add = distanceFactor * NEAR_MISS_SUPPRESSION * speedMultiplier * burstMultiplier * weaponMultiplier;
-        suppressionLevel = Math.min(MAX_SUPPRESSION, suppressionLevel + add);
-        if (suppressionLevel > peakSuppression) peakSuppression = suppressionLevel;
-        lastSuppressionTime = now;
+        recordSuppressionEvent(add, now);
         nearMissCount++;
 
         if (debugLog()) {
@@ -81,9 +87,7 @@ public class SuppressionTracker {
      * No distance scaling, no burst damping, no speed multiplier.
      */
     public void onCbcNearMiss(LivingEntity soldier) {
-        suppressionLevel = MAX_SUPPRESSION;
-        peakSuppression = MAX_SUPPRESSION;
-        lastSuppressionTime = System.currentTimeMillis();
+        recordSuppressionEvent(MAX_SUPPRESSION, System.currentTimeMillis());
         nearMissCount++;
 
         if (debugLog()) {
@@ -100,9 +104,7 @@ public class SuppressionTracker {
         float speedMultiplier = Mth.clamp(bulletSpeed / BASE_SPEED, MIN_SPEED_MULTIPLIER, MAX_SPEED_MULTIPLIER);
         float weaponMultiplier = GunIntegration.isMachineGun(shooter) ? MACHINE_GUN_SUPPRESSION_MULTIPLIER : 1.0f;
         float add = DIRECT_FIRE_SUPPRESSION * speedMultiplier * weaponMultiplier;
-        suppressionLevel = Math.min(MAX_SUPPRESSION, suppressionLevel + add);
-        if (suppressionLevel > peakSuppression) peakSuppression = suppressionLevel;
-        lastSuppressionTime = System.currentTimeMillis();
+        recordSuppressionEvent(add, System.currentTimeMillis());
 
         if (debugLog()) {
             StevesArmyMod.LOGGER.info("[Suppression] incoming fire from {}: speedMult=" + String.format("%.2f", speedMultiplier) + ", weaponMult=" + String.format("%.2f", weaponMultiplier) + ", +" + String.format("%.2f", add) + " sup -> " + String.format("%.2f", suppressionLevel),
@@ -112,9 +114,7 @@ public class SuppressionTracker {
 
     public void onTakeDamage() {
         float add = 0.5f;
-        suppressionLevel = Math.min(MAX_SUPPRESSION, suppressionLevel + add);
-        if (suppressionLevel > peakSuppression) peakSuppression = suppressionLevel;
-        lastSuppressionTime = System.currentTimeMillis();
+        recordSuppressionEvent(add, System.currentTimeMillis());
 
         if (debugLog()) {
             StevesArmyMod.LOGGER.info("[Suppression] took damage: +" + String.format("%.2f", add) + " sup -> " + String.format("%.2f", suppressionLevel));
@@ -158,9 +158,7 @@ public class SuppressionTracker {
         add *= burstFactor;
 
         float previousLevel = suppressionLevel;
-        suppressionLevel = Math.min(MAX_SUPPRESSION, suppressionLevel + add);
-        if (suppressionLevel > peakSuppression) peakSuppression = suppressionLevel;
-        lastSuppressionTime = now;
+        recordSuppressionEvent(add, now);
 
         if (debugLog()) {
             StevesArmyMod.LOGGER.info("[Suppression] explosion: dist=" + String.format("%.1f", distance)
@@ -170,7 +168,7 @@ public class SuppressionTracker {
                 + ", burstFactor=" + String.format("%.2f", burstFactor)
                 + ", +" + String.format("%.2f", add) + " sup " + String.format("%.2f", previousLevel)
                 + " -> " + String.format("%.2f", suppressionLevel)
-                + ", suppressed=" + isSuppressed());
+                + ", state=" + getState());
         }
     }
 
@@ -197,8 +195,8 @@ public class SuppressionTracker {
                 tickCounter = 0;
                 wasSuppressed = nowSuppressed;
                 wasPinned = nowPinned;
-                StevesArmyMod.LOGGER.info("[Suppression] Soldier tick: inCover={}, decay=" + String.format("%.4f", decayAmount) + ", peakSlow=" + String.format("%.2f", peakSlowdown) + ", sup " + String.format("%.2f", oldLevel) + " -> " + String.format("%.2f", suppressionLevel) + ", suppressed={}",
-                    inCover, isSuppressed());
+                StevesArmyMod.LOGGER.info("[Suppression] Soldier tick: inCover={}, decay=" + String.format("%.4f", decayAmount) + ", peakSlow=" + String.format("%.2f", peakSlowdown) + ", sup " + String.format("%.2f", oldLevel) + " -> " + String.format("%.2f", suppressionLevel) + ", state={}",
+                    inCover, getState());
             }
         }
     }
@@ -215,16 +213,26 @@ public class SuppressionTracker {
         explosionBurstCount = 0;
     }
 
+    public SuppressionState getState() {
+        if (suppressionLevel >= PINNED_THRESHOLD) return SuppressionState.PINNED;
+        if (suppressionLevel >= PRESSURED_THRESHOLD) return SuppressionState.PRESSURED;
+        return SuppressionState.CLEAR;
+    }
+
     public boolean isSuppressed() {
-        return suppressionLevel > SUPPRESSED_THRESHOLD;
+        return getState() != SuppressionState.CLEAR;
     }
 
     public boolean isPinned() {
-        return isSuppressed();
+        return getState() == SuppressionState.PINNED;
     }
 
     public float getSuppressionLevel() {
         return suppressionLevel;
+    }
+
+    public long getSuppressionEventSequence() {
+        return suppressionEventSequence;
     }
 
     public float getAccuracyModifier() {
@@ -232,7 +240,7 @@ public class SuppressionTracker {
     }
 
     public boolean canPeek() {
-        if (isSuppressed()) {
+        if (isPinned()) {
             return false;
         }
         long timeSinceLastSuppression = System.currentTimeMillis() - lastSuppressionTime;
@@ -259,5 +267,13 @@ public class SuppressionTracker {
 
     private boolean debugLog() {
         return DiagnosticLogManager.isSuppressionLoggingEnabled();
+    }
+
+    private void recordSuppressionEvent(float amount, long now) {
+        if (amount <= 0.0f) return;
+        suppressionLevel = Math.min(MAX_SUPPRESSION, suppressionLevel + amount);
+        if (suppressionLevel > peakSuppression) peakSuppression = suppressionLevel;
+        lastSuppressionTime = now;
+        suppressionEventSequence++;
     }
 }

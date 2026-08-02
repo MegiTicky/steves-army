@@ -91,7 +91,6 @@ public class SoldierCombatGoal extends Goal {
     private static final int SUPPRESSION_PLAN_MAX_TICKS = 200;
     private static final int SUPPRESSION_ACTIVE_FIRE_TICKS = 120;
     private static final int SUPPRESSION_PREPARATION_TICKS = 20;
-    private static final int SUPPRESSION_CONTACT_HANDOFF_TICKS = 8;
     private static final double SUPPRESSION_LOS_TOLERANCE = 2.0;  // blocks
     private static final double SUPPRESSION_SPREAD_MIN_RADIUS = 0.12;
     private static final double SUPPRESSION_SPREAD_PER_BLOCK = 0.0075;
@@ -104,7 +103,6 @@ public class SoldierCombatGoal extends Goal {
     private int suppressionPlanStartTick = -1;
     private int suppressionFirstShotTick = -1;
     private long suppressionLastSeenTick = -1;
-    private int suppressionVisibleContactTicks = 0;
     private Vec3 suppressionTargetAimPoint = null;
 
     private enum EngagementPostureState {
@@ -404,6 +402,13 @@ public class SoldierCombatGoal extends Goal {
         }
 
         maintainSuppressionAssignment();
+
+        // Last-seen suppression must yield to a real visible target immediately,
+        // including while the soldier is exposed from cover. Use a fresh scan so
+        // newly in-range enemies are not delayed by the normal target cache.
+        if (isSuppressing) {
+            preemptSuppressionForVisibleTarget();
+        }
         
         boolean inCover = soldier.getCoverBehaviorManager().isInCover();
         
@@ -966,19 +971,10 @@ public class SoldierCombatGoal extends Goal {
     private void tickCombat(boolean hasGun) {
         boolean canSee = TargetAcquisition.hasLineOfSight(soldier, target);
 
-        boolean maintainSuppressionContact = canSee && isSuppressing
-            && suppressionTargetUUID != null && suppressionTargetUUID.equals(target.getUUID())
-            && soldier.level().getGameTime() - suppressionLastSeenTick <= SUPPRESSION_CONTACT_FOCUSED_TICKS
-            && suppressionVisibleContactTicks < SUPPRESSION_CONTACT_HANDOFF_TICKS;
-
         if (canSee) {
             threatTracker.reportThreatDirect(target);
             resetAim(target);
-            if (maintainSuppressionContact) {
-                suppressionVisibleContactTicks++;
-            } else {
-                cancelAllSuppression();
-            }
+            cancelAllSuppression();
         }
         
         CoverBehaviorManager coverManager = soldier.getCoverBehaviorManager();
@@ -998,11 +994,7 @@ public class SoldierCombatGoal extends Goal {
         }
         
         if (hasGun) {
-            if (maintainSuppressionContact) {
-                ExposureCalculator.AimPointResult contactAimPoint = getOrComputeAimPoint();
-                trySuppressireFire(contactAimPoint != null && contactAimPoint.canShoot()
-                    ? contactAimPoint.position : null);
-            } else if (canSee) {
+            if (canSee) {
                 tickGunCombat();
             } else if (isSuppressing) {
                 trySuppressireFire(null);
@@ -1042,7 +1034,6 @@ public class SoldierCombatGoal extends Goal {
             suppressionPlanStartTick = -1;
             suppressionFirstShotTick = -1;
             suppressionLastSeenTick = -1;
-            suppressionVisibleContactTicks = 0;
             pendingSuppressionThreat = null;
             isSuppressing = false;
         }
@@ -1547,6 +1538,40 @@ public class SoldierCombatGoal extends Goal {
         }
     }
 
+    private Optional<LivingEntity> findBestVisibleTarget(List<LivingEntity> potentialTargets) {
+        return potentialTargets.stream()
+            .filter(e -> TargetAcquisition.hasLineOfSight(soldier, e))
+            .map(e -> new TargetScore(e, AimAccuracyManager.calculateHitProbability(soldier, e)))
+            .max(Comparator.comparingDouble(ts -> ts.hitProbability))
+            .map(ts -> ts.target);
+    }
+
+    private void preemptSuppressionForVisibleTarget() {
+        Optional<LivingEntity> visibleTarget = findBestVisibleTarget(computePotentialTargets());
+        if (visibleTarget.isEmpty()) {
+            return;
+        }
+
+        UUID releasedThreatId = suppressionTargetUUID;
+        LivingEntity acquiredTarget = visibleTarget.get();
+        this.target = acquiredTarget;
+        soldier.setTarget(acquiredTarget);
+
+        ThreatAwareness threats = soldier.getThreatAwareness();
+        threats.onEntityDetected(acquiredTarget, soldier.position());
+        threatTracker.reportThreatDirect(acquiredTarget);
+        detectionSystem.forceDetect(acquiredTarget);
+
+        cancelAllSuppression();
+
+        if (isSuppressionDebugLogging()) {
+            String releasedId = releasedThreatId == null
+                ? "none" : releasedThreatId.toString().substring(0, 8);
+            StevesArmyMod.LOGGER.info("[Suppression] Soldier {} preempted last-seen threat {} for visible target {}",
+                soldier.getId(), releasedId, acquiredTarget.getName().getString());
+        }
+    }
+
     private boolean findNewTarget() {
         boolean found = findNewTargetInternal();
         if (found) {
@@ -1622,10 +1647,7 @@ public class SoldierCombatGoal extends Goal {
             .collect(Collectors.toList());
         
         if (!losTargets.isEmpty()) {
-            Optional<LivingEntity> best = losTargets.stream()
-                .map(e -> new TargetScore(e, AimAccuracyManager.calculateHitProbability(soldier, e)))
-                .max(Comparator.comparingDouble(ts -> ts.hitProbability))
-                .map(ts -> ts.target);
+            Optional<LivingEntity> best = findBestVisibleTarget(losTargets);
             
             if (best.isPresent()) {
                 this.target = best.get();
@@ -2316,7 +2338,6 @@ public class SoldierCombatGoal extends Goal {
             suppressionLastSeenTick = pendingSuppressionThreat.lastSeenTime;
             suppressionPlanStartTick = soldier.tickCount;
             suppressionFirstShotTick = -1;
-            suppressionVisibleContactTicks = 0;
             pendingSuppressionThreat = null;
             burstShotsFired = 0;
             burstCooldownTicks = 0;

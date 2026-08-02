@@ -116,6 +116,8 @@ public class SoldierEntity extends PathfinderMob implements Container {
         SynchedEntityData.defineId(SoldierEntity.class, EntityDataSerializers.BLOCK_POS);
     private static final EntityDataAccessor<Float> SUPPRESSION_LEVEL =
         SynchedEntityData.defineId(SoldierEntity.class, EntityDataSerializers.FLOAT);
+    private static final EntityDataAccessor<Integer> SUPPRESSION_EVENT_SEQUENCE =
+        SynchedEntityData.defineId(SoldierEntity.class, EntityDataSerializers.INT);
     private static final EntityDataAccessor<Integer> PEEK_STATE =
         SynchedEntityData.defineId(SoldierEntity.class, EntityDataSerializers.INT);
     private static final EntityDataAccessor<BlockPos> PEEK_POSITION =
@@ -276,6 +278,7 @@ public class SoldierEntity extends PathfinderMob implements Container {
         this.entityData.define(COVER_TARGET_QUALITY, 0f);
         this.entityData.define(COVER_LAST_POS, BlockPos.ZERO);
         this.entityData.define(SUPPRESSION_LEVEL, 0f);
+        this.entityData.define(SUPPRESSION_EVENT_SEQUENCE, 0);
         this.entityData.define(PEEK_STATE, 0);
         this.entityData.define(PEEK_POSITION, BlockPos.ZERO);
         this.entityData.define(LOW_CROUCHING, false);
@@ -1319,6 +1322,14 @@ public BlockPos getPingMoveTarget() {
     
     public float getSyncedSuppressionLevel() {
         return this.entityData.get(SUPPRESSION_LEVEL);
+    }
+
+    public void syncSuppressionEventSequence(int sequence) {
+        this.entityData.set(SUPPRESSION_EVENT_SEQUENCE, sequence);
+    }
+
+    public int getSyncedSuppressionEventSequence() {
+        return this.entityData.get(SUPPRESSION_EVENT_SEQUENCE);
     }
     
     public void syncPeekState(int peekStateOrdinal) {

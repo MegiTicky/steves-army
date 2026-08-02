@@ -27,7 +27,6 @@ public class PeekController {
     private static final long EXPOSURE_TIME_MAX_MS = 8000;   // 8 seconds
     private static final long MIN_EXPOSURE_TIME_MS = 800;
     private static final long DUCK_COOLDOWN_MS = 1000;
-    private static final long SUPPRESSED_HIDE_EXTRA_MS = 2000;
     private static final double PEEK_REACHED_DISTANCE = 0.05;
     private static final double RETURN_REACHED_DISTANCE = 0.5;
     private static final double PEEK_SPEED = 0.75;
@@ -45,6 +44,7 @@ public class PeekController {
     private int peekCountSameCover = 0;
     private BlockPos lastCoverPosition = null;
     private long currentMaxExposureTime = 3000;
+    private long suppressionEventSequenceAtExposure = 0L;
     private boolean returnAllowedDuringReload;
     
     private long getRandomExposureTime() {
@@ -128,11 +128,16 @@ public class PeekController {
     }
 
     public void tick(SoldierEntity soldier, CoverPoint cover, CoverPositionController mover) {
+        tick(soldier, cover, mover, true);
+    }
+
+    public void tick(SoldierEntity soldier, CoverPoint cover, CoverPositionController mover,
+                     boolean allowPeekStart) {
         if (cover == null) return;
 
         switch (state) {
             case HIDING:
-                tickHiding(soldier, cover, mover);
+                tickHiding(soldier, cover, mover, allowPeekStart);
                 break;
             case MOVING_TO_PEEK:
                 tickMovingToPeek(soldier, cover, mover);
@@ -168,7 +173,8 @@ public class PeekController {
         enterReturning(soldier, cover, mover, true);
     }
 
-    private void tickHiding(SoldierEntity soldier, CoverPoint cover, CoverPositionController mover) {
+    private void tickHiding(SoldierEntity soldier, CoverPoint cover, CoverPositionController mover,
+                            boolean allowPeekStart) {
         boolean isHalf = cover.getType() == CoverType.HALF;
         boolean isFull = cover.getType() == CoverType.FULL;
 
@@ -190,9 +196,7 @@ public class PeekController {
             nonPeekableTicks = 0;
         }
 
-        long cooldown = soldier.getCoverBehaviorManager().isSuppressed() ?
-            DUCK_COOLDOWN_MS + SUPPRESSED_HIDE_EXTRA_MS : DUCK_COOLDOWN_MS;
-        if (getTimeSinceLastPeek() < cooldown) {
+        if (getTimeSinceLastPeek() < DUCK_COOLDOWN_MS || !allowPeekStart) {
             return;
         }
 
@@ -208,6 +212,7 @@ public class PeekController {
         }
 
         currentMaxExposureTime = getRandomExposureTime();
+        captureSuppressionSequence(soldier);
         preAimToward(soldier, threatDir);
 
         if (isHalf) {
@@ -262,6 +267,15 @@ public class PeekController {
     }
 
     private void tickMovingToPeek(SoldierEntity soldier, CoverPoint cover, CoverPositionController mover) {
+        if (shouldDuckForSuppression(soldier)) {
+            if (CoverTacticalGoal.isDebugLoggingEnabled()) {
+                StevesArmyMod.LOGGER.info("[PeekController] Soldier {} suppressed during peek movement, ducking back",
+                    soldier.getId());
+            }
+            enterReturning(soldier, cover, mover, false);
+            return;
+        }
+
         CoverPositionController.MovementResult result = mover.getLastResult();
 
         if (result == CoverPositionController.MovementResult.REACHED_TARGET) {
@@ -303,7 +317,7 @@ public class PeekController {
             return;
         }
 
-        if (soldier.getCoverBehaviorManager().isSuppressed() && !soldier.hasEmergencyEngagementPosture()) {
+        if (shouldDuckForSuppression(soldier)) {
             if (CoverTacticalGoal.isDebugLoggingEnabled()) {
                 StevesArmyMod.LOGGER.info("[PeekController] Soldier {} suppressed while exposed, ducking back",
                     soldier.getId());
@@ -384,8 +398,26 @@ public class PeekController {
         }
 
         currentMaxExposureTime = getRandomExposureTime();
+        captureSuppressionSequence(soldier);
         enterExposed(soldier, cover);
         return true;
+    }
+
+    private void captureSuppressionSequence(SoldierEntity soldier) {
+        suppressionEventSequenceAtExposure = soldier.getCoverBehaviorManager()
+            .getSuppressionTracker().getSuppressionEventSequence();
+    }
+
+    private boolean shouldDuckForSuppression(SoldierEntity soldier) {
+        if (soldier.hasEmergencyEngagementPosture()) {
+            return false;
+        }
+
+        var suppressionTracker = soldier.getCoverBehaviorManager().getSuppressionTracker();
+        boolean newSuppressionEvent = suppressionTracker.getSuppressionEventSequence()
+            != suppressionEventSequenceAtExposure;
+        return suppressionTracker.isPinned()
+            || (suppressionTracker.isSuppressed() && newSuppressionEvent);
     }
 
     private void enterReturning(SoldierEntity soldier, CoverPoint cover, CoverPositionController mover,

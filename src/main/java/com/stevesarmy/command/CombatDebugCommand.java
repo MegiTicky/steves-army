@@ -677,6 +677,7 @@ public class CombatDebugCommand {
                 source.sendSuccess(() -> Component.literal(
                     "Soldier " + soldier.getId() +
                     " | Level: " + String.format("%.2f", tracker.getSuppressionLevel()) +
+                    " | State: " + tracker.getState() +
                     " | Suppressed: " + tracker.isSuppressed() +
                     " | Since: " + tracker.getTimeSinceLastSuppression() + "ms"
                 ), false);

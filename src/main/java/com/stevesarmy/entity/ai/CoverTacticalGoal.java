@@ -72,6 +72,12 @@ public class CoverTacticalGoal extends Goal {
     private static final float LOW_HEALTH_THRESHOLD = 0.3f;
     private static final float FOLLOW_COVER_DISTANCE = 15.0f;
     private static final int REPEATED_SUPPRESSION_EPISODE_THRESHOLD = 3;
+    private static final int PRESSURED_PEEK_DECISION_INTERVAL_TICKS = 10;
+    private static final double PRESSURED_PEEK_RADIUS = 8.0D;
+    private static final float PRESSURED_PEEK_MIN_CHANCE = 0.10f;
+    private static final float PRESSURED_PEEK_RECOVERY_WEIGHT = 0.40f;
+    private static final float PRESSURED_PEEK_ALLY_WEIGHT = 0.20f;
+    private static final float PRESSURED_PEEK_MAX_CHANCE = 0.90f;
     
     private static final double FOLLOW_COVER_SEARCH_RADIUS = 15.0D;
     private static final double FOLLOW_REGROUP_DISTANCE = 10.0D;
@@ -156,6 +162,7 @@ public class CoverTacticalGoal extends Goal {
     private boolean suppressionEpisodeActive = false;
     private long continuousSuppressionStartTime = 0L;
     private boolean continuousSuppressionRepositionStarted = false;
+    private int nextPressuredPeekDecisionTick = 0;
     private boolean suppressionRouteSearchActive = false;
     private Vec3 suppressionRouteFiringOrigin = null;
     private SuppressionRoutePlan selectedSuppressionRoute = null;
@@ -215,6 +222,14 @@ public class CoverTacticalGoal extends Goal {
 
     public static boolean isDebugLoggingEnabled() {
         return DiagnosticLogManager.isCoverLoggingEnabled();
+    }
+
+    public static float calculatePressuredPeekChance(float suppression, int nearbyPeekers) {
+        float recovery = Math.max(0.0f, Math.min(1.0f, (0.90f - suppression) / 0.40f));
+        return Math.min(PRESSURED_PEEK_MAX_CHANCE,
+            PRESSURED_PEEK_MIN_CHANCE
+                + PRESSURED_PEEK_RECOVERY_WEIGHT * recovery
+                + PRESSURED_PEEK_ALLY_WEIGHT * Math.max(0, nearbyPeekers));
     }
 
     public enum BlacklistReason {
@@ -355,24 +370,30 @@ public class CoverTacticalGoal extends Goal {
             suppressionEpisodeActive = false;
         }
 
-        boolean suppressed = coverManager.isSuppressed();
-        if (!suppressed) {
+        boolean pressured = coverManager.isSuppressed();
+        boolean pinned = coverManager.isPinned();
+        if (!pressured) {
             suppressionEpisodeActive = false;
             continuousSuppressionStartTime = 0L;
             continuousSuppressionRepositionStarted = false;
             return;
         }
 
-        if (continuousSuppressionStartTime == 0L) {
-            continuousSuppressionStartTime = System.currentTimeMillis();
-        } else if (!continuousSuppressionRepositionStarted
-            && System.currentTimeMillis() - continuousSuppressionStartTime >= CONTINUOUS_SUPPRESSION_REPOSITION_DELAY_MS
-            && !coverManager.isContinuousSuppressionRepositionRequested()) {
-            continuousSuppressionRepositionStarted = true;
-            coverManager.requestContinuousSuppressionReposition();
-            if (DiagnosticLogManager.isCoverLoggingEnabled()) {
-                StevesArmyMod.LOGGER.info("[CoverSuppression] Soldier {} continuously suppressed at {} for {}ms, queued immediate reposition",
-                    soldier.getId(), coverPosition, CONTINUOUS_SUPPRESSION_REPOSITION_DELAY_MS);
+        if (!pinned) {
+            continuousSuppressionStartTime = 0L;
+            continuousSuppressionRepositionStarted = false;
+        } else {
+            if (continuousSuppressionStartTime == 0L) {
+                continuousSuppressionStartTime = System.currentTimeMillis();
+            } else if (!continuousSuppressionRepositionStarted
+                && System.currentTimeMillis() - continuousSuppressionStartTime >= CONTINUOUS_SUPPRESSION_REPOSITION_DELAY_MS
+                && !coverManager.isContinuousSuppressionRepositionRequested()) {
+                continuousSuppressionRepositionStarted = true;
+                coverManager.requestContinuousSuppressionReposition();
+                if (DiagnosticLogManager.isCoverLoggingEnabled()) {
+                    StevesArmyMod.LOGGER.info("[CoverSuppression] Soldier {} continuously pinned at {} for {}ms, queued immediate reposition",
+                        soldier.getId(), coverPosition, CONTINUOUS_SUPPRESSION_REPOSITION_DELAY_MS);
+                }
             }
         }
 
@@ -403,6 +424,7 @@ public class CoverTacticalGoal extends Goal {
         suppressionEpisodeActive = false;
         continuousSuppressionStartTime = 0L;
         continuousSuppressionRepositionStarted = false;
+        nextPressuredPeekDecisionTick = 0;
     }
 
     /**
@@ -1418,11 +1440,20 @@ private void tickRepositioning() {
     }
     
     private void tickSuppressedInCover() {
+        CoverBehaviorManager coverManager = getCoverManager();
         CoverPoint currentCover = getCoverManager().getCurrentCover();
 
         // A hit while hidden means this cover is compromised. Unlike routine cover
         // changes, this relocation may start while suppressed.
         if (processPendingRepositionRequests() == PendingRepositionResult.MOVEMENT_STARTED) {
+            return;
+        }
+
+        if (!coverManager.isSuppressed()) {
+            if (currentCover != null && currentCover.getType() == CoverType.HALF) {
+                soldier.setLowCrouching(false);
+            }
+            coverManager.setState(CoverBehaviorManager.CoverState.IN_COVER);
             return;
         }
 
@@ -1433,7 +1464,8 @@ private void tickRepositioning() {
 
         // Force duck-back if soldier was exposed or moving to peek when suppressed
         PeekController peekCtrl = getPeekController();
-        if (peekCtrl.isExposed() || peekCtrl.isMovingToPeek()) {
+        if (coverManager.isPinned()
+            && (peekCtrl.isExposed() || peekCtrl.isMovingToPeek())) {
             if (!soldier.hasEmergencyEngagementPosture()) {
                 peekCtrl.forceReturnToCover(soldier, currentCover, getPositionController());
             }
@@ -1450,22 +1482,60 @@ private void tickRepositioning() {
         // evaluate flank repositioning after recovery in tickInCover()
         // (recovery transitions us from SUPPRESSED_IN_COVER back to IN_COVER)
 
-        float sup = getCoverManager().getSuppressionTracker().getSuppressionLevel();
-        boolean canPeek = getCoverManager().getSuppressionTracker().canPeek();
-        
-        if (canPeek) {
+        if (!coverManager.isPinned() && peekCtrl.isHiding()) {
+            boolean allowPressuredPeek = shouldAllowPressuredPeek();
             if (currentCover != null && currentCover.getType() == CoverType.HALF) {
-                soldier.setLowCrouching(false);
+                soldier.setLowCrouching(!allowPressuredPeek);
             }
-            // A suppression interval may outlast the prior peek cooldown. Start a
-            // fresh hide interval so recovery cannot immediately expose the soldier.
-            peekCtrl.setLastPeekEndTime(System.currentTimeMillis());
-            getCoverManager().setState(CoverBehaviorManager.CoverState.IN_COVER);
+            peekCtrl.tick(soldier, currentCover, getPositionController(), allowPressuredPeek);
+        } else if (!coverManager.isPinned()) {
+            peekCtrl.tick(soldier, currentCover, getPositionController());
         }
-        
-        if (shouldExitCoverForFollow() && !getCoverManager().isSuppressed()) {
-            getCoverManager().clearCover();
+    }
+
+    private boolean shouldAllowPressuredPeek() {
+        if (soldier.tickCount < nextPressuredPeekDecisionTick) {
+            return false;
         }
+        nextPressuredPeekDecisionTick = soldier.tickCount + PRESSURED_PEEK_DECISION_INTERVAL_TICKS;
+
+        float suppression = getCoverManager().getSuppressionTracker().getSuppressionLevel();
+        float recovery = Math.max(0.0f, Math.min(1.0f, (0.90f - suppression) / 0.40f));
+        int nearbyPeekers = countNearbyPeekers();
+        float chance = calculatePressuredPeekChance(suppression, nearbyPeekers);
+        float roll = soldier.getRandom().nextFloat();
+        boolean allowed = roll < chance;
+
+        if (DiagnosticLogManager.isCoverLoggingEnabled()) {
+            StevesArmyMod.LOGGER.info("[SuppressionPeek] Soldier {} pressured peek: suppression={}, recovery={}, nearby={}, chance={}, roll={}, allowed={}",
+                soldier.getId(), String.format("%.2f", suppression), String.format("%.2f", recovery),
+                nearbyPeekers, String.format("%.2f", chance), String.format("%.2f", roll), allowed);
+        }
+        return allowed;
+    }
+
+    private int countNearbyPeekers() {
+        if (!(soldier.level() instanceof ServerLevel serverLevel)) {
+            return 0;
+        }
+
+        UUID squadId = soldier.getSquadId();
+        if (squadId == null) {
+            return 0;
+        }
+
+        double radiusSqr = PRESSURED_PEEK_RADIUS * PRESSURED_PEEK_RADIUS;
+        return (int) SquadManager.get(serverLevel)
+            .getSquadMembers(serverLevel, squadId, soldier.getUUID()).stream()
+            .filter(SoldierEntity.class::isInstance)
+            .map(SoldierEntity.class::cast)
+            .filter(member -> member.isAlive() && member.distanceToSqr(soldier) <= radiusSqr)
+            .filter(member -> {
+                PeekController.State state = member.getPeekController().getState();
+                return state == PeekController.State.MOVING_TO_PEEK
+                    || state == PeekController.State.EXPOSED;
+            })
+            .count();
     }
 
     /**

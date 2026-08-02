@@ -14,6 +14,7 @@ import com.stevesarmy.combat.cover.CoverType;
 import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.entity.TargetEntity;
 import com.stevesarmy.entity.ai.CoverPositionController;
+import com.stevesarmy.entity.ai.CoverTacticalGoal;
 import com.stevesarmy.entity.ai.PeekController;
 import net.minecraft.client.Camera;
 import net.minecraft.client.Minecraft;
@@ -958,6 +959,21 @@ private static void renderSoldierCoverLabels(PoseStack poseStack, Vec3 cameraPos
             font.drawInBatch(peekLabel, -font.width(peekLabel) / 2.0f, lineOffset, peekStateColor | 0xFF000000, false,
                              poseStack.last().pose(), bufferSource, net.minecraft.client.gui.Font.DisplayMode.NORMAL, 0, 15728880);
             lineOffset += 10;
+
+            float suppression = soldier.getSyncedSuppressionLevel();
+            String suppressionState = getSuppressionStateLabel(suppression);
+            int nearbyPeekers = countNearbyFriendlyPeekers(soldier, level);
+            float recovery = Math.max(0.0f, Math.min(1.0f, (0.90f - suppression) / 0.40f));
+            float peekChance = suppression >= 0.90f ? 0.0f
+                : suppression >= 0.50f ? CoverTacticalGoal.calculatePressuredPeekChance(suppression, nearbyPeekers)
+                : 1.0f;
+            String suppressionLabel = String.format("Supp: %s %.0f%% rec=%.0f%% peek=%.0f%% peekers=%d event=%d",
+                suppressionState, suppression * 100.0f, recovery * 100.0f, peekChance * 100.0f,
+                nearbyPeekers, soldier.getSyncedSuppressionEventSequence());
+            font.drawInBatch(suppressionLabel, -font.width(suppressionLabel) / 2.0f, lineOffset,
+                getSuppressionStateColor(suppression) | 0xFF000000, false,
+                poseStack.last().pose(), bufferSource, net.minecraft.client.gui.Font.DisplayMode.NORMAL, 0, 15728880);
+            lineOffset += 10;
             
             CoverPositionController ctrl = (CoverPositionController) soldier.getMoveControl();
             CoverPositionController.MovementResult moveResult = ctrl.getLastResult();
@@ -998,6 +1014,29 @@ private static void renderSoldierCoverLabels(PoseStack poseStack, Vec3 cameraPos
             
             poseStack.popPose();
         }
+    }
+
+    private static String getSuppressionStateLabel(float suppression) {
+        if (suppression >= 0.90f) return "PINNED";
+        if (suppression >= 0.50f) return "PRESSURED";
+        return "CLEAR";
+    }
+
+    private static int getSuppressionStateColor(float suppression) {
+        if (suppression >= 0.90f) return 0xFFFF3333;
+        if (suppression >= 0.50f) return 0xFFFFAA00;
+        return 0xFF66FF66;
+    }
+
+    private static int countNearbyFriendlyPeekers(SoldierEntity soldier, Level level) {
+        double radius = 8.0D;
+        return (int) level.getEntitiesOfClass(SoldierEntity.class,
+                soldier.getBoundingBox().inflate(radius),
+                member -> member != soldier && member.isAlive()
+                    && soldier.isFriendlyTo(member)
+                    && (member.getSyncedPeekState() == PeekController.State.MOVING_TO_PEEK.ordinal()
+                        || member.getSyncedPeekState() == PeekController.State.EXPOSED.ordinal()))
+            .size();
     }
     
     private static int getStateColor(CoverBehaviorManager.CoverState state) {

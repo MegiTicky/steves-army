@@ -106,6 +106,8 @@ public class CoverBehaviorManager {
     private void syncSuppression() {
         if (soldier != null && !soldier.level().isClientSide) {
             soldier.syncSuppressionLevel(suppressionTracker.getSuppressionLevel());
+            soldier.syncSuppressionEventSequence((int) Math.min(Integer.MAX_VALUE,
+                suppressionTracker.getSuppressionEventSequence()));
         }
     }
     
@@ -510,6 +512,11 @@ if (currentCover != null) {
     
     public void tickSuppression(boolean inCover) {
         suppressionTracker.tick(inCover);
+
+        if (soldier != null && !soldier.level().isClientSide) {
+            soldier.syncSuppressionEventSequence((int) Math.min(Integer.MAX_VALUE,
+                suppressionTracker.getSuppressionEventSequence()));
+        }
         
         float currentLevel = suppressionTracker.getSuppressionLevel();
         boolean crossedThreshold = (lastSyncedSuppression >= SUPPRESSION_SYNC_THRESHOLD) != (currentLevel >= SUPPRESSION_SYNC_THRESHOLD);

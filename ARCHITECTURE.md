@@ -372,7 +372,28 @@ flowchart TD
 - `tick()`: for each tracked bullet, computes line segment between previous and current position, then `checkNearMissLineSegment()` against all nearby soldiers within NEAR_MISS_THRESHOLD (3 blocks)
 - `@SubscribeEvent onLivingDeath`: propagates death to `SquadThreatIntel.markThreatDead()` and each squad member's `SoldierCombatGoal.onTargetKilledByTeammate()`
 
-### 4.3 Suppression Fire Integration
+### 4.3 Repeated Suppression Repositioning
+
+`CoverTacticalGoal` tracks distinct transitions into the suppressed state while a
+soldier occupies the same cover position. Individual near-misses, bullets, and
+ticks spent continuously suppressed do not count as separate episodes.
+
+- Three suppression episodes at the same cover queue a normal reposition request.
+- The request remains pending while the soldier is suppressed, so the soldier
+  stays hidden instead of crossing open ground while pinned.
+- Eight seconds of continuous suppression at the same cover starts an immediate
+  reposition, even while the soldier remains pinned. This trigger fires once per
+  continuous suppression interval.
+- Once `SuppressionTracker.isRecovered()` is true, the existing cover search and
+  navigation select and move to a replacement cover.
+- The episode counter resets when a different cover is reached or the queued
+  reposition starts.
+
+This is intentionally a first-stage response. The replacement search is still
+the existing general cover search; local trench-constrained movement and route
+exposure scoring can be added independently later.
+
+### 4.4 Suppression Fire Integration
 
 See [Section 15: Suppression Fire Lifecycle](#15-suppression-fire-lifecycle).
 
