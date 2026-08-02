@@ -3672,7 +3672,7 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
         Level level = soldier.level();
         UUID squadId = soldier.getSquadId();
         if (squadId == null || !(level instanceof ServerLevel serverLevel)) {
-            return new SquadCoverContext(false, 0, 0, List.of(), List.of(), List.of(), null);
+            return new SquadCoverContext(false, 0, 0, List.of(), List.of(), List.of(), List.of(), null);
         }
 
         SquadManager mgr = SquadManager.get(serverLevel);
@@ -3682,6 +3682,20 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
         List<BlockPos> occupiedCovers = new ArrayList<>();
         List<BlockPos> defensivePositions = new ArrayList<>();
         List<Vec3> threatDirs = new ArrayList<>();
+        List<SquadCoverContext.FiringContact> firingContacts = new ArrayList<>();
+
+        mgr.getSquadById(squadId).ifPresent(squad -> {
+            long now = level.getGameTime();
+            squad.getThreatIntel().getAllThreats().stream()
+                .filter(threat -> threat.isAlive && threat.lastVisibleAimPoint != null)
+                .filter(threat -> now - threat.lastSeenTime >= 0
+                    && now - threat.lastSeenTime <= SquadCoverContext.FiringContact.MAX_AGE_TICKS)
+                .sorted(java.util.Comparator.comparingLong((com.stevesarmy.squad.SquadThreatIntel.ThreatKnowledge threat)
+                    -> threat.lastSeenTime).reversed())
+                .limit(SquadCoverContext.FiringContact.MAX_CONTACTS)
+                .forEach(threat -> firingContacts.add(new SquadCoverContext.FiringContact(
+                    threat.threatEntityId, threat.lastVisibleAimPoint, threat.lastSeenTime)));
+        });
 
         for (LivingEntity member : members) {
             if (member instanceof SoldierEntity ms) {
@@ -3720,7 +3734,7 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
             }
         }
 
-        return new SquadCoverContext(true, 0, 0, occupiedCovers, defensivePositions, threatDirs, ownerPos);
+        return new SquadCoverContext(true, 0, 0, occupiedCovers, defensivePositions, threatDirs, firingContacts, ownerPos);
     }
 
     private static void addSquadPosition(List<BlockPos> positions, BlockPos position) {

@@ -88,8 +88,20 @@ public class ExposureCalculator {
             return new AimPointResult(target.getEyePosition(), AimPointType.FALLBACK, false, false, 1.0);
         }
         
-        Level level = observer.level();
-        Vec3 observerEye = observer.getEyePosition();
+        return getBestAimPointFrom(observer.getEyePosition(), target, observer, skipBlock);
+    }
+
+    /**
+     * Finds the best directly visible target point from a hypothetical firing origin.
+     * Cover scoring uses this to assess a candidate peek or exposed half-cover eye.
+     */
+    public static AimPointResult getBestAimPointFrom(Vec3 observerEye, LivingEntity target) {
+        return getBestAimPointFrom(observerEye, target, null, null);
+    }
+
+    private static AimPointResult getBestAimPointFrom(Vec3 observerEye, LivingEntity target,
+                                                       LivingEntity observer, BlockPos skipBlock) {
+        Level level = target.level();
         
         TargetPoint[] targetPoints = getTargetPointsWithPriority(target);
         
@@ -119,7 +131,7 @@ public class ExposureCalculator {
         
         if (DiagnosticLogManager.isDamageLoggingEnabled()) {
             StevesArmyMod.LOGGER.info("[DAMAGE_DEBUG] getBestAimPoint: NO visible aimpoint, returning FALLBACK. observer=({},{},{}) target=({},{},{})",
-                String.format("%.2f", observer.getX()), String.format("%.2f", observer.getEyeY()), String.format("%.2f", observer.getZ()),
+                String.format("%.2f", observerEye.x), String.format("%.2f", observerEye.y), String.format("%.2f", observerEye.z),
                 String.format("%.2f", target.getX()), String.format("%.2f", target.getY()), String.format("%.2f", target.getZ()));
         }
         return new AimPointResult(target.getEyePosition(), AimPointType.FALLBACK, false, false, 1.0);

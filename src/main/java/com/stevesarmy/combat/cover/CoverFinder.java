@@ -13,6 +13,7 @@ import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
 import com.stevesarmy.StevesArmyMod;
+import com.stevesarmy.combat.ExposureCalculator;
 import com.stevesarmy.combat.ModBlockTags;
 import com.stevesarmy.combat.VisibilityRay;
 import com.stevesarmy.entity.SoldierEntity;
@@ -44,6 +45,8 @@ public class CoverFinder {
     
     private static final float HALF_COVER_FIGHTABILITY_BONUS = 0.25f;
     private static final float FULL_COVER_FIGHTABILITY_BONUS = 0.15f;
+    private static final double LAST_SEEN_CONTACT_TOLERANCE = 2.0;
+    private static final float FIRING_LANE_EPSILON = 0.01f;
 
     // Suppression targets for half cover must be above the cover's collision shape.
     // A block-center target is commonly inside the block and causes shots to hit cover.
@@ -380,8 +383,9 @@ public class CoverFinder {
         float primaryProtection = calculatePrimaryProtection(coverPoint, threatDirection);
         float flankingProtection = calculateFlankingProtection(coverPoint, allThreats);
         float firingQuality = calculateFiringQuality(coverPoint, threatDirection);
-        float peekAngleScore = calculatePeekAngleScore(coverPoint, threatDirection, primaryThreat);
-        coverPoint.setFiringAccessScore(peekAngleScore);
+        FiringLaneResult firingLane = calculateFiringLane(coverPoint, threatDirection, primaryThreat, null);
+        float firingAccessScore = firingLane.score();
+        coverPoint.setFiringAccessScore(firingAccessScore);
         
         boolean isAttackMode = (soldier instanceof SoldierEntity se && se.hasValidAttackTarget());
         float distanceScore;
@@ -393,13 +397,13 @@ public class CoverFinder {
         }
         
         float fightability = 0.0f;
-        if (coverPoint.canShootFrom() && peekAngleScore > 0.01f) {
+        if (coverPoint.canShootFrom() && firingAccessScore > FIRING_LANE_EPSILON) {
             fightability = coverPoint.getType() == CoverType.HALF ? 
                 HALF_COVER_FIGHTABILITY_BONUS : FULL_COVER_FIGHTABILITY_BONUS;
         }
         
         float blindPenalty = 0.0f;
-        if (coverPoint.getType() == CoverType.FULL && peekAngleScore <= 0.01f && primaryThreat != null) {
+        if (coverPoint.getType() == CoverType.FULL && firingAccessScore <= FIRING_LANE_EPSILON && primaryThreat != null) {
             blindPenalty = 0.50f;
         }
         
@@ -411,7 +415,7 @@ public class CoverFinder {
             blindPenalty = 0.50f;
             fightability = 0.0f;
             firingQuality = 0.0f;
-            peekAngleScore = 0.0f;
+            firingAccessScore = 0.0f;
         }
         
         float weightedScore;
@@ -420,30 +424,31 @@ public class CoverFinder {
                            flankingProtection * FLANKING_PROTECTION_WEIGHT +
                            distanceScore * ATTACK_OBJECTIVE_PROGRESS_WEIGHT +
                            firingQuality * FIRING_QUALITY_WEIGHT +
-                           peekAngleScore * PEEK_ANGLE_WEIGHT) + fightability - blindPenalty;
+                           firingAccessScore * PEEK_ANGLE_WEIGHT) + fightability - blindPenalty;
         } else {
             weightedScore = (float)(primaryProtection * PRIMARY_PROTECTION_WEIGHT +
                            flankingProtection * FLANKING_PROTECTION_WEIGHT +
                            distanceScore * DISTANCE_WEIGHT +
                            firingQuality * FIRING_QUALITY_WEIGHT +
-                           peekAngleScore * PEEK_ANGLE_WEIGHT) + fightability - blindPenalty;
+                           firingAccessScore * PEEK_ANGLE_WEIGHT) + fightability - blindPenalty;
         }
         
         if (com.stevesarmy.debug.DiagnosticLogManager.isCoverScoreLoggingEnabled()) {
-            StevesArmyMod.LOGGER.info("[CoverScore] {} type={} q={} prim={} flank={} dist={} firing={} peek={} fight={} blindPen={} TOTAL={}",
+            StevesArmyMod.LOGGER.info("[CoverScore] {} type={} q={} prim={} flank={} dist={} firing={} lane={} laneSource={} contacts={}/{} fight={} blindPen={} TOTAL={}",
                 coverPoint.getPosition(), coverPoint.getType(),
                 String.format("%.2f", coverPoint.getQuality()),
                 String.format("%.2f", primaryProtection * PRIMARY_PROTECTION_WEIGHT),
                 String.format("%.2f", flankingProtection * FLANKING_PROTECTION_WEIGHT),
                 String.format("%.2f", distanceScore * (isAttackMode ? ATTACK_OBJECTIVE_PROGRESS_WEIGHT : DISTANCE_WEIGHT)),
                 String.format("%.2f", firingQuality * FIRING_QUALITY_WEIGHT),
-                String.format("%.2f", peekAngleScore * PEEK_ANGLE_WEIGHT),
+                String.format("%.2f", firingAccessScore * PEEK_ANGLE_WEIGHT),
+                firingLane.source(), firingLane.reachableContacts(), firingLane.eligibleContacts(),
                 String.format("%.2f", fightability),
                 String.format("%.2f", blindPenalty),
                 String.format("%.2f", weightedScore));
         }
         
-return weightedScore;
+        return weightedScore;
     }
 
     private float calculateThreatAwareScore(CoverPoint coverPoint, LivingEntity soldier,
@@ -459,8 +464,9 @@ return weightedScore;
         float primaryProtection = calculatePrimaryProtection(coverPoint, threatDirection);
         float flankingProtection = calculateFlankingProtection(coverPoint, allThreats);
         float firingQuality = calculateFiringQuality(coverPoint, threatDirection);
-        float peekAngleScore = calculatePeekAngleScore(coverPoint, threatDirection, primaryThreat);
-        coverPoint.setFiringAccessScore(peekAngleScore);
+        FiringLaneResult firingLane = calculateFiringLane(coverPoint, threatDirection, primaryThreat, squadCtx);
+        float firingAccessScore = firingLane.score();
+        coverPoint.setFiringAccessScore(firingAccessScore);
 
         boolean isAttackMode = (soldier instanceof SoldierEntity se && se.hasValidAttackTarget());
         float distanceScore;
@@ -478,13 +484,13 @@ return weightedScore;
         }
 
         float fightability = 0.0f;
-        if (coverPoint.canShootFrom() && peekAngleScore > 0.01f) {
+        if (coverPoint.canShootFrom() && firingAccessScore > FIRING_LANE_EPSILON) {
             fightability = coverPoint.getType() == CoverType.HALF ? 
                 HALF_COVER_FIGHTABILITY_BONUS : FULL_COVER_FIGHTABILITY_BONUS;
         }
 
         float blindPenalty = 0.0f;
-        if (coverPoint.getType() == CoverType.FULL && peekAngleScore <= 0.01f && primaryThreat != null) {
+        if (coverPoint.getType() == CoverType.FULL && firingAccessScore <= FIRING_LANE_EPSILON && primaryThreat != null) {
             blindPenalty = 0.50f;
         }
 
@@ -496,7 +502,7 @@ return weightedScore;
             blindPenalty = 0.50f;
             fightability = 0.0f;
             firingQuality = 0.0f;
-            peekAngleScore = 0.0f;
+            firingAccessScore = 0.0f;
         }
 
         float weightedScore;
@@ -505,15 +511,23 @@ return weightedScore;
                            flankingProtection * FLANKING_PROTECTION_WEIGHT +
                            distanceScore * ATTACK_OBJECTIVE_PROGRESS_WEIGHT +
                            firingQuality * FIRING_QUALITY_WEIGHT +
-                           peekAngleScore * PEEK_ANGLE_WEIGHT +
+                           firingAccessScore * PEEK_ANGLE_WEIGHT +
                            dispersionScore * ATTACK_SQUAD_DISPERSION_WEIGHT) + fightability - blindPenalty;
         } else {
             weightedScore = (float)(primaryProtection * PRIMARY_PROTECTION_WEIGHT +
                            flankingProtection * FLANKING_PROTECTION_WEIGHT +
                            distanceScore * DISTANCE_WEIGHT +
                            firingQuality * FIRING_QUALITY_WEIGHT +
-                           peekAngleScore * PEEK_ANGLE_WEIGHT +
+                           firingAccessScore * PEEK_ANGLE_WEIGHT +
                            dispersionScore * SQUAD_DISPERSION_WEIGHT) + fightability - blindPenalty;
+        }
+
+        if (com.stevesarmy.debug.DiagnosticLogManager.isCoverScoreLoggingEnabled()) {
+            StevesArmyMod.LOGGER.info("[CoverScore] {} type={} lane={} laneSource={} contacts={}/{} total={}",
+                coverPoint.getPosition(), coverPoint.getType(),
+                String.format("%.2f", firingAccessScore * PEEK_ANGLE_WEIGHT),
+                firingLane.source(), firingLane.reachableContacts(), firingLane.eligibleContacts(),
+                String.format("%.2f", weightedScore));
         }
 
         return weightedScore;
@@ -662,102 +676,129 @@ return weightedScore;
                (dir1 == Direction.WEST && (dir2 == Direction.NORTH || dir2 == Direction.SOUTH));
     }
     
-    private float calculatePeekAngleScore(CoverPoint coverPoint, Vec3 threatDirection, LivingEntity primaryThreat) {
+    private record FiringLaneResult(float score, String source, int reachableContacts, int eligibleContacts) {
+        private static final FiringLaneResult NONE = new FiringLaneResult(0.0f, "none", 0, 0);
+    }
+
+    private FiringLaneResult calculateFiringLane(CoverPoint coverPoint, Vec3 threatDirection,
+                                                   LivingEntity primaryThreat, SquadCoverContext squadCtx) {
         if (threatDirection == null || threatDirection.lengthSqr() < 0.001) {
-            return 0.0f;
+            return FiringLaneResult.NONE;
         }
 
         if (coverPoint.getType() == CoverType.HALF) {
-            return calculateHalfCoverFiringLaneScore(coverPoint, threatDirection);
+            return evaluateFiringOrigin(getHalfCoverExposedEye(coverPoint), threatDirection, primaryThreat, squadCtx);
         }
-        
+
         Set<Direction> protectedDirs = coverPoint.getProtectedDirections();
         if (protectedDirs == null || protectedDirs.isEmpty()) {
-            return 0.0f;
+            return FiringLaneResult.NONE;
         }
-        
+
+        FiringLaneResult best = FiringLaneResult.NONE;
         BlockPos coverPos = coverPoint.getPosition();
-        float bestPeekScore = 0.0f;
-        boolean scoreLogging = com.stevesarmy.debug.DiagnosticLogManager.isCoverScoreLoggingEnabled();
-        StringBuilder debug = scoreLogging ? new StringBuilder() : null;
-        if (scoreLogging) {
-            debug.append("calculatePeekAngleScore for ").append(coverPos).append(" protectedDirs=").append(protectedDirs).append(":\n");
-        }
-        
         for (Direction peekDir : Direction.Plane.HORIZONTAL) {
             if (protectedDirs.contains(peekDir)) {
-                if (scoreLogging) debug.append("  ").append(peekDir).append(": protected (wall blocks this direction)\n");
                 continue;
             }
-            
-            if (scoreLogging) debug.append("  ").append(peekDir).append(": NOT protected, checking...\n");
-            
+
             BlockPos peekPos = coverPos.relative(peekDir);
             if (!isValidPeekPosition(peekPos)) {
-                if (scoreLogging) debug.append("    -> ").append(peekPos).append(": INVALID position (blocked or no ground)\n");
                 continue;
             }
-            
-            if (scoreLogging) debug.append("    -> ").append(peekPos).append(": valid position\n");
-            
-            boolean losOk = true;
-            float coneCoverageScore = 1.0f;
-            
-            if (primaryThreat != null && primaryThreat.isAlive()) {
-                // Try direct LOS to entity first
-                Vec3 peekEye = new Vec3(peekPos.getX() + 0.5, peekPos.getY() + 1.62, peekPos.getZ() + 0.5);
-                Vec3 targetEye = new Vec3(primaryThreat.getX(), primaryThreat.getEyeY(), primaryThreat.getZ());
-                losOk = hasLineOfSight(peekEye, targetEye);
-                if (scoreLogging) debug.append("    Direct LOS to entity: ").append(losOk ? "SUCCESS" : "FAILED").append("\n");
-                
-                if (!losOk) {
-                    // Direct LOS failed - fallback to cone raycast to find openings
-                    if (scoreLogging) debug.append("    Falling back to cone raycast...\n");
-                    coneCoverageScore = calculateConeCoverage(peekPos, threatDirection, debug);
-                    if (coneCoverageScore <= 0.01f) {
-                        if (scoreLogging) debug.append("    Cone raycast: NO OPENING FOUND, skipping this peek direction\n");
-                        continue;
-                    }
-                    if (scoreLogging) debug.append("    Cone raycast found opening, coverage=").append(String.format("%.2f", coneCoverageScore)).append("\n");
-                }
-            } else {
-                // No primaryThreat entity - always use cone raycast
-                if (scoreLogging) debug.append("    No entity target, using cone raycast...\n");
-                coneCoverageScore = calculateConeCoverage(peekPos, threatDirection, debug);
-                if (coneCoverageScore <= 0.01f) {
-                    if (scoreLogging) debug.append("    Cone raycast: NO OPENING FOUND, skipping this peek direction\n");
-                    continue;
-                }
-                if (scoreLogging) debug.append("    Cone raycast: coverage=").append(String.format("%.2f", coneCoverageScore)).append("\n");
+
+            Vec3 peekEye = new Vec3(peekPos.getX() + 0.5, peekPos.getY() + HALF_COVER_STANDING_EYE_HEIGHT,
+                peekPos.getZ() + 0.5);
+            FiringLaneResult candidate = evaluateFiringOrigin(peekEye, threatDirection, primaryThreat, squadCtx);
+            if (isBetterFiringLane(candidate, best)) {
+                best = candidate;
             }
-            
-            bestPeekScore = Math.max(bestPeekScore, coneCoverageScore);
-            if (scoreLogging) debug.append("    -> SCORED ").append(String.format("%.3f", coneCoverageScore))
-                .append(" (cone coverage)\n");
         }
-        
-        if (scoreLogging) {
-            debug.append("  FINAL score=").append(String.format("%.3f", bestPeekScore)).append("\n");
-            StevesArmyMod.LOGGER.info(debug.toString());
-        }
-        return bestPeekScore;
+        return best;
     }
 
-    /**
-     * Half cover exposes vertically from its occupied block, rather than by sliding
-     * into an adjacent full-cover peek position. Keep this test geometric so it
-     * remains useful for remembered threat directions as well as live targets.
-     */
-    private float calculateHalfCoverFiringLaneScore(CoverPoint coverPoint, Vec3 threatDirection) {
+    private Vec3 getHalfCoverExposedEye(CoverPoint coverPoint) {
         BlockPos coverPos = coverPoint.getPosition();
         double eyeHeight = coverPoint.getCoverHeight() >= HALF_COVER_STANDING_HEIGHT_THRESHOLD
             ? HALF_COVER_STANDING_EYE_HEIGHT
             : HALF_COVER_CROUCH_EYE_HEIGHT;
-        Vec3 exposedEye = new Vec3(
-            coverPos.getX() + 0.5,
-            coverPos.getY() + eyeHeight,
-            coverPos.getZ() + 0.5);
-        return calculateConeCoverage(exposedEye, threatDirection, level);
+        return new Vec3(coverPos.getX() + 0.5, coverPos.getY() + eyeHeight, coverPos.getZ() + 0.5);
+    }
+
+    private FiringLaneResult evaluateFiringOrigin(Vec3 origin, Vec3 threatDirection,
+                                                   LivingEntity primaryThreat, SquadCoverContext squadCtx) {
+        if (primaryThreat != null && primaryThreat.isAlive()) {
+            ExposureCalculator.AimPointResult activeAim = ExposureCalculator.getBestAimPointFrom(origin, primaryThreat);
+            if (activeAim.canShoot()) {
+                return new FiringLaneResult(1.0f, "active", 0, 0);
+            }
+        }
+
+        FiringLaneResult squadLane = calculateSquadContactCoverage(origin, squadCtx);
+        if (squadLane.score() > FIRING_LANE_EPSILON) {
+            return squadLane;
+        }
+
+        return new FiringLaneResult(calculateConeCoverage(origin, threatDirection, level), "cone", 0, 0);
+    }
+
+    private FiringLaneResult calculateSquadContactCoverage(Vec3 origin, SquadCoverContext squadCtx) {
+        if (squadCtx == null || squadCtx.getFiringContacts().isEmpty()) {
+            return FiringLaneResult.NONE;
+        }
+
+        long currentTick = level.getGameTime();
+        float totalWeight = 0.0f;
+        float reachableWeight = 0.0f;
+        int eligible = 0;
+        int reachable = 0;
+
+        for (SquadCoverContext.FiringContact contact : squadCtx.getFiringContacts()) {
+            float freshness = contact.freshnessAt(currentTick);
+            if (freshness <= 0.0f) {
+                continue;
+            }
+
+            eligible++;
+            totalWeight += freshness;
+            VisibilityRay.Result visibility = VisibilityRay.trace(level, origin, contact.exposedPoint(), null);
+            if (visibility.hasContact() || isNearLastSeenContact(origin, contact.exposedPoint(), visibility)) {
+                reachable++;
+                reachableWeight += freshness;
+            }
+        }
+
+        if (totalWeight <= 0.0f || reachable == 0) {
+            return new FiringLaneResult(0.0f, "squad-memory", reachable, eligible);
+        }
+        return new FiringLaneResult(reachableWeight / totalWeight, "squad-memory", reachable, eligible);
+    }
+
+    private boolean isNearLastSeenContact(Vec3 origin, Vec3 exposedPoint, VisibilityRay.Result visibility) {
+        if (visibility.clear() || !Double.isFinite(visibility.blockedDistance())) {
+            return false;
+        }
+        double remainingDistance = origin.distanceTo(exposedPoint) - visibility.blockedDistance();
+        return remainingDistance <= LAST_SEEN_CONTACT_TOLERANCE;
+    }
+
+    private boolean isBetterFiringLane(FiringLaneResult candidate, FiringLaneResult current) {
+        if (candidate.score() > current.score() + FIRING_LANE_EPSILON) {
+            return true;
+        }
+        if (Math.abs(candidate.score() - current.score()) > FIRING_LANE_EPSILON) {
+            return false;
+        }
+        return firingLaneSourcePriority(candidate.source()) > firingLaneSourcePriority(current.source());
+    }
+
+    private int firingLaneSourcePriority(String source) {
+        return switch (source) {
+            case "active" -> 3;
+            case "squad-memory" -> 2;
+            case "cone" -> 1;
+            default -> 0;
+        };
     }
     
     public static boolean isValidPeekPosition(BlockPos pos, net.minecraft.world.level.Level level) {
@@ -803,10 +844,6 @@ return qualityScore + shootBonus - distancePenalty;
 
     public static boolean hasLineOfSightStatic(Vec3 from, Vec3 to, net.minecraft.world.level.Level level) {
         return VisibilityRay.trace(level, from, to, null).hasContact();
-    }
-    
-    private boolean hasLineOfSight(Vec3 from, Vec3 to) {
-        return hasLineOfSightStatic(from, to, level);
     }
     
     /**
@@ -855,10 +892,6 @@ return qualityScore + shootBonus - distancePenalty;
         float validRatio = (float) validRays / RAY_COUNT;
         
         return avgCoverage * validRatio;
-    }
-    
-    private float calculateConeCoverage(BlockPos peekPos, Vec3 threatDirection, StringBuilder debug) {
-        return calculateConeCoverage(peekPos, threatDirection, level);
     }
     
     /**

@@ -389,6 +389,7 @@ public class SoldierCombatGoal extends Goal {
             if (TargetAcquisition.isValidTarget(soldier, potential)
                     && TargetAcquisition.hasLineOfSight(soldier, potential)) {
                 EnemyContactTracker.reportContact(soldier, potential);
+                reportThreatToSquadIntel(potential, 1.0f);
             }
         }
         
@@ -1976,10 +1977,11 @@ public class SoldierCombatGoal extends Goal {
             StevesArmyMod.LOGGER.info("[ThreatReport] Soldier {} reporting threat {} to squad intel", 
                 soldier.getId(), threat.getName().getString());
         }
-        ExposureCalculator.AimPointResult aimPoint = getOrComputeAimPoint();
+        // Squad knowledge must represent what this observer actually saw. Do not
+        // use the combat cache here because that may ignore the observer's cover.
+        ExposureCalculator.AimPointResult aimPoint = ExposureCalculator.getBestAimPoint(soldier, threat);
         intel.reportThreat(soldier.getUUID(), threat, threat.blockPosition(),
             aimPoint != null && aimPoint.canShoot() ? aimPoint.position : threat.getEyePosition(), accuracy);
-        EnemyContactTracker.reportContact(soldier, threat);
     }
 
     private boolean shouldSuppressTarget() {

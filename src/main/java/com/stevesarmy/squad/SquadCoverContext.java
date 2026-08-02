@@ -5,6 +5,7 @@ import net.minecraft.world.phys.Vec3;
 
 import java.util.Collections;
 import java.util.List;
+import java.util.UUID;
 
 public record SquadCoverContext(
     boolean inSquad,
@@ -13,8 +14,19 @@ public record SquadCoverContext(
     List<BlockPos> occupiedCovers,
     List<BlockPos> defensivePositions,
     List<Vec3> squadThreatDirections,
+    List<FiringContact> firingContacts,
     Vec3 ownerPosition
 ) {
+    public record FiringContact(UUID threatEntityId, Vec3 exposedPoint, long lastSeenTick) {
+        public static final long MAX_AGE_TICKS = 200L;
+        public static final int MAX_CONTACTS = 12;
+
+        public float freshnessAt(long currentTick) {
+            long age = Math.max(0L, currentTick - lastSeenTick);
+            return Math.max(0.0f, 1.0f - (float) age / MAX_AGE_TICKS);
+        }
+    }
+
     public boolean isTooClose(BlockPos pos, double minDist) {
         if (occupiedCovers.isEmpty()) return false;
         double minDistSq = minDist * minDist;
@@ -41,6 +53,11 @@ public record SquadCoverContext(
 
     public List<Vec3> getSquadThreatDirections() {
         return squadThreatDirections != null ? squadThreatDirections : Collections.emptyList();
+    }
+
+    /** Last genuinely observed hostile body points eligible for cover fire-lane scoring. */
+    public List<FiringContact> getFiringContacts() {
+        return firingContacts != null ? firingContacts : Collections.emptyList();
     }
 
     public Vec3 getOwnerPosition() {
