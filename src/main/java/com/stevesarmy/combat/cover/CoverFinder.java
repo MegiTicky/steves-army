@@ -21,6 +21,10 @@ import com.stevesarmy.squad.SquadCoverContext;
 public class CoverFinder {
     private static final float MIN_EFFECTIVE_COVER_HEIGHT = 0.8f;
     private static final float STANDING_EYE_HEIGHT = 1.6f;
+    // Match SoldierEntity's exposed posture while occupying half cover.
+    private static final float HALF_COVER_STANDING_HEIGHT_THRESHOLD = 1.3f;
+    private static final double HALF_COVER_CROUCH_EYE_HEIGHT = 1.27;
+    private static final double HALF_COVER_STANDING_EYE_HEIGHT = 1.62;
     private static final int DEFAULT_SEARCH_RADIUS = 12;
     private static final int MAX_SEARCH_RADIUS = 24;
     private static final int MAX_COVER_POINTS = 50;
@@ -377,8 +381,7 @@ public class CoverFinder {
         float flankingProtection = calculateFlankingProtection(coverPoint, allThreats);
         float firingQuality = calculateFiringQuality(coverPoint, threatDirection);
         float peekAngleScore = calculatePeekAngleScore(coverPoint, threatDirection, primaryThreat);
-        coverPoint.setFiringAccessScore(coverPoint.canShootFrom()
-            ? Math.max(0.75f, peekAngleScore) : peekAngleScore);
+        coverPoint.setFiringAccessScore(peekAngleScore);
         
         boolean isAttackMode = (soldier instanceof SoldierEntity se && se.hasValidAttackTarget());
         float distanceScore;
@@ -390,7 +393,7 @@ public class CoverFinder {
         }
         
         float fightability = 0.0f;
-        if (coverPoint.canShootFrom()) {
+        if (coverPoint.canShootFrom() && peekAngleScore > 0.01f) {
             fightability = coverPoint.getType() == CoverType.HALF ? 
                 HALF_COVER_FIGHTABILITY_BONUS : FULL_COVER_FIGHTABILITY_BONUS;
         }
@@ -457,8 +460,7 @@ return weightedScore;
         float flankingProtection = calculateFlankingProtection(coverPoint, allThreats);
         float firingQuality = calculateFiringQuality(coverPoint, threatDirection);
         float peekAngleScore = calculatePeekAngleScore(coverPoint, threatDirection, primaryThreat);
-        coverPoint.setFiringAccessScore(coverPoint.canShootFrom()
-            ? Math.max(0.75f, peekAngleScore) : peekAngleScore);
+        coverPoint.setFiringAccessScore(peekAngleScore);
 
         boolean isAttackMode = (soldier instanceof SoldierEntity se && se.hasValidAttackTarget());
         float distanceScore;
@@ -476,7 +478,7 @@ return weightedScore;
         }
 
         float fightability = 0.0f;
-        if (coverPoint.canShootFrom()) {
+        if (coverPoint.canShootFrom() && peekAngleScore > 0.01f) {
             fightability = coverPoint.getType() == CoverType.HALF ? 
                 HALF_COVER_FIGHTABILITY_BONUS : FULL_COVER_FIGHTABILITY_BONUS;
         }
@@ -664,6 +666,10 @@ return weightedScore;
         if (threatDirection == null || threatDirection.lengthSqr() < 0.001) {
             return 0.0f;
         }
+
+        if (coverPoint.getType() == CoverType.HALF) {
+            return calculateHalfCoverFiringLaneScore(coverPoint, threatDirection);
+        }
         
         Set<Direction> protectedDirs = coverPoint.getProtectedDirections();
         if (protectedDirs == null || protectedDirs.isEmpty()) {
@@ -736,6 +742,23 @@ return weightedScore;
         }
         return bestPeekScore;
     }
+
+    /**
+     * Half cover exposes vertically from its occupied block, rather than by sliding
+     * into an adjacent full-cover peek position. Keep this test geometric so it
+     * remains useful for remembered threat directions as well as live targets.
+     */
+    private float calculateHalfCoverFiringLaneScore(CoverPoint coverPoint, Vec3 threatDirection) {
+        BlockPos coverPos = coverPoint.getPosition();
+        double eyeHeight = coverPoint.getCoverHeight() >= HALF_COVER_STANDING_HEIGHT_THRESHOLD
+            ? HALF_COVER_STANDING_EYE_HEIGHT
+            : HALF_COVER_CROUCH_EYE_HEIGHT;
+        Vec3 exposedEye = new Vec3(
+            coverPos.getX() + 0.5,
+            coverPos.getY() + eyeHeight,
+            coverPos.getZ() + 0.5);
+        return calculateConeCoverage(exposedEye, threatDirection, level);
+    }
     
     public static boolean isValidPeekPosition(BlockPos pos, net.minecraft.world.level.Level level) {
         if (!level.isLoaded(pos)) return false;
@@ -791,14 +814,20 @@ return qualityScore + shootBonus - distancePenalty;
      * Returns a score from 0.0 (no opening) to 1.0 (full cone coverage).
      * Uses "area covered" approach - measures how far each ray travels before hitting a block,
      * then normalizes by expected distance.
-     */
+    */
     public static float calculateConeCoverage(BlockPos peekPos, Vec3 threatDirection, net.minecraft.world.level.Level level) {
+        Vec3 peekEye = new Vec3(peekPos.getX() + 0.5, peekPos.getY() + 1.62, peekPos.getZ() + 0.5);
+        return calculateConeCoverage(peekEye, threatDirection, level);
+    }
+
+    /** Calculates open firing space from an already-resolved exposed eye position. */
+    public static float calculateConeCoverage(Vec3 eyePosition, Vec3 threatDirection, net.minecraft.world.level.Level level) {
         final int RAY_COUNT = 7;
         final double CONE_HALF_ANGLE_DEG = 30.0;
         final double MAX_RAY_DISTANCE = 20.0;
         final double MIN_OPENING_DISTANCE = 5.0;
-        
-        Vec3 peekEye = new Vec3(peekPos.getX() + 0.5, peekPos.getY() + 1.62, peekPos.getZ() + 0.5);
+
+        Vec3 peekEye = eyePosition;
         Vec3 threatDir = threatDirection.normalize();
         
         double totalCoverage = 0.0;
