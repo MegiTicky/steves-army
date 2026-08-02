@@ -1,6 +1,7 @@
 package com.stevesarmy.combat.cover;
 
 import com.stevesarmy.StevesArmyMod;
+import com.stevesarmy.combat.EnemyContactTracker;
 import com.stevesarmy.debug.DiagnosticLogManager;
 import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.entity.ai.CoverTacticalGoal;
@@ -224,6 +225,8 @@ public class IncomingFireHandler {
     public static void onLivingDeath(LivingDeathEvent event) {
         LivingEntity deadEntity = event.getEntity();
         if (!(deadEntity.level() instanceof ServerLevel serverLevel)) return;
+
+        EnemyContactTracker.removeThreat(serverLevel, deadEntity.getUUID());
         
         SquadManager manager = SquadManager.get(serverLevel);
         for (SquadData squad : manager.getAllSquads()) {

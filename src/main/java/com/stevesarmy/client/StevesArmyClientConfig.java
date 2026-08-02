@@ -7,6 +7,8 @@ public final class StevesArmyClientConfig {
     public static final ForgeConfigSpec.DoubleValue SOLDIER_HELD_ITEM_RENDER_DISTANCE;
     public static final ForgeConfigSpec.BooleanValue ENABLE_FIRE_TEAM_WHEEL;
     public static final ForgeConfigSpec.DoubleValue PING_SCALE;
+    public static final ForgeConfigSpec.DoubleValue ENEMY_CONTACT_PING_BASELINE_SIZE;
+    public static final ForgeConfigSpec.DoubleValue ENEMY_CONTACT_PING_HEIGHT_OFFSET;
 
     static {
         ForgeConfigSpec.Builder builder = new ForgeConfigSpec.Builder();
@@ -22,6 +24,15 @@ public final class StevesArmyClientConfig {
             .comment("Global scale factor for ping icons and text.",
                      "Default: 0.8")
             .defineInRange("pingScale", 0.8, 0.25, 2.0);
+        ENEMY_CONTACT_PING_BASELINE_SIZE = builder
+            .comment("Screen-space diameter in GUI pixels for enemy contact diamonds at 96 blocks and beyond.",
+                     "Nearby on-screen contacts scale up to three times this size.",
+                     "Default: 2.0 pixels")
+            .defineInRange("enemyContactPingBaselineSize", 2.0, 0.5, 64.0);
+        ENEMY_CONTACT_PING_HEIGHT_OFFSET = builder
+            .comment("Additional world-space height in blocks above an enemy's head for the contact diamond.",
+                     "Default: 0.5 blocks")
+            .defineInRange("enemyContactPingHeightOffset", 0.5, 0.0, 4.0);
         builder.pop();
 
         builder.push("controls");

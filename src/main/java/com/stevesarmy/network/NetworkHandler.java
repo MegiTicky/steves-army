@@ -9,7 +9,7 @@ import net.minecraftforge.network.PacketDistributor;
 import net.minecraftforge.network.simple.SimpleChannel;
 
 public class NetworkHandler {
-    private static final String PROTOCOL_VERSION = "5";
+    private static final String PROTOCOL_VERSION = "6";
     
     public static final SimpleChannel INSTANCE = NetworkRegistry.newSimpleChannel(
         new ResourceLocation(StevesArmyMod.MODID, "main"),
@@ -88,6 +88,10 @@ public class NetworkHandler {
             DismissSoldierPacket::encode,
             DismissSoldierPacket::decode,
             DismissSoldierPacket::handle);
+        INSTANCE.registerMessage(id++, EnemyContactSyncPacket.class,
+            EnemyContactSyncPacket::encode,
+            EnemyContactSyncPacket::new,
+            EnemyContactSyncPacket::handle);
     }
 
     public static void sendTo(ServerPlayer player, Object message) {

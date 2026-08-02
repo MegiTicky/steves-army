@@ -4,6 +4,7 @@ import com.stevesarmy.StevesArmyConfig;
 import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.combat.AimAccuracyManager;
 import com.stevesarmy.combat.DetectionSystem;
+import com.stevesarmy.combat.EnemyContactTracker;
 import com.stevesarmy.combat.ExposureCalculator;
 import com.stevesarmy.combat.FriendlyFireChecker;
 import com.stevesarmy.combat.GunIntegration;
@@ -381,6 +382,13 @@ public class SoldierCombatGoal extends Goal {
         for (LivingEntity potential : potentialTargets) {
             if (detectionSystem.isTargetDetected(potential)) {
                 threats.onEntityDetected(potential, soldier.position());
+            }
+
+            // Player-facing contact pings represent every valid enemy the soldier
+            // can currently see, not only the target selected for direct fire.
+            if (TargetAcquisition.isValidTarget(soldier, potential)
+                    && TargetAcquisition.hasLineOfSight(soldier, potential)) {
+                EnemyContactTracker.reportContact(soldier, potential);
             }
         }
         
@@ -1971,6 +1979,7 @@ public class SoldierCombatGoal extends Goal {
         ExposureCalculator.AimPointResult aimPoint = getOrComputeAimPoint();
         intel.reportThreat(soldier.getUUID(), threat, threat.blockPosition(),
             aimPoint != null && aimPoint.canShoot() ? aimPoint.position : threat.getEyePosition(), accuracy);
+        EnemyContactTracker.reportContact(soldier, threat);
     }
 
     private boolean shouldSuppressTarget() {

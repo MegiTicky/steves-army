@@ -27,15 +27,15 @@ public class PingOverlayRenderer {
             double distance = ping.getDistance();
             if (distance < 1.0 || distance > 256.0) continue;
             
-            int screenX = (int) screenPos.x;
-            int screenY = (int) screenPos.y;
+            float screenX = screenPos.x;
+            float screenY = screenPos.y;
             float scale = ping.getScale();
             
             renderPingIcon(guiGraphics, ping, screenX, screenY, scale, distance);
         }
     }
     
-    private static void renderPingIcon(GuiGraphics guiGraphics, Ping ping, int x, int y, float scale, double distance) {
+    private static void renderPingIcon(GuiGraphics guiGraphics, Ping ping, float x, float y, float scale, double distance) {
         Minecraft mc = Minecraft.getInstance();
         
         guiGraphics.pose().pushPose();

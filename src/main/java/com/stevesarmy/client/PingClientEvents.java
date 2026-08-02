@@ -124,6 +124,7 @@ public class PingClientEvents {
     public static void onWorldUnload(LevelEvent.Unload event) {
         if (event.getLevel().isClientSide()) {
             soldierDebugDataMap.clear();
+            EnemyContactOverlay.clear();
         }
     }
 
@@ -293,6 +294,7 @@ public class PingClientEvents {
             );
             
             PingManager.updatePingScreenPositions(lastWorldRenderContext);
+            EnemyContactOverlay.updateScreenPositions(lastWorldRenderContext);
         }
         
         if (event.getStage() == RenderLevelStageEvent.Stage.AFTER_TRANSLUCENT_BLOCKS) {
@@ -320,6 +322,7 @@ public class PingClientEvents {
                 FormationWheelRenderer.render(event.getGuiGraphics());
             }
             
+            EnemyContactOverlay.render(event.getGuiGraphics(), lastWorldRenderContext);
             PingOverlayRenderer.render(event.getGuiGraphics(), lastWorldRenderContext);
             
             CoverHudRenderer.render(event.getGuiGraphics());
