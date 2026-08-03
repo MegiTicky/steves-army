@@ -99,6 +99,24 @@ public class ExposureCalculator {
         return getBestAimPointFrom(observerEye, target, null, null);
     }
 
+    /**
+     * Tests whether any exposed target point is reachable from an origin. Unlike the
+     * full aim-point query, this exits on the first visible point because callers only
+     * need lane availability, not the point priority.
+     */
+    public static boolean hasAnyAimPointFrom(Vec3 observerEye, LivingEntity target) {
+        if (target == null || !target.isAlive()) {
+            return false;
+        }
+
+        for (TargetPoint point : getTargetPointsWithPriority(target)) {
+            if (VisibilityRay.trace(target.level(), observerEye, point.position, null).hasContact()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private static AimPointResult getBestAimPointFrom(Vec3 observerEye, LivingEntity target,
                                                        LivingEntity observer, BlockPos skipBlock) {
         Level level = target.level();

@@ -15,6 +15,7 @@ public class SquadData {
     private boolean cqbMode = false;
     private SquadFormation formation = SquadFormation.NONE;
     private SquadThreatIntel threatIntel = new SquadThreatIntel();
+    private transient SquadCoverPeekabilityCache coverPeekabilityCache = new SquadCoverPeekabilityCache();
 
     public SquadData(UUID leaderId) {
         this.squadId = UUID.randomUUID();
@@ -83,6 +84,14 @@ public class SquadData {
 
     public SquadThreatIntel getThreatIntel() {
         return threatIntel;
+    }
+
+    /** Runtime-only geometry cache shared by squad cover searches. */
+    public SquadCoverPeekabilityCache getCoverPeekabilityCache() {
+        if (coverPeekabilityCache == null) {
+            coverPeekabilityCache = new SquadCoverPeekabilityCache();
+        }
+        return coverPeekabilityCache;
     }
 
     public void tickIntelCleanup(long currentGameTime) {

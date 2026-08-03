@@ -18,6 +18,7 @@ import com.stevesarmy.combat.ModBlockTags;
 import com.stevesarmy.combat.VisibilityRay;
 import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.squad.SquadCoverContext;
+import com.stevesarmy.squad.SquadCoverPeekabilityCache;
 
 public class CoverFinder {
     private static final float MIN_EFFECTIVE_COVER_HEIGHT = 0.8f;
@@ -728,8 +729,7 @@ public class CoverFinder {
     private FiringLaneResult evaluateFiringOrigin(Vec3 origin, Vec3 threatDirection,
                                                    LivingEntity primaryThreat, SquadCoverContext squadCtx) {
         if (primaryThreat != null && primaryThreat.isAlive()) {
-            ExposureCalculator.AimPointResult activeAim = ExposureCalculator.getBestAimPointFrom(origin, primaryThreat);
-            if (activeAim.canShoot()) {
+            if (ExposureCalculator.hasAnyAimPointFrom(origin, primaryThreat)) {
                 return new FiringLaneResult(1.0f, "active", 0, 0);
             }
         }
@@ -739,7 +739,16 @@ public class CoverFinder {
             return squadLane;
         }
 
-        return new FiringLaneResult(calculateConeCoverage(origin, threatDirection, level), "cone", 0, 0);
+        SquadCoverPeekabilityCache cache = squadCtx != null ? squadCtx.getPeekabilityCache() : null;
+        Direction coneDirection = getDirectionFromVector(threatDirection);
+        Float cachedCoverage = cache != null ? cache.getConeCoverage(origin, coneDirection, level.getGameTime()) : null;
+        float coneCoverage = cachedCoverage != null
+            ? cachedCoverage
+            : calculateConeCoverage(origin, threatDirection, level);
+        if (cache != null && cachedCoverage == null) {
+            cache.putConeCoverage(origin, coneDirection, coneCoverage, level.getGameTime());
+        }
+        return new FiringLaneResult(coneCoverage, "cone", 0, 0);
     }
 
     private FiringLaneResult calculateSquadContactCoverage(Vec3 origin, SquadCoverContext squadCtx) {
@@ -761,7 +770,10 @@ public class CoverFinder {
 
             eligible++;
             totalWeight += freshness;
-            VisibilityRay.Result visibility = VisibilityRay.trace(level, origin, contact.exposedPoint(), null);
+            SquadCoverPeekabilityCache cache = squadCtx.getPeekabilityCache();
+            VisibilityRay.Result visibility = cache != null
+                ? cache.getContactVisibility(level, origin, contact.threatEntityId(), contact.exposedPoint(), currentTick)
+                : VisibilityRay.trace(level, origin, contact.exposedPoint(), null);
             if (visibility.hasContact() || isNearLastSeenContact(origin, contact.exposedPoint(), visibility)) {
                 reachable++;
                 reachableWeight += freshness;

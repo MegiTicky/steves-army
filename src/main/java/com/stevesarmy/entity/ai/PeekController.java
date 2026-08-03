@@ -2,11 +2,14 @@ package com.stevesarmy.entity.ai;
 
 import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.combat.GunIntegration;
+import com.stevesarmy.combat.TargetAcquisition;
 import com.stevesarmy.combat.ThreatAwareness;
 import com.stevesarmy.combat.cover.*;
 import com.stevesarmy.entity.SoldierEntity;
+import com.stevesarmy.squad.SquadManager;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.phys.Vec3;
@@ -33,6 +36,8 @@ public class PeekController {
     private static final double RETURN_TOLERANCE = 0.3;
     private static final double RETURN_SPEED = 1.0;
     private static final int NON_PEEKABLE_REPOSITION_TICKS = 40;
+    private static final int BLIND_PEEK_REPOSITION_TICKS = 80;
+    private static final long SQUAD_CONTACT_MAX_AGE_TICKS = 200L;
 
     private State state = State.HIDING;
     private Vec3 peekTarget = Vec3.ZERO;
@@ -41,6 +46,7 @@ public class PeekController {
     private long stateStartTime = 0;
     private long lastPeekEndTime = 0;
     private int nonPeekableTicks = 0;
+    private int blindPeekTicks = 0;
     private int peekCountSameCover = 0;
     private BlockPos lastCoverPosition = null;
     private long currentMaxExposureTime = 3000;
@@ -81,6 +87,7 @@ public class PeekController {
         currentPeekPos = null;
         returnAllowedDuringReload = false;
         nonPeekableTicks = 0;
+        blindPeekTicks = 0;
         currentMaxExposureTime = getRandomExposureTime();
     }
 
@@ -90,6 +97,7 @@ public class PeekController {
         currentPeekPos = null;
         returnAllowedDuringReload = false;
         nonPeekableTicks = 0;
+        blindPeekTicks = 0;
         currentMaxExposureTime = getRandomExposureTime();
     }
 
@@ -298,6 +306,8 @@ public class PeekController {
     private void tickExposed(SoldierEntity soldier, CoverPoint cover, CoverPositionController mover) {
         long timeInState = getTimeInCurrentState();
 
+        updateBlindPeekTimer(soldier);
+
         if (timeInState > currentMaxExposureTime) {
             if (CoverTacticalGoal.isDebugLoggingEnabled()) {
                 StevesArmyMod.LOGGER.info("[PeekController] Soldier {} exposure time exceeded ({}ms), ducking back",
@@ -401,6 +411,68 @@ public class PeekController {
         captureSuppressionSequence(soldier);
         enterExposed(soldier, cover);
         return true;
+    }
+
+    /**
+     * Accumulates exposed time spent without a personal LOS contact while the squad still
+     * has a recent exposed enemy point. The counter intentionally survives separate peek
+     * cycles, but is reset by personal contact or when a new cover is selected.
+     */
+    private void updateBlindPeekTimer(SoldierEntity soldier) {
+        LivingEntity target = soldier.getTarget();
+        boolean hasActiveContact = target != null
+            && TargetAcquisition.isValidTarget(soldier, target)
+            && !soldier.isFriendlyTo(target)
+            && TargetAcquisition.hasLineOfSight(soldier, target);
+
+        if (hasActiveContact) {
+            if (blindPeekTicks > 0 && CoverTacticalGoal.isDebugLoggingEnabled()) {
+                StevesArmyMod.LOGGER.info("[PeekController] Soldier {} blind-peek timer reset by active contact after {} ticks",
+                    soldier.getId(), blindPeekTicks);
+            }
+            blindPeekTicks = 0;
+            return;
+        }
+
+        int freshContacts = countFreshSquadContacts(soldier);
+        if (freshContacts <= 0) {
+            return;
+        }
+
+        blindPeekTicks = Math.min(BLIND_PEEK_REPOSITION_TICKS, blindPeekTicks + 1);
+        if (blindPeekTicks == 1 && CoverTacticalGoal.isDebugLoggingEnabled()) {
+            StevesArmyMod.LOGGER.info("[PeekController] Soldier {} started blind-peek timer with {} fresh squad contacts",
+                soldier.getId(), freshContacts);
+        }
+
+        if (blindPeekTicks >= BLIND_PEEK_REPOSITION_TICKS
+            && !soldier.getCoverBehaviorManager().isRepositionRequested()) {
+            soldier.getCoverBehaviorManager().requestReposition();
+            if (CoverTacticalGoal.isDebugLoggingEnabled()) {
+                StevesArmyMod.LOGGER.info("[PeekController] Soldier {} blind-peek timeout reached after {} ticks, requesting reposition (freshContacts={})",
+                    soldier.getId(), blindPeekTicks, freshContacts);
+            }
+        }
+    }
+
+    private int countFreshSquadContacts(SoldierEntity soldier) {
+        if (!(soldier.level() instanceof ServerLevel serverLevel)) {
+            return 0;
+        }
+
+        java.util.UUID squadId = soldier.getSquadId();
+        if (squadId == null) {
+            return 0;
+        }
+
+        long now = soldier.level().getGameTime();
+        return SquadManager.get(serverLevel).getSquadById(squadId)
+            .map(squad -> (int) squad.getThreatIntel().getAllThreats().stream()
+                .filter(threat -> threat.isAlive && threat.lastVisibleAimPoint != null)
+                .filter(threat -> now - threat.lastSeenTime >= 0
+                    && now - threat.lastSeenTime <= SQUAD_CONTACT_MAX_AGE_TICKS)
+                .count())
+            .orElse(0);
     }
 
     private void captureSuppressionSequence(SoldierEntity soldier) {

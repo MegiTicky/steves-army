@@ -15,6 +15,7 @@ public record SquadCoverContext(
     List<BlockPos> defensivePositions,
     List<Vec3> squadThreatDirections,
     List<FiringContact> firingContacts,
+    SquadCoverPeekabilityCache peekabilityCache,
     Vec3 ownerPosition
 ) {
     public record FiringContact(UUID threatEntityId, Vec3 exposedPoint, long lastSeenTick) {
@@ -58,6 +59,10 @@ public record SquadCoverContext(
     /** Last genuinely observed hostile body points eligible for cover fire-lane scoring. */
     public List<FiringContact> getFiringContacts() {
         return firingContacts != null ? firingContacts : Collections.emptyList();
+    }
+
+    public SquadCoverPeekabilityCache getPeekabilityCache() {
+        return peekabilityCache;
     }
 
     public Vec3 getOwnerPosition() {

@@ -1992,6 +1992,7 @@ private boolean shouldExitCoverForFollow() {
         this.debugSearchCenter = searchCenter;
         
         Optional<CoverPoint> bestCover = Optional.empty();
+        List<CoverFinder.ScoredCover> reusableScored = null;
 
         if (suppressionRouteSearchActive && !soldier.hasValidAttackTarget()) {
             if (suppressionRouteFiringOrigin == null) {
@@ -2095,13 +2096,9 @@ private boolean shouldExitCoverForFollow() {
                 }
             }
         } else {
-            bestCover = finder.findBestCover(
-                soldier,
-                threatDirection,
-                threats,
-                searchRadius,
-                squadCtx
-            );
+            reusableScored = finder.evaluateAndScoreAll(
+                soldier, threatDirection, threats, searchRadius, true, squadCtx);
+            bestCover = selectBestAvailableCover(reusableScored, threatDirection);
 
             if (bestCover.isEmpty()) {
                 bestCover = finder.findBestCover(
@@ -2125,8 +2122,11 @@ private boolean shouldExitCoverForFollow() {
         if (bestCover.isPresent()) {
             CoverPoint cover = bestCover.get();
 
-            List<CoverFinder.ScoredCover> tacticalCovers = finder.evaluateAndScoreAll(
-                soldier, threatDirection, threats, searchRadius, true).stream()
+            if (reusableScored == null) {
+                reusableScored = finder.evaluateAndScoreAll(
+                    soldier, threatDirection, threats, searchRadius, true, squadCtx);
+            }
+            List<CoverFinder.ScoredCover> tacticalCovers = reusableScored.stream()
                 .filter(sc -> isExactCoverPathReachable(sc.cover))
                 .collect(java.util.stream.Collectors.toList());
             Optional<DefensivePositionCandidate.ProneFiringCandidate> prone =
@@ -2140,16 +2140,15 @@ private boolean shouldExitCoverForFollow() {
             boolean wantsDebug = DiagnosticLogManager.isCoverScoreLoggingEnabled()
                 || CoverDebugManager.isShowSoldierCover();
             if (wantsDebug) {
-                List<CoverFinder.ScoredCover> top = finder.findTopCovers(soldier, threatDirection, threats, searchRadius, 5, true);
-                cachedTopCovers = top.toArray(new CoverFinder.ScoredCover[0]);
+                cachedTopCovers = reusableScored.stream().limit(5)
+                    .toArray(CoverFinder.ScoredCover[]::new);
             }
             
             CoverPoint currentCover = getCoverManager().getCurrentCover();
             boolean excludesCurrentCover = emergencyCoverSearchActive && currentCover != null
                 && cover.getPosition().equals(currentCover.getPosition());
             if (failedCoverPositions.contains(cover.getPosition()) || excludesCurrentCover) {
-                List<CoverFinder.ScoredCover> scored = finder.evaluateAndScoreAll(
-                    soldier, threatDirection, threats, searchRadius, true);
+                List<CoverFinder.ScoredCover> scored = reusableScored;
                 
                 scored = scored.stream()
                     .filter(sc -> !failedCoverPositions.contains(sc.cover.getPosition()))
@@ -2219,8 +2218,11 @@ private boolean shouldExitCoverForFollow() {
             logCoverSearchPerformance(finder, searchStarted, CoverMoveResult.NO_COVER_FOUND, "reservation");
             return CoverMoveResult.NO_COVER_FOUND;
         }
-        List<CoverFinder.ScoredCover> tacticalCovers = finder.evaluateAndScoreAll(
-            soldier, threatDirection, threats, searchRadius, true).stream()
+        if (reusableScored == null) {
+            reusableScored = finder.evaluateAndScoreAll(
+                soldier, threatDirection, threats, searchRadius, true, squadCtx);
+        }
+        List<CoverFinder.ScoredCover> tacticalCovers = reusableScored.stream()
             .filter(sc -> isExactCoverPathReachable(sc.cover))
             .collect(java.util.stream.Collectors.toList());
         Optional<DefensivePositionCandidate.ProneFiringCandidate> prone =
@@ -2232,6 +2234,32 @@ private boolean shouldExitCoverForFollow() {
         }
         logCoverSearchPerformance(finder, searchStarted, CoverMoveResult.NO_COVER_FOUND, "none");
         return CoverMoveResult.NO_COVER_FOUND;
+    }
+
+    private Optional<CoverPoint> selectBestAvailableCover(List<CoverFinder.ScoredCover> scored,
+                                                            Vec3 threatDirection) {
+        if (scored == null || scored.isEmpty()) {
+            return Optional.empty();
+        }
+
+        Direction threatDir = threatDirection != null && threatDirection.lengthSqr() > 0.001
+            ? CoverFinder.getDirectionFromVector(threatDirection) : null;
+
+        if (threatDir != null) {
+            Optional<CoverPoint> protectedCover = scored.stream()
+                .filter(sc -> CoverReservationManager.isAvailable(sc.cover.getPosition()))
+                .filter(sc -> sc.cover.getProtectedDirections().contains(threatDir))
+                .map(sc -> sc.cover)
+                .findFirst();
+            if (protectedCover.isPresent()) {
+                return protectedCover;
+            }
+        }
+
+        return scored.stream()
+            .filter(sc -> CoverReservationManager.isAvailable(sc.cover.getPosition()))
+            .map(sc -> sc.cover)
+            .findFirst();
     }
 
     private void startProneFiringMovement(DefensivePositionCandidate.ProneFiringCandidate candidate) {
@@ -3672,7 +3700,7 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
         Level level = soldier.level();
         UUID squadId = soldier.getSquadId();
         if (squadId == null || !(level instanceof ServerLevel serverLevel)) {
-            return new SquadCoverContext(false, 0, 0, List.of(), List.of(), List.of(), List.of(), null);
+            return new SquadCoverContext(false, 0, 0, List.of(), List.of(), List.of(), List.of(), null, null);
         }
 
         SquadManager mgr = SquadManager.get(serverLevel);
@@ -3683,10 +3711,13 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
         List<BlockPos> defensivePositions = new ArrayList<>();
         List<Vec3> threatDirs = new ArrayList<>();
         List<SquadCoverContext.FiringContact> firingContacts = new ArrayList<>();
+        com.stevesarmy.squad.SquadCoverPeekabilityCache peekabilityCache = null;
 
-        mgr.getSquadById(squadId).ifPresent(squad -> {
+        com.stevesarmy.squad.SquadData squadData = mgr.getSquadById(squadId).orElse(null);
+        if (squadData != null) {
+            peekabilityCache = squadData.getCoverPeekabilityCache();
             long now = level.getGameTime();
-            squad.getThreatIntel().getAllThreats().stream()
+            squadData.getThreatIntel().getAllThreats().stream()
                 .filter(threat -> threat.isAlive && threat.lastVisibleAimPoint != null)
                 .filter(threat -> now - threat.lastSeenTime >= 0
                     && now - threat.lastSeenTime <= SquadCoverContext.FiringContact.MAX_AGE_TICKS)
@@ -3695,7 +3726,7 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
                 .limit(SquadCoverContext.FiringContact.MAX_CONTACTS)
                 .forEach(threat -> firingContacts.add(new SquadCoverContext.FiringContact(
                     threat.threatEntityId, threat.lastVisibleAimPoint, threat.lastSeenTime)));
-        });
+        }
 
         for (LivingEntity member : members) {
             if (member instanceof SoldierEntity ms) {
@@ -3734,7 +3765,8 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
             }
         }
 
-        return new SquadCoverContext(true, 0, 0, occupiedCovers, defensivePositions, threatDirs, firingContacts, ownerPos);
+        return new SquadCoverContext(true, 0, 0, occupiedCovers, defensivePositions, threatDirs,
+            firingContacts, peekabilityCache, ownerPos);
     }
 
     private static void addSquadPosition(List<BlockPos> positions, BlockPos position) {
