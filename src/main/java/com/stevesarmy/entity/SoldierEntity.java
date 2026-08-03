@@ -395,14 +395,22 @@ public class SoldierEntity extends PathfinderMob implements Container {
         }
         
         UUID uuid = ownerUUID.get();
-        if (cachedOwner != null && cachedOwner.getUUID().equals(uuid)) {
+        if (cachedOwner != null
+            && cachedOwner.getUUID().equals(uuid)
+            && cachedOwner.isAlive()
+            && !cachedOwner.isRemoved()
+            && cachedOwner.level() == this.level()) {
             return cachedOwner;
         }
+
+        cachedOwner = null;
         
         if (this.level() instanceof ServerLevel serverLevel) {
             Entity entity = serverLevel.getEntity(uuid);
-            if (entity instanceof LivingEntity) {
-                cachedOwner = (LivingEntity) entity;
+            if (entity instanceof LivingEntity livingEntity
+                && livingEntity.isAlive()
+                && !livingEntity.isRemoved()) {
+                cachedOwner = livingEntity;
                 return cachedOwner;
             }
         }
