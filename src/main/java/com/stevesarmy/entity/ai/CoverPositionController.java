@@ -84,8 +84,11 @@ public class CoverPositionController extends MoveControl {
             }
         }
 
-        // Reject movement when the swept bounding box would collide with a solid block
-        if (sweptBoxCollidesWithSolid(pos)) {
+        // Let vanilla navigation handle vertical step-up/jump geometry. The
+        // custom controller is only a final same-level alignment helper; a
+        // horizontal sweep must not reject a legal half-cover landing path.
+        double verticalDelta = Math.abs(pos.y - this.mob.getY());
+        if (verticalDelta < 0.05D && sweptBoxCollidesWithSolid(pos)) {
             StevesArmyMod.LOGGER.info("[MoveCtl] Soldier {} moveTo to ({}, {}, {}) blocked by solid collision",
                 ((net.minecraft.world.entity.LivingEntity)this.mob).getId(),
                 pos.x, pos.y, pos.z);
