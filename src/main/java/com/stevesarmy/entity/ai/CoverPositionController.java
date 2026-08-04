@@ -39,6 +39,13 @@ public class CoverPositionController extends MoveControl {
     private Vec3 debugLastSetVelocity = Vec3.ZERO;
     private boolean controlledReturnToCover;
     private Vec3 coverAnchorTarget;
+    /**
+     * Transient tactical override used only by a level retreat-fire bound.
+     * Navigation continues selecting the next route node; this controller
+     * converts that route direction into local backward/strafe input while
+     * preserving the weapon-facing direction supplied by the combat goal.
+     */
+    private Vec3 retreatFireTarget;
 
     // Max steps for swept-box collision check
     private static final int COLLISION_SWEEP_STEPS = 8;
@@ -141,6 +148,7 @@ public class CoverPositionController extends MoveControl {
         this.lastResult = MovementResult.FAILED;
         this.lastFailureReason = reason;
         this.controlledReturnToCover = controlledReturn;
+        this.retreatFireTarget = null;
         this.operation = Operation.WAIT;
         this.mob.setZza(0.0F);
         this.mob.setXxa(0.0F);
@@ -161,6 +169,7 @@ public class CoverPositionController extends MoveControl {
         this.lastFailureReason = FailureReason.NONE;
         this.controlledReturnToCover = false;
         this.coverAnchorTarget = null;
+        this.retreatFireTarget = null;
         this.operation = MoveControl.Operation.WAIT;
         this.mob.getNavigation().stop();
         this.mob.setZza(0.0F);
@@ -185,6 +194,14 @@ public class CoverPositionController extends MoveControl {
     public String getDebugMoveSource() { return debugMoveSource; }
     public String getDebugMoveReason() { return debugMoveReason; }
     public Vec3 getDebugLastSetVelocity() { return debugLastSetVelocity; }
+
+    public void setRetreatFireTarget(Vec3 target) {
+        this.retreatFireTarget = target;
+    }
+
+    public void clearRetreatFireTarget() {
+        this.retreatFireTarget = null;
+    }
 
     /**
      * Requests short-range position correction while the soldier is hiding in
@@ -244,11 +261,14 @@ public class CoverPositionController extends MoveControl {
         }
 
         if (lastResult != MovementResult.IN_PROGRESS) {
-            super.tick();
+            boolean retreatFireSteering = tickRetreatFireSteering();
+            if (!retreatFireSteering) {
+                super.tick();
+            }
             applyCoverAnchorVelocity(anchorTarget);
             this.debugLastSetVelocity = this.mob.getDeltaMovement();
-            this.debugMoveSource = "vanilla";
-            this.debugMoveReason = "navigation";
+            this.debugMoveSource = retreatFireSteering ? "retreat_fire" : "vanilla";
+            this.debugMoveReason = retreatFireSteering ? "backward route steering" : "navigation";
             return;
         }
 
@@ -299,5 +319,52 @@ public class CoverPositionController extends MoveControl {
 
     private boolean isPreparingOrReloading() {
         return this.mob instanceof SoldierEntity soldier && soldier.isPreparingOrReloading();
+    }
+
+    /**
+     * Lets the normal path controller calculate its speed and next waypoint,
+     * then replaces its forward-facing input with movement in the local space
+     * of the threat-facing body. The tactical goal admits this only on a flat,
+     * retreating route, so this method never owns step, jump, or turn handling.
+     */
+    private boolean tickRetreatFireSteering() {
+        if (retreatFireTarget == null || this.operation != MoveControl.Operation.MOVE_TO) {
+            return false;
+        }
+
+        Vec3 toThreat = retreatFireTarget.subtract(this.mob.getEyePosition());
+        double threatDistance = toThreat.horizontalDistance();
+        if (threatDistance < 0.001D) {
+            return false;
+        }
+
+        Vec3 toWaypoint = new Vec3(this.wantedX - this.mob.getX(), 0.0D, this.wantedZ - this.mob.getZ());
+        double waypointDistance = toWaypoint.horizontalDistance();
+        if (waypointDistance < 0.001D) {
+            return false;
+        }
+
+        // Preserve vanilla speed calculation and waypoint progression before
+        // substituting the local movement controls below.
+        super.tick();
+
+        float aimYaw = (float) Math.toDegrees(Math.atan2(-toThreat.x, toThreat.z));
+        this.mob.setYRot(aimYaw);
+        this.mob.setYBodyRot(aimYaw);
+        this.mob.setYHeadRot(aimYaw);
+
+        double yawRadians = Math.toRadians(aimYaw);
+        double forwardX = -Math.sin(yawRadians);
+        double forwardZ = Math.cos(yawRadians);
+        double rightX = Math.cos(yawRadians);
+        double rightZ = Math.sin(yawRadians);
+        double routeX = toWaypoint.x / waypointDistance;
+        double routeZ = toWaypoint.z / waypointDistance;
+
+        double forward = routeX * forwardX + routeZ * forwardZ;
+        double strafe = routeX * rightX + routeZ * rightZ;
+        this.mob.setZza((float) forward);
+        this.mob.setXxa((float) strafe);
+        return true;
     }
 }

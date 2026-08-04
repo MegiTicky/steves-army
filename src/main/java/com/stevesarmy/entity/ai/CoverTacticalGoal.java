@@ -13,6 +13,7 @@ import com.stevesarmy.squad.SquadMode;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.util.Mth;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.ai.goal.Goal;
 import net.minecraft.world.entity.ai.navigation.PathNavigation;
@@ -115,6 +116,7 @@ public class CoverTacticalGoal extends Goal {
     private static final int MOBILE_FIRE_INTERVAL_TICKS = 24;
     private static final int MOBILE_FIRE_SUPPORT_INTERVAL_TICKS = 50;
     private static final double MOBILE_FIRE_MAX_TURN_COS = 0.5D;
+    private static final double RETREAT_FIRE_MAX_ALIGNMENT_DEGREES = 45.0D;
     // Attack-mode constants
     private static final int ATTACK_FORWARD_BIAS_BLOCKS = 6;
     private static final double ATTACK_MIN_FORWARD_PROGRESS = 2.0;
@@ -189,7 +191,7 @@ public class CoverTacticalGoal extends Goal {
 
     private enum RouteMovement { NORMAL, CRAWL }
 
-    private enum TacticalBoundPhase { NONE, PATH_PENDING, TRAVEL, MOBILE_FIRE, DEFERRED_TERRAIN }
+    private enum TacticalBoundPhase { NONE, PATH_PENDING, TRAVEL, MOBILE_FIRE, RETREAT_FIRE, DEFERRED_TERRAIN }
 
     private enum TacticalBoundDirection { ADVANCE, RETREAT, REPOSITION }
 
@@ -3350,7 +3352,7 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
             return false;
         }
 
-        if (tacticalBoundPhase == TacticalBoundPhase.MOBILE_FIRE) {
+        if (isTacticalFirePhase()) {
             String stopReason = getMobileFireStopReason(combatGoal);
             if (stopReason != null) {
                 finishMobileFire(combatGoal, stopReason, false);
@@ -3379,6 +3381,7 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
         movementAttemptTarget = null;
         movementAttemptCount = 0;
         SoldierCombatGoal combatGoal = soldier.getCombatGoal();
+        getPositionController().clearRetreatFireTarget();
         setTacticalBoundFire(combatGoal, false, null);
         setTacticalBoundTravel(combatGoal, false);
         navigation.setSpeedModifier(activeSuppressionRouteMovement == RouteMovement.CRAWL
@@ -3387,6 +3390,9 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
     }
 
     private void tickMobileFireAdmission(SoldierCombatGoal combatGoal) {
+        // A completed or deferred retreat-fire bound must never leave the
+        // movement controller holding its threat-facing override.
+        getPositionController().clearRetreatFireTarget();
         Vec3 threatPosition = getBoundThreatPosition();
         if (threatPosition == null) {
             transitionTacticalBound(TacticalBoundPhase.TRAVEL, "no active threat");
@@ -3413,6 +3419,14 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
             return;
         }
 
+        if (tacticalBoundDirection == TacticalBoundDirection.RETREAT) {
+            String retreatReason = getRetreatFireRouteDeferralReason(threatPosition);
+            if (retreatReason != null) {
+                transitionTacticalBound(TacticalBoundPhase.DEFERRED_TERRAIN, retreatReason);
+                return;
+            }
+        }
+
         if (tacticalMobileCooldownTicks > 0) {
             transitionTacticalBound(TacticalBoundPhase.TRAVEL, "moving to cover");
             return;
@@ -3424,11 +3438,20 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
         navigation.setSpeedModifier(MOBILE_FIRE_SPEED);
         setTacticalBoundTravel(combatGoal, false);
         setTacticalBoundFire(combatGoal, true, getBoundThreatId());
-        transitionTacticalBound(TacticalBoundPhase.MOBILE_FIRE,
-            tacticalMobileFireHasCoverage ? "supporting fireteam cover" : "fireteam needs cover fire");
+        if (tacticalBoundDirection == TacticalBoundDirection.RETREAT) {
+            getPositionController().setRetreatFireTarget(threatPosition);
+            long routeAngle = Math.round(getRetreatFireRouteAlignmentDegrees(threatPosition));
+            transitionTacticalBound(TacticalBoundPhase.RETREAT_FIRE,
+                (tacticalMobileFireHasCoverage ? "backward supporting fire" : "backward cover fire")
+                    + " route angle " + routeAngle + "deg");
+        } else {
+            transitionTacticalBound(TacticalBoundPhase.MOBILE_FIRE,
+                tacticalMobileFireHasCoverage ? "supporting fireteam cover" : "fireteam needs cover fire");
+        }
     }
 
     private void finishMobileFire(SoldierCombatGoal combatGoal, String reason, boolean completedBurst) {
+        getPositionController().clearRetreatFireTarget();
         setTacticalBoundFire(combatGoal, false, null);
         setTacticalBoundTravel(combatGoal, true);
         navigation.setSpeedModifier(activeSuppressionRouteMovement == RouteMovement.CRAWL
@@ -3446,7 +3469,11 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
         if (getCoverManager().isSuppressed()) return "incoming suppression";
         if (soldier.isPreparingOrReloading()) return "reload started";
         if (combatGoal == null || !combatGoal.canFireTacticalBound()) return "weapon not ready";
-        return getMobileFireTerrainDeferralReason();
+        String terrainReason = getMobileFireTerrainDeferralReason();
+        if (terrainReason != null) return terrainReason;
+        return tacticalBoundPhase == TacticalBoundPhase.RETREAT_FIRE
+            ? getRetreatFireRouteDeferralReason(getBoundThreatPosition())
+            : null;
     }
 
     @javax.annotation.Nullable
@@ -3475,18 +3502,51 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
         return turnCos < MOBILE_FIRE_MAX_TURN_COS ? "sharp route turn" : null;
     }
 
+    @javax.annotation.Nullable
+    private String getRetreatFireRouteDeferralReason(Vec3 threatPosition) {
+        double alignmentDegrees = getRetreatFireRouteAlignmentDegrees(threatPosition);
+        if (Double.isNaN(alignmentDegrees)) return null;
+        return alignmentDegrees > RETREAT_FIRE_MAX_ALIGNMENT_DEGREES
+            ? "retreat route angle " + Math.round(alignmentDegrees) + "deg"
+            : null;
+    }
+
+    private double getRetreatFireRouteAlignmentDegrees(Vec3 threatPosition) {
+        Path path = navigation.getPath();
+        if (path == null || path.isDone()) return Double.NaN;
+
+        int nextIndex = path.getNextNodeIndex();
+        if (nextIndex >= path.getNodeCount()) return Double.NaN;
+        Vec3 route = Vec3.atCenterOf(path.getNode(nextIndex).asBlockPos()).subtract(soldier.position());
+        Vec3 awayFromThreat = soldier.position().subtract(threatPosition);
+        double routeLength = route.horizontalDistance();
+        double retreatLength = awayFromThreat.horizontalDistance();
+        if (routeLength < 0.15D || retreatLength < 0.15D) return Double.NaN;
+
+        double routeDotRetreat = (route.x * awayFromThreat.x + route.z * awayFromThreat.z)
+            / (routeLength * retreatLength);
+        return Math.toDegrees(Math.acos(Mth.clamp(routeDotRetreat, -1.0D, 1.0D)));
+    }
+
+    private boolean isTacticalFirePhase() {
+        return tacticalBoundPhase == TacticalBoundPhase.MOBILE_FIRE
+            || tacticalBoundPhase == TacticalBoundPhase.RETREAT_FIRE;
+    }
+
     private void transitionTacticalBound(TacticalBoundPhase phase, String reason) {
         boolean changed = tacticalBoundPhase != phase || !Objects.equals(tacticalBoundReason, reason);
         tacticalBoundPhase = phase;
         tacticalBoundReason = reason;
         soldier.syncTacticalBoundDebug(phase.name(), phase == TacticalBoundPhase.NONE ? "-"
             : tacticalBoundDirection.name(), tacticalBoundTarget, reason);
-        soldier.syncTacticalBoundCooldown(phase == TacticalBoundPhase.MOBILE_FIRE
+        soldier.syncTacticalBoundCooldown((phase == TacticalBoundPhase.MOBILE_FIRE
+            || phase == TacticalBoundPhase.RETREAT_FIRE)
             ? tacticalMobileFireTicks : tacticalMobileCooldownTicks);
         if (changed && DiagnosticLogManager.isCoverLoggingEnabled()) {
             StevesArmyMod.LOGGER.info("[TacticalBound] Soldier {} phase={} direction={} target={} cooldown={} reason={}",
                 soldier.getId(), phase, tacticalBoundDirection, tacticalBoundTarget,
-                phase == TacticalBoundPhase.MOBILE_FIRE ? tacticalMobileFireTicks : tacticalMobileCooldownTicks, reason);
+                (phase == TacticalBoundPhase.MOBILE_FIRE || phase == TacticalBoundPhase.RETREAT_FIRE)
+                    ? tacticalMobileFireTicks : tacticalMobileCooldownTicks, reason);
         }
     }
 

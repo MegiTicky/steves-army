@@ -1005,7 +1005,8 @@ private static void renderSoldierCoverLabels(PoseStack poseStack, Vec3 cameraPos
                     soldier.getSyncedTacticalBoundReason());
                 int cooldown = soldier.getSyncedTacticalBoundCooldown();
                 boundLabel += " cd=" + cooldown;
-                int boundColor = "MOBILE_FIRE".equals(boundPhase) ? 0xFFFF5555
+                int boundColor = "RETREAT_FIRE".equals(boundPhase) ? 0xFFFFAA00
+                    : "MOBILE_FIRE".equals(boundPhase) ? 0xFFFF5555
                     : "DEFERRED_TERRAIN".equals(boundPhase) ? 0xFFFFAA00 : 0xFF55FFFF;
                 font.drawInBatch(boundLabel, -font.width(boundLabel) / 2.0f, lineOffset, boundColor, false,
                     poseStack.last().pose(), bufferSource, net.minecraft.client.gui.Font.DisplayMode.NORMAL, 0, 15728880);
