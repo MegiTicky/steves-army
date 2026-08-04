@@ -78,10 +78,6 @@ public class SoldierCombatGoal extends Goal {
     private int findNewTargetLogCounter = 0;
 
     private boolean isSuppressing = false;
-    /** True while cover navigation owns facing and movement for a tactical bound. */
-    private boolean tacticalBoundTravel;
-    private boolean tacticalBoundFire;
-    private UUID tacticalBoundThreatId;
     private boolean reloadPending = false;
     private boolean tacticalReloadPending = false;
     private boolean reloadStartRequested = false;
@@ -369,15 +365,6 @@ public class SoldierCombatGoal extends Goal {
     @Override
     public void tick() {
         if (soldier.isHealing()) return;
-
-        if (tacticalBoundTravel) {
-            // Navigation must own body rotation while crossing terrain. In
-            // particular, do not let combat look-at commands turn a mover into
-            // a strafing/backward walker near steps or half cover.
-            cancelAllSuppression();
-            GunIntegration.aim(soldier, false);
-            return;
-        }
 
         threatTracker.update(soldier);
         
@@ -2570,77 +2557,6 @@ public class SoldierCombatGoal extends Goal {
 
     public boolean isSuppressing() {
         return isSuppressing;
-    }
-
-    public void setTacticalBoundTravel(boolean active) {
-        if (tacticalBoundTravel == active) return;
-        tacticalBoundTravel = active;
-        if (active) {
-            cancelAllSuppression();
-            GunIntegration.aim(soldier, false);
-        }
-    }
-
-    public boolean isTacticalBoundTravel() {
-        return tacticalBoundTravel;
-    }
-
-    public void setTacticalBoundFire(boolean active, UUID threatId) {
-        tacticalBoundFire = active;
-        tacticalBoundThreatId = active ? threatId : null;
-    }
-
-    public boolean isSuppressingThreat(UUID threatId) {
-        return isSuppressing && suppressionTargetUUID != null
-            && (threatId == null || threatId.equals(suppressionTargetUUID));
-    }
-
-    /** Returns whether this soldier can provide stationary fire support now. */
-    public boolean canProvideCoverFire(Vec3 threatPosition) {
-        return canProvideCoverFire(null, threatPosition);
-    }
-
-    public boolean canProvideCoverFire(UUID threatId, Vec3 threatPosition) {
-        if (!GunIntegration.isTaczLoaded() || !GunIntegration.hasGun(soldier)
-            || soldier.isPreparingOrReloading()
-            || GunIntegration.isBolting(soldier)
-            || GunIntegration.isDrawing(soldier)
-            || getTotalAmmo() <= 0) {
-            return false;
-        }
-        return threatPosition != null
-            && TargetAcquisition.hasNearLineOfSightToPosition(soldier, threatPosition, SUPPRESSION_LOS_TOLERANCE)
-            && ((isSuppressingThreatAt(threatId, threatPosition) || isTacticalBoundFireAt(threatId, threatPosition))
-                || (soldier.getCoverBehaviorManager().isInCover()
-                && (soldier.getPeekController().isExposed()
-                    || soldier.getPeekController().isMovingToPeek())));
-    }
-
-    public boolean canFireTacticalBound() {
-        return GunIntegration.isTaczLoaded() && GunIntegration.hasGun(soldier)
-            && !soldier.isPreparingOrReloading()
-            && !GunIntegration.isBolting(soldier)
-            && !GunIntegration.isDrawing(soldier)
-            && getTotalAmmo() > 0;
-    }
-
-    public boolean canStartTacticalFireBound() {
-        return canFireTacticalBound()
-            && ((target != null && target.isAlive()) || isSuppressing);
-    }
-
-    private boolean isSuppressingThreatAt(UUID threatId, Vec3 threatPosition) {
-        if (!isSuppressing) return false;
-        if (threatId != null && isSuppressingThreat(threatId)) return true;
-        return suppressionTargetPos != null
-            && threatPosition != null
-            && suppressionTargetPos.getCenter().distanceToSqr(threatPosition)
-                <= SUPPRESSION_LOS_TOLERANCE * SUPPRESSION_LOS_TOLERANCE;
-    }
-
-    private boolean isTacticalBoundFireAt(UUID threatId, Vec3 threatPosition) {
-        return tacticalBoundFire && ((threatId != null && threatId.equals(tacticalBoundThreatId))
-            || (threatId == null && tacticalBoundThreatId == null));
     }
 
     public BlockPos getSuppressireTargetPos() {
