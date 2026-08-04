@@ -996,6 +996,18 @@ private static void renderSoldierCoverLabels(PoseStack poseStack, Vec3 cameraPos
             font.drawInBatch(srcLabel, -font.width(srcLabel) / 2.0f, lineOffset, 0xFFAA00 | 0xFF000000, false,
                              poseStack.last().pose(), bufferSource, net.minecraft.client.gui.Font.DisplayMode.NORMAL, 0, 15728880);
             lineOffset += 10;
+
+            String boundPhase = soldier.getSyncedTacticalBoundPhase();
+            if (!"NONE".equals(boundPhase)) {
+                BlockPos boundTarget = soldier.getSyncedTacticalBoundTarget();
+                String boundLabel = String.format("Bound: %s %s -> %s (%s)",
+                    boundPhase, soldier.getSyncedTacticalBoundDirection(), boundTarget,
+                    soldier.getSyncedTacticalBoundReason());
+                int boundColor = "FIRE_BOUND".equals(boundPhase) ? 0xFFFF5555 : 0xFF55FFFF;
+                font.drawInBatch(boundLabel, -font.width(boundLabel) / 2.0f, lineOffset, boundColor, false,
+                    poseStack.last().pose(), bufferSource, net.minecraft.client.gui.Font.DisplayMode.NORMAL, 0, 15728880);
+                lineOffset += 10;
+            }
             
             String modeLabel = soldier.getSquadMode().name();
             font.drawInBatch(modeLabel, -font.width(modeLabel) / 2.0f, lineOffset, 0xFFAAAAAA, false,

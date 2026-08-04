@@ -1,5 +1,7 @@
 package com.stevesarmy.entity.ai;
 
+import com.stevesarmy.StevesArmyMod;
+import com.stevesarmy.debug.DiagnosticLogManager;
 import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.util.SpacingHelper;
 import net.minecraft.core.BlockPos;
@@ -30,8 +32,14 @@ public class SoldierMoveToPingGoal extends Goal {
         if (!soldier.hasValidPingMoveTarget()) return false;
         captureCommand();
         computeNavigationTarget();
-        if (navigationTarget != null && soldier.getCoverTacticalGoal()
-            .requestGoToRelocation(navigationTarget, commandGeneration)) {
+        boolean coverRelocationAccepted = navigationTarget != null && soldier.getCoverTacticalGoal()
+            .requestGoToRelocation(navigationTarget, commandGeneration);
+        if (DiagnosticLogManager.isCoverLoggingEnabled()) {
+            StevesArmyMod.LOGGER.info("[GoToBound] Soldier {} command={} rawTarget={} navTarget={} route={}",
+                soldier.getId(), commandGeneration, rawTarget, navigationTarget,
+                coverRelocationAccepted ? "cover_relocation" : "direct_navigation");
+        }
+        if (coverRelocationAccepted) {
             return false;
         }
         return rawTarget != null;
@@ -54,6 +62,10 @@ public class SoldierMoveToPingGoal extends Goal {
         soldier.cancelCoverMovement();
         soldier.clearFormationOffset();
         computeNavigationTarget();
+        if (DiagnosticLogManager.isCoverLoggingEnabled()) {
+            StevesArmyMod.LOGGER.info("[GoToBound] Soldier {} starting direct Go To navigation command={} target={}",
+                soldier.getId(), commandGeneration, navigationTarget);
+        }
         submitNavigation();
     }
 
@@ -83,8 +95,14 @@ public class SoldierMoveToPingGoal extends Goal {
                 captureCommand();
                 soldier.clearFormationOffset();
                 computeNavigationTarget();
-                if (navigationTarget != null && soldier.getCoverTacticalGoal()
-                    .requestGoToRelocation(navigationTarget, commandGeneration)) {
+                boolean coverRelocationAccepted = navigationTarget != null && soldier.getCoverTacticalGoal()
+                    .requestGoToRelocation(navigationTarget, commandGeneration);
+                if (DiagnosticLogManager.isCoverLoggingEnabled()) {
+                    StevesArmyMod.LOGGER.info("[GoToBound] Soldier {} replacement command={} target={} route={}",
+                        soldier.getId(), commandGeneration, navigationTarget,
+                        coverRelocationAccepted ? "cover_relocation" : "direct_navigation");
+                }
+                if (coverRelocationAccepted) {
                     soldier.getNavigation().stop();
                     return;
                 }

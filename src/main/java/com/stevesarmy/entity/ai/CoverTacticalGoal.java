@@ -298,6 +298,11 @@ public class CoverTacticalGoal extends Goal {
         if (destination == null || !soldier.hasValidPingMoveTarget()
             || soldier.getPingMoveGeneration() != commandGeneration
             || failedGoToRelocationGeneration == commandGeneration) {
+            if (DiagnosticLogManager.isCoverLoggingEnabled()) {
+                StevesArmyMod.LOGGER.info("[GoToBound] Soldier {} rejected cover relocation command={} destination={} reason={}",
+                    soldier.getId(), commandGeneration, destination,
+                    failedGoToRelocationGeneration == commandGeneration ? "previous_cover_search_failed" : "invalid_command");
+            }
             return false;
         }
         if (relocationType == RelocationType.GO_TO
@@ -309,6 +314,10 @@ public class CoverTacticalGoal extends Goal {
         relocationType = RelocationType.GO_TO;
         relocationCenter = destination.immutable();
         relocationCommandGeneration = commandGeneration;
+        if (DiagnosticLogManager.isCoverLoggingEnabled()) {
+            StevesArmyMod.LOGGER.info("[GoToBound] Soldier {} accepted cover relocation command={} center={}",
+                soldier.getId(), commandGeneration, relocationCenter);
+        }
         return true;
     }
 
@@ -3308,23 +3317,28 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
             if (threatPosition == null) {
                 tacticalBoundPhase = TacticalBoundPhase.TRAVEL;
                 setTacticalBoundTravel(combatGoal, true);
+                syncTacticalBoundDebug("TRAVEL", TacticalBoundDirection.REPOSITION, target, "no active threat");
+                logTacticalBoundDecision(target, "TRAVEL", "no active threat");
                 return false;
             }
 
             tacticalBoundDirection = classifyBoundDirection(threatPosition, target);
+            boolean hasStableCover = getCoverManager().getCurrentCover() != null;
+            boolean canFireBound = combatGoal != null && combatGoal.canStartTacticalFireBound();
+            boolean fireteamCoverage = hasStableCover && canFireBound
+                && hasFireteamCoverage(getBoundThreatId(), threatPosition);
             // A soldier already in stable cover can provide one last short
             // burst when the fireteam has no other valid coverer. Open-ground
             // movers travel immediately; there is no safe bound position yet.
-            if (getCoverManager().getCurrentCover() != null
-                && combatGoal != null
-                && combatGoal.canStartTacticalFireBound()
-                && !hasFireteamCoverage(getBoundThreatId(), threatPosition)) {
+            if (hasStableCover && canFireBound && !fireteamCoverage) {
                 tacticalBoundPhase = TacticalBoundPhase.FIRE_BOUND;
                 tacticalFireBoundTicks = TACTICAL_FIRE_BOUND_TICKS;
                 navigation.stop();
                 getPositionController().clear();
                 combatGoal.setTacticalBoundFire(true, getBoundThreatId());
                 combatGoal.setTacticalBoundTravel(false);
+                syncTacticalBoundDebug("FIRE_BOUND", tacticalBoundDirection, target, "no fireteam coverer");
+                logTacticalBoundDecision(target, "FIRE_BOUND", "no fireteam coverer");
                 if (DiagnosticLogManager.isCoverLoggingEnabled()) {
                     StevesArmyMod.LOGGER.info("[TacticalBound] Soldier {} starting {} fire bound before moving to {}",
                         soldier.getId(), tacticalBoundDirection, target);
@@ -3335,6 +3349,9 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
 
         tacticalBoundPhase = TacticalBoundPhase.PATH_PENDING;
         setTacticalBoundTravel(combatGoal, true);
+        String reason = getTacticalTravelReason(combatGoal);
+        syncTacticalBoundDebug("PATH_PENDING", tacticalBoundDirection, target, reason);
+        logTacticalBoundDecision(target, "PATH_PENDING", reason);
         return false;
     }
 
@@ -3353,6 +3370,8 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
                 startCoverPath(targetCover);
             }
             tacticalBoundPhase = TacticalBoundPhase.TRAVEL;
+            syncTacticalBoundDebug("TRAVEL", tacticalBoundDirection, tacticalBoundTarget, "navigation owns facing");
+            logTacticalBoundDecision(tacticalBoundTarget, "TRAVEL", "navigation owns facing");
             return false;
         }
 
@@ -3362,14 +3381,21 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
                 || hasFireteamCoverage(getBoundThreatId(), threatPosition)
                 || soldier.isPreparingOrReloading()) {
                 if (getCoverManager().isSuppressed()) {
+                    syncTacticalBoundDebug("NONE", tacticalBoundDirection, tacticalBoundTarget, "movement interrupted by suppression");
+                    logTacticalBoundDecision(tacticalBoundTarget, "NONE", "movement interrupted by suppression");
                     clearTacticalBound();
                     return false;
                 }
+                String reason = threatPosition == null ? "threat lost"
+                    : soldier.isPreparingOrReloading() ? "reload started"
+                    : "fireteam coverer became valid";
                 tacticalBoundPhase = TacticalBoundPhase.PATH_PENDING;
                 setTacticalBoundFire(combatGoal, false, null);
                 setTacticalBoundTravel(combatGoal, true);
                 startCoverPath(targetCover);
                 tacticalBoundPhase = TacticalBoundPhase.TRAVEL;
+                syncTacticalBoundDebug("TRAVEL", tacticalBoundDirection, tacticalBoundTarget, reason);
+                logTacticalBoundDecision(tacticalBoundTarget, "TRAVEL", reason);
                 return false;
             }
 
@@ -3381,6 +3407,8 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
                 setTacticalBoundTravel(combatGoal, true);
                 startCoverPath(targetCover);
                 tacticalBoundPhase = TacticalBoundPhase.TRAVEL;
+                syncTacticalBoundDebug("TRAVEL", tacticalBoundDirection, tacticalBoundTarget, "burst complete");
+                logTacticalBoundDecision(tacticalBoundTarget, "TRAVEL", "burst complete");
             }
             return true;
         }
@@ -3399,6 +3427,27 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
         SoldierCombatGoal combatGoal = soldier.getCombatGoal();
         setTacticalBoundFire(combatGoal, false, null);
         setTacticalBoundTravel(combatGoal, false);
+        soldier.syncTacticalBoundDebug("NONE", "-", BlockPos.ZERO, "idle");
+    }
+
+    private String getTacticalTravelReason(SoldierCombatGoal combatGoal) {
+        Vec3 threatPosition = getBoundThreatPosition();
+        if (threatPosition == null) return "no active threat";
+        if (getCoverManager().getCurrentCover() == null) return "not in stable cover";
+        if (combatGoal == null || !combatGoal.canStartTacticalFireBound()) return "cannot start fire bound";
+        return hasFireteamCoverage(getBoundThreatId(), threatPosition)
+            ? "fireteam coverer active" : "starting path";
+    }
+
+    private void syncTacticalBoundDebug(String phase, TacticalBoundDirection direction, BlockPos target, String reason) {
+        soldier.syncTacticalBoundDebug(phase, direction.name(), target, reason);
+    }
+
+    private void logTacticalBoundDecision(BlockPos target, String phase, String reason) {
+        if (DiagnosticLogManager.isCoverLoggingEnabled()) {
+            StevesArmyMod.LOGGER.info("[TacticalBound] Soldier {} phase={} direction={} target={} reason={}",
+                soldier.getId(), phase, tacticalBoundDirection, target, reason);
+        }
     }
 
     private void setTacticalBoundTravel(SoldierCombatGoal combatGoal, boolean active) {

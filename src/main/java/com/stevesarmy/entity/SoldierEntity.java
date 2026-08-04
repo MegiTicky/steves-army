@@ -145,6 +145,16 @@ public class SoldierEntity extends PathfinderMob implements Container {
     private static final EntityDataAccessor<Integer> RECALL_TICKS =
         SynchedEntityData.defineId(SoldierEntity.class, EntityDataSerializers.INT);
 
+    // Transient server-authored state used by the cover debug renderer.
+    private static final EntityDataAccessor<String> TACTICAL_BOUND_PHASE =
+        SynchedEntityData.defineId(SoldierEntity.class, EntityDataSerializers.STRING);
+    private static final EntityDataAccessor<String> TACTICAL_BOUND_DIRECTION =
+        SynchedEntityData.defineId(SoldierEntity.class, EntityDataSerializers.STRING);
+    private static final EntityDataAccessor<BlockPos> TACTICAL_BOUND_TARGET =
+        SynchedEntityData.defineId(SoldierEntity.class, EntityDataSerializers.BLOCK_POS);
+    private static final EntityDataAccessor<String> TACTICAL_BOUND_REASON =
+        SynchedEntityData.defineId(SoldierEntity.class, EntityDataSerializers.STRING);
+
     @Nullable
     private UUID squadId;
     private SquadFormation squadFormation = SquadFormation.NONE;
@@ -291,6 +301,10 @@ public class SoldierEntity extends PathfinderMob implements Container {
         this.entityData.define(FIRE_DISCIPLINE, FireDiscipline.STANDARD.ordinal());
         this.entityData.define(FIRE_TEAM, FireTeam.ALPHA.ordinal());
         this.entityData.define(RECALL_TICKS, 0);
+        this.entityData.define(TACTICAL_BOUND_PHASE, "NONE");
+        this.entityData.define(TACTICAL_BOUND_DIRECTION, "-");
+        this.entityData.define(TACTICAL_BOUND_TARGET, BlockPos.ZERO);
+        this.entityData.define(TACTICAL_BOUND_REASON, "idle");
     }
 
     @Override
@@ -1324,6 +1338,29 @@ public BlockPos getPingMoveTarget() {
     
     public BlockPos getSyncedCoverLastPos() {
         return this.entityData.get(COVER_LAST_POS);
+    }
+
+    public void syncTacticalBoundDebug(String phase, String direction, BlockPos target, String reason) {
+        this.entityData.set(TACTICAL_BOUND_PHASE, phase);
+        this.entityData.set(TACTICAL_BOUND_DIRECTION, direction);
+        this.entityData.set(TACTICAL_BOUND_TARGET, target == null ? BlockPos.ZERO : target);
+        this.entityData.set(TACTICAL_BOUND_REASON, reason);
+    }
+
+    public String getSyncedTacticalBoundPhase() {
+        return this.entityData.get(TACTICAL_BOUND_PHASE);
+    }
+
+    public String getSyncedTacticalBoundDirection() {
+        return this.entityData.get(TACTICAL_BOUND_DIRECTION);
+    }
+
+    public BlockPos getSyncedTacticalBoundTarget() {
+        return this.entityData.get(TACTICAL_BOUND_TARGET);
+    }
+
+    public String getSyncedTacticalBoundReason() {
+        return this.entityData.get(TACTICAL_BOUND_REASON);
     }
     
     public void syncSuppressionLevel(float level) {
