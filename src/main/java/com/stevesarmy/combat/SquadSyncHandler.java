@@ -3,6 +3,8 @@ package com.stevesarmy.combat;
 import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.network.NetworkHandler;
 import com.stevesarmy.network.SquadStatusSyncPacket;
+import com.stevesarmy.squad.OwnedSoldierRegistry;
+import com.stevesarmy.entity.SoldierEntity;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
@@ -19,6 +21,19 @@ public class SquadSyncHandler {
         tickCounter++;
         if (tickCounter < 20) return;
         tickCounter = 0;
+
+        for (net.minecraft.server.level.ServerLevel level : event.getServer().getAllLevels()) {
+            for (var entity : level.getEntities().getAll()) {
+                if (entity instanceof SoldierEntity soldier && !soldier.level().isClientSide) {
+                    OwnedSoldierRegistry registry = OwnedSoldierRegistry.get(event.getServer());
+                    if (soldier.isAlive()) {
+                        registry.refresh(soldier, level);
+                    } else {
+                        registry.remove(soldier.getUUID());
+                    }
+                }
+            }
+        }
 
         for (ServerPlayer player : event.getServer().getPlayerList().getPlayers()) {
             SquadStatusSyncPacket packet = SquadStatusSyncPacket.createForPlayer(player);

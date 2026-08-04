@@ -8,6 +8,7 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.tags.FluidTags;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.Mob;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
@@ -28,38 +29,45 @@ public class RecallHelper {
     private static final int ENEMY_SAFE_DISTANCE = 10;
     private static final int VERTICAL_SEARCH_RANGE = 12;
 
-    public static void executeRecall(SoldierEntity soldier) {
-        if (soldier.level().isClientSide) return;
-        if (!(soldier.level() instanceof ServerLevel serverLevel)) return;
+    @Nullable
+    public static SoldierEntity executeRecall(SoldierEntity soldier, ServerPlayer player) {
+        if (soldier.level().isClientSide) return null;
+        ServerLevel destinationLevel = player.serverLevel();
 
-        LivingEntity owner = soldier.getOwner();
-        if (!(owner instanceof ServerPlayer player)) {
-            soldier.cancelRecall();
-            return;
-        }
-
-        BlockPos pos = findSafeRecallPosition(serverLevel, soldier, player);
+        BlockPos pos = findSafeRecallPosition(destinationLevel, soldier, player);
         if (pos == null) {
             soldier.cancelRecall();
             player.sendSystemMessage(net.minecraft.network.chat.Component.literal(
                 "No safe recall position found for " + soldier.getName().getString()));
-            return;
+            return null;
         }
 
-        soldier.teleportTo(pos.getX() + 0.5, pos.getY(), pos.getZ() + 0.5);
-        soldier.setSquadMode(com.stevesarmy.squad.SquadMode.FOLLOW);
-        soldier.setTarget(null);
-        soldier.getNavigation().stop();
+        SoldierEntity recalled = soldier;
+        if (soldier.level() != destinationLevel) {
+            Entity transferred = soldier.changeDimension(destinationLevel);
+            if (!(transferred instanceof SoldierEntity transferredSoldier)) {
+                player.sendSystemMessage(net.minecraft.network.chat.Component.literal(
+                    "Could not transfer " + soldier.getName().getString() + " to your dimension"));
+                return null;
+            }
+            recalled = transferredSoldier;
+        }
+
+        recalled.teleportTo(pos.getX() + 0.5, pos.getY(), pos.getZ() + 0.5);
+        recalled.setSquadMode(com.stevesarmy.squad.SquadMode.FOLLOW);
+        recalled.setTarget(null);
+        recalled.getNavigation().stop();
 
         player.sendSystemMessage(net.minecraft.network.chat.Component.literal(
-            "Recalled " + soldier.getName().getString()));
-        soldier.setRecallTicks(0);
+            "Recalled " + recalled.getName().getString()));
+        recalled.setRecallTicks(0);
+        return recalled;
     }
 
     @Nullable
     public static BlockPos findSafeRecallPosition(ServerLevel level, SoldierEntity soldier, Player player) {
         BlockPos playerPos = player.blockPosition();
-        Vec3 soldierPos = soldier.position();
+        Vec3 soldierPos = soldier.level() == level ? soldier.position() : player.position();
 
         List<BlockPos> candidates = new ArrayList<>();
         double angleOffset = level.random.nextDouble() * (Math.PI * 2 / ANGLES);

@@ -6,6 +6,7 @@ import com.stevesarmy.inventory.SoldierInventory;
 import com.stevesarmy.squad.FireDiscipline;
 import com.stevesarmy.squad.FireTeam;
 import com.stevesarmy.squad.FireTeamAssignment;
+import com.stevesarmy.squad.OwnedSoldierRegistry;
 import com.stevesarmy.squad.SquadMode;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.server.level.ServerLevel;
@@ -17,6 +18,7 @@ import net.minecraftforge.network.NetworkEvent;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.function.Supplier;
 
@@ -48,8 +50,9 @@ public class SquadStatusSyncPacket {
             int coverState = buf.readVarInt();
             double distance = buf.readDouble();
             int recallTicks = buf.readVarInt();
+            boolean loaded = buf.readBoolean();
             entries.add(new SoldierStatusEntry(entityId, entityIntId, name, health, maxHealth, totalAmmo, gunStack,
-                squadModeOrdinal, fireDisciplineOrdinal, fireTeamOrdinal, coverState, distance, recallTicks));
+                squadModeOrdinal, fireDisciplineOrdinal, fireTeamOrdinal, coverState, distance, recallTicks, loaded));
         }
         return new SquadStatusSyncPacket(entries);
     }
@@ -70,6 +73,7 @@ public class SquadStatusSyncPacket {
             buf.writeVarInt(entry.coverState);
             buf.writeDouble(entry.distance);
             buf.writeVarInt(entry.recallTicks);
+            buf.writeBoolean(entry.loaded);
         }
     }
 
@@ -82,49 +86,42 @@ public class SquadStatusSyncPacket {
 
     public static SquadStatusSyncPacket createForPlayer(ServerPlayer player) {
         List<SoldierStatusEntry> entries = new ArrayList<>();
-        if (player.level() instanceof ServerLevel) {
-            ServerLevel serverLevel = (ServerLevel) player.level();
-            List<SoldierEntity> soldiers = new ArrayList<>();
-            for (var entity : serverLevel.getEntities().getAll()) {
-                if (entity instanceof SoldierEntity s && s.isOwnedBy(player)) {
-                    soldiers.add(s);
-                }
-            }
-            FireTeamAssignment fireTeamAssignment = FireTeamAssignment.get(serverLevel, player.getUUID());
-            soldiers.sort(Comparator
-                .comparingInt((SoldierEntity soldier) -> fireTeamAssignment.getTeamFor(soldier.getUUID()).ordinal())
-                .thenComparing(soldier -> soldier.getName().getString(), String.CASE_INSENSITIVE_ORDER)
-                .thenComparing(SoldierEntity::getUUID));
-            for (SoldierEntity soldier : soldiers) {
-
-                ItemStack gunStack = ItemStack.EMPTY;
-                int totalAmmo = 0;
-                SoldierInventory inv = soldier.getSoldierInventory();
-                if (inv != null) {
-                    ItemStack mainHand = inv.getItem(SoldierInventory.SLOT_MAIN_HAND);
-                    if (!mainHand.isEmpty()) {
-                        gunStack = mainHand.copy();
+        if (player.getServer() != null) {
+            OwnedSoldierRegistry registry = OwnedSoldierRegistry.get(player.getServer());
+            Map<UUID, SoldierEntity> loadedSoldiers = new java.util.HashMap<>();
+            for (ServerLevel level : player.getServer().getAllLevels()) {
+                for (var entity : level.getEntities().getAll()) {
+                    if (entity instanceof SoldierEntity soldier && soldier.isOwnedBy(player)) {
+                        if (soldier.isAlive()) {
+                            loadedSoldiers.put(soldier.getUUID(), soldier);
+                            registry.refresh(soldier, level);
+                        } else {
+                            registry.remove(soldier.getUUID());
+                        }
                     }
                 }
-                if (soldier.getCombatGoal() != null) {
-                    totalAmmo = soldier.getCombatGoal().getTotalAmmo();
-                }
-
+            }
+            registry.pruneDeadEntries();
+            FireTeamAssignment fireTeamAssignment = FireTeamAssignment.get(player.getServer().overworld(), player.getUUID());
+            for (OwnedSoldierRegistry.Entry snapshot : registry.getOwned(player.getUUID())) {
+                SoldierEntity soldier = loadedSoldiers.get(snapshot.soldierId());
+                boolean loaded = soldier != null && soldier.isAlive();
+                int teamOrdinal = loaded ? fireTeamAssignment.getTeamFor(soldier.getUUID()).ordinal() : snapshot.fireTeam();
                 entries.add(new SoldierStatusEntry(
-                    soldier.getUUID(),
-                    soldier.getId(),
-                    soldier.getName().getString(),
-                    soldier.getHealth(),
-                    soldier.getMaxHealth(),
-                    totalAmmo,
-                    gunStack,
-                    soldier.getSquadMode().ordinal(),
-                    soldier.getFireDiscipline().ordinal(),
-                    fireTeamAssignment.getTeamFor(soldier.getUUID()).ordinal(),
-                    soldier.getSyncedCoverState(),
-                    soldier.distanceTo(player),
-                    soldier.getRecallTicks()
-                ));
+                    snapshot.soldierId(),
+                    loaded ? soldier.getId() : -1,
+                    loaded ? soldier.getName().getString() : snapshot.name(),
+                    loaded ? soldier.getHealth() : snapshot.health(),
+                    loaded ? soldier.getMaxHealth() : snapshot.maxHealth(),
+                    loaded && soldier.getCombatGoal() != null ? soldier.getCombatGoal().getTotalAmmo() : snapshot.totalAmmo(),
+                    loaded ? soldier.getSoldierInventory().getItem(SoldierInventory.SLOT_MAIN_HAND).copy() : snapshot.gunStack(),
+                    loaded ? soldier.getSquadMode().ordinal() : snapshot.squadMode(),
+                    loaded ? soldier.getFireDiscipline().ordinal() : snapshot.fireDiscipline(),
+                    teamOrdinal,
+                    loaded ? soldier.getSyncedCoverState() : snapshot.coverState(),
+                    loaded ? soldier.distanceTo(player) : -1.0D,
+                    loaded ? soldier.getRecallTicks() : snapshot.recallTicks(),
+                    loaded));
             }
         }
         return new SquadStatusSyncPacket(entries);
@@ -144,11 +141,12 @@ public class SquadStatusSyncPacket {
         public final int coverState;
         public final double distance;
         public final int recallTicks;
+        public final boolean loaded;
 
         public SoldierStatusEntry(UUID entityId, int entityIntId, String name, float health, float maxHealth,
                                     int totalAmmo, ItemStack gunStack, int squadModeOrdinal,
                                    int fireDisciplineOrdinal, int fireTeamOrdinal,
-                                   int coverState, double distance, int recallTicks) {
+                                   int coverState, double distance, int recallTicks, boolean loaded) {
             this.entityId = entityId;
             this.entityIntId = entityIntId;
             this.name = name;
@@ -162,6 +160,7 @@ public class SquadStatusSyncPacket {
             this.coverState = coverState;
             this.distance = distance;
             this.recallTicks = recallTicks;
+            this.loaded = loaded;
         }
 
         public SquadMode getSquadMode() { return SquadMode.values()[squadModeOrdinal % SquadMode.values().length]; }

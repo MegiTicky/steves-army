@@ -294,7 +294,7 @@ public class SoldierEntity extends PathfinderMob implements Container {
 
     @Override
     protected void registerGoals() {
-        this.combatGoal = new SoldierCombatGoal(this);
+        initializeCombatGoal();
         
         this.goalSelector.addGoal(0, new SoldierHoleRescueGoal(this));
         this.goalSelector.addGoal(0, new FloatGoal(this));
@@ -308,6 +308,15 @@ public class SoldierEntity extends PathfinderMob implements Container {
         this.goalSelector.addGoal(5, new SoldierStrollGoal(this, 0.8D));
         this.goalSelector.addGoal(6, new LookAtPlayerGoal(this, Player.class, 8.0F));
         this.goalSelector.addGoal(7, new RandomLookAroundGoal(this));
+    }
+
+    /**
+     * Stores the combat goal so cover and combat coordination use the same instance.
+     * Subclasses with custom goal layouts must use this instead of constructing one directly.
+     */
+    protected final SoldierCombatGoal initializeCombatGoal() {
+        this.combatGoal = new SoldierCombatGoal(this);
+        return this.combatGoal;
     }
 
     @Override
@@ -816,15 +825,6 @@ public class SoldierEntity extends PathfinderMob implements Container {
             }
         }
 
-        if (!this.level().isClientSide && !this.isPassenger() && isRecalling()) {
-            int ticks = getRecallTicks() - 1;
-            if (ticks <= 0) {
-                com.stevesarmy.combat.RecallHelper.executeRecall(this);
-            } else {
-                setRecallTicks(ticks);
-                this.getNavigation().stop();
-            }
-        }
     }
 
     @Override

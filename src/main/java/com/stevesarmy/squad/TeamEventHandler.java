@@ -13,6 +13,7 @@ import net.minecraft.world.effect.MobEffectInstance;
 import net.minecraft.world.effect.MobEffects;
 import net.minecraft.world.level.Level;
 import net.minecraftforge.event.entity.EntityJoinLevelEvent;
+import net.minecraftforge.event.entity.living.LivingDeathEvent;
 import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
@@ -38,6 +39,11 @@ public class TeamEventHandler {
                 TeamManager.assignToEnemyTeam(enemy);
                 StevesArmyMod.LOGGER.info("TeamEventHandler: assigned enemy {} to enemy team", enemy.getName().getString());
             } else if (entity instanceof SoldierEntity soldier) {
+                if (OwnedSoldierRegistry.get(((ServerLevel) level).getServer()).isDismissed(soldier.getUUID())) {
+                    soldier.discard();
+                    return;
+                }
+                OwnedSoldierRegistry.get(((ServerLevel) level).getServer()).refresh(soldier, (ServerLevel) level);
                 UUID ownerUUID = soldier.getOwnerUUID().orElseGet(() -> {
                     StevesArmyMod.LOGGER.warn("TeamEventHandler: soldier {} has no owner UUID, using random fallback", soldier.getName().getString());
                     return UUID.randomUUID();
@@ -71,6 +77,14 @@ public class TeamEventHandler {
             }
         } catch (Exception e) {
             StevesArmyMod.LOGGER.error("Failed to assign team for entity {}: {}", entity, e.getMessage());
+        }
+    }
+
+    @SubscribeEvent
+    public static void onLivingDeath(LivingDeathEvent event) {
+        if (event.getEntity() instanceof SoldierEntity soldier && soldier.level() instanceof ServerLevel level
+            && level.getServer() != null) {
+            OwnedSoldierRegistry.get(level.getServer()).remove(soldier.getUUID());
         }
     }
 

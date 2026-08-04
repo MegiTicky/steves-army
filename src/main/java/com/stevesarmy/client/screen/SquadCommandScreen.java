@@ -37,7 +37,7 @@ public class SquadCommandScreen extends Screen {
     private static final int COL_HEALTH_WIDTH = 40;
     private static final int COL_FT_WIDTH = 24;
     private static final int COL_AMMO_WIDTH = 32;
-    private static final int COL_DIST_WIDTH = 28;
+    private static final int COL_DIST_WIDTH = 50;
     private static final int COL_DISC_WIDTH = 24;
     private static final int COL_SPACING = 4;
     private static final int ACTION_BUTTON_GAP = 2;
@@ -65,6 +65,7 @@ public class SquadCommandScreen extends Screen {
         FireTeam fireTeam;
         double distance;
         int recallTicks;
+        boolean loaded;
         int invButtonX;
         int recallButtonX;
         int dismissButtonX;
@@ -81,6 +82,7 @@ public class SquadCommandScreen extends Screen {
             this.fireTeam = entry.getFireTeam();
             this.distance = entry.distance;
             this.recallTicks = entry.recallTicks;
+            this.loaded = entry.loaded;
         }
 
         void update(SquadStatusSyncPacket.SoldierStatusEntry entry, net.minecraft.client.gui.Font font) {
@@ -93,6 +95,7 @@ public class SquadCommandScreen extends Screen {
             this.fireTeam = entry.getFireTeam();
             this.distance = entry.distance;
             this.recallTicks = entry.recallTicks;
+            this.loaded = entry.loaded;
         }
     }
 
@@ -254,7 +257,7 @@ public class SquadCommandScreen extends Screen {
             row.dismissButtonX = row.recallButtonX + ACTION_BUTTON_SIZE + ACTION_BUTTON_GAP;
             int buttonY = y + 1;
 
-            drawIconButton(graphics, row.invButtonX, buttonY, INVENTORY_ICON, row.distance <= 20.0,
+            drawIconButton(graphics, row.invButtonX, buttonY, INVENTORY_ICON, row.loaded && row.distance <= 20.0,
                 false, Component.literal("Open inventory"), mouseX, mouseY);
             String recallLabel = row.recallTicks > 0 ? "Recall: " + ((row.recallTicks + 19) / 20) + "s" : "Recall soldier";
             drawIconButton(graphics, row.recallButtonX, buttonY, RECALL_ICON, row.recallTicks <= 0,
@@ -369,6 +372,10 @@ public class SquadCommandScreen extends Screen {
     }
 
     private int drawDistance(GuiGraphics graphics, int x, int y, double distance) {
+        if (distance < 0.0) {
+            graphics.drawString(font, Component.literal("unloaded"), x, y + 6, 0xFFFFAA55, false);
+            return x + COL_DIST_WIDTH;
+        }
         String distStr = String.format("%.1fm", distance);
         int color = distance <= 20.0 ? 0xFF55FF55 : (distance <= 40.0 ? 0xFFFFFF55 : 0xFFFF5555);
         graphics.drawString(font, Component.literal(distStr), x, y + 6, color, false);
@@ -446,8 +453,8 @@ public class SquadCommandScreen extends Screen {
                 int localMouseY = (int)(mouseY - rowY);
 
                 if (tryClickInventoryButton(row, mouseX, localMouseY)) return true;
-                if (tryClickRecallButton(mouseX, row.recallButtonX, localMouseY, row.entityIntId, row.recallTicks)) return true;
-                if (tryClickDismissButton(mouseX, row.dismissButtonX, localMouseY, row.entityIntId)) return true;
+                if (tryClickRecallButton(mouseX, row.recallButtonX, localMouseY, row.entityId, row.recallTicks)) return true;
+                if (tryClickDismissButton(mouseX, row.dismissButtonX, localMouseY, row.entityId)) return true;
                 return true;
             }
         }
@@ -455,7 +462,7 @@ public class SquadCommandScreen extends Screen {
     }
 
     private boolean tryClickInventoryButton(SoldierRow row, double mouseX, int localMouseY) {
-        if (row.distance > 20.0) return false;
+        if (!row.loaded || row.distance > 20.0) return false;
         if (mouseX >= row.invButtonX && mouseX < row.invButtonX + ACTION_BUTTON_SIZE
             && localMouseY >= 1 && localMouseY < 1 + ACTION_BUTTON_SIZE) {
             NetworkHandler.INSTANCE.sendToServer(new OpenSoldierInventoryMessage(row.entityIntId));
@@ -464,7 +471,7 @@ public class SquadCommandScreen extends Screen {
         return false;
     }
 
-    private boolean tryClickRecallButton(double mouseX, int buttonX, int localMouseY, int soldierId, int recallTicks) {
+    private boolean tryClickRecallButton(double mouseX, int buttonX, int localMouseY, UUID soldierId, int recallTicks) {
         if (recallTicks > 0) return false;
         if (mouseX >= buttonX && mouseX < buttonX + ACTION_BUTTON_SIZE
             && localMouseY >= 1 && localMouseY < 1 + ACTION_BUTTON_SIZE) {
@@ -474,7 +481,7 @@ public class SquadCommandScreen extends Screen {
         return false;
     }
 
-    private boolean tryClickDismissButton(double mouseX, int buttonX, int localMouseY, int soldierId) {
+    private boolean tryClickDismissButton(double mouseX, int buttonX, int localMouseY, UUID soldierId) {
         if (mouseX >= buttonX && mouseX < buttonX + ACTION_BUTTON_SIZE
             && localMouseY >= 1 && localMouseY < 1 + ACTION_BUTTON_SIZE) {
             NetworkHandler.INSTANCE.sendToServer(new DismissSoldierPacket(soldierId));

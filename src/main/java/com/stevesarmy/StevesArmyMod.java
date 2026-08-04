@@ -13,6 +13,7 @@ import com.stevesarmy.registry.ModCreativeTab;
 import com.stevesarmy.registry.ModMenuTypes;
 import com.stevesarmy.squad.TeamEventHandler;
 import net.minecraftforge.common.MinecraftForge;
+import net.minecraftforge.common.world.ForgeChunkManager;
 import net.minecraftforge.event.RegisterCommandsEvent;
 import net.minecraftforge.eventbus.api.IEventBus;
 import net.minecraftforge.fml.ModLoadingContext;
@@ -50,6 +51,13 @@ public class StevesArmyMod {
     private void commonSetup(final FMLCommonSetupEvent event) {
         NetworkHandler.register();
         GunIntegration.init();
+        ForgeChunkManager.setForcedChunkLoadingCallback(MODID, (level, helper) -> {
+            // Recall tickets are intentionally transient and are never resumed
+            // after a server restart.
+            for (java.util.UUID owner : new java.util.ArrayList<>(helper.getEntityTickets().keySet())) {
+                helper.removeAllTickets(owner);
+            }
+        });
         LOGGER.info("Steve's Army mod initialized - Enlisted-style squad system ready!");
     }
     
