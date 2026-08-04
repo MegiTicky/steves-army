@@ -374,7 +374,6 @@ public class SoldierCombatGoal extends Goal {
             // Navigation must own body rotation while crossing terrain. In
             // particular, do not let combat look-at commands turn a mover into
             // a strafing/backward walker near steps or half cover.
-            cancelAllSuppression();
             GunIntegration.aim(soldier, false);
             return;
         }
@@ -2576,7 +2575,6 @@ public class SoldierCombatGoal extends Goal {
         if (tacticalBoundTravel == active) return;
         tacticalBoundTravel = active;
         if (active) {
-            cancelAllSuppression();
             GunIntegration.aim(soldier, false);
         }
     }
@@ -2601,7 +2599,7 @@ public class SoldierCombatGoal extends Goal {
     }
 
     public boolean canProvideCoverFire(UUID threatId, Vec3 threatPosition) {
-        if (!GunIntegration.isTaczLoaded() || !GunIntegration.hasGun(soldier)
+        if (tacticalBoundTravel || !GunIntegration.isTaczLoaded() || !GunIntegration.hasGun(soldier)
             || soldier.isPreparingOrReloading()
             || GunIntegration.isBolting(soldier)
             || GunIntegration.isDrawing(soldier)

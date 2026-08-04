@@ -17,6 +17,8 @@ public class SoldierMoveToPingGoal extends Goal {
     private final double speedModifier;
     private final float closeDistance;
     private int timeToRecalcPath;
+    private int lastLoggedCommandGeneration = Integer.MIN_VALUE;
+    private String lastLoggedRoute = "";
 
     public SoldierMoveToPingGoal(SoldierEntity soldier) {
         this.soldier = soldier;
@@ -34,11 +36,7 @@ public class SoldierMoveToPingGoal extends Goal {
         computeNavigationTarget();
         boolean coverRelocationAccepted = navigationTarget != null && soldier.getCoverTacticalGoal()
             .requestGoToRelocation(navigationTarget, commandGeneration);
-        if (DiagnosticLogManager.isCoverLoggingEnabled()) {
-            StevesArmyMod.LOGGER.info("[GoToBound] Soldier {} command={} rawTarget={} navTarget={} route={}",
-                soldier.getId(), commandGeneration, rawTarget, navigationTarget,
-                coverRelocationAccepted ? "cover_relocation" : "direct_navigation");
-        }
+        logRouteOnce(coverRelocationAccepted ? "cover_relocation" : "direct_navigation");
         if (coverRelocationAccepted) {
             return false;
         }
@@ -97,11 +95,7 @@ public class SoldierMoveToPingGoal extends Goal {
                 computeNavigationTarget();
                 boolean coverRelocationAccepted = navigationTarget != null && soldier.getCoverTacticalGoal()
                     .requestGoToRelocation(navigationTarget, commandGeneration);
-                if (DiagnosticLogManager.isCoverLoggingEnabled()) {
-                    StevesArmyMod.LOGGER.info("[GoToBound] Soldier {} replacement command={} target={} route={}",
-                        soldier.getId(), commandGeneration, navigationTarget,
-                        coverRelocationAccepted ? "cover_relocation" : "direct_navigation");
-                }
+                logRouteOnce(coverRelocationAccepted ? "cover_relocation" : "direct_navigation");
                 if (coverRelocationAccepted) {
                     soldier.getNavigation().stop();
                     return;
@@ -141,5 +135,16 @@ public class SoldierMoveToPingGoal extends Goal {
         if (navigationTarget == null) return;
         soldier.getNavigation().moveTo(
             navigationTarget.getX(), navigationTarget.getY(), navigationTarget.getZ(), speedModifier);
+    }
+
+    private void logRouteOnce(String route) {
+        if (!DiagnosticLogManager.isCoverLoggingEnabled()
+            || (lastLoggedCommandGeneration == commandGeneration && route.equals(lastLoggedRoute))) {
+            return;
+        }
+        lastLoggedCommandGeneration = commandGeneration;
+        lastLoggedRoute = route;
+        StevesArmyMod.LOGGER.info("[GoToBound] Soldier {} command={} rawTarget={} navTarget={} route={}",
+            soldier.getId(), commandGeneration, rawTarget, navigationTarget, route);
     }
 }

@@ -154,6 +154,8 @@ public class SoldierEntity extends PathfinderMob implements Container {
         SynchedEntityData.defineId(SoldierEntity.class, EntityDataSerializers.BLOCK_POS);
     private static final EntityDataAccessor<String> TACTICAL_BOUND_REASON =
         SynchedEntityData.defineId(SoldierEntity.class, EntityDataSerializers.STRING);
+    private static final EntityDataAccessor<Integer> TACTICAL_BOUND_COOLDOWN =
+        SynchedEntityData.defineId(SoldierEntity.class, EntityDataSerializers.INT);
 
     @Nullable
     private UUID squadId;
@@ -305,6 +307,7 @@ public class SoldierEntity extends PathfinderMob implements Container {
         this.entityData.define(TACTICAL_BOUND_DIRECTION, "-");
         this.entityData.define(TACTICAL_BOUND_TARGET, BlockPos.ZERO);
         this.entityData.define(TACTICAL_BOUND_REASON, "idle");
+        this.entityData.define(TACTICAL_BOUND_COOLDOWN, 0);
     }
 
     @Override
@@ -1361,6 +1364,14 @@ public BlockPos getPingMoveTarget() {
 
     public String getSyncedTacticalBoundReason() {
         return this.entityData.get(TACTICAL_BOUND_REASON);
+    }
+
+    public void syncTacticalBoundCooldown(int ticks) {
+        this.entityData.set(TACTICAL_BOUND_COOLDOWN, Math.max(0, ticks));
+    }
+
+    public int getSyncedTacticalBoundCooldown() {
+        return this.entityData.get(TACTICAL_BOUND_COOLDOWN);
     }
     
     public void syncSuppressionLevel(float level) {
