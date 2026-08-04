@@ -236,12 +236,13 @@ public class SoldierEntity extends PathfinderMob implements Container {
         this.inventory.setMainHandChangedCallback(stack -> {
             if (!this.level().isClientSide) {
                 if (inventorySyncingFromEntity) return;
-                if (GunIntegration.isTaczLoaded() && GunIntegration.isReloading(this)) {
+                boolean reloading = GunIntegration.isTaczLoaded() && GunIntegration.isReloading(this);
+                if (reloading && !ItemStack.isSameItem(stack, getMainHandItem())) {
                     StevesArmyMod.LOGGER.info("[Soldier] Blocked gun swap during reload (callback)");
                     return;
                 }
                 setItemSlot(EquipmentSlot.MAINHAND, stack.copy());
-                if (GunIntegration.isTaczLoaded() && !stack.isEmpty()) {
+                if (GunIntegration.isTaczLoaded() && !stack.isEmpty() && !reloading) {
                     GunIntegration.initialData(this);
                     GunIntegration.draw(this);
                 }
@@ -721,14 +722,15 @@ public class SoldierEntity extends PathfinderMob implements Container {
 
     @Override
     public void setItem(int slot, ItemStack stack) {
-        if (slot == SoldierInventory.SLOT_MAIN_HAND && GunIntegration.isTaczLoaded() && GunIntegration.isReloading(this)) {
+        boolean reloading = GunIntegration.isTaczLoaded() && GunIntegration.isReloading(this);
+        if (slot == SoldierInventory.SLOT_MAIN_HAND && reloading && !ItemStack.isSameItem(stack, getMainHandItem())) {
             StevesArmyMod.LOGGER.info("[Soldier] Blocked gun swap during reload (setItem)");
             return;
         }
         inventory.setItem(slot, stack);
         if (slot == SoldierInventory.SLOT_MAIN_HAND) {
             setItemSlot(EquipmentSlot.MAINHAND, stack.copy());
-            if (GunIntegration.isTaczLoaded() && !stack.isEmpty()) {
+            if (GunIntegration.isTaczLoaded() && !stack.isEmpty() && !reloading) {
                 GunIntegration.initialData(this);
                 GunIntegration.draw(this);
             }
