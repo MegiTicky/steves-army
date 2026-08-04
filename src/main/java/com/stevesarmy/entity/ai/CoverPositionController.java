@@ -39,8 +39,6 @@ public class CoverPositionController extends MoveControl {
     private Vec3 debugLastSetVelocity = Vec3.ZERO;
     private boolean controlledReturnToCover;
     private Vec3 coverAnchorTarget;
-    /** Transient tactical override that holds a retreating soldier in place while firing. */
-    private Vec3 retreatFireTarget;
 
     // Max steps for swept-box collision check
     private static final int COLLISION_SWEEP_STEPS = 8;
@@ -143,7 +141,6 @@ public class CoverPositionController extends MoveControl {
         this.lastResult = MovementResult.FAILED;
         this.lastFailureReason = reason;
         this.controlledReturnToCover = controlledReturn;
-        this.retreatFireTarget = null;
         this.operation = Operation.WAIT;
         this.mob.setZza(0.0F);
         this.mob.setXxa(0.0F);
@@ -164,7 +161,6 @@ public class CoverPositionController extends MoveControl {
         this.lastFailureReason = FailureReason.NONE;
         this.controlledReturnToCover = false;
         this.coverAnchorTarget = null;
-        this.retreatFireTarget = null;
         this.operation = MoveControl.Operation.WAIT;
         this.mob.getNavigation().stop();
         this.mob.setZza(0.0F);
@@ -189,14 +185,6 @@ public class CoverPositionController extends MoveControl {
     public String getDebugMoveSource() { return debugMoveSource; }
     public String getDebugMoveReason() { return debugMoveReason; }
     public Vec3 getDebugLastSetVelocity() { return debugLastSetVelocity; }
-
-    public void setRetreatFireTarget(Vec3 target) {
-        this.retreatFireTarget = target;
-    }
-
-    public void clearRetreatFireTarget() {
-        this.retreatFireTarget = null;
-    }
 
     /**
      * Requests short-range position correction while the soldier is hiding in
@@ -256,14 +244,11 @@ public class CoverPositionController extends MoveControl {
         }
 
         if (lastResult != MovementResult.IN_PROGRESS) {
-            boolean retreatFireSteering = tickRetreatFireSteering();
-            if (!retreatFireSteering) {
-                super.tick();
-            }
+            super.tick();
             applyCoverAnchorVelocity(anchorTarget);
             this.debugLastSetVelocity = this.mob.getDeltaMovement();
-            this.debugMoveSource = retreatFireSteering ? "retreat_fire" : "vanilla";
-            this.debugMoveReason = retreatFireSteering ? "stationary retreat fire" : "navigation";
+            this.debugMoveSource = "vanilla";
+            this.debugMoveReason = "navigation";
             return;
         }
 
@@ -314,28 +299,5 @@ public class CoverPositionController extends MoveControl {
 
     private boolean isPreparingOrReloading() {
         return this.mob instanceof SoldierEntity soldier && soldier.isPreparingOrReloading();
-    }
-
-    /** Holds navigation at its current route node while combat owns body facing and fire. */
-    private boolean tickRetreatFireSteering() {
-        if (retreatFireTarget == null) {
-            return false;
-        }
-
-        Vec3 toThreat = retreatFireTarget.subtract(this.mob.getEyePosition());
-        double threatDistance = toThreat.horizontalDistance();
-        if (threatDistance < 0.001D) {
-            return false;
-        }
-
-        float aimYaw = (float) Math.toDegrees(Math.atan2(-toThreat.x, toThreat.z));
-        this.mob.setYRot(aimYaw);
-        this.mob.setYBodyRot(aimYaw);
-        this.mob.setYHeadRot(aimYaw);
-        this.mob.setZza(0.0F);
-        this.mob.setXxa(0.0F);
-        this.mob.setSpeed(0.0F);
-        this.mob.setDeltaMovement(0.0D, this.mob.getDeltaMovement().y, 0.0D);
-        return true;
     }
 }
