@@ -39,12 +39,7 @@ public class CoverPositionController extends MoveControl {
     private Vec3 debugLastSetVelocity = Vec3.ZERO;
     private boolean controlledReturnToCover;
     private Vec3 coverAnchorTarget;
-    /**
-     * Transient tactical override used only by a level retreat-fire bound.
-     * Navigation continues selecting the next route node; this controller
-     * converts that route direction into local backward/strafe input while
-     * preserving the weapon-facing direction supplied by the combat goal.
-     */
+    /** Transient tactical override that holds a retreating soldier in place while firing. */
     private Vec3 retreatFireTarget;
 
     // Max steps for swept-box collision check
@@ -268,7 +263,7 @@ public class CoverPositionController extends MoveControl {
             applyCoverAnchorVelocity(anchorTarget);
             this.debugLastSetVelocity = this.mob.getDeltaMovement();
             this.debugMoveSource = retreatFireSteering ? "retreat_fire" : "vanilla";
-            this.debugMoveReason = retreatFireSteering ? "backward route steering" : "navigation";
+            this.debugMoveReason = retreatFireSteering ? "stationary retreat fire" : "navigation";
             return;
         }
 
@@ -321,14 +316,9 @@ public class CoverPositionController extends MoveControl {
         return this.mob instanceof SoldierEntity soldier && soldier.isPreparingOrReloading();
     }
 
-    /**
-     * Lets the normal path controller calculate its speed and next waypoint,
-     * then replaces its forward-facing input with movement in the local space
-     * of the threat-facing body. The tactical goal admits this only on a flat,
-     * retreating route, so this method never owns step, jump, or turn handling.
-     */
+    /** Holds navigation at its current route node while combat owns body facing and fire. */
     private boolean tickRetreatFireSteering() {
-        if (retreatFireTarget == null || this.operation != MoveControl.Operation.MOVE_TO) {
+        if (retreatFireTarget == null) {
             return false;
         }
 
@@ -338,33 +328,14 @@ public class CoverPositionController extends MoveControl {
             return false;
         }
 
-        Vec3 toWaypoint = new Vec3(this.wantedX - this.mob.getX(), 0.0D, this.wantedZ - this.mob.getZ());
-        double waypointDistance = toWaypoint.horizontalDistance();
-        if (waypointDistance < 0.001D) {
-            return false;
-        }
-
-        // Preserve vanilla speed calculation and waypoint progression before
-        // substituting the local movement controls below.
-        super.tick();
-
         float aimYaw = (float) Math.toDegrees(Math.atan2(-toThreat.x, toThreat.z));
         this.mob.setYRot(aimYaw);
         this.mob.setYBodyRot(aimYaw);
         this.mob.setYHeadRot(aimYaw);
-
-        double yawRadians = Math.toRadians(aimYaw);
-        double forwardX = -Math.sin(yawRadians);
-        double forwardZ = Math.cos(yawRadians);
-        double rightX = Math.cos(yawRadians);
-        double rightZ = Math.sin(yawRadians);
-        double routeX = toWaypoint.x / waypointDistance;
-        double routeZ = toWaypoint.z / waypointDistance;
-
-        double forward = routeX * forwardX + routeZ * forwardZ;
-        double strafe = routeX * rightX + routeZ * rightZ;
-        this.mob.setZza((float) forward);
-        this.mob.setXxa((float) strafe);
+        this.mob.setZza(0.0F);
+        this.mob.setXxa(0.0F);
+        this.mob.setSpeed(0.0F);
+        this.mob.setDeltaMovement(0.0D, this.mob.getDeltaMovement().y, 0.0D);
         return true;
     }
 }
