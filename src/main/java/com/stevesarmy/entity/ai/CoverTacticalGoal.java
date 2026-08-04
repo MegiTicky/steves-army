@@ -110,11 +110,11 @@ public class CoverTacticalGoal extends Goal {
 
     private static final double COVER_TRAVEL_SPEED = 1.2D;
     private static final double MOBILE_FIRE_SPEED = 0.55D;
-    private static final int MOBILE_FIRE_BURST_TICKS = 6;
-    private static final int MOBILE_FIRE_SUPPORT_BURST_TICKS = 4;
-    private static final int MOBILE_FIRE_INTERVAL_TICKS = 40;
-    private static final int MOBILE_FIRE_SUPPORT_INTERVAL_TICKS = 80;
-    private static final double MOBILE_FIRE_MAX_TURN_COS = 0.866D;
+    private static final int MOBILE_FIRE_BURST_TICKS = 10;
+    private static final int MOBILE_FIRE_SUPPORT_BURST_TICKS = 6;
+    private static final int MOBILE_FIRE_INTERVAL_TICKS = 24;
+    private static final int MOBILE_FIRE_SUPPORT_INTERVAL_TICKS = 50;
+    private static final double MOBILE_FIRE_MAX_TURN_COS = 0.5D;
     // Attack-mode constants
     private static final int ATTACK_FORWARD_BIAS_BLOCKS = 6;
     private static final double ATTACK_MIN_FORWARD_PROGRESS = 2.0;
@@ -3402,6 +3402,11 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
             return;
         }
 
+        if (tacticalMobileCooldownTicks > 0) {
+            tacticalMobileCooldownTicks--;
+            soldier.syncTacticalBoundCooldown(tacticalMobileCooldownTicks);
+        }
+
         String terrainReason = getMobileFireTerrainDeferralReason();
         if (terrainReason != null) {
             transitionTacticalBound(TacticalBoundPhase.DEFERRED_TERRAIN, terrainReason);
@@ -3409,8 +3414,6 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
         }
 
         if (tacticalMobileCooldownTicks > 0) {
-            tacticalMobileCooldownTicks--;
-            soldier.syncTacticalBoundCooldown(tacticalMobileCooldownTicks);
             transitionTacticalBound(TacticalBoundPhase.TRAVEL, "moving to cover");
             return;
         }
@@ -3466,7 +3469,7 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
         Vec3 nextToAfter = Vec3.atCenterOf(afterNext).subtract(Vec3.atCenterOf(next));
         double currentLength = currentToNext.horizontalDistance();
         double nextLength = nextToAfter.horizontalDistance();
-        if (currentLength < 0.15D || nextLength < 0.15D) return "route node transition";
+        if (currentLength < 0.15D || nextLength < 0.15D) return null;
         double turnCos = (currentToNext.x * nextToAfter.x + currentToNext.z * nextToAfter.z)
             / (currentLength * nextLength);
         return turnCos < MOBILE_FIRE_MAX_TURN_COS ? "sharp route turn" : null;

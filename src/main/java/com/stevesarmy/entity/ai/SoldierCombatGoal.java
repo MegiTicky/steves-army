@@ -373,8 +373,8 @@ public class SoldierCombatGoal extends Goal {
         if (tacticalBoundTravel) {
             // Navigation must own body rotation while crossing terrain. In
             // particular, do not let combat look-at commands turn a mover into
-            // a strafing/backward walker near steps or half cover.
-            GunIntegration.aim(soldier, false);
+            // a strafing/backward walker near steps or half cover. Keep the
+            // current ADS state so the next mobile-fire window can shoot.
             return;
         }
 
@@ -2574,9 +2574,6 @@ public class SoldierCombatGoal extends Goal {
     public void setTacticalBoundTravel(boolean active) {
         if (tacticalBoundTravel == active) return;
         tacticalBoundTravel = active;
-        if (active) {
-            GunIntegration.aim(soldier, false);
-        }
     }
 
     public boolean isTacticalBoundTravel() {
