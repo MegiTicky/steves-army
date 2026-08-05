@@ -75,6 +75,9 @@ public class GunIntegration {
     public static int getRPM(LivingEntity entity) { return gunHandler.getRPM(entity); }
     public static float getBurstMinInterval(LivingEntity entity) { return gunHandler.getBurstMinInterval(entity); }
     public static float getAimInaccuracy(LivingEntity entity) { return gunHandler.getAimInaccuracy(entity); }
+    public static GunshotSignature getGunshotSignature(LivingEntity entity) {
+        return gunHandler.getGunshotSignature(entity);
+    }
     public static String getGunTabType(LivingEntity entity) { return gunHandler.getGunTabType(entity); }
     public static boolean isMachineGun(LivingEntity entity) { return gunHandler.isMachineGun(entity); }
 
@@ -89,6 +92,11 @@ public class GunIntegration {
         SUCCESS, NO_AMMO, COOLDOWN, NOT_GUN, NO_TARGET, OUT_OF_RANGE,
         NEED_BOLT, IS_BOLTING, IS_RELOADING, IS_DRAWING, NOT_DRAWN, 
         PATH_BLOCKED, UNKNOWN
+    }
+
+    /** TaCZ sound modifiers relevant to AI gunshot detection. */
+    public record GunshotSignature(boolean suppressed, int soundDistanceAdjustment) {
+        public static final GunshotSignature UNSUPPRESSED = new GunshotSignature(false, 0);
     }
 
     public interface GunHandler {
@@ -126,6 +134,7 @@ public class GunIntegration {
         int getRPM(LivingEntity entity);
         float getBurstMinInterval(LivingEntity entity);
         float getAimInaccuracy(LivingEntity entity);
+        GunshotSignature getGunshotSignature(LivingEntity entity);
         String getGunTabType(LivingEntity entity);
         boolean isMachineGun(LivingEntity entity);
     }
@@ -165,6 +174,7 @@ public class GunIntegration {
         @Override public int getRPM(LivingEntity entity) { return 600; }
         @Override public float getBurstMinInterval(LivingEntity entity) { return 0.8f; }
         @Override public float getAimInaccuracy(LivingEntity entity) { return 0.15f; }
+        @Override public GunshotSignature getGunshotSignature(LivingEntity entity) { return GunshotSignature.UNSUPPRESSED; }
         @Override public String getGunTabType(LivingEntity entity) { return "rifle"; }
         @Override public boolean isMachineGun(LivingEntity entity) { return false; }
     }
@@ -624,6 +634,28 @@ public class GunIntegration {
                 StevesArmyMod.LOGGER.debug("[TaCZ] Failed to get effective range: {}", e.getMessage());
             }
             return DEFAULT_GUN_RANGE;
+        }
+
+        @Override
+        public GunshotSignature getGunshotSignature(LivingEntity entity) {
+            try {
+                Class<?> gunOperatorClass = Class.forName("com.tacz.guns.api.entity.IGunOperator");
+                Method fromLivingEntity = gunOperatorClass.getMethod("fromLivingEntity", LivingEntity.class);
+                Object gunOperator = fromLivingEntity.invoke(null, entity);
+                Method getCacheProperty = gunOperatorClass.getMethod("getCacheProperty");
+                Object cacheProperty = getCacheProperty.invoke(gunOperator);
+                Method getCache = cacheProperty.getClass().getMethod("getCache", String.class);
+                Object silence = getCache.invoke(cacheProperty, "silence");
+                if (silence == null) return GunshotSignature.UNSUPPRESSED;
+
+                Object distanceValue = silence.getClass().getMethod("left").invoke(silence);
+                Object useSilenceSoundValue = silence.getClass().getMethod("right").invoke(silence);
+                int distanceAdjustment = distanceValue instanceof Number number ? number.intValue() : 0;
+                boolean useSilenceSound = Boolean.TRUE.equals(useSilenceSoundValue);
+                return new GunshotSignature(distanceAdjustment < 0 || useSilenceSound, distanceAdjustment);
+            } catch (Exception ignored) {
+                return GunshotSignature.UNSUPPRESSED;
+            }
         }
 
         @Override

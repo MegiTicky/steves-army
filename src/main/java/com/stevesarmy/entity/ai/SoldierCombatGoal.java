@@ -376,21 +376,24 @@ public class SoldierCombatGoal extends Goal {
         }
         
         List<LivingEntity> potentialTargets = getPotentialTargets();
-        detectionSystem.tick(soldier, potentialTargets);
+        detectionSystem.tick(soldier, potentialTargets, getSquadIntel());
         
         // Feed detected entities into ThreatAwareness
         ThreatAwareness threats = soldier.getThreatAwareness();
         for (LivingEntity potential : potentialTargets) {
+            boolean hasLineOfSight = TargetAcquisition.isValidTarget(soldier, potential)
+                && TargetAcquisition.hasLineOfSight(soldier, potential);
             if (detectionSystem.isTargetDetected(potential)) {
                 threats.onEntityDetected(potential, soldier.position());
+                if (hasLineOfSight) {
+                    reportThreatToSquadIntel(potential, 1.0f);
+                }
             }
 
             // Player-facing contact pings represent every valid enemy the soldier
             // can currently see, not only the target selected for direct fire.
-            if (TargetAcquisition.isValidTarget(soldier, potential)
-                    && TargetAcquisition.hasLineOfSight(soldier, potential)) {
+            if (hasLineOfSight) {
                 EnemyContactTracker.reportContact(soldier, potential);
-                reportThreatToSquadIntel(potential, 1.0f);
             }
         }
         
@@ -1758,6 +1761,38 @@ public class SoldierCombatGoal extends Goal {
     
     public DetectionSystem getDetectionSystem() {
         return detectionSystem;
+    }
+
+    /** Applies visual and audible detection cues from a successful hostile TaCZ shot. */
+    public void onEnemyGunshot(LivingEntity shooter, GunIntegration.GunshotSignature signature) {
+        if (shooter == null || !shooter.isAlive() || !getPotentialTargets().contains(shooter)) {
+            return;
+        }
+
+        double distance = soldier.distanceTo(shooter);
+        double strengthMultiplier = signature.suppressed() ? 0.25 : 1.0;
+        double points = 0.0;
+
+        if (distance < 64.0
+            && TargetAcquisition.isInPeripheralArc(soldier, shooter)
+            && TargetAcquisition.hasLineOfSight(soldier, shooter)) {
+            points += 35.0 * quadraticFalloff(distance, 64.0) * strengthMultiplier;
+        }
+
+        double soundRange = Math.max(8.0, 64.0 + signature.soundDistanceAdjustment());
+        if (distance < soundRange) {
+            boolean soundBlocked = !VisibilityRay.traceIgnoringSmoke(
+                soldier.level(), soldier.getEyePosition(), shooter.getEyePosition(), soldier).clear();
+            double obstructionMultiplier = soundBlocked ? 0.5 : 1.0;
+            points += 25.0 * quadraticFalloff(distance, soundRange)
+                * strengthMultiplier * obstructionMultiplier;
+        }
+
+        detectionSystem.addDetectionPoints(shooter, points);
+    }
+
+    private static double quadraticFalloff(double distance, double range) {
+        return Math.max(0.0, 1.0 - (distance * distance) / (range * range));
     }
     
     public void setTarget(LivingEntity newTarget) {

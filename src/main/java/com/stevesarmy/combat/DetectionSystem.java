@@ -1,8 +1,7 @@
 package com.stevesarmy.combat;
 
+import com.stevesarmy.squad.SquadThreatIntel;
 import net.minecraft.world.entity.LivingEntity;
-import net.minecraft.world.entity.ai.attributes.Attributes;
-import net.minecraft.world.level.Level;
 import java.util.*;
 
 public class DetectionSystem {
@@ -21,12 +20,15 @@ public class DetectionSystem {
     public static final double DETECTION_THRESHOLD = 80.0;
     public static final double DECAY_RATE = 3.0;
     public static final double FIRST_CONTACT_BONUS = 20.0;
+    public static final double SHARED_INTEL_FLOOR = 50.0;
+    public static final double SHARED_INTEL_POSITION_RADIUS = 2.0;
     
     public DetectionSystem(UUID soldierId) {
         this.soldierId = soldierId;
     }
     
-    public void tick(LivingEntity soldier, List<LivingEntity> potentialTargets) {
+    public void tick(LivingEntity soldier, List<LivingEntity> potentialTargets,
+                     SquadThreatIntel squadIntel) {
         long currentTime = soldier.level().getGameTime();
         
         Set<UUID> seenThisTick = new HashSet<>();
@@ -38,6 +40,10 @@ public class DetectionSystem {
             seenThisTick.add(targetId);
             
             DetectionState state = detectionStates.computeIfAbsent(targetId, id -> new DetectionState());
+            boolean hasSharedIntel = hasFreshSharedIntel(soldier, target, squadIntel, currentTime);
+            if (hasSharedIntel) {
+                state.accumulatedPoints = Math.max(state.accumulatedPoints, SHARED_INTEL_FLOOR);
+            }
             
             double distance = soldier.distanceTo(target);
             
@@ -56,6 +62,9 @@ public class DetectionSystem {
             }
             
             state.accumulatedPoints = Math.max(0, Math.min(200, state.accumulatedPoints));
+            if (hasSharedIntel) {
+                state.accumulatedPoints = Math.max(state.accumulatedPoints, SHARED_INTEL_FLOOR);
+            }
             state.wasInLOSLastCheck = nowInLOS;
             state.lastCheckTime = currentTime;
         }
@@ -64,6 +73,22 @@ public class DetectionSystem {
             DetectionState state = entry.getValue();
             return !seenThisTick.contains(entry.getKey()) && state.ticksSinceLastSeen > 200;
         });
+    }
+
+    private boolean hasFreshSharedIntel(LivingEntity soldier, LivingEntity target,
+                                        SquadThreatIntel squadIntel, long currentTime) {
+        if (squadIntel == null || squadIntel.isThreatStale(target.getUUID(), currentTime)) {
+            return false;
+        }
+
+        return squadIntel.getThreat(target.getUUID())
+            .filter(knowledge -> knowledge.isAlive
+                && knowledge.lastKnownPosition != null
+                && knowledge.lastSeenBySoldier != null
+                && !knowledge.lastSeenBySoldier.equals(soldierId)
+                && target.blockPosition().distSqr(knowledge.lastKnownPosition)
+                    <= SHARED_INTEL_POSITION_RADIUS * SHARED_INTEL_POSITION_RADIUS)
+            .isPresent();
     }
     
     private double calculateDetectionPoints(LivingEntity soldier, LivingEntity target, double distance,
@@ -182,6 +207,14 @@ public class DetectionSystem {
         state.accumulatedPoints = DETECTION_THRESHOLD;
         state.wasInLOSLastCheck = true;
         state.ticksSinceLastSeen = 0;
+    }
+
+    /** Adds a bounded detection impulse from a discrete cue such as a gunshot. */
+    public void addDetectionPoints(LivingEntity target, double points) {
+        if (target == null || !Double.isFinite(points) || points <= 0) return;
+
+        DetectionState state = detectionStates.computeIfAbsent(target.getUUID(), id -> new DetectionState());
+        state.accumulatedPoints = Math.min(200, state.accumulatedPoints + points);
     }
     
     public DetectionState getDetectionState(UUID targetId) {

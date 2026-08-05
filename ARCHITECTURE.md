@@ -655,8 +655,10 @@ SquadMode.HOLD   -- soldier holds position, seeks cover near hold pos
 
 - Shared threat knowledge for the squad (stored in `SquadData`)
 - Each `ThreatKnowledge` tracks: position, last seen time, reporter, accuracy, alive/dead, suppression state
+- A threat report is published only after its reporter reaches the normal 80-point detection threshold.
+- A fresh report from another squadmate gives an observer a 50-point detection floor while the matching entity remains within 2 blocks of the reported position.
 - Threats remembered for `THREAT_MEMORY_TICKS = 600` (30s)
-- Stale check: `STALE_TIMEOUT_TICKS = 60` (3s) for suppression assignment eligibility
+- Stale check: `STALE_TIMEOUT_TICKS = 120` (6s) for suppression assignment eligibility and shared-intel detection floors
 - Suppression heartbeat timeout: 10 ticks -- if suppressor doesn't heartbeat, assignment is cleared
 
 ---
@@ -667,7 +669,7 @@ SquadMode.HOLD   -- soldier holds position, seeks cover near hold pos
 
 ```mermaid
 flowchart TD
-    TICK["tick(soldier, potentialTargets)"] --> LOOP[For each potential target]
+    TICK["tick(soldier, potentialTargets, squadIntel)"] --> LOOP[For each potential target]
     LOOP --> LOS{"hasLineOfSight?"}
     LOS -->|Yes| ARC{Arc check}
     ARC -->|In focused arc <=96 blocks| FOCUSED["baseRate = 12.0"]
@@ -681,7 +683,7 @@ flowchart TD
     BONUS -->|No| ACCUM["accumulatedPoints += points"]
     LOS -->|No| DECAY["accumulatedPoints -= 3.0"]
     ACCUM --> CLAMP[clamp 0-200]
-    CLARM --> CHECK{"points >= 80?"}
+    CLAMP --> CHECK{"points >= 80?"}
     CHECK -->|Yes| DETECTED[isTargetDetected = true]
 ```
 
@@ -700,6 +702,14 @@ flowchart TD
 | Exposure | 0.0-1.0 | From `ExposureCalculator` (% of body visible) |
 | Movement | 0.3-1.5 | Sprint=1.5, walk=1.0, sneak=0.3, still=0.7 |
 | Brightness | 0.3-1.0 | `0.3 + 0.7 x sqrt(lightLevel / 15)` |
+
+### Shared Intel And Gunshot Cues
+
+- Fresh squad intel from another soldier keeps detection at or above 50 points only when the exact reported threat remains within 2 blocks of its last-known block position.
+- A successful TaCZ shot can add immediate points to hostile soldiers that could normally target the shooter:
+  - Muzzle flash: `35 * (1 - (distance / 64)^2)`, with normal LOS and inside the 180-degree peripheral arc.
+  - Sound: `25 * (1 - (distance / range)^2)` in all directions; solid cover halves the sound bonus, while smoke does not affect it.
+  - TaCZ `silence` modifiers reduce both cues to 25% strength and adjust sound range from 64 blocks, with an 8-block minimum.
 
 ---
 
@@ -754,6 +764,7 @@ flowchart TD
     REFLECT --> OPERATOR["IGunOperator - shoot, reload, bolt, aim, draw"]
     REFLECT --> IGUN["IGun - getAmmoCount, getGunId, hasAmmoInBarrel"]
     REFLECT --> TIMELESS["TimelessAPI - getCommonGunIndex -> GunData - magazineSize, bolt, recoil, rpm, inaccuracy"]
+    REFLECT --> SIGNATURE["TaCZ silence cache -> GunshotSignature"]
 ```
 
 ### Gun Operations (ReflectionGunHandler)
@@ -770,6 +781,7 @@ flowchart TD
 | `crawl(entity, isCrawl)` | `IGunOperator.crawl` | Also sets soldier `setCrawling(boolean)` -> `Pose.SWIMMING` |
 | `initialData(entity)` | `IGunOperator.initialData` | Initialize TaCZ gun data |
 | `draw(entity)` | `IGunOperator.draw(ItemStack)` | Draw gun (skipped if reloading) |
+| `getGunshotSignature(entity)` | `IGunOperator.getCacheProperty().getCache("silence")` | Detects suppressors and their sound-range adjustment |
 
 ### ShootResult Mapping
 
