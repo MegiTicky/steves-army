@@ -39,6 +39,7 @@ import net.minecraft.world.entity.ai.goal.Goal;
 import net.minecraft.world.entity.monster.Monster;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.pathfinder.Path;
 import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.network.PacketDistributor;
 
@@ -69,6 +70,12 @@ public class SoldierCombatGoal extends Goal {
     private ExposureCalculator.AimPointResult currentAimPoint = null;
     
     private static final float ADS_THRESHOLD = 0.8f;
+    private static final float MOBILE_FIRE_ADS_THRESHOLD = 0.40f;
+    private static final float MOBILE_FIRE_THRESHOLD_FLOOR = 0.08f;
+    private static final float MOBILE_FIRE_MOVEMENT_DECAY = 0.005f;
+    private static final float MOBILE_FIRE_TARGET_MOVEMENT_DECAY = 0.008f;
+    private static final int MOBILE_FIRE_MAX_BURST_SHOTS = 2;
+    private static final double MOBILE_FIRE_MIN_SPEED_SQR = 0.01D;
     private static final int PATH_BLOCKED_SWITCH_TICKS = 40;
     private static final int CQB_PATH_BLOCKED_SWITCH_TICKS = 10;
     private int pathBlockedCounter = 0;
@@ -1199,10 +1206,9 @@ public class SoldierCombatGoal extends Goal {
         wasAiming = true;
         
         float adsProgress = GunIntegration.getAimProgress(soldier);
-        float adsThreshold = ADS_THRESHOLD;
-        if (soldier.getFireDiscipline() == FireDiscipline.SUPPRESSIVE) {
-            adsThreshold = 0.40f;
-        }
+        boolean mobileFire = isMobileSuppressiveFireAllowed();
+        float adsThreshold = mobileFire || soldier.getFireDiscipline() == FireDiscipline.SUPPRESSIVE
+            ? MOBILE_FIRE_ADS_THRESHOLD : ADS_THRESHOLD;
         if (adsProgress < adsThreshold) {
             return;
         }
@@ -1219,9 +1225,19 @@ public class SoldierCombatGoal extends Goal {
         } else if (discipline == FireDiscipline.SUPPRESSIVE) {
             thresholdScale = Math.min(thresholdScale, 0.20f);
         }
-        float shotThreshold = Math.max(0.15f, targetAimQ * thresholdScale);
+        if (mobileFire) {
+            thresholdScale = Math.min(thresholdScale, 0.20f);
+        }
+        float shotThreshold = Math.max(mobileFire ? MOBILE_FIRE_THRESHOLD_FLOOR : 0.15f,
+            targetAimQ * thresholdScale);
 
         DirectFireWeaponProfile directProfile = getDirectFireWeaponProfile();
+        int burstShotLimit = mobileFire
+            ? Math.min(directProfile.burstShots, MOBILE_FIRE_MAX_BURST_SHOTS)
+            : directProfile.burstShots;
+        if (!mobileFire && directBurstActive) {
+            finishDirectFireBurst(directProfile);
+        }
         if (directBurstCooldownTicks > 0) {
             directBurstCooldownTicks--;
             return;
@@ -1296,7 +1312,7 @@ public class SoldierCombatGoal extends Goal {
         result = GunIntegration.shootWithDeviation(soldier, aimPoint, pitchDev, yawDev);
         
         if (result == GunIntegration.ShootResult.SUCCESS) {
-            directBurstActive = directProfile.burstShots > 1;
+            directBurstActive = burstShotLimit > 1;
             directBurstShotsFired++;
             if (coverManager.isInCover()) {
                 coverManager.onPeekShot();
@@ -1316,7 +1332,7 @@ public class SoldierCombatGoal extends Goal {
                 }
             }
 
-            if (directBurstShotsFired >= directProfile.burstShots) {
+            if (directBurstShotsFired >= burstShotLimit) {
                 finishDirectFireBurst(directProfile);
             }
         }
@@ -1436,6 +1452,7 @@ public class SoldierCombatGoal extends Goal {
         boolean inLOS = TargetAcquisition.hasLineOfSight(soldier, target);
 
         if (inLOS) {
+            boolean mobileFire = isMobileSuppressiveFireAllowed();
             float targetAimQuality = AimAccuracyManager.getTargetAimQuality(soldier, target);
             float buildRate = AimAccuracyManager.getBuildRate(soldier, target);
             if (soldier.isFiringProne()) {
@@ -1443,12 +1460,14 @@ public class SoldierCombatGoal extends Goal {
             }
 
             if (soldier.getDeltaMovement().horizontalDistanceSqr() > 0.01) {
-                aimQuality -= StevesArmyConfig.getAimQualityMoveDecayRate();
+                aimQuality -= mobileFire ? MOBILE_FIRE_MOVEMENT_DECAY
+                    : StevesArmyConfig.getAimQualityMoveDecayRate();
             }
 
             double targetSpeed = target.getDeltaMovement().horizontalDistanceSqr();
             if (targetSpeed > 0.01) {
-                aimQuality -= StevesArmyConfig.getAimQualityTargetMovePenalty();
+                aimQuality -= mobileFire ? MOBILE_FIRE_TARGET_MOVEMENT_DECAY
+                    : StevesArmyConfig.getAimQualityTargetMovePenalty();
             }
 
             if (aimQuality < targetAimQuality) {
@@ -1461,6 +1480,51 @@ public class SoldierCombatGoal extends Goal {
         }
 
         aimQuality = Mth.clamp(aimQuality, 0.0f, 1.0f);
+    }
+
+    /**
+     * Mobile fire is intentionally narrow: it is covering fire on a flat,
+     * straight navigation segment, never a replacement for terrain-safe travel.
+     */
+    private boolean isMobileSuppressiveFireAllowed() {
+        if (target == null || !target.isAlive()
+            || soldier.isNavigationTraversalLocked()
+            || !soldier.onGround()
+            || soldier.isCrawlMoving()
+            || soldier.horizontalCollision
+            || soldier.minorHorizontalCollision
+            || soldier.getDeltaMovement().horizontalDistanceSqr() <= MOBILE_FIRE_MIN_SPEED_SQR) {
+            return false;
+        }
+
+        Path path = soldier.getNavigation().getPath();
+        if (path == null || path.isDone() || path.getNodeCount() == 0) {
+            return false;
+        }
+
+        int nextIndex = Math.min(path.getNextNodeIndex(), path.getNodeCount() - 1);
+        BlockPos nextNode = path.getNode(nextIndex).asBlockPos();
+        if (nextNode.getY() != soldier.blockPosition().getY()) {
+            return false;
+        }
+
+        if (nextIndex + 1 >= path.getNodeCount()) {
+            return true;
+        }
+
+        BlockPos followingNode = path.getNode(nextIndex + 1).asBlockPos();
+        if (followingNode.getY() != nextNode.getY()) {
+            return false;
+        }
+
+        Vec3 travelDirection = new Vec3(nextNode.getX() + 0.5D - soldier.getX(), 0.0D,
+            nextNode.getZ() + 0.5D - soldier.getZ());
+        Vec3 followingDirection = new Vec3(followingNode.getX() - nextNode.getX(), 0.0D,
+            followingNode.getZ() - nextNode.getZ());
+        if (travelDirection.horizontalDistanceSqr() < 0.01D || followingDirection.horizontalDistanceSqr() < 0.01D) {
+            return true;
+        }
+        return travelDirection.normalize().dot(followingDirection.normalize()) >= 0.707D;
     }
 
     private void tickScanning(List<LivingEntity> potentialTargets) {
