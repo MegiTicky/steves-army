@@ -57,6 +57,7 @@ import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.LevelAccessor;
+import net.minecraft.world.level.pathfinder.Path;
 import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
@@ -148,6 +149,8 @@ public class SoldierEntity extends PathfinderMob implements Container {
         SynchedEntityData.defineId(SoldierEntity.class, EntityDataSerializers.INT);
 
     private static final int HALF_COVER_RISE_TICKS = 8;
+    private static final int NAVIGATION_LANDING_LOCK_TICKS = 4;
+    private static final int NAVIGATION_COLLISION_LOCK_TICKS = 2;
 
     @Nullable
     private UUID squadId;
@@ -167,6 +170,9 @@ public class SoldierEntity extends PathfinderMob implements Container {
     private final ThreatAwareness threatAwareness;
     
     private boolean healing = false;
+    private int navigationTraversalLockUntilTick = -1;
+    private int navigationTraversalHeightDelta;
+    private String navigationTraversalLockReason = "none";
     /** True when combat, rather than cover movement, owns the low-prone posture. */
     private boolean firingProne = false;
 
@@ -841,6 +847,7 @@ public class SoldierEntity extends PathfinderMob implements Container {
         if (VS2Compat.prepareSoldierAi(this)) {
             return;
         }
+        updateNavigationTraversalLock();
         super.customServerAiStep();
     }
     
@@ -1524,6 +1531,76 @@ public BlockPos getPingMoveTarget() {
     public void cancelCoverMovement() {
         if (moveControl instanceof com.stevesarmy.entity.ai.CoverPositionController ctrl) {
             ctrl.clear();
+        }
+    }
+
+    /**
+     * Temporarily gives vanilla navigation exclusive control of facing while
+     * traversing a vertical route segment. Combat uses this to avoid pulling a
+     * soldier back toward a threat in the middle of a jump or landing.
+     */
+    private void updateNavigationTraversalLock() {
+        Path path = getNavigation().getPath();
+        if (path == null || path.isDone()) {
+            return;
+        }
+
+        int nextIndex = path.getNextNodeIndex();
+        BlockPos nextNode = path.getNode(Math.min(nextIndex, path.getNodeCount() - 1)).asBlockPos();
+        int currentY = blockPosition().getY();
+        int heightDelta = nextNode.getY() - currentY;
+        boolean verticalNextNode = heightDelta != 0;
+        boolean upcomingClimb = heightDelta > 0;
+
+        if (!verticalNextNode && nextIndex + 1 < path.getNodeCount()) {
+            BlockPos followingNode = path.getNode(nextIndex + 1).asBlockPos();
+            upcomingClimb = followingNode.getY() > nextNode.getY();
+        }
+
+        if (verticalNextNode) {
+            setNavigationTraversalLock("vertical_node", heightDelta, NAVIGATION_LANDING_LOCK_TICKS);
+        } else if (!onGround()) {
+            setNavigationTraversalLock("airborne", 0, NAVIGATION_LANDING_LOCK_TICKS);
+        } else if ((horizontalCollision || minorHorizontalCollision) && upcomingClimb) {
+            setNavigationTraversalLock("climb_collision", 1, NAVIGATION_COLLISION_LOCK_TICKS);
+        }
+    }
+
+    private void setNavigationTraversalLock(String reason, int heightDelta, int durationTicks) {
+        navigationTraversalLockUntilTick = Math.max(navigationTraversalLockUntilTick, tickCount + durationTicks);
+        navigationTraversalHeightDelta = heightDelta;
+        navigationTraversalLockReason = reason;
+    }
+
+    public boolean isNavigationTraversalLocked() {
+        return tickCount <= navigationTraversalLockUntilTick;
+    }
+
+    public String getNavigationTraversalLockReason() {
+        return isNavigationTraversalLocked() ? navigationTraversalLockReason : "none";
+    }
+
+    public int getNavigationTraversalHeightDelta() {
+        return isNavigationTraversalLocked() ? navigationTraversalHeightDelta : 0;
+    }
+
+    /** Directs LookControl along the active path without directly changing body yaw. */
+    public void faceNavigationTraversal() {
+        if (!isNavigationTraversalLocked()) {
+            return;
+        }
+
+        Path path = getNavigation().getPath();
+        if (path != null && !path.isDone() && path.getNodeCount() > 0) {
+            int nextIndex = Math.min(path.getNextNodeIndex(), path.getNodeCount() - 1);
+            BlockPos nextNode = path.getNode(nextIndex).asBlockPos();
+            getLookControl().setLookAt(nextNode.getX() + 0.5D, getEyeY(), nextNode.getZ() + 0.5D, 30.0F, 30.0F);
+            return;
+        }
+
+        Vec3 movement = getDeltaMovement();
+        if (movement.horizontalDistanceSqr() > 0.0001D) {
+            getLookControl().setLookAt(getX() + movement.x, getEyeY(), getZ() + movement.z, 30.0F, 30.0F);
         }
     }
 

@@ -74,7 +74,11 @@ public class SoldierMoveToPingGoal extends Goal {
         double cx = rawTarget.getX() + 0.5;
         double cy = rawTarget.getY() + 0.5;
         double cz = rawTarget.getZ() + 0.5;
-        soldier.getLookControl().setLookAt(cx, cy + 0.5, cz, 30.0F, 30.0F);
+        if (soldier.isNavigationTraversalLocked()) {
+            soldier.faceNavigationTraversal();
+        } else {
+            soldier.getLookControl().setLookAt(cx, cy + 0.5, cz, 30.0F, 30.0F);
+        }
 
         if (--timeToRecalcPath <= 0) {
             timeToRecalcPath = 10;

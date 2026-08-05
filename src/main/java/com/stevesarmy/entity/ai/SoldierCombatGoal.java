@@ -60,6 +60,7 @@ public class SoldierCombatGoal extends Goal {
     private boolean gunInitialized = false;
     private ItemStack lastGunStack = ItemStack.EMPTY;
     private boolean wasAiming = false;
+    private boolean navigationTraversalLockWasActive = false;
     private boolean wasReloading = false;
     
     private float aimQuality = 0.0f;
@@ -449,6 +450,11 @@ public class SoldierCombatGoal extends Goal {
             updateDebugSync();
             return;
         }
+
+        if (holdCombatForNavigationTraversal(hasGun)) {
+            updateDebugSync();
+            return;
+        }
         
         if (target != null && target.isAlive()) {
             tickCombat(hasGun);
@@ -491,6 +497,38 @@ public class SoldierCombatGoal extends Goal {
             debugSyncTickCounter = 0;
             sendDebugPacketToOwner();
         }
+    }
+
+    /**
+     * Keep target and suppression ownership alive, but do not let combat turn
+     * or fire while vanilla navigation is clearing a vertical path segment.
+     */
+    private boolean holdCombatForNavigationTraversal(boolean hasGun) {
+        if (!soldier.isNavigationTraversalLocked()) {
+            if (navigationTraversalLockWasActive
+                && (DiagnosticLogManager.isAttackLoggingEnabled() || DiagnosticLogManager.isCoverLoggingEnabled())) {
+                StevesArmyMod.LOGGER.info("[TraversalLock] soldier={} released tick={}",
+                    soldier.getId(), soldier.tickCount);
+            }
+            navigationTraversalLockWasActive = false;
+            return false;
+        }
+
+        if (!navigationTraversalLockWasActive
+            && (DiagnosticLogManager.isAttackLoggingEnabled() || DiagnosticLogManager.isCoverLoggingEnabled())) {
+            StevesArmyMod.LOGGER.info("[TraversalLock] soldier={} admitted tick={} reason={} heightDelta={}",
+                soldier.getId(), soldier.tickCount, soldier.getNavigationTraversalLockReason(),
+                soldier.getNavigationTraversalHeightDelta());
+        }
+        navigationTraversalLockWasActive = true;
+
+        soldier.faceNavigationTraversal();
+        resetDirectFireBurst();
+        if (hasGun && wasAiming) {
+            GunIntegration.aim(soldier, false);
+        }
+        wasAiming = false;
+        return true;
     }
 
     private void tickFiringProne(boolean hasGun, boolean canSee) {
