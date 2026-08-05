@@ -27,6 +27,17 @@ public class SoldierModel<T extends SoldierEntity> extends HumanoidModel<T> {
                           float ageInTicks, float netHeadYaw, float headPitch) {
         super.setupAnim(entity, limbSwing, limbSwingAmount, ageInTicks, netHeadYaw, headPitch);
 
+        if (entity.isHalfCoverRising()) {
+            // HumanoidModel only has a binary crouching pose. Re-run its pose
+            // setup once standing and blend the two transforms for the rise.
+            float[] crouched = capturePose();
+            this.crouching = false;
+            super.setupAnim(entity, limbSwing, limbSwingAmount, ageInTicks, netHeadYaw, headPitch);
+            float[] standing = capturePose();
+            this.crouching = true;
+            blendPose(crouched, standing, entity.getHalfCoverRiseProgress());
+        }
+
         float f = this.swimAmount;
 
         boolean applyProne = entity.isLowCrouching() || f > EXIT_THRESHOLD;
@@ -86,5 +97,38 @@ public class SoldierModel<T extends SoldierEntity> extends HumanoidModel<T> {
         this.leftLeg.z = Mth.lerp(f, this.leftLeg.z, 0.0F + PoseConfig.LL_POS_Z);
 
         this.hat.copyFrom(this.head);
+    }
+
+    private float[] capturePose() {
+        return new float[]{
+            head.xRot, head.yRot, head.zRot, head.x, head.y, head.z,
+            body.xRot, body.yRot, body.zRot, body.x, body.y, body.z,
+            rightArm.xRot, rightArm.yRot, rightArm.zRot, rightArm.x, rightArm.y, rightArm.z,
+            leftArm.xRot, leftArm.yRot, leftArm.zRot, leftArm.x, leftArm.y, leftArm.z,
+            rightLeg.xRot, rightLeg.yRot, rightLeg.zRot, rightLeg.x, rightLeg.y, rightLeg.z,
+            leftLeg.xRot, leftLeg.yRot, leftLeg.zRot, leftLeg.x, leftLeg.y, leftLeg.z
+        };
+    }
+
+    private void blendPose(float[] crouched, float[] standing, float progress) {
+        float p = Mth.clamp(progress, 0.0F, 1.0F);
+        int i = 0;
+        i = blendPart(head, crouched, standing, i, p);
+        i = blendPart(body, crouched, standing, i, p);
+        i = blendPart(rightArm, crouched, standing, i, p);
+        i = blendPart(leftArm, crouched, standing, i, p);
+        i = blendPart(rightLeg, crouched, standing, i, p);
+        blendPart(leftLeg, crouched, standing, i, p);
+    }
+
+    private static int blendPart(ModelPart part, float[] crouched, float[] standing,
+                                 int index, float progress) {
+        part.xRot = Mth.lerp(progress, crouched[index], standing[index]);
+        part.yRot = Mth.lerp(progress, crouched[index + 1], standing[index + 1]);
+        part.zRot = Mth.lerp(progress, crouched[index + 2], standing[index + 2]);
+        part.x = Mth.lerp(progress, crouched[index + 3], standing[index + 3]);
+        part.y = Mth.lerp(progress, crouched[index + 4], standing[index + 4]);
+        part.z = Mth.lerp(progress, crouched[index + 5], standing[index + 5]);
+        return index + 6;
     }
 }

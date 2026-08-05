@@ -1063,6 +1063,19 @@ public class SoldierCombatGoal extends Goal {
     private void tickGunCombat() {
         CoverBehaviorManager coverManager = soldier.getCoverBehaviorManager();
 
+        // Half-cover exposure is a visible reaction window. The soldier may
+        // turn and raise the weapon during the rise, but cannot fire until the
+        // server-synchronised body transition is complete.
+        if (soldier.isHalfCoverRising()) {
+            if (target != null && target.isAlive()
+                && prepareToFire(target.getEyePosition(), true)) {
+                GunIntegration.aim(soldier, true);
+                wasAiming = true;
+            }
+            resetDirectFireBurst();
+            return;
+        }
+
         if (coverManager.isInCover() && soldier.getPeekController().getState() != PeekController.State.EXPOSED) {
             // A close visible flanker may interrupt a suppressed half-cover posture,
             // but still has to transition through the exposed state before firing.

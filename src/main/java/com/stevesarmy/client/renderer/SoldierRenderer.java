@@ -33,12 +33,16 @@ public class SoldierRenderer extends HumanoidMobRenderer<SoldierEntity, SoldierM
     @Override
     public void render(SoldierEntity soldier, float entityYaw, float partialTick,
                        PoseStack poseStack, MultiBufferSource bufferSource, int packedLight) {
-        this.model.crouching = soldier.isCrouching();
+        this.model.crouching = soldier.isCrouching() || soldier.isHalfCoverRising();
         super.render(soldier, entityYaw, partialTick, poseStack, bufferSource, packedLight);
     }
 
     @Override
     public Vec3 getRenderOffset(SoldierEntity soldier, float partialTick) {
+        if (soldier.isHalfCoverRising()) {
+            double rise = soldier.getHalfCoverRiseProgress();
+            return new Vec3(0.0D, -0.125D * (1.0D - rise), 0.0D);
+        }
         return soldier.isCrouching() ? new Vec3(0.0D, -0.125D, 0.0D) : super.getRenderOffset(soldier, partialTick);
     }
 

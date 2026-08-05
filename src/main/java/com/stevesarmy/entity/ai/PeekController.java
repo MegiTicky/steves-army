@@ -385,7 +385,8 @@ public class PeekController {
         
         boolean isHalf = cover.getType() == CoverType.HALF;
         if (isHalf) {
-            // Pose managed by CoverTacticalGoal + SoldierEntity.tick() enforcement
+            // Keep the crouched hitbox/eye height while the synced rise progresses.
+            soldier.beginHalfCoverRise();
         } else {
             CoverPositionController mover = (CoverPositionController) soldier.getMoveControl();
             mover.clear();
