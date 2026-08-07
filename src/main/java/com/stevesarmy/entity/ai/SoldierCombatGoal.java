@@ -83,6 +83,7 @@ public class SoldierCombatGoal extends Goal {
     private static final int DEBUG_SYNC_INTERVAL = 20;
     private int targetReevaluateCounter = 0;
     private int lastCqbGoToPursuitSuppressedTick = Integer.MIN_VALUE;
+    private int lastHiddenCoverFireDebugTick = Integer.MIN_VALUE;
     
     private int findNewTargetLogCounter = 0;
 
@@ -1055,16 +1056,9 @@ public class SoldierCombatGoal extends Goal {
             tickCoverPeekCycle(coverManager);
         }
         
-        PeekController.State peekState = soldier.getPeekController().getState();
-        boolean isDuckedInHalfCover = coverManager.isInCover()
-            && coverManager.getCurrentCover() != null
-            && coverManager.getCurrentCover().getType() == CoverType.HALF
-            && (peekState == PeekController.State.HIDING 
-                || peekState == PeekController.State.RETURNING_TO_COVER);
-        
-        if (!isDuckedInHalfCover) {
-            soldier.getLookControl().setLookAt(target, 30.0F, 30.0F);
-        }
+        // A valid direct shot from cover must track the target just like an
+        // exposed peek. Cover ownership still controls the soldier's position.
+        soldier.getLookControl().setLookAt(target, 30.0F, 30.0F);
         
         if (hasGun) {
             if (canSee) {
@@ -1133,16 +1127,6 @@ public class SoldierCombatGoal extends Goal {
             return;
         }
 
-        if (coverManager.isInCover() && soldier.getPeekController().getState() != PeekController.State.EXPOSED) {
-            // A close visible flanker may interrupt a suppressed half-cover posture,
-            // but still has to transition through the exposed state before firing.
-            if (target != null && target.isAlive()) {
-                prepareToFire(target.getEyePosition(), true);
-            }
-            resetDirectFireBurst();
-            return;
-        }
-        
         boolean isDrawing = GunIntegration.isDrawing(soldier);
         boolean isBolting = GunIntegration.isBolting(soldier);
         boolean isReloading = GunIntegration.isReloading(soldier);
@@ -1256,6 +1240,16 @@ public class SoldierCombatGoal extends Goal {
             return;
         }
 
+        boolean hiddenCoverFire = isHiddenCoverFire();
+        if (hiddenCoverFire && isDebugLogging()
+            && soldier.tickCount - lastHiddenCoverFireDebugTick >= DEBUG_SYNC_INTERVAL) {
+            lastHiddenCoverFireDebugTick = soldier.tickCount;
+            StevesArmyMod.LOGGER.info(
+                "[HiddenCoverFire] soldier={} peek={} target={} aim={} canShoot={}",
+                soldier.getId(), soldier.getPeekController().getState(), target.getId(),
+                aimPoint.type.displayName, aimPoint.canShoot());
+        }
+
         // Starting a burst requires a solid firing solution. The lower
         // continuation floor allows recoil to degrade later shots naturally.
         float continuationThreshold = directBurstActive
@@ -1340,6 +1334,12 @@ public class SoldierCombatGoal extends Goal {
                 coverManager.onPeekShot();
             }
 
+            if (hiddenCoverFire && isDebugLogging()) {
+                StevesArmyMod.LOGGER.info(
+                    "[HiddenCoverFire] soldier={} shot target={} aim={}",
+                    soldier.getId(), target.getId(), aimPoint.type.displayName);
+            }
+
             if (GunIntegration.isTaczLoaded() && GunIntegration.hasGun(soldier)) {
                 float[] recoil = AimAccuracyManager.getGunRecoil(soldier);
                 float recoilMagnitude = Math.abs(recoil[0]) + Math.abs(recoil[1]);
@@ -1404,6 +1404,11 @@ public class SoldierCombatGoal extends Goal {
             || peekState == PeekController.State.RETURNING_TO_COVER) {
             lookTowardThreat();
         }
+    }
+
+    private boolean isHiddenCoverFire() {
+        return soldier.getCoverBehaviorManager().isInCover()
+            && soldier.getPeekController().getState() == PeekController.State.HIDING;
     }
     
     @javax.annotation.Nullable
