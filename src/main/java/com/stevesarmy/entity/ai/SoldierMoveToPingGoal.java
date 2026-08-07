@@ -27,6 +27,7 @@ public class SoldierMoveToPingGoal extends Goal {
     public boolean canUse() {
         if (!soldier.isAlive()) return false;
         if (soldier.hasValidAttackTarget()) return false;
+        if (soldier.isGoToHolding()) return false;
         if (!soldier.hasValidPingMoveTarget()) return false;
         captureCommand();
         computeNavigationTarget();
@@ -40,6 +41,7 @@ public class SoldierMoveToPingGoal extends Goal {
     @Override
     public boolean canContinueToUse() {
         if (!soldier.isAlive()) return false;
+        if (soldier.isGoToHolding()) return false;
         if (!soldier.hasValidPingMoveTarget()) return false;
         if (rawTarget == null) return false;
         if (soldier.getCoverTacticalGoal().isHandlingGoToRelocation(commandGeneration)) return false;
@@ -61,7 +63,9 @@ public class SoldierMoveToPingGoal extends Goal {
     public void stop() {
         if (!soldier.getCoverTacticalGoal().isHandlingGoToRelocation(commandGeneration)) {
             soldier.getNavigation().stop();
-            soldier.clearPingMoveTargetIfGeneration(commandGeneration);
+            if (!soldier.hasPersistentGoTo()) {
+                soldier.clearPingMoveTargetIfGeneration(commandGeneration);
+            }
         }
         rawTarget = null;
         navigationTarget = null;
@@ -105,7 +109,7 @@ public class SoldierMoveToPingGoal extends Goal {
                 }
             } else {
                 soldier.getNavigation().stop();
-                soldier.clearPingMoveTargetIfGeneration(commandGeneration);
+                soldier.completeGoToIfGeneration(commandGeneration);
             }
         }
     }

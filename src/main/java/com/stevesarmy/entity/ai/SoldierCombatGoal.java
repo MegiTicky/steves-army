@@ -82,6 +82,7 @@ public class SoldierCombatGoal extends Goal {
     private int debugSyncTickCounter = 0;
     private static final int DEBUG_SYNC_INTERVAL = 20;
     private int targetReevaluateCounter = 0;
+    private int lastCqbGoToPursuitSuppressedTick = Integer.MIN_VALUE;
     
     private int findNewTargetLogCounter = 0;
 
@@ -1033,9 +1034,11 @@ public class SoldierCombatGoal extends Goal {
     private void tickCombat(boolean hasGun) {
         boolean canSee = TargetAcquisition.hasLineOfSight(soldier, target);
 
-        boolean visibleCloseTarget = target != null && target.isAlive()
-            && canSee && soldier.distanceToSqr(target) <= SoldierEntity.CQB_RANGE * SoldierEntity.CQB_RANGE;
-        if (visibleCloseTarget) {
+        boolean shouldHoldCqbEngagement = target != null && target.isAlive()
+            && canSee
+            && (soldier.isCQB()
+                || soldier.distanceToSqr(target) <= SoldierEntity.CQB_RANGE * SoldierEntity.CQB_RANGE);
+        if (shouldHoldCqbEngagement) {
             soldier.beginCqbEngagement();
         } else if (soldier.isCqbEngagementHold()) {
             soldier.endCqbEngagement();
@@ -1079,16 +1082,13 @@ public class SoldierCombatGoal extends Goal {
             }
         }
         
-        if (!soldier.isCqbEngagementHold() && soldier.isCQB() && target != null && target.isAlive()) {
-            double distSq = soldier.distanceToSqr(target);
-            if (!soldier.getCoverBehaviorManager().isInCover() && distSq > SoldierEntity.CQB_RANGE * SoldierEntity.CQB_RANGE) {
-                // Don't overwrite cover/direct-bound navigation
-                if (soldier.getCoverBehaviorManager().isSeekingCover()) {
-                    // Only log once
-                } else {
-                    soldier.getNavigation().moveTo(target, 1.0);
-                }
-            }
+        if (!soldier.isCqbEngagementHold() && soldier.isCQB() && target != null && target.isAlive()
+            && soldier.hasGoToNavigationOwnership() && isDebugLogging()
+            && soldier.tickCount - lastCqbGoToPursuitSuppressedTick >= DEBUG_SYNC_INTERVAL) {
+            lastCqbGoToPursuitSuppressedTick = soldier.tickCount;
+            StevesArmyMod.LOGGER.info(
+                "[CqbNav] Soldier {} preserved GO_TO {} while not pursuing enemy {} hold={}",
+                soldier.getId(), soldier.getPingMoveTarget(), target.getId(), soldier.isCqbEngagementHold());
         }
     }
     

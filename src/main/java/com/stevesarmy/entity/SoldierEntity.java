@@ -181,6 +181,8 @@ public class SoldierEntity extends PathfinderMob implements Container {
     private BlockPos pingMoveTarget = null;
     private long pingMoveTimestamp = 0;
     private static final long PING_MOVE_MEMORY_MS = 15000;
+    private boolean persistentGoTo = false;
+    private boolean goToHolding = false;
 
     private int pingMoveGeneration = 0;
 
@@ -1031,6 +1033,7 @@ public class SoldierEntity extends PathfinderMob implements Container {
         switch (type) {
             case SEND -> {
                 BlockPos pos = BlockPos.containing(position);
+                clearGoToState();
                 pingMoveTarget = pos;
                 pingMoveTimestamp = System.currentTimeMillis();
                 setSquadMode(com.stevesarmy.squad.SquadMode.HOLD);
@@ -1043,6 +1046,8 @@ public class SoldierEntity extends PathfinderMob implements Container {
                 pingMoveGeneration++;
                 pingMoveTarget = BlockPos.containing(position);
                 pingMoveTimestamp = System.currentTimeMillis();
+                persistentGoTo = true;
+                goToHolding = false;
                 setSquadMode(com.stevesarmy.squad.SquadMode.HOLD);
                 setHoldPosition(BlockPos.containing(position));
                 coverBehaviorManager.clearCover();
@@ -1117,12 +1122,37 @@ public BlockPos getPingMoveTarget() {
 
     public boolean hasValidPingMoveTarget() {
         return pingMoveTarget != null &&
-               System.currentTimeMillis() - pingMoveTimestamp < PING_MOVE_MEMORY_MS;
+               (persistentGoTo || System.currentTimeMillis() - pingMoveTimestamp < PING_MOVE_MEMORY_MS);
+    }
+
+    public boolean hasPersistentGoTo() {
+        return persistentGoTo && pingMoveTarget != null;
+    }
+
+    public boolean isGoToHolding() {
+        return persistentGoTo && goToHolding;
+    }
+
+    /** True while an active or completed GO_TO command owns CQB movement decisions. */
+    public boolean hasGoToNavigationOwnership() {
+        return persistentGoTo;
+    }
+
+    public void completeGoToIfGeneration(int expectedGeneration) {
+        if (pingMoveGeneration != expectedGeneration || !persistentGoTo) return;
+
+        pingMoveTarget = null;
+        pingMoveTimestamp = 0;
+        goToHolding = true;
+        if (squadId != null) {
+            com.stevesarmy.util.SpacingHelper.clearAssignment(squadId);
+        }
     }
 
     public void clearPingMoveTarget() {
         pingMoveTarget = null;
         pingMoveTimestamp = 0;
+        clearGoToState();
         if (squadId != null) {
             com.stevesarmy.util.SpacingHelper.clearAssignment(squadId);
         }
@@ -1132,10 +1162,16 @@ public BlockPos getPingMoveTarget() {
         if (pingMoveGeneration == expectedGeneration) {
             pingMoveTarget = null;
             pingMoveTimestamp = 0;
+            clearGoToState();
             if (squadId != null) {
                 com.stevesarmy.util.SpacingHelper.clearAssignment(squadId);
             }
         }
+    }
+
+    private void clearGoToState() {
+        persistentGoTo = false;
+        goToHolding = false;
     }
 
     public BlockPos getAttackTargetPos() {

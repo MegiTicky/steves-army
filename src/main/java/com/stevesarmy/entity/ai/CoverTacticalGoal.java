@@ -3521,7 +3521,7 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
         doLowCrouchIfHalfCover();
 
         if (relocationType == RelocationType.GO_TO) {
-            soldier.clearPingMoveTargetIfGeneration(relocationCommandGeneration);
+            soldier.completeGoToIfGeneration(relocationCommandGeneration);
         }
         if (relocationType != RelocationType.NONE) {
             relocationType = RelocationType.NONE;
