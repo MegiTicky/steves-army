@@ -108,6 +108,7 @@
 - [ ] Sound effects
 - [ ] Weird look angle: soldier not looking at target when shooting
 - [ ] Prone walking: soldiers remain proned when moving
+- [ ] Make skin data-driven/configurable (player can use their own skin for the soldiers)
 
 ## Future (Post-MVP)
 - Detailed planning UI (engagement rules: scout/battle/stealth, trigger discipline, formation, movement speed)

@@ -105,6 +105,10 @@ public class CoverDebugRenderer {
             MultiBufferSource.BufferSource soldierBufferSource = mc.renderBuffers().bufferSource();
             renderSoldierCoverLabels(poseStack, cameraPos, mc.level, mc, soldierBufferSource);
             soldierBufferSource.endBatch();
+
+            buffer.begin(VertexFormat.Mode.DEBUG_LINES, DefaultVertexFormat.POSITION_COLOR);
+            renderCqbDebugPaths(buffer, poseStack, cameraPos, mc.level);
+            tesselator.end();
             
             buffer.begin(VertexFormat.Mode.DEBUG_LINES, DefaultVertexFormat.POSITION_COLOR);
             renderTopCoversVisualization(buffer, poseStack, cameraPos, mc.level);
@@ -1013,6 +1017,32 @@ private static void renderSoldierCoverLabels(PoseStack poseStack, Vec3 cameraPos
             }
             
             poseStack.popPose();
+        }
+    }
+
+    private static void renderCqbDebugPaths(BufferBuilder buffer, PoseStack poseStack, Vec3 cameraPos, Level level) {
+        for (SoldierEntity soldier : level.getEntitiesOfClass(SoldierEntity.class,
+                Minecraft.getInstance().player.getBoundingBox().inflate(50))) {
+            String encoded = soldier.getSyncedCqbPath();
+            if (encoded == null || encoded.isEmpty()) continue;
+            String[] nodes = encoded.split("\\|");
+            Vec3 previous = soldier.position().subtract(cameraPos);
+            for (String node : nodes) {
+                String[] parts = node.split(":");
+                if (parts.length != 3) continue;
+                try {
+                    Vec3 next = new Vec3(Integer.parseInt(parts[0]) + 0.5 - cameraPos.x,
+                        Integer.parseInt(parts[1]) + 0.15 - cameraPos.y,
+                        Integer.parseInt(parts[2]) + 0.5 - cameraPos.z);
+                    buffer.vertex(poseStack.last().pose(), (float) previous.x, (float) previous.y, (float) previous.z)
+                        .color(0, 200, 255, 220).endVertex();
+                    buffer.vertex(poseStack.last().pose(), (float) next.x, (float) next.y, (float) next.z)
+                        .color(0, 200, 255, 220).endVertex();
+                    previous = next;
+                } catch (NumberFormatException ignored) {
+                    // A malformed debug sample must not break world rendering.
+                }
+            }
         }
     }
 

@@ -64,6 +64,7 @@ public class SoldierHealGoal extends Goal {
 
         soldier.setItemSlot(net.minecraft.world.entity.EquipmentSlot.OFFHAND, selected);
         soldier.setHealing(true);
+        soldier.cancelCoverMovement();
         soldier.getNavigation().stop();
         syncInventory();
         if (GunIntegration.isTaczLoaded() && GunIntegration.hasGun(soldier)) {

@@ -195,6 +195,9 @@ public class SoldierCombatGoal extends Goal {
     private boolean directBurstActive = false;
     private int directBurstShotsFired = 0;
     private int directBurstCooldownTicks = 0;
+    private DirectFireWeaponProfile directBurstProfile = null;
+    private int directBurstShotLimit = 0;
+    private float directBurstContinuationThreshold = 0.0f;
 
     private enum DirectFireWeaponProfile {
         SINGLE_SHOT(1, 0),
@@ -323,6 +326,7 @@ public class SoldierCombatGoal extends Goal {
     @Override
     public void stop() {
         cancelAllSuppression();
+        soldier.endCqbEngagement();
         if (GunIntegration.isTaczLoaded() && GunIntegration.hasGun(soldier)) {
             GunIntegration.aim(soldier, false);
         }
@@ -1029,6 +1033,14 @@ public class SoldierCombatGoal extends Goal {
     private void tickCombat(boolean hasGun) {
         boolean canSee = TargetAcquisition.hasLineOfSight(soldier, target);
 
+        boolean visibleCloseTarget = target != null && target.isAlive()
+            && canSee && soldier.distanceToSqr(target) <= SoldierEntity.CQB_RANGE * SoldierEntity.CQB_RANGE;
+        if (visibleCloseTarget) {
+            soldier.beginCqbEngagement();
+        } else if (soldier.isCqbEngagementHold()) {
+            soldier.endCqbEngagement();
+        }
+
         if (canSee) {
             threatTracker.reportThreatDirect(target);
             resetAim(target);
@@ -1067,7 +1079,7 @@ public class SoldierCombatGoal extends Goal {
             }
         }
         
-        if (soldier.isCQB() && target != null && target.isAlive()) {
+        if (!soldier.isCqbEngagementHold() && soldier.isCQB() && target != null && target.isAlive()) {
             double distSq = soldier.distanceToSqr(target);
             if (!soldier.getCoverBehaviorManager().isInCover() && distSq > SoldierEntity.CQB_RANGE * SoldierEntity.CQB_RANGE) {
                 // Don't overwrite cover/direct-bound navigation
@@ -1232,22 +1244,25 @@ public class SoldierCombatGoal extends Goal {
             targetAimQ * thresholdScale);
 
         DirectFireWeaponProfile directProfile = getDirectFireWeaponProfile();
-        int burstShotLimit = mobileFire
+        int requestedBurstShotLimit = mobileFire
             ? Math.min(directProfile.burstShots, MOBILE_FIRE_MAX_BURST_SHOTS)
             : directProfile.burstShots;
-        if (!mobileFire && directBurstActive) {
-            finishDirectFireBurst(directProfile);
-        }
         if (directBurstCooldownTicks > 0) {
             directBurstCooldownTicks--;
+            if (isDebugLogging() && (directBurstCooldownTicks == 0 || directBurstCooldownTicks % 5 == 0)) {
+                StevesArmyMod.LOGGER.info("[DirectBurst] soldier={} recovery_remaining={}",
+                    soldier.getId(), directBurstCooldownTicks);
+            }
             return;
         }
 
         // Starting a burst requires a solid firing solution. The lower
         // continuation floor allows recoil to degrade later shots naturally.
-        float continuationThreshold = getDirectBurstContinuationThreshold(shotThreshold);
+        float continuationThreshold = directBurstActive
+            ? directBurstContinuationThreshold
+            : getDirectBurstContinuationThreshold(shotThreshold);
         if (directBurstActive && aimQuality < continuationThreshold) {
-            finishDirectFireBurst(directProfile);
+            finishDirectFireBurst("aim_quality");
             return;
         }
 
@@ -1312,8 +1327,15 @@ public class SoldierCombatGoal extends Goal {
         result = GunIntegration.shootWithDeviation(soldier, aimPoint, pitchDev, yawDev);
         
         if (result == GunIntegration.ShootResult.SUCCESS) {
-            directBurstActive = burstShotLimit > 1;
+            if (!directBurstActive) {
+                beginDirectFireBurst(directProfile, requestedBurstShotLimit, mobileFire, continuationThreshold);
+            }
             directBurstShotsFired++;
+            if (isDebugLogging()) {
+                StevesArmyMod.LOGGER.info("[DirectBurst] soldier={} shot={}/{} profile={} mobile={}",
+                    soldier.getId(), directBurstShotsFired, directBurstShotLimit,
+                    directBurstProfile, mobileFire);
+            }
             if (coverManager.isInCover()) {
                 coverManager.onPeekShot();
             }
@@ -1332,8 +1354,8 @@ public class SoldierCombatGoal extends Goal {
                 }
             }
 
-            if (directBurstShotsFired >= burstShotLimit) {
-                finishDirectFireBurst(directProfile);
+            if (directBurstShotsFired >= directBurstShotLimit) {
+                finishDirectFireBurst("completed");
             }
         }
         
@@ -2445,16 +2467,46 @@ public class SoldierCombatGoal extends Goal {
         return Math.max(0.08f, startThreshold * scale);
     }
 
-    private void finishDirectFireBurst(DirectFireWeaponProfile profile) {
+    private void beginDirectFireBurst(DirectFireWeaponProfile profile, int shotLimit, boolean mobile,
+                                      float continuationThreshold) {
+        directBurstProfile = profile;
+        directBurstShotLimit = shotLimit;
+        directBurstContinuationThreshold = continuationThreshold;
+        directBurstShotsFired = 0;
+        directBurstActive = shotLimit > 1;
+        if (isDebugLogging()) {
+            StevesArmyMod.LOGGER.info("[DirectBurst] soldier={} start profile={} shots={} mobile={} continuation={}",
+                soldier.getId(), profile, shotLimit, mobile, String.format("%.3f", continuationThreshold));
+        }
+    }
+
+    private void finishDirectFireBurst(String reason) {
+        DirectFireWeaponProfile profile = directBurstProfile != null
+            ? directBurstProfile : getDirectFireWeaponProfile();
+        int shotsFired = directBurstShotsFired;
         directBurstActive = false;
         directBurstShotsFired = 0;
         directBurstCooldownTicks = profile.recoveryTicks;
+        directBurstProfile = null;
+        directBurstShotLimit = 0;
+        directBurstContinuationThreshold = 0.0f;
+        if (isDebugLogging()) {
+            StevesArmyMod.LOGGER.info("[DirectBurst] soldier={} end reason={} shots={} profile={} recovery={}",
+                soldier.getId(), reason, shotsFired, profile, directBurstCooldownTicks);
+        }
     }
 
     private void resetDirectFireBurst() {
+        if (isDebugLogging() && (directBurstActive || directBurstCooldownTicks > 0)) {
+            StevesArmyMod.LOGGER.info("[DirectBurst] soldier={} cancelled reason=state_change shots={} cooldown={}",
+                soldier.getId(), directBurstShotsFired, directBurstCooldownTicks);
+        }
         directBurstActive = false;
         directBurstShotsFired = 0;
         directBurstCooldownTicks = 0;
+        directBurstProfile = null;
+        directBurstShotLimit = 0;
+        directBurstContinuationThreshold = 0.0f;
     }
 
     private void resetBurstState() {

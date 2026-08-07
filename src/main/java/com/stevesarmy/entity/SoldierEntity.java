@@ -138,6 +138,8 @@ public class SoldierEntity extends PathfinderMob implements Container {
         SynchedEntityData.defineId(SoldierEntity.class, EntityDataSerializers.FLOAT);
     private static final EntityDataAccessor<Float> THREAT_DIR_Z =
         SynchedEntityData.defineId(SoldierEntity.class, EntityDataSerializers.FLOAT);
+    private static final EntityDataAccessor<String> DEBUG_CQB_PATH =
+        SynchedEntityData.defineId(SoldierEntity.class, EntityDataSerializers.STRING);
 
     private static final EntityDataAccessor<Integer> FIRE_DISCIPLINE =
         SynchedEntityData.defineId(SoldierEntity.class, EntityDataSerializers.INT);
@@ -205,8 +207,12 @@ public class SoldierEntity extends PathfinderMob implements Container {
     private boolean dispatchedBySend = false;
     private boolean inventorySyncingFromEntity = false;
     private boolean cqbMode = false;
+    private boolean cqbEngagementHold = false;
+    private String lastSyncedCqbPath = null;
 
     public static final double CQB_RANGE = 5.0;
+    /** Radius around the remaining path within which a known enemy triggers caution steering. */
+    public static final double CQB_CAUTION_RADIUS = 10.0;
 
     public boolean isDispatchedBySend() {
         return dispatchedBySend;
@@ -223,6 +229,52 @@ public class SoldierEntity extends PathfinderMob implements Container {
     public boolean hasCloseRangeTarget() {
         if (this.getTarget() == null || !this.getTarget().isAlive()) return false;
         return this.distanceToSqr(this.getTarget()) < CQB_RANGE * CQB_RANGE;
+    }
+
+    public boolean isCqbEngagementHold() {
+        return cqbEngagementHold;
+    }
+
+    public void beginCqbEngagement() {
+        if (cqbEngagementHold) return;
+        cqbEngagementHold = true;
+        getNavigation().stop();
+        cancelCoverMovement();
+        setZza(0.0F);
+        setXxa(0.0F);
+        setDeltaMovement(0.0D, getDeltaMovement().y, 0.0D);
+    }
+
+    public void endCqbEngagement() {
+        cqbEngagementHold = false;
+    }
+
+    public String getSyncedCqbPath() {
+        return entityData.get(DEBUG_CQB_PATH);
+    }
+
+    private void syncCqbDebugPath() {
+        Path path = getNavigation().getPath();
+        if (path == null || path.isDone() || path.getNodeCount() == 0) {
+            if (!"".equals(lastSyncedCqbPath)) {
+                entityData.set(DEBUG_CQB_PATH, "");
+                lastSyncedCqbPath = "";
+            }
+            return;
+        }
+        StringBuilder encoded = new StringBuilder();
+        int start = Math.max(0, path.getNextNodeIndex());
+        int end = Math.min(path.getNodeCount(), start + 12);
+        for (int i = start; i < end; i++) {
+            if (encoded.length() > 0) encoded.append('|');
+            BlockPos p = path.getNode(i).asBlockPos();
+            encoded.append(p.getX()).append(':').append(p.getY()).append(':').append(p.getZ());
+        }
+        String value = encoded.toString();
+        if (!value.equals(lastSyncedCqbPath)) {
+            entityData.set(DEBUG_CQB_PATH, value);
+            lastSyncedCqbPath = value;
+        }
     }
 
     public boolean isHealing() {
@@ -299,6 +351,7 @@ public class SoldierEntity extends PathfinderMob implements Container {
         this.entityData.define(THREAT_DIR_X, 0f);
         this.entityData.define(THREAT_DIR_Y, 0f);
         this.entityData.define(THREAT_DIR_Z, 0f);
+        this.entityData.define(DEBUG_CQB_PATH, "");
         this.entityData.define(FIRE_DISCIPLINE, FireDiscipline.STANDARD.ordinal());
         this.entityData.define(FIRE_TEAM, FireTeam.ALPHA.ordinal());
         this.entityData.define(RECALL_TICKS, 0);
@@ -797,6 +850,7 @@ public class SoldierEntity extends PathfinderMob implements Container {
         }
         
         if (!this.level().isClientSide) {
+            syncCqbDebugPath();
             threatAwareness.tick();
             holdMovementForReload();
             updateCrawlFacing();

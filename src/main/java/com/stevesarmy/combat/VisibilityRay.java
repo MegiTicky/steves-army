@@ -204,8 +204,8 @@ public final class VisibilityRay {
     }
 
     private static double concealmentWeight(BlockState state) {
-        if (state.is(ModBlockTags.VISION_CONCEALMENT_MEDIUM)) return 0.50;
-        return 0.35;
+        if (state.is(ModBlockTags.VISION_CONCEALMENT_MEDIUM)) return 0.30;
+        return 0.20;
     }
 
     private static int floor(double value) {

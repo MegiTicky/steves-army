@@ -3,7 +3,9 @@ package com.stevesarmy.entity.ai;
 import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.util.HazardBlockHelper;
+import net.minecraft.util.Mth;
 import net.minecraft.world.entity.Mob;
+import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.ai.control.MoveControl;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
@@ -39,6 +41,7 @@ public class CoverPositionController extends MoveControl {
     private Vec3 debugLastSetVelocity = Vec3.ZERO;
     private boolean controlledReturnToCover;
     private Vec3 coverAnchorTarget;
+    private final CqbSteeringAdvisor steeringAdvisor = new CqbSteeringAdvisor();
 
     // Max steps for swept-box collision check
     private static final int COLLISION_SWEEP_STEPS = 8;
@@ -56,6 +59,17 @@ public class CoverPositionController extends MoveControl {
 
     public void moveTo(Vec3 pos, double tolerance, double speed, String source, String reason) {
         this.coverAnchorTarget = null;
+        if (this.mob instanceof SoldierEntity soldier && soldier.isCqbEngagementHold()
+            && !"PeekController".equals(source)) {
+            this.mob.getNavigation().stop();
+            this.mob.setZza(0.0F);
+            this.mob.setXxa(0.0F);
+            this.mob.setSpeed(0.0F);
+            this.operation = Operation.WAIT;
+            this.debugMoveSource = "cqb-engage";
+            this.debugMoveReason = "visible close target";
+            return;
+        }
         if (isPreparingOrReloading()) {
             if (!controlledReturnToCover) {
                 stopForReload();
@@ -243,7 +257,25 @@ public class CoverPositionController extends MoveControl {
             return;
         }
 
+        if (this.mob instanceof SoldierEntity soldier && soldier.isCqbEngagementHold()
+            && !soldier.getPeekController().isMovingToPeek()
+            && !soldier.getPeekController().isReturning()) {
+            this.operation = Operation.WAIT;
+            this.mob.getNavigation().stop();
+            this.mob.setZza(0.0F);
+            this.mob.setXxa(0.0F);
+            this.mob.setSpeed(0.0F);
+            this.mob.setDeltaMovement(0.0D, this.mob.getDeltaMovement().y, 0.0D);
+            this.debugLastSetVelocity = Vec3.ZERO;
+            this.debugMoveSource = "cqb-engage";
+            this.debugMoveReason = "visible close target";
+            return;
+        }
+
         if (lastResult != MovementResult.IN_PROGRESS) {
+            if (tickCautionSteering(anchorTarget)) {
+                return;
+            }
             super.tick();
             applyCoverAnchorVelocity(anchorTarget);
             this.debugLastSetVelocity = this.mob.getDeltaMovement();
@@ -295,6 +327,54 @@ public class CoverPositionController extends MoveControl {
         super.tick();
         applyCoverAnchorVelocity(anchorTarget);
         this.debugLastSetVelocity = this.mob.getDeltaMovement();
+    }
+
+    /**
+     * Cautious path following while an enemy is near the remaining path:
+     * slower speed and hugging the side of the path that keeps cover between
+     * the soldier and the enemy (continuous slow-pie, never stopping).
+     * Returns false to let the caller follow the path normally.
+     */
+    private boolean tickCautionSteering(Vec3 anchorTarget) {
+        if (!(this.mob instanceof SoldierEntity soldier)) {
+            return false;
+        }
+        if (isPreparingOrReloading()) {
+            return false;
+        }
+        if (!steeringAdvisor.isCautionActive(soldier)) {
+            return false;
+        }
+        if (soldier.getNavigation().isDone()) {
+            return false;
+        }
+
+        Vec3 steerTarget = steeringAdvisor.getSteerTarget(soldier);
+        if (steerTarget == null) {
+            return false;
+        }
+
+        double dx = steerTarget.x - this.mob.getX();
+        double dz = steerTarget.z - this.mob.getZ();
+        if (dx * dx + dz * dz < 0.01) {
+            return false;
+        }
+        if (sweptBoxCollidesWithSolid(steerTarget)) {
+            return false;
+        }
+
+        float targetYaw = (float) (Mth.atan2(dz, dx) * (180.0F / (float) Math.PI)) - 90.0F;
+        this.mob.setYRot(this.rotlerp(this.mob.getYRot(), targetYaw, 45.0F));
+        double cautionSpeed = steeringAdvisor.getCautionSpeed(this.speedModifier);
+        this.mob.setSpeed((float) (cautionSpeed * this.mob.getAttributeValue(Attributes.MOVEMENT_SPEED)));
+        this.mob.setZza(1.0F);
+        this.mob.setXxa(0.0F);
+
+        applyCoverAnchorVelocity(anchorTarget);
+        this.debugLastSetVelocity = this.mob.getDeltaMovement();
+        this.debugMoveSource = "cqb-caution";
+        this.debugMoveReason = steeringAdvisor.getCautionReason();
+        return true;
     }
 
     private boolean isPreparingOrReloading() {

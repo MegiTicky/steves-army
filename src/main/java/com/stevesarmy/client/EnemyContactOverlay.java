@@ -73,7 +73,6 @@ public final class EnemyContactOverlay {
         for (Map.Entry<UUID, Contact> entry : contacts.entrySet()) {
             Contact contact = entry.getValue();
             contact.renderHeadPosition = getRenderHeadPosition(contact, renderedEntities.get(entry.getKey()), context.tickDelta);
-            contact.headScreenPosition = MathUtils.worldToScreen(contact.renderHeadPosition, context);
             contact.screenPosition = MathUtils.worldToScreen(getMarkerPosition(contact), context);
         }
     }
@@ -104,10 +103,6 @@ public final class EnemyContactOverlay {
             boolean onScreen = isOnScreen(contact.screenPosition, guiWidth, guiHeight);
             float[] screenPosition = resolveScreenPosition(contact, context, guiWidth, guiHeight);
             float diameter = onScreen ? getOnScreenDiamondDiameter(contact, context) : getBaselineDiamondDiameter();
-            if (onScreen && isOnScreen(contact.headScreenPosition, guiWidth, guiHeight)) {
-                drawConnector(graphics, contact.headScreenPosition, contact.screenPosition, diameter,
-                    withAlpha(contact.teamColor, opacity * 0.35f));
-            }
             drawDiamond(graphics, screenPosition[0], screenPosition[1], diameter, withAlpha(contact.teamColor, opacity));
         }
     }
@@ -182,17 +177,6 @@ public final class EnemyContactOverlay {
         graphics.pose().popPose();
     }
 
-    private static void drawConnector(GuiGraphics graphics, ScreenPos head, ScreenPos marker, float diameter, int color) {
-        float diamondScale = diameter / BASE_DIAMOND_DIAMETER;
-        float centeredX = (head.x + marker.x) * 0.5f + 0.5f * diamondScale;
-        int x = Math.round(centeredX);
-        int startY = Math.min(Math.round(head.y), Math.round(marker.y));
-        int endY = Math.max(Math.round(head.y), Math.round(marker.y));
-        if (endY > startY) {
-            graphics.fill(x, startY, x + 1, endY + 1, color);
-        }
-    }
-
     private static Vec3 getMarkerPosition(Contact contact) {
         return contact.renderHeadPosition.add(0.0, StevesArmyClientConfig.ENEMY_CONTACT_PING_HEIGHT_OFFSET.get(), 0.0);
     }
@@ -223,7 +207,6 @@ public final class EnemyContactOverlay {
     private static final class Contact {
         private Vec3 headPosition = Vec3.ZERO;
         private Vec3 renderHeadPosition = Vec3.ZERO;
-        private ScreenPos headScreenPosition;
         private ScreenPos screenPosition;
         private int teamColor;
         private boolean visible;
