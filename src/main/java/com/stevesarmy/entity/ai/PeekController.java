@@ -294,10 +294,15 @@ public class PeekController {
     }
 
     private void preAimToward(SoldierEntity soldier, Vec3 direction) {
+        float previousYaw = soldier.getYRot();
+        float previousBodyYaw = soldier.yBodyRot;
+        float previousHeadYaw = soldier.getYHeadRot();
         double yaw = Math.toDegrees(Math.atan2(-direction.x, direction.z));
         soldier.setYRot((float) yaw);
         soldier.setYHeadRot((float) yaw);
         soldier.setYBodyRot((float) yaw);
+        soldier.traceRotationWrite("peek-pre-aim", previousYaw, previousBodyYaw, previousHeadYaw,
+            "threatDirection=" + direction + ", targetYaw=" + String.format("%.1f", yaw));
     }
 
     private void tickMovingToPeek(SoldierEntity soldier, CoverPoint cover, CoverPositionController mover) {
@@ -599,10 +604,17 @@ public class PeekController {
         }
         
         float finalYaw = Mth.wrapDegrees(baseYaw + offset);
+        float previousYaw = soldier.getYRot();
+        float previousBodyYaw = soldier.yBodyRot;
+        float previousHeadYaw = soldier.getYHeadRot();
         soldier.setYRot(finalYaw);
         soldier.setYBodyRot(finalYaw);
         soldier.setYHeadRot(finalYaw);
         soldier.yBodyRotO = finalYaw;
         soldier.yHeadRotO = finalYaw;
+        soldier.traceRotationWrite("peek-cover-wall", previousYaw, previousBodyYaw, previousHeadYaw,
+            "wall=" + wallDir + ", baseYaw=" + String.format("%.1f", baseYaw)
+                + ", offset=" + String.format("%.1f", offset)
+                + ", target=" + (target == null ? "none" : target.getId()));
     }
 }

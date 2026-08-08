@@ -181,6 +181,11 @@ public class SoldierEntity extends PathfinderMob implements Container {
     private boolean firingProne = false;
     /** Armed only by a low-crouch exit; prevents unrelated peek transitions from rising. */
     private boolean halfCoverRisePending;
+    private int lastRotationTraceWriterTick = -1;
+    private boolean hasRotationTraceSnapshot;
+    private float lastRotationTraceYaw;
+    private float lastRotationTraceBodyYaw;
+    private float lastRotationTraceHeadYaw;
 
     private BlockPos pingMoveTarget = null;
     private long pingMoveTimestamp = 0;
@@ -868,6 +873,7 @@ public class SoldierEntity extends PathfinderMob implements Container {
                 setLowCrouching(true);
             }
             tickHalfCoverRiseProgress();
+            traceRotationSnapshot();
         }
 
         // Enforce the server-synced posture every tick to fight vanilla pose overrides.
@@ -914,6 +920,10 @@ public class SoldierEntity extends PathfinderMob implements Container {
     
     @Override
     public void remove(RemovalReason reason) {
+        if (DiagnosticLogManager.isRotationTraceEnabledFor(getUUID())) {
+            DiagnosticLogManager.clearRotationTrace();
+            StevesArmyMod.LOGGER.info("[RotationTrace] soldier={} removed, trace stopped", getId());
+        }
         if (!this.level().isClientSide) {
             VS2Compat.onSoldierRemoved(this);
             TeamManager.removeFromTeam(this);
@@ -1598,10 +1608,77 @@ public BlockPos getPingMoveTarget() {
             return;
         }
 
+        float previousYaw = getYRot();
+        float previousBodyYaw = yBodyRot;
+        float previousHeadYaw = getYHeadRot();
         float movementYaw = getCrawlMovementYaw();
         float bodyYaw = approachAngle(this.yBodyRot, movementYaw, CRAWL_TURN_RATE_DEGREES);
         this.setYRot(bodyYaw);
         this.setYBodyRot(bodyYaw);
+        traceRotationWrite("crawl-facing", previousYaw, previousBodyYaw, previousHeadYaw,
+            "movement=" + formatVec(getDeltaMovement()) + ", targetYaw=" + formatAngle(movementYaw));
+    }
+
+    /** Records a mod-owned yaw write when this soldier is the active rotation trace target. */
+    public void traceRotationWrite(String source, float previousYaw, float previousBodyYaw,
+                                   float previousHeadYaw, String detail) {
+        if (!isRotationTraceActive()) return;
+        lastRotationTraceWriterTick = tickCount;
+        StevesArmyMod.LOGGER.info("[RotationTrace] tick={} soldier={} source={} {} -> {} detail={} context={}",
+            tickCount, getId(), source, formatYawTriplet(previousYaw, previousBodyYaw, previousHeadYaw),
+            formatYawTriplet(getYRot(), yBodyRot, getYHeadRot()), detail, rotationTraceContext());
+    }
+
+    private void traceRotationSnapshot() {
+        if (!isRotationTraceActive()) {
+            hasRotationTraceSnapshot = false;
+            return;
+        }
+        float yaw = getYRot();
+        float bodyYaw = yBodyRot;
+        float headYaw = getYHeadRot();
+        boolean changed = hasRotationTraceSnapshot
+            && (Math.abs(Mth.wrapDegrees(yaw - lastRotationTraceYaw)) > 0.01F
+                || Math.abs(Mth.wrapDegrees(bodyYaw - lastRotationTraceBodyYaw)) > 0.01F
+                || Math.abs(Mth.wrapDegrees(headYaw - lastRotationTraceHeadYaw)) > 0.01F);
+        String source = changed && lastRotationTraceWriterTick != tickCount ? "external-or-vanilla" : "final";
+        StevesArmyMod.LOGGER.info("[RotationTrace] tick={} soldier={} source={} yaw={} changed={} context={}",
+            tickCount, getId(), source, formatYawTriplet(yaw, bodyYaw, headYaw), changed, rotationTraceContext());
+        hasRotationTraceSnapshot = true;
+        lastRotationTraceYaw = yaw;
+        lastRotationTraceBodyYaw = bodyYaw;
+        lastRotationTraceHeadYaw = headYaw;
+    }
+
+    private boolean isRotationTraceActive() {
+        return !level().isClientSide && DiagnosticLogManager.isRotationTraceEnabledFor(getUUID());
+    }
+
+    private String rotationTraceContext() {
+        Vec3 threat = threatAwareness.getPrimaryDirection(position());
+        LivingEntity target = getTarget();
+        String coverState = enumName(CoverBehaviorManager.CoverState.values(), getSyncedCoverState());
+        String coverType = enumName(CoverType.values(), getSyncedCoverCurrentType());
+        String peekState = enumName(PeekController.State.values(), getSyncedPeekState());
+        return "coverState=" + coverState + ", coverType=" + coverType + ", peek=" + peekState
+            + ", suppression=" + String.format("%.2f", getSyncedSuppressionLevel())
+            + ", lowCrouch=" + isLowCrouching() + ", target=" + (target == null ? "none" : target.getId())
+            + ", threat=" + formatVec(threat) + ", navDone=" + getNavigation().isDone()
+            + ", velocity=" + formatVec(getDeltaMovement());
+    }
+
+    private static String enumName(Enum<?>[] values, int ordinal) {
+        return ordinal >= 0 && ordinal < values.length ? values[ordinal].name() : "INVALID(" + ordinal + ")";
+    }
+
+    private static String formatYawTriplet(float yaw, float bodyYaw, float headYaw) {
+        return "entity=" + formatAngle(yaw) + ",body=" + formatAngle(bodyYaw) + ",head=" + formatAngle(headYaw);
+    }
+
+    private static String formatAngle(float angle) { return String.format("%.1f", Mth.wrapDegrees(angle)); }
+
+    private static String formatVec(Vec3 value) {
+        return value == null ? "none" : String.format("(%.2f,%.2f,%.2f)", value.x, value.y, value.z);
     }
 
     private static float approachAngle(float current, float target, float maxChange) {

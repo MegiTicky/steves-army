@@ -117,6 +117,13 @@ public class CombatDebugCommand {
                         .executes(ctx -> toggleHoleRescueLogging(ctx, true)))
                     .then(Commands.literal("off")
                         .executes(ctx -> toggleHoleRescueLogging(ctx, false)))
+                )
+                .then(Commands.literal("rotation")
+                    .executes(ctx -> toggleRotationTrace(ctx, null))
+                    .then(Commands.literal("on")
+                        .executes(ctx -> toggleRotationTrace(ctx, true)))
+                    .then(Commands.literal("off")
+                        .executes(ctx -> toggleRotationTrace(ctx, false)))
                 ))
 
             // === RENDER TOGGLES ===
@@ -229,6 +236,8 @@ public class CombatDebugCommand {
             "  log cover [on|off]  - Toggle cover behavior logging\n" +
             "  log coverscore [on|off] - Toggle verbose per-candidate cover scoring traces\n" +
             "  log coverperf [on|off] - Toggle compact cover search/path timing summaries\n" +
+            "  log attack [on|off] - Toggle attack phase logging\n" +
+            "  log rotation [on|off] - Trace yaw writers for nearest soldier\n" +
             "  log attack [on|off] - Toggle attack phase logging (quiet, soldier-specific)\n" +
             "  log damage [on|off] - Toggle damage and gun integration logging\n" +
             "  log suppression [on|off] - Toggle suppression and incoming-fire logging\n" +
@@ -403,6 +412,35 @@ public class CombatDebugCommand {
         context.getSource().sendSuccess(() -> Component.literal(
             "Hole rescue logging: " + (newState ? "ON" : "OFF")
         ), true);
+        return 1;
+    }
+
+    private static int toggleRotationTrace(CommandContext<CommandSourceStack> context, Boolean enable) {
+        if (enable != null && !enable) {
+            DiagnosticLogManager.clearRotationTrace();
+            context.getSource().sendSuccess(() -> Component.literal("Rotation trace: OFF"), true);
+            return 1;
+        }
+
+        if (enable == null && DiagnosticLogManager.getRotationTraceSoldierId() != null) {
+            DiagnosticLogManager.clearRotationTrace();
+            context.getSource().sendSuccess(() -> Component.literal("Rotation trace: OFF"), true);
+            return 1;
+        }
+
+        Player player = context.getSource().getPlayer();
+        if (player == null) {
+            context.getSource().sendFailure(Component.literal("Player only: stand near the soldier to trace"));
+            return 0;
+        }
+        SoldierEntity soldier = getNearestSoldier(player, 32);
+        if (soldier == null) {
+            context.getSource().sendFailure(Component.literal("No soldier within 32 blocks"));
+            return 0;
+        }
+        DiagnosticLogManager.setRotationTraceSoldierId(soldier.getUUID());
+        context.getSource().sendSuccess(() -> Component.literal(
+            "Rotation trace: ON for soldier " + soldier.getId() + " (" + soldier.getUUID() + ")"), true);
         return 1;
     }
 
@@ -1162,6 +1200,8 @@ public class CombatDebugCommand {
             "  Suppression logging: " + (DiagnosticLogManager.isSuppressionLoggingEnabled() ? "ON" : "OFF") + "\n" +
             "  Spacing logging: " + (DiagnosticLogManager.isSpacingLoggingEnabled() ? "ON" : "OFF") + "\n" +
             "  Hole rescue logging: " + (DiagnosticLogManager.isHoleRescueLoggingEnabled() ? "ON" : "OFF") + "\n" +
+            "  Rotation trace: " + (DiagnosticLogManager.getRotationTraceSoldierId() == null
+                ? "OFF" : "ON (" + DiagnosticLogManager.getRotationTraceSoldierId() + ")") + "\n" +
             "  Combat overlay: " + CombatDebugRenderer.getDebugModeName() + "\n" +
             "  Soldier viz: " + (CoverDebugManager.isShowSoldierCover() ? "ON" : "OFF") + "\n" +
             "  Peek candidates: " + (CoverDebugManager.isShowPeekCandidates() ? "ON" : "OFF") + "\n" +

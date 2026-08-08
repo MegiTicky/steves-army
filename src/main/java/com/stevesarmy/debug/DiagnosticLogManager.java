@@ -1,5 +1,7 @@
 package com.stevesarmy.debug;
 
+import java.util.UUID;
+
 /** Server-wide diagnostic log toggles. All default to false, reset on restart. */
 public final class DiagnosticLogManager {
     private static boolean coverLoggingEnabled;
@@ -10,6 +12,7 @@ public final class DiagnosticLogManager {
     private static boolean suppressionLoggingEnabled;
     private static boolean spacingLoggingEnabled;
     private static boolean holeRescueLoggingEnabled;
+    private static UUID rotationTraceSoldierId;
 
     private DiagnosticLogManager() {}
 
@@ -45,6 +48,14 @@ public final class DiagnosticLogManager {
     public static boolean isHoleRescueLoggingEnabled() { return holeRescueLoggingEnabled; }
     public static void setHoleRescueLoggingEnabled(boolean v) { holeRescueLoggingEnabled = v; }
 
+    // Targeted rotation trace. A UUID is required to avoid per-tick squad-wide output.
+    public static void setRotationTraceSoldierId(UUID soldierId) { rotationTraceSoldierId = soldierId; }
+    public static void clearRotationTrace() { rotationTraceSoldierId = null; }
+    public static UUID getRotationTraceSoldierId() { return rotationTraceSoldierId; }
+    public static boolean isRotationTraceEnabledFor(UUID soldierId) {
+        return rotationTraceSoldierId != null && rotationTraceSoldierId.equals(soldierId);
+    }
+
     /** Enable all diagnostic logging categories. */
     public static void enableAll() {
         coverLoggingEnabled = true;
@@ -65,5 +76,6 @@ public final class DiagnosticLogManager {
         suppressionLoggingEnabled = false;
         spacingLoggingEnabled = false;
         holeRescueLoggingEnabled = false;
+        rotationTraceSoldierId = null;
     }
 }

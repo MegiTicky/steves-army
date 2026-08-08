@@ -2400,20 +2400,32 @@ public class SoldierCombatGoal extends Goal {
     }
 
     private float turnToward(float targetYaw, float targetPitch) {
+        float previousYaw = soldier.getYRot();
+        float previousBodyYaw = soldier.yBodyRot;
+        float previousHeadYaw = soldier.getYHeadRot();
         float yaw = approachAngle(soldier.getYRot(), targetYaw, TURN_RATE_DEGREES);
         float pitch = approachAngle(soldier.getXRot(), targetPitch, TURN_RATE_DEGREES);
         soldier.setYRot(yaw);
         soldier.setYBodyRot(yaw);
         soldier.setYHeadRot(yaw);
         soldier.setXRot(pitch);
+        soldier.traceRotationWrite("combat-turn", previousYaw, previousBodyYaw, previousHeadYaw,
+            "targetYaw=" + String.format("%.1f", targetYaw) + ", targetPitch=" + String.format("%.1f", targetPitch)
+                + ", appliedPitch=" + String.format("%.1f", pitch));
         return Math.abs(Mth.wrapDegrees(targetYaw - yaw));
     }
 
     private float turnHeadToward(float targetYaw, float targetPitch) {
+        float previousYaw = soldier.getYRot();
+        float previousBodyYaw = soldier.yBodyRot;
+        float previousHeadYaw = soldier.getYHeadRot();
         float headYaw = approachAngle(soldier.getYHeadRot(), targetYaw, TURN_RATE_DEGREES);
         float pitch = approachAngle(soldier.getXRot(), targetPitch, TURN_RATE_DEGREES);
         soldier.setYHeadRot(headYaw);
         soldier.setXRot(pitch);
+        soldier.traceRotationWrite("combat-head-turn", previousYaw, previousBodyYaw, previousHeadYaw,
+            "targetYaw=" + String.format("%.1f", targetYaw) + ", targetPitch=" + String.format("%.1f", targetPitch)
+                + ", appliedPitch=" + String.format("%.1f", pitch));
         return Math.abs(Mth.wrapDegrees(targetYaw - headYaw));
     }
 

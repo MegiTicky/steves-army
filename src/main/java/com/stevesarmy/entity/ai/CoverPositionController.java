@@ -363,8 +363,14 @@ public class CoverPositionController extends MoveControl {
             return false;
         }
 
+        float previousYaw = this.mob.getYRot();
+        float previousBodyYaw = this.mob.yBodyRot;
+        float previousHeadYaw = this.mob.getYHeadRot();
         float targetYaw = (float) (Mth.atan2(dz, dx) * (180.0F / (float) Math.PI)) - 90.0F;
         this.mob.setYRot(this.rotlerp(this.mob.getYRot(), targetYaw, 45.0F));
+        soldier.traceRotationWrite("cqb-caution-steer", previousYaw, previousBodyYaw, previousHeadYaw,
+            "steerTarget=" + steerTarget + ", targetYaw=" + String.format("%.1f", targetYaw)
+                + ", reason=" + steeringAdvisor.getCautionReason());
         double cautionSpeed = steeringAdvisor.getCautionSpeed(this.speedModifier);
         this.mob.setSpeed((float) (cautionSpeed * this.mob.getAttributeValue(Attributes.MOVEMENT_SPEED)));
         this.mob.setZza(1.0F);
