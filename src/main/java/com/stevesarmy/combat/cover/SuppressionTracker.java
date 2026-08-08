@@ -3,6 +3,7 @@ package com.stevesarmy.combat.cover;
 import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.combat.GunIntegration;
 import com.stevesarmy.debug.DiagnosticLogManager;
+import com.stevesarmy.entity.SoldierEntity;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.phys.Vec3;
@@ -74,6 +75,7 @@ public class SuppressionTracker {
         float add = distanceFactor * NEAR_MISS_SUPPRESSION * speedMultiplier * burstMultiplier * weaponMultiplier;
         recordSuppressionEvent(add, now);
         nearMissCount++;
+        traceSuppressionEvent(soldier, "near-miss", add);
 
         if (debugLog()) {
             StevesArmyMod.LOGGER.info("[Suppression] Soldier {} near miss: dist=" + String.format("%.1f", distance) + ", speedMult=" + String.format("%.2f", speedMultiplier) + ", burstMult=" + String.format("%.2f", burstMultiplier) + ", weaponMult=" + String.format("%.2f", weaponMultiplier) + ", +" + String.format("%.2f", add) + " sup -> " + String.format("%.2f", suppressionLevel),
@@ -89,6 +91,7 @@ public class SuppressionTracker {
     public void onCbcNearMiss(LivingEntity soldier) {
         recordSuppressionEvent(MAX_SUPPRESSION, System.currentTimeMillis());
         nearMissCount++;
+        traceSuppressionEvent(soldier, "cbc-near-miss", MAX_SUPPRESSION);
 
         if (debugLog()) {
             StevesArmyMod.LOGGER.info("[Suppression] Soldier {} CBC near miss: suppression set to 1.0",
@@ -275,5 +278,13 @@ public class SuppressionTracker {
         if (suppressionLevel > peakSuppression) peakSuppression = suppressionLevel;
         lastSuppressionTime = now;
         suppressionEventSequence++;
+    }
+
+    private void traceSuppressionEvent(LivingEntity soldier, String source, float amount) {
+        if (soldier instanceof SoldierEntity soldierEntity) {
+            soldierEntity.tracePeek("suppression-event", "source=" + source
+                + ", added=" + String.format("%.5f", amount)
+                + ", sequence=" + suppressionEventSequence);
+        }
     }
 }

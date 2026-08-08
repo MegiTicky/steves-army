@@ -127,9 +127,13 @@ public class PeekController {
     }
 
     private void setState(SoldierEntity soldier, State newState) {
+        State previousState = this.state;
         this.state = newState;
         if (soldier != null && !soldier.level().isClientSide) {
             soldier.syncPeekState(newState.ordinal());
+            if (previousState != newState) {
+                soldier.tracePeek("peek-state", "previous=" + previousState + ", current=" + newState);
+            }
         }
     }
 
@@ -187,6 +191,7 @@ public class PeekController {
 
     public void forceReturnToCover(SoldierEntity soldier, CoverPoint cover, CoverPositionController mover) {
         if (cover == null || isIdleInCover() || state == State.RETURNING_TO_COVER) return;
+        soldier.tracePeek("return-request", "reason=forced-return");
         enterReturning(soldier, cover, mover, false);
     }
 
@@ -307,6 +312,7 @@ public class PeekController {
 
     private void tickMovingToPeek(SoldierEntity soldier, CoverPoint cover, CoverPositionController mover) {
         if (shouldDuckForSuppression(soldier)) {
+            soldier.tracePeek("return-request", "reason=suppression-during-peek-movement");
             if (CoverTacticalGoal.isDebugLoggingEnabled()) {
                 StevesArmyMod.LOGGER.info("[PeekController] Soldier {} suppressed during peek movement, ducking back",
                     soldier.getId());
@@ -340,6 +346,7 @@ public class PeekController {
         updateBlindPeekTimer(soldier);
 
         if (timeInState > currentMaxExposureTime) {
+            soldier.tracePeek("return-request", "reason=exposure-timeout, limitMs=" + currentMaxExposureTime);
             if (CoverTacticalGoal.isDebugLoggingEnabled()) {
                 StevesArmyMod.LOGGER.info("[PeekController] Soldier {} exposure time exceeded ({}ms), ducking back",
                     soldier.getId(), currentMaxExposureTime);
@@ -350,6 +357,7 @@ public class PeekController {
 
         LivingEntity target = soldier.getTarget();
         if (target != null && !target.isAlive()) {
+            soldier.tracePeek("return-request", "reason=target-dead");
             if (CoverTacticalGoal.isDebugLoggingEnabled()) {
                 StevesArmyMod.LOGGER.info("[PeekController] Soldier {} target dead, ducking back sooner",
                     soldier.getId());
@@ -359,6 +367,7 @@ public class PeekController {
         }
 
         if (shouldDuckForSuppression(soldier)) {
+            soldier.tracePeek("return-request", "reason=suppression-while-exposed");
             if (CoverTacticalGoal.isDebugLoggingEnabled()) {
                 StevesArmyMod.LOGGER.info("[PeekController] Soldier {} suppressed while exposed, ducking back",
                     soldier.getId());
@@ -516,6 +525,7 @@ public class PeekController {
 
     private boolean shouldDuckForSuppression(SoldierEntity soldier) {
         if (soldier.hasEmergencyEngagementPosture()) {
+            soldier.tracePeek("suppression-override", "reason=emergency-engagement");
             return false;
         }
 
@@ -528,6 +538,7 @@ public class PeekController {
 
     private void enterReturning(SoldierEntity soldier, CoverPoint cover, CoverPositionController mover,
                                 boolean allowDuringReload) {
+        soldier.tracePeek("return-start", "coverType=" + cover.getType() + ", allowDuringReload=" + allowDuringReload);
         setState(soldier, State.RETURNING_TO_COVER);
         stateStartTime = System.currentTimeMillis();
         returnAllowedDuringReload = allowDuringReload;
@@ -557,6 +568,7 @@ public class PeekController {
     }
 
     private void completeReturn(SoldierEntity soldier, CoverPoint cover) {
+        soldier.tracePeek("return-complete", "coverType=" + cover.getType());
         lastPeekEndTime = System.currentTimeMillis();
         recordPeekCycle(soldier);
         setIdleState(soldier, cover);

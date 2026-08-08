@@ -1398,13 +1398,12 @@ private void tickRepositioning() {
         // so that a suppressed soldier immediately gets the correct posture
         // and state transition even if a reposition request is pending.
         if (getCoverManager().isSuppressed()) {
-            if (currentCover != null && currentCover.getType() == CoverType.HALF) {
-                if (!soldier.hasEmergencyEngagementPosture()) {
-                    soldier.setLowCrouching(true);
-                }
-            }
+            soldier.tracePeek("cover-suppression", "tickInCover transition");
+            enforceSuppressedHalfCoverPosture(currentCover);
             if (getPeekController().isExposed() && !soldier.hasEmergencyEngagementPosture()) {
                 getPeekController().tick(soldier, currentCover, getPositionController());
+            } else if (getPeekController().isExposed()) {
+                soldier.tracePeek("suppression-override", "reason=emergency-engagement blocks exposed tick");
             }
             getCoverManager().setState(CoverBehaviorManager.CoverState.SUPPRESSED_IN_COVER);
             if (currentCover != null && currentCover.getType() == CoverType.HALF
@@ -1499,10 +1498,7 @@ private void tickRepositioning() {
         CoverBehaviorManager coverManager = getCoverManager();
         CoverPoint currentCover = getCoverManager().getCurrentCover();
 
-        if (currentCover != null && currentCover.getType() == CoverType.HALF
-            && soldier.isLowCrouching() && getPeekController().isStandingInHalfCover()) {
-            getPeekController().enterHiding(soldier);
-        }
+        enforceSuppressedHalfCoverPosture(currentCover);
 
         // A hit while hidden means this cover is compromised. Unlike routine cover
         // changes, this relocation may start while suppressed.
@@ -1530,7 +1526,10 @@ private void tickRepositioning() {
         if (coverManager.isPinned()
             && (peekCtrl.isExposed() || peekCtrl.isMovingToPeek())) {
             if (!soldier.hasEmergencyEngagementPosture()) {
+                soldier.tracePeek("pinned-return", "action=force-return");
                 peekCtrl.forceReturnToCover(soldier, currentCover, getPositionController());
+            } else {
+                soldier.tracePeek("pinned-return", "action=blocked, reason=emergency-engagement");
             }
         }
 
@@ -1553,6 +1552,22 @@ private void tickRepositioning() {
             peekCtrl.tick(soldier, currentCover, getPositionController(), allowPressuredPeek);
         } else if (!coverManager.isPinned()) {
             peekCtrl.tick(soldier, currentCover, getPositionController());
+        }
+    }
+
+    /** Keeps the physical low-crouch posture authoritative across suppressed-goal entry paths. */
+    private void enforceSuppressedHalfCoverPosture(CoverPoint currentCover) {
+        if (currentCover == null || currentCover.getType() != CoverType.HALF) {
+            return;
+        }
+        if (soldier.hasEmergencyEngagementPosture()) {
+            soldier.tracePeek("suppression-override", "reason=emergency-engagement blocks low-crouch");
+            return;
+        }
+
+        soldier.setLowCrouching(true);
+        if (getPeekController().isStandingInHalfCover()) {
+            getPeekController().enterHiding(soldier);
         }
     }
 

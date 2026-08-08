@@ -7,8 +7,10 @@ import com.stevesarmy.combat.DetectionSystem;
 import com.stevesarmy.combat.GunIntegration;
 import com.stevesarmy.combat.ThreatAwareness;
 import com.stevesarmy.combat.cover.CoverBehaviorManager;
+import com.stevesarmy.combat.cover.CoverPoint;
 import com.stevesarmy.combat.cover.CoverType;
 import com.stevesarmy.combat.cover.IncomingFireHandler;
+import com.stevesarmy.combat.cover.SuppressionTracker;
 import com.stevesarmy.debug.DiagnosticLogManager;
 
 import com.stevesarmy.entity.ai.SoldierCombatGoal;
@@ -186,6 +188,9 @@ public class SoldierEntity extends PathfinderMob implements Container {
     private float lastRotationTraceYaw;
     private float lastRotationTraceBodyYaw;
     private float lastRotationTraceHeadYaw;
+    private int lastPeekTraceSnapshotTick = -20;
+    private SuppressionTracker.SuppressionState lastPeekTraceSuppressionState;
+    private boolean lastPeekTraceEmergencyPosture;
 
     private BlockPos pingMoveTarget = null;
     private long pingMoveTimestamp = 0;
@@ -874,6 +879,7 @@ public class SoldierEntity extends PathfinderMob implements Container {
             }
             tickHalfCoverRiseProgress();
             traceRotationSnapshot();
+            tracePeekSnapshot();
         }
 
         // Enforce the server-synced posture every tick to fight vanilla pose overrides.
@@ -1427,6 +1433,7 @@ public BlockPos getPingMoveTarget() {
         this.entityData.set(HALF_COVER_RISE_PROGRESS, 0.0f);
         this.entityData.set(HALF_COVER_RISING, true);
         this.refreshDimensions();
+        tracePeek("half-cover-rise", "started");
     }
 
     public void cancelHalfCoverRise() {
@@ -1437,6 +1444,7 @@ public BlockPos getPingMoveTarget() {
         this.entityData.set(HALF_COVER_RISE_PROGRESS, 1.0f);
         this.entityData.set(HALF_COVER_RISING, false);
         this.refreshDimensions();
+        tracePeek("half-cover-rise", "cancelled");
     }
 
     public float getHalfCoverRiseProgress() {
@@ -1566,6 +1574,7 @@ public BlockPos getPingMoveTarget() {
         }
         this.setPose(lowCrouch ? Pose.SWIMMING : Pose.CROUCHING);
         this.refreshDimensions();
+        tracePeek("low-crouch", "changed=" + wasLowCrouching + "->" + lowCrouch);
     }
 
     /** Requests the shared low-prone pose for a direct-fire stabilization stance. */
@@ -1654,6 +1663,64 @@ public BlockPos getPingMoveTarget() {
         return !level().isClientSide && DiagnosticLogManager.isRotationTraceEnabledFor(getUUID());
     }
 
+    /** Records a selected soldier's posture/peek decision with one common state context. */
+    public void tracePeek(String event, String detail) {
+        if (!isPeekTraceActive()) return;
+        StevesArmyMod.LOGGER.info("[PeekTrace] tick={} soldier={} event={} detail={} context={}",
+            tickCount, getId(), event, detail, peekTraceContext());
+    }
+
+    private void tracePeekSnapshot() {
+        if (!isPeekTraceActive()) {
+            lastPeekTraceSuppressionState = null;
+            return;
+        }
+
+        SuppressionTracker.SuppressionState suppressionState = getCoverBehaviorManager()
+            .getSuppressionTracker().getState();
+        boolean emergency = hasEmergencyEngagementPosture();
+        if (suppressionState != lastPeekTraceSuppressionState) {
+            tracePeek("suppression-state", "previous=" + lastPeekTraceSuppressionState + ", current=" + suppressionState);
+            lastPeekTraceSuppressionState = suppressionState;
+        }
+        if (emergency != lastPeekTraceEmergencyPosture) {
+            tracePeek("emergency-posture", "active=" + emergency + ", remainingTicks=" + getEmergencyEngagementPostureRemainingTicks());
+            lastPeekTraceEmergencyPosture = emergency;
+        }
+        if (tickCount - lastPeekTraceSnapshotTick < 20) return;
+
+        lastPeekTraceSnapshotTick = tickCount;
+        PeekController peekController = getPeekController();
+        boolean pinnedAndExposed = suppressionState == SuppressionTracker.SuppressionState.PINNED
+            && (peekController.isExposed() || peekController.isMovingToPeek());
+        tracePeek(pinnedAndExposed ? "ANOMALY-pinned-exposed" : "snapshot",
+            "peekElapsedMs=" + peekController.getTimeInCurrentState()
+                + ", emergencyOverride=" + emergency
+                + ", pinnedAndExposed=" + pinnedAndExposed);
+    }
+
+    private boolean isPeekTraceActive() {
+        return !level().isClientSide && DiagnosticLogManager.isPeekTraceEnabledFor(getUUID());
+    }
+
+    private String peekTraceContext() {
+        CoverBehaviorManager manager = getCoverBehaviorManager();
+        SuppressionTracker tracker = manager.getSuppressionTracker();
+        CoverPoint cover = manager.getCurrentCover();
+        LivingEntity target = getTarget();
+        String targetDescription = target == null ? "none"
+            : target.getId() + "@" + String.format("%.2f", distanceTo(target));
+        return "suppression=" + String.format("%.5f", tracker.getSuppressionLevel())
+            + ", suppressionState=" + tracker.getState()
+            + ", coverState=" + manager.getState()
+            + ", coverType=" + (cover == null ? "NONE" : cover.getType())
+            + ", peek=" + getPeekController().getState()
+            + ", lowCrouch=" + isLowCrouching()
+            + ", emergency=" + hasEmergencyEngagementPosture()
+            + ", emergencyRemaining=" + getEmergencyEngagementPostureRemainingTicks()
+            + ", target=" + targetDescription;
+    }
+
     private String rotationTraceContext() {
         Vec3 threat = threatAwareness.getPrimaryDirection(position());
         LivingEntity target = getTarget();
@@ -1688,6 +1755,7 @@ public BlockPos getPingMoveTarget() {
     /** Lets a close flanker briefly interrupt defensive low-crouch posture. */
     public void requestEmergencyEngagementPosture() {
         emergencyEngagementPostureUntilTick = tickCount + 20;
+        tracePeek("emergency-posture", "requested remainingTicks=20");
     }
 
     public boolean hasEmergencyEngagementPosture() {
@@ -1696,6 +1764,11 @@ public BlockPos getPingMoveTarget() {
 
     public void clearEmergencyEngagementPosture() {
         emergencyEngagementPostureUntilTick = -1;
+        tracePeek("emergency-posture", "cleared");
+    }
+
+    public int getEmergencyEngagementPostureRemainingTicks() {
+        return Math.max(0, emergencyEngagementPostureUntilTick - tickCount + 1);
     }
 
     /**

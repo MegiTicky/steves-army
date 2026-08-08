@@ -13,6 +13,7 @@ public final class DiagnosticLogManager {
     private static boolean spacingLoggingEnabled;
     private static boolean holeRescueLoggingEnabled;
     private static UUID rotationTraceSoldierId;
+    private static UUID peekTraceSoldierId;
 
     private DiagnosticLogManager() {}
 
@@ -56,6 +57,15 @@ public final class DiagnosticLogManager {
         return rotationTraceSoldierId != null && rotationTraceSoldierId.equals(soldierId);
     }
 
+    // Targeted peek/suppression trace. Kept separate from rotation because the two
+    // diagnostics have different reproduction workflows and output volume.
+    public static void setPeekTraceSoldierId(UUID soldierId) { peekTraceSoldierId = soldierId; }
+    public static void clearPeekTrace() { peekTraceSoldierId = null; }
+    public static UUID getPeekTraceSoldierId() { return peekTraceSoldierId; }
+    public static boolean isPeekTraceEnabledFor(UUID soldierId) {
+        return peekTraceSoldierId != null && peekTraceSoldierId.equals(soldierId);
+    }
+
     /** Enable all diagnostic logging categories. */
     public static void enableAll() {
         coverLoggingEnabled = true;
@@ -77,5 +87,6 @@ public final class DiagnosticLogManager {
         spacingLoggingEnabled = false;
         holeRescueLoggingEnabled = false;
         rotationTraceSoldierId = null;
+        peekTraceSoldierId = null;
     }
 }
