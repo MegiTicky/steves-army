@@ -1555,9 +1555,12 @@ private void tickRepositioning() {
         }
     }
 
-    /** Keeps the physical low-crouch posture authoritative across suppressed-goal entry paths. */
+    /** Keeps defensive low-crouch authoritative without cancelling an allowed pressured peek. */
     private void enforceSuppressedHalfCoverPosture(CoverPoint currentCover) {
         if (currentCover == null || currentCover.getType() != CoverType.HALF) {
+            return;
+        }
+        if (!getCoverManager().isSuppressed()) {
             return;
         }
         if (soldier.hasEmergencyEngagementPosture()) {
@@ -1565,9 +1568,15 @@ private void tickRepositioning() {
             return;
         }
 
+        PeekController peekController = getPeekController();
+        if (!getCoverManager().isPinned()
+            && (peekController.isExposed() || peekController.isMovingToPeek())) {
+            return;
+        }
+
         soldier.setLowCrouching(true);
-        if (getPeekController().isStandingInHalfCover()) {
-            getPeekController().enterHiding(soldier);
+        if (peekController.isStandingInHalfCover()) {
+            peekController.enterHiding(soldier);
         }
     }
 
