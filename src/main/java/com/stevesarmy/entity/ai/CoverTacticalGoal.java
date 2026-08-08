@@ -1368,8 +1368,10 @@ private void tickRepositioning() {
                     getCoverManager().setState(CoverBehaviorManager.CoverState.SEEKING_COVER);
                     return;
                 }
-                navigation.stop();
-                getPositionController().moveTo(getCoverStandingPosition(currentCover.getPosition()), POSITIONING_TOLERANCE, POSITIONING_SPEED, "tickInCover", "recenter to cover");
+                if (!getPositionController().isWithinCoverAnchorDeadzone(standingPos)) {
+                    navigation.stop();
+                    getPositionController().moveTo(getCoverStandingPosition(currentCover.getPosition()), POSITIONING_TOLERANCE, POSITIONING_SPEED, "tickInCover", "recenter to cover");
+                }
             }
 // Renew current cover reservation every 5 seconds so it doesn't expire
             // while the soldier is still occupying it

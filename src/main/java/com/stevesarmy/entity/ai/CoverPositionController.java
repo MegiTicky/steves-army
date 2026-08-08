@@ -35,6 +35,7 @@ public class CoverPositionController extends MoveControl {
     private FailureReason lastFailureReason = FailureReason.NONE;
     private int stuckTicks = 0;
     private Vec3 lastPos = Vec3.ZERO;
+    private double bestDistanceToTarget = Double.POSITIVE_INFINITY;
 
     private String debugMoveSource = "none";
     private String debugMoveReason = "";
@@ -48,6 +49,9 @@ public class CoverPositionController extends MoveControl {
     private static final double COVER_ANCHOR_DEADZONE = 0.08;
     private static final double COVER_ANCHOR_MAX_SPEED = 0.18;
     private static final double COVER_ANCHOR_RESPONSE = 0.75;
+    private static final double APPROACH_SLOWDOWN_DISTANCE = 0.35;
+    private static final double MIN_APPROACH_SPEED_FACTOR = 0.08;
+    private static final double TARGET_PROGRESS_EPSILON = 0.002;
 
     public CoverPositionController(Mob mob) {
         super(mob);
@@ -116,6 +120,8 @@ public class CoverPositionController extends MoveControl {
         this.lastResult = MovementResult.IN_PROGRESS;
         this.lastFailureReason = FailureReason.NONE;
         this.stuckTicks = 0;
+        this.lastPos = this.mob.position();
+        this.bestDistanceToTarget = horizontalDistanceTo(pos);
         this.controlledReturnToCover = controlledReturn;
 
         this.setWantedPosition(pos.x, pos.y, pos.z, speed);
@@ -160,6 +166,20 @@ public class CoverPositionController extends MoveControl {
         this.mob.setXxa(0.0F);
         this.mob.setSpeed(0.0F);
         this.mob.setDeltaMovement(0, this.mob.getDeltaMovement().y, 0);
+        this.bestDistanceToTarget = Double.POSITIVE_INFINITY;
+    }
+
+    private void completeMove() {
+        this.operation = MoveControl.Operation.WAIT;
+        this.mob.setZza(0.0F);
+        this.mob.setXxa(0.0F);
+        this.mob.setSpeed(0.0F);
+        this.mob.setDeltaMovement(0, this.mob.getDeltaMovement().y, 0);
+        this.debugLastSetVelocity = Vec3.ZERO;
+        this.lastResult = MovementResult.REACHED_TARGET;
+        this.lastFailureReason = FailureReason.NONE;
+        this.controlledReturnToCover = false;
+        this.bestDistanceToTarget = Double.POSITIVE_INFINITY;
     }
 
     public FailureReason getLastFailureReason() {
@@ -175,6 +195,7 @@ public class CoverPositionController extends MoveControl {
         this.lastFailureReason = FailureReason.NONE;
         this.controlledReturnToCover = false;
         this.coverAnchorTarget = null;
+        this.bestDistanceToTarget = Double.POSITIVE_INFINITY;
         this.operation = MoveControl.Operation.WAIT;
         this.mob.getNavigation().stop();
         this.mob.setZza(0.0F);
@@ -199,6 +220,11 @@ public class CoverPositionController extends MoveControl {
     public String getDebugMoveSource() { return debugMoveSource; }
     public String getDebugMoveReason() { return debugMoveReason; }
     public Vec3 getDebugLastSetVelocity() { return debugLastSetVelocity; }
+
+    /** True when passive anchoring can hold the soldier without an explicit move request. */
+    public boolean isWithinCoverAnchorDeadzone(Vec3 target) {
+        return horizontalDistanceTo(target) <= COVER_ANCHOR_DEADZONE;
+    }
 
     /**
      * Requests short-range position correction while the soldier is hiding in
@@ -276,7 +302,11 @@ public class CoverPositionController extends MoveControl {
             if (tickCautionSteering(anchorTarget)) {
                 return;
             }
+            float previousYaw = this.mob.getYRot();
+            float previousBodyYaw = this.mob.yBodyRot;
+            float previousHeadYaw = this.mob.getYHeadRot();
             super.tick();
+            traceMoveControlRotation("vanilla-navigation", previousYaw, previousBodyYaw, previousHeadYaw);
             applyCoverAnchorVelocity(anchorTarget);
             this.debugLastSetVelocity = this.mob.getDeltaMovement();
             this.debugMoveSource = "vanilla";
@@ -286,9 +316,7 @@ public class CoverPositionController extends MoveControl {
 
         if (StevesArmyMod.teleportOnlyMode) {
             mob.moveTo(targetPos.x, targetPos.y, targetPos.z, mob.getYRot(), mob.getXRot());
-            lastResult = MovementResult.REACHED_TARGET;
-            lastFailureReason = FailureReason.NONE;
-            controlledReturnToCover = false;
+            completeMove();
             return;
         }
 
@@ -296,37 +324,74 @@ public class CoverPositionController extends MoveControl {
         double dz = targetPos.z - this.mob.getZ();
         double distSq = dx * dx + dz * dz;
 
-        if (distSq < tolerance * tolerance) {
-            this.operation = MoveControl.Operation.WAIT;
-            this.mob.setZza(0.0F);
-            this.mob.setXxa(0.0F);
-            this.mob.setSpeed(0.0F);
-            this.mob.setDeltaMovement(0, this.mob.getDeltaMovement().y, 0);
-            this.debugLastSetVelocity = Vec3.ZERO;
-            lastResult = MovementResult.REACHED_TARGET;
-            lastFailureReason = FailureReason.NONE;
-            controlledReturnToCover = false;
+        double distance = Math.sqrt(distSq);
+        if (distance <= tolerance || previousSegmentReachedTarget()) {
+            completeMove();
             return;
         }
 
-        double moved = this.mob.position().distanceToSqr(lastPos);
-        lastPos = this.mob.position();
-        if (moved < 0.0001) {
+        if (distance < bestDistanceToTarget - TARGET_PROGRESS_EPSILON) {
+            bestDistanceToTarget = distance;
+            stuckTicks = 0;
+        } else {
             stuckTicks++;
             if (stuckTicks > 40) {
                 failWithReason(FailureReason.NO_PROGRESS, false);
                 return;
             }
-        } else {
-            stuckTicks = 0;
         }
+        lastPos = this.mob.position();
 
-        // Re-assert target position every tick so super.tick() doesn't reset to WAIT
-        this.setWantedPosition(targetPos.x, targetPos.y, targetPos.z, targetSpeed);
+        // Re-assert target position every tick so super.tick() doesn't reset to WAIT.
+        // Slow before the arrival radius so vanilla's 90-degree turn cap cannot orbit it.
+        this.setWantedPosition(targetPos.x, targetPos.y, targetPos.z, getApproachSpeed(distance));
 
+        float previousYaw = this.mob.getYRot();
+        float previousBodyYaw = this.mob.yBodyRot;
+        float previousHeadYaw = this.mob.getYHeadRot();
         super.tick();
-        applyCoverAnchorVelocity(anchorTarget);
+        traceMoveControlRotation(debugMoveSource, previousYaw, previousBodyYaw, previousHeadYaw);
         this.debugLastSetVelocity = this.mob.getDeltaMovement();
+    }
+
+    private double getApproachSpeed(double distance) {
+        double slowdownDistance = Math.max(APPROACH_SLOWDOWN_DISTANCE, tolerance * 3.0D);
+        double range = Math.max(0.001D, slowdownDistance - tolerance);
+        double factor = Math.max(MIN_APPROACH_SPEED_FACTOR,
+            Math.min(1.0D, (distance - tolerance) / range));
+        return targetSpeed * factor;
+    }
+
+    private boolean previousSegmentReachedTarget() {
+        Vec3 currentPos = this.mob.position();
+        Vec3 segment = currentPos.subtract(lastPos);
+        double lengthSqr = segment.x * segment.x + segment.z * segment.z;
+        if (lengthSqr <= 0.000001D) {
+            return false;
+        }
+        Vec3 fromStartToTarget = targetPos.subtract(lastPos);
+        double projection = Math.max(0.0D, Math.min(1.0D,
+            (fromStartToTarget.x * segment.x + fromStartToTarget.z * segment.z) / lengthSqr));
+        double closestX = lastPos.x + segment.x * projection;
+        double closestZ = lastPos.z + segment.z * projection;
+        double dx = targetPos.x - closestX;
+        double dz = targetPos.z - closestZ;
+        return dx * dx + dz * dz <= tolerance * tolerance;
+    }
+
+    private double horizontalDistanceTo(Vec3 target) {
+        double dx = target.x - this.mob.getX();
+        double dz = target.z - this.mob.getZ();
+        return Math.sqrt(dx * dx + dz * dz);
+    }
+
+    private void traceMoveControlRotation(String source, float previousYaw, float previousBodyYaw,
+                                          float previousHeadYaw) {
+        if (this.mob instanceof SoldierEntity soldier
+            && Math.abs(Mth.wrapDegrees(this.mob.getYRot() - previousYaw)) > 0.01F) {
+            soldier.traceRotationWrite("move-control:" + source, previousYaw, previousBodyYaw, previousHeadYaw,
+                "target=" + targetPos + ", speed=" + String.format("%.3f", this.speedModifier));
+        }
     }
 
     /**
