@@ -127,6 +127,8 @@ public class SoldierEntity extends PathfinderMob implements Container {
         SynchedEntityData.defineId(SoldierEntity.class, EntityDataSerializers.BOOLEAN);
     private static final EntityDataAccessor<Float> HALF_COVER_RISE_PROGRESS =
         SynchedEntityData.defineId(SoldierEntity.class, EntityDataSerializers.FLOAT);
+    private static final EntityDataAccessor<Boolean> HALF_COVER_RISING =
+        SynchedEntityData.defineId(SoldierEntity.class, EntityDataSerializers.BOOLEAN);
     private static final EntityDataAccessor<Boolean> RELOAD_PENDING =
         SynchedEntityData.defineId(SoldierEntity.class, EntityDataSerializers.BOOLEAN);
     private static final EntityDataAccessor<Boolean> TACTICAL_RELOADING =
@@ -177,6 +179,8 @@ public class SoldierEntity extends PathfinderMob implements Container {
     private String navigationTraversalLockReason = "none";
     /** True when combat, rather than cover movement, owns the low-prone posture. */
     private boolean firingProne = false;
+    /** Armed only by a low-crouch exit; prevents unrelated peek transitions from rising. */
+    private boolean halfCoverRisePending;
 
     private BlockPos pingMoveTarget = null;
     private long pingMoveTimestamp = 0;
@@ -348,6 +352,7 @@ public class SoldierEntity extends PathfinderMob implements Container {
         this.entityData.define(PEEK_POSITION, BlockPos.ZERO);
         this.entityData.define(LOW_CROUCHING, false);
         this.entityData.define(HALF_COVER_RISE_PROGRESS, 1.0f);
+        this.entityData.define(HALF_COVER_RISING, false);
         this.entityData.define(RELOAD_PENDING, false);
         this.entityData.define(TACTICAL_RELOADING, false);
         this.entityData.define(THREAT_DIR_X, 0f);
@@ -1314,7 +1319,8 @@ public BlockPos getPingMoveTarget() {
     @Override
     public void onSyncedDataUpdated(EntityDataAccessor<?> accessor) {
         super.onSyncedDataUpdated(accessor);
-        if (LOW_CROUCHING.equals(accessor) || HALF_COVER_RISE_PROGRESS.equals(accessor)) {
+        if (LOW_CROUCHING.equals(accessor) || HALF_COVER_RISE_PROGRESS.equals(accessor)
+            || HALF_COVER_RISING.equals(accessor)) {
             // DATA_POSE and LOW_CROUCHING can arrive in either order. Refresh
             // here so the client bounding box always uses the current posture.
             this.refreshDimensions();
@@ -1392,14 +1398,34 @@ public BlockPos getPingMoveTarget() {
     }
     
     public void syncCoverCurrent(BlockPos pos, int typeOrdinal, float quality, float height) {
+        boolean changedCover = !pos.equals(this.entityData.get(COVER_CURRENT_POS))
+            || typeOrdinal != this.entityData.get(COVER_CURRENT_TYPE);
         this.entityData.set(COVER_CURRENT_POS, pos);
         this.entityData.set(COVER_CURRENT_TYPE, typeOrdinal);
         this.entityData.set(COVER_CURRENT_QUALITY, quality);
         this.entityData.set(COVER_CURRENT_HEIGHT, height);
+        if (changedCover) {
+            cancelHalfCoverRise();
+        }
     }
 
     public void beginHalfCoverRise() {
+        if (this.level().isClientSide || entityData.get(LOW_CROUCHING) || !halfCoverRisePending) {
+            return;
+        }
+        halfCoverRisePending = false;
         this.entityData.set(HALF_COVER_RISE_PROGRESS, 0.0f);
+        this.entityData.set(HALF_COVER_RISING, true);
+        this.refreshDimensions();
+    }
+
+    public void cancelHalfCoverRise() {
+        if (this.level().isClientSide) {
+            return;
+        }
+        halfCoverRisePending = false;
+        this.entityData.set(HALF_COVER_RISE_PROGRESS, 1.0f);
+        this.entityData.set(HALF_COVER_RISING, false);
         this.refreshDimensions();
     }
 
@@ -1408,7 +1434,8 @@ public BlockPos getPingMoveTarget() {
     }
 
     public boolean isHalfCoverRising() {
-        if (entityData.get(LOW_CROUCHING) || getHalfCoverRiseProgress() >= 1.0f) {
+        if (!entityData.get(HALF_COVER_RISING) || entityData.get(LOW_CROUCHING)
+            || getHalfCoverRiseProgress() >= 1.0f) {
             return false;
         }
         int state = getSyncedCoverState();
@@ -1421,6 +1448,9 @@ public BlockPos getPingMoveTarget() {
         if (!isHalfCoverRising()) return;
         float next = Math.min(1.0f, getHalfCoverRiseProgress() + 1.0f / HALF_COVER_RISE_TICKS);
         this.entityData.set(HALF_COVER_RISE_PROGRESS, next);
+        if (next >= 1.0f) {
+            this.entityData.set(HALF_COVER_RISING, false);
+        }
         this.refreshDimensions();
     }
     
@@ -1519,6 +1549,11 @@ public BlockPos getPingMoveTarget() {
         }
         
         this.entityData.set(LOW_CROUCHING, lowCrouch);
+        if (lowCrouch) {
+            cancelHalfCoverRise();
+        } else {
+            halfCoverRisePending = true;
+        }
         this.setPose(lowCrouch ? Pose.SWIMMING : Pose.CROUCHING);
         this.refreshDimensions();
     }

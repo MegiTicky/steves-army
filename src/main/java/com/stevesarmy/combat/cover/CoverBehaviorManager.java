@@ -283,6 +283,7 @@ if (currentCover != null) {
         soldier.getPeekController().reset();
         // Preserve suppression during cover transitions - don't reset
         soldier.setLowCrouching(false);
+        soldier.cancelHalfCoverRise();
         soldier.refreshDimensions();
         soldier.setPose(net.minecraft.world.entity.Pose.STANDING);
         soldier.refreshDimensions();

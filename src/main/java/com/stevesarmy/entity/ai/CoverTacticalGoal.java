@@ -1311,6 +1311,7 @@ private void tickRepositioning() {
         if (currentCover != null && currentCover.getType() == CoverType.HALF
             && soldier.isLowCrouching() && !getCoverManager().isSuppressed()) {
             soldier.setLowCrouching(false);
+            getPeekController().enterStandingInHalfCover(soldier, false);
         }
 
         if (currentCover != null) {
@@ -1404,6 +1405,10 @@ private void tickRepositioning() {
                 getPeekController().tick(soldier, currentCover, getPositionController());
             }
             getCoverManager().setState(CoverBehaviorManager.CoverState.SUPPRESSED_IN_COVER);
+            if (currentCover != null && currentCover.getType() == CoverType.HALF
+                && getPeekController().isStandingInHalfCover()) {
+                getPeekController().enterHiding(soldier);
+            }
             return;
         }
 
@@ -1456,6 +1461,7 @@ private void tickRepositioning() {
         if (currentCover.getType() == CoverType.HALF) {
             soldier.clearEmergencyEngagementPosture();
             soldier.setLowCrouching(true);
+            peekCtrl.enterHiding(soldier);
         } else {
             soldier.setLowCrouching(soldier.isFiringProne());
         }
@@ -1491,6 +1497,11 @@ private void tickRepositioning() {
         CoverBehaviorManager coverManager = getCoverManager();
         CoverPoint currentCover = getCoverManager().getCurrentCover();
 
+        if (currentCover != null && currentCover.getType() == CoverType.HALF
+            && soldier.isLowCrouching() && getPeekController().isStandingInHalfCover()) {
+            getPeekController().enterHiding(soldier);
+        }
+
         // A hit while hidden means this cover is compromised. Unlike routine cover
         // changes, this relocation may start while suppressed.
         if (processPendingRepositionRequests() == PendingRepositionResult.MOVEMENT_STARTED) {
@@ -1499,7 +1510,9 @@ private void tickRepositioning() {
 
         if (!coverManager.isSuppressed()) {
             if (currentCover != null && currentCover.getType() == CoverType.HALF) {
+                boolean wasLowCrouching = soldier.isLowCrouching();
                 soldier.setLowCrouching(false);
+                getPeekController().enterStandingInHalfCover(soldier, wasLowCrouching);
             }
             coverManager.setState(CoverBehaviorManager.CoverState.IN_COVER);
             return;
@@ -2882,7 +2895,7 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
                 boolean peeking = peekCtrl.isExposed() || peekCtrl.isMovingToPeek() || peekCtrl.isReturning();
 
                 // Check if we've completed a peek cycle
-                if (!attackHasPeekedThisCover && !peeking && peekCtrl.getState() == PeekController.State.HIDING
+                if (!attackHasPeekedThisCover && !peeking && peekCtrl.isIdleInCover()
                     && getCoverManager().getTimeSinceLastPeek() > 500) {
                     if (peekCtrl.getPeekCountSameCover() > 0) {
                         attackHasPeekedThisCover = true;
@@ -3138,7 +3151,7 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
     }
 
     private void maintainCoverAnchorIfHiding(CoverPoint cover) {
-        if (cover != null && getPeekController().isHiding()) {
+        if (cover != null && getPeekController().isIdleInCover()) {
             getPositionController().maintainCoverAnchor(getCoverStandingPosition(cover.getPosition()));
         }
     }
@@ -3519,6 +3532,9 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
         }
         soldier.refreshDimensions();
         doLowCrouchIfHalfCover();
+        if (cover.getType() == CoverType.HALF && !getCoverManager().isSuppressed()) {
+            getPeekController().enterStandingInHalfCover(soldier, false);
+        }
 
         if (relocationType == RelocationType.GO_TO) {
             soldier.completeGoToIfGeneration(relocationCommandGeneration);

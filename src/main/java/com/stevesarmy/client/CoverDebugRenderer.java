@@ -1082,6 +1082,7 @@ private static void renderSoldierCoverLabels(PoseStack poseStack, Vec3 cameraPos
     private static int getPeekStateColor(PeekController.State peekState) {
         switch (peekState) {
             case HIDING: return 0x808080;
+            case STANDING_IN_HALF_COVER: return 0x6699FF;
             case EXPOSED: return 0x00FF00;
             case RETURNING_TO_COVER: return 0xFF8800;
             case MOVING_TO_PEEK: return 0x00FFFF;

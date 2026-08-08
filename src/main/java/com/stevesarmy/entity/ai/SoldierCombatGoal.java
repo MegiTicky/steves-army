@@ -995,7 +995,7 @@ public class SoldierCombatGoal extends Goal {
         }
 
         CoverBehaviorManager coverManager = soldier.getCoverBehaviorManager();
-        return !coverManager.isInCover() || soldier.getPeekController().isHiding();
+        return !coverManager.isInCover() || soldier.getPeekController().isIdleInCover();
     }
 
     private boolean shouldTacticalReload() {
@@ -2356,6 +2356,10 @@ public class SoldierCombatGoal extends Goal {
 
             soldier.requestEmergencyEngagementPosture();
             soldier.setLowCrouching(false);
+            CoverPoint cover = soldier.getCoverBehaviorManager().getCurrentCover();
+            if (cover != null && cover.getType() == CoverType.HALF) {
+                soldier.beginHalfCoverRise();
+            }
             engagementPostureState = EngagementPostureState.EXITING_LOW_CROUCH;
             return false;
         }

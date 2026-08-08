@@ -23,7 +23,8 @@ public class PeekController {
         HIDING,
         MOVING_TO_PEEK,
         EXPOSED,
-        RETURNING_TO_COVER
+        RETURNING_TO_COVER,
+        STANDING_IN_HALF_COVER
     }
 
     private static final long EXPOSURE_TIME_MIN_MS = 3000;   // 3 seconds
@@ -80,6 +81,30 @@ public class PeekController {
     public boolean isReturning() { return state == State.RETURNING_TO_COVER; }
 
     public boolean isHiding() { return state == State.HIDING; }
+
+    public boolean isStandingInHalfCover() { return state == State.STANDING_IN_HALF_COVER; }
+
+    /** True for either non-peeking cover posture. */
+    public boolean isIdleInCover() { return isHiding() || isStandingInHalfCover(); }
+
+    public void enterStandingInHalfCover(SoldierEntity soldier, boolean animateRise) {
+        setState(soldier, State.STANDING_IN_HALF_COVER);
+        stateStartTime = 0;
+        currentPeekPos = null;
+        returnAllowedDuringReload = false;
+        if (animateRise) {
+            soldier.beginHalfCoverRise();
+        } else {
+            soldier.cancelHalfCoverRise();
+        }
+    }
+
+    public void enterHiding(SoldierEntity soldier) {
+        setState(soldier, State.HIDING);
+        stateStartTime = 0;
+        currentPeekPos = null;
+        returnAllowedDuringReload = false;
+    }
 
     public void reset(SoldierEntity soldier) {
         setState(soldier, State.HIDING);
@@ -145,6 +170,7 @@ public class PeekController {
 
         switch (state) {
             case HIDING:
+            case STANDING_IN_HALF_COVER:
                 tickHiding(soldier, cover, mover, allowPeekStart);
                 break;
             case MOVING_TO_PEEK:
@@ -160,13 +186,13 @@ public class PeekController {
     }
 
     public void forceReturnToCover(SoldierEntity soldier, CoverPoint cover, CoverPositionController mover) {
-        if (cover == null || state == State.HIDING || state == State.RETURNING_TO_COVER) return;
+        if (cover == null || isIdleInCover() || state == State.RETURNING_TO_COVER) return;
         enterReturning(soldier, cover, mover, false);
     }
 
     /** Allows the full-cover duck-back to complete while reload blocks all other movement. */
     public void forceReturnToCoverDuringReload(SoldierEntity soldier, CoverPoint cover, CoverPositionController mover) {
-        if (cover == null || state == State.HIDING) return;
+        if (cover == null || isIdleInCover()) return;
 
         if (state == State.RETURNING_TO_COVER) {
             returnAllowedDuringReload = true;
@@ -197,7 +223,7 @@ public class PeekController {
                 nonPeekableTicks = 0;
                 soldier.getCoverBehaviorManager().setNonPeekableCover(false);
                 soldier.getCoverBehaviorManager().requestReposition();
-                setState(soldier, State.HIDING);
+                setIdleState(soldier, cover);
                 return;
             }
         } else {
@@ -298,7 +324,7 @@ public class PeekController {
                     soldier.getId());
             }
             lastPeekEndTime = System.currentTimeMillis();
-            setState(soldier, State.HIDING);
+            setIdleState(soldier, cover);
             stateStartTime = 0;
         }
     }
@@ -385,8 +411,10 @@ public class PeekController {
         
         boolean isHalf = cover.getType() == CoverType.HALF;
         if (isHalf) {
-            // Keep the crouched hitbox/eye height while the synced rise progresses.
-            soldier.beginHalfCoverRise();
+            // Normal half-cover peeks do not alter posture.
+            if (!soldier.isHalfCoverRising()) {
+                soldier.cancelHalfCoverRise();
+            }
         } else {
             CoverPositionController mover = (CoverPositionController) soldier.getMoveControl();
             mover.clear();
@@ -397,14 +425,14 @@ public class PeekController {
         soldier.refreshDimensions();
 
         if (CoverTacticalGoal.isDebugLoggingEnabled()) {
-            StevesArmyMod.LOGGER.info("[PeekController] Soldier {} state: HIDING -> EXPOSED (exposure={}ms)",
+            StevesArmyMod.LOGGER.info("[PeekController] Soldier {} entered EXPOSED (exposure={}ms)",
                 soldier.getId(), currentMaxExposureTime);
         }
     }
 
     /** Exposes only half cover after combat has completed an emergency posture change. */
     public boolean exposeForEmergencyEngagement(SoldierEntity soldier, CoverPoint cover) {
-        if (state != State.HIDING || cover.getType() != CoverType.HALF) {
+        if (!isIdleInCover() || cover.getType() != CoverType.HALF) {
             return false;
         }
 
@@ -526,15 +554,23 @@ public class PeekController {
     private void completeReturn(SoldierEntity soldier, CoverPoint cover) {
         lastPeekEndTime = System.currentTimeMillis();
         recordPeekCycle(soldier);
-        setState(soldier, State.HIDING);
+        setIdleState(soldier, cover);
         stateStartTime = 0;
         currentPeekPos = null;
         returnAllowedDuringReload = false;
         soldier.refreshDimensions();
         
         if (CoverTacticalGoal.isDebugLoggingEnabled()) {
-            StevesArmyMod.LOGGER.info("[PeekController] Soldier {} state: RETURNING_TO_COVER -> HIDING",
-                soldier.getId());
+            StevesArmyMod.LOGGER.info("[PeekController] Soldier {} state: RETURNING_TO_COVER -> {}",
+                soldier.getId(), state);
+        }
+    }
+
+    private void setIdleState(SoldierEntity soldier, CoverPoint cover) {
+        if (cover != null && cover.getType() == CoverType.HALF && !soldier.isLowCrouching()) {
+            enterStandingInHalfCover(soldier, false);
+        } else {
+            enterHiding(soldier);
         }
     }
 
@@ -563,7 +599,6 @@ public class PeekController {
         }
         
         float finalYaw = Mth.wrapDegrees(baseYaw + offset);
-        
         soldier.setYRot(finalYaw);
         soldier.setYBodyRot(finalYaw);
         soldier.setYHeadRot(finalYaw);
