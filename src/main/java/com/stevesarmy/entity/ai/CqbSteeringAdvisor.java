@@ -33,6 +33,7 @@ public class CqbSteeringAdvisor {
     private static final int PATH_SAMPLE_NODE_COUNT = 8;
     private static final double LATERAL_OFFSET = 0.35;
     private static final double CAUTION_SPEED_CAP = 0.24;
+    private static final double AUTO_CAUTION_SPEED_CAP = 0.37;
     private static final double BODY_SAMPLE_HEIGHT = 0.9;
     private static final double ENEMY_EYE_HEIGHT = 1.2;
     private static final String MANUAL_CQB_REASON = "manual CQB";
@@ -144,8 +145,17 @@ public class CqbSteeringAdvisor {
         return node;
     }
 
-    /** Caps the navigation speed to a cautious pace while caution is active. */
-    public double getCautionSpeed(double requestedSpeed) {
+    /**
+     * Manual CQB retains its original cautious pace. Automatic path caution
+     * keeps its lateral steering but travels at the normal sprint pace when
+     * the CQB toggle is off.
+     */
+    public double getCautionSpeed(SoldierEntity soldier, double requestedSpeed) {
+        if (!soldier.isCQB()) {
+            currentSpeedFactor = 0.0;
+            return Math.min(requestedSpeed, AUTO_CAUTION_SPEED_CAP);
+        }
+
         // Ramp into the cap so entering CQB does not look like an abrupt sprint
         // or an abrupt velocity override.
         currentSpeedFactor = Math.min(CAUTION_SPEED_CAP, currentSpeedFactor + 0.02);

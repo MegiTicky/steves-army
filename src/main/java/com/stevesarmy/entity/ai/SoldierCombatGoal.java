@@ -15,6 +15,7 @@ import com.stevesarmy.combat.VisibilityRay;
 import com.stevesarmy.combat.cover.CoverBehaviorManager;
 import com.stevesarmy.combat.cover.CoverFinder;
 import com.stevesarmy.combat.cover.CoverPoint;
+import com.stevesarmy.combat.cover.CoverProtectionContext;
 import com.stevesarmy.combat.cover.CoverType;
 import com.stevesarmy.debug.DiagnosticLogManager;
 import com.stevesarmy.entity.SoldierEntity;
@@ -1940,6 +1941,32 @@ public class SoldierCombatGoal extends Goal {
     public void setTarget(LivingEntity newTarget) {
         this.target = newTarget;
         soldier.setTarget(newTarget);
+    }
+
+    /**
+     * Resolves the source used to decide whether a candidate physically protects
+     * the soldier. Do not use a hidden entity's current location: that would give
+     * cover selection information the soldier has not observed.
+     */
+    public CoverProtectionContext resolveCoverProtectionContext() {
+        if (target != null && target.isAlive() && !soldier.isFriendlyTo(target)
+            && TargetAcquisition.hasLineOfSight(soldier, target)) {
+            return new CoverProtectionContext(CoverProtectionContext.Source.VISIBLE_TARGET,
+                target.position(), null);
+        }
+
+        Optional<BlockPos> lastKnown = threatTracker.getLastKnownPosition();
+        if (lastKnown.isPresent()) {
+            return new CoverProtectionContext(CoverProtectionContext.Source.LAST_SEEN,
+                Vec3.atCenterOf(lastKnown.get()), null);
+        }
+
+        Vec3 awarenessDirection = soldier.getThreatAwareness().getPrimaryDirection(soldier.position());
+        if (awarenessDirection != null && awarenessDirection.lengthSqr() > 0.001D) {
+            return new CoverProtectionContext(CoverProtectionContext.Source.THREAT_AWARENESS,
+                null, awarenessDirection);
+        }
+        return CoverProtectionContext.NONE;
     }
     
     private void updateDebugSync() {

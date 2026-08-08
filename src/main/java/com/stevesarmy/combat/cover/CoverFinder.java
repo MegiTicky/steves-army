@@ -169,24 +169,23 @@ public class CoverFinder {
             return Optional.empty();
         }
         
-        // Hard filter: prefer covers that protect from primary threat direction
-        if (threatDirection != null && threatDirection.lengthSqr() > 0.001) {
-            Direction threatDir = getDirectionFromVector(threatDirection);
+        // Hard filter: prefer covers that physically protect from the resolved primary threat.
+        if (resolveProtectionContext(soldier, threatDirection).hasThreat()) {
             List<ScoredCover> protectedCovers = all.stream()
-                .filter(s -> s.cover.getProtectedDirections().contains(threatDir))
+                .filter(s -> isPrimaryThreatProtected(s.cover, soldier, threatDirection))
                 .collect(java.util.stream.Collectors.toList());
             
             if (!protectedCovers.isEmpty()) {
                 if (com.stevesarmy.entity.ai.CoverTacticalGoal.isDebugLoggingEnabled()) {
                     StevesArmyMod.LOGGER.info("[CoverFinder] Selected protected cover: {} (threatDir={}, {} protected covers available)",
-                        protectedCovers.get(0).cover.getPosition(), threatDir, protectedCovers.size());
+                        protectedCovers.get(0).cover.getPosition(), resolveProtectionContext(soldier, threatDirection).source(), protectedCovers.size());
                 }
                 return Optional.of(protectedCovers.get(0).cover);
             }
 
             if (com.stevesarmy.entity.ai.CoverTacticalGoal.isDebugLoggingEnabled()) {
-                StevesArmyMod.LOGGER.info("[CoverFinder] No protected covers available for threatDir={}, using best unprotected cover",
-                    threatDir);
+                StevesArmyMod.LOGGER.info("[CoverFinder] No physically protected covers available for source={}, using best scored cover",
+                    resolveProtectionContext(soldier, threatDirection).source());
             }
         }
         
@@ -202,11 +201,10 @@ public class CoverFinder {
             return Optional.empty();
         }
 
-        // Hard filter: prefer covers that protect from primary threat direction
-        if (threatDirection != null && threatDirection.lengthSqr() > 0.001) {
-            Direction threatDir = getDirectionFromVector(threatDirection);
+        // Hard filter: prefer covers that physically protect from the resolved primary threat.
+        if (resolveProtectionContext(soldier, threatDirection).hasThreat()) {
             List<ScoredCover> protectedCovers = all.stream()
-                .filter(s -> s.cover.getProtectedDirections().contains(threatDir))
+                .filter(s -> isPrimaryThreatProtected(s.cover, soldier, threatDirection))
                 .collect(java.util.stream.Collectors.toList());
 
             if (!protectedCovers.isEmpty()) {
@@ -221,11 +219,10 @@ public class CoverFinder {
                                             List<LivingEntity> allThreats, int radius, int count, boolean includeReserved) {
         List<ScoredCover> all = evaluateAndScoreAll(soldier, threatDirection, allThreats, radius, includeReserved);
         
-        // Apply hard filter: prefer protected covers when threat direction exists
-        if (threatDirection != null && threatDirection.lengthSqr() > 0.001) {
-            Direction threatDir = getDirectionFromVector(threatDirection);
+        // Apply hard filter: prefer physically protected covers when a threat is known.
+        if (resolveProtectionContext(soldier, threatDirection).hasThreat()) {
             List<ScoredCover> protectedCovers = all.stream()
-                .filter(s -> s.cover.getProtectedDirections().contains(threatDir))
+                .filter(s -> isPrimaryThreatProtected(s.cover, soldier, threatDirection))
                 .collect(java.util.stream.Collectors.toList());
             
             if (!protectedCovers.isEmpty()) {
@@ -246,27 +243,25 @@ public class CoverFinder {
 
         LivingEntity primaryThreat = allThreats != null && !allThreats.isEmpty() ? allThreats.get(0) : null;
         CoverQualityEvaluator evaluator = new CoverQualityEvaluator(level);
+        CoverProtectionContext protection = resolveProtectionContext(soldier, threatDirection);
 
         for (CoverPoint coverPoint : coverPoints) {
             if (!includeReserved && !CoverReservationManager.isAvailable(coverPoint.getPosition())) {
                 continue;
             }
-            if (threatDirection != null && threatDirection.lengthSqr() > 0.001) {
-                evaluator.evaluateWithCone(coverPoint, threatDirection);
+            Vec3 evaluationDirection = protection.directionFrom(coverPoint.getPosition());
+            if (evaluationDirection != null) {
+                evaluator.evaluateWithCone(coverPoint, evaluationDirection);
             }
             candidatesEvaluated++;
-            float score = calculateThreatAwareScore(coverPoint, soldier, threatDirection, allThreats, primaryThreat);
+            float score = calculateThreatAwareScore(coverPoint, soldier, threatDirection, allThreats, primaryThreat, protection);
             coverPoint.setQuality(score);
             coverPoint.setCombatScore(score);
         }
 
-        Direction threatDir = threatDirection != null && threatDirection.lengthSqr() > 0.001 
-            ? getDirectionFromVector(threatDirection) : null;
-        
         List<ScoredCover> scored = coverPoints.stream()
             .filter(cp -> includeReserved || CoverReservationManager.isAvailable(cp.getPosition()))
-            .filter(cp -> cp.getType() != CoverType.NONE || 
-                         (threatDir != null && cp.getProtectedDirections().contains(threatDir)))
+            .filter(cp -> cp.getType() != CoverType.NONE)
             .map(cp -> new ScoredCover(cp, cp.getCombatScore()))
             .sorted(Comparator.comparingDouble((ScoredCover s) -> s.score).reversed())
             .collect(java.util.stream.Collectors.toList());
@@ -286,30 +281,29 @@ public class CoverFinder {
 
         LivingEntity primaryThreat = allThreats != null && !allThreats.isEmpty() ? allThreats.get(0) : null;
         CoverQualityEvaluator evaluator = new CoverQualityEvaluator(level);
+        CoverProtectionContext protection = resolveProtectionContext(soldier, threatDirection);
 
         for (CoverPoint coverPoint : coverPoints) {
             if (!includeReserved && !CoverReservationManager.isAvailable(coverPoint.getPosition())) {
                 continue;
             }
-            if (threatDirection != null && threatDirection.lengthSqr() > 0.001) {
-                evaluator.evaluateWithCone(coverPoint, threatDirection);
+            Vec3 evaluationDirection = protection.directionFrom(coverPoint.getPosition());
+            if (evaluationDirection != null) {
+                evaluator.evaluateWithCone(coverPoint, evaluationDirection);
             }
             candidatesEvaluated++;
-            float score = calculateThreatAwareScore(coverPoint, soldier, threatDirection, allThreats, primaryThreat, squadCtx, null, 0);
+            float score = calculateThreatAwareScore(coverPoint, soldier, threatDirection, allThreats, primaryThreat,
+                squadCtx, null, 0, protection);
             coverPoint.setQuality(score);
             coverPoint.setCombatScore(score);
         }
 
-        Direction threatDir = threatDirection != null && threatDirection.lengthSqr() > 0.001 
-            ? getDirectionFromVector(threatDirection) : null;
-        
         Vec3 ownerPos = squadCtx != null ? squadCtx.ownerPosition() : null;
         double maxOwnerDistSq = FOLLOW_MODE_MAX_OWNER_DISTANCE * FOLLOW_MODE_MAX_OWNER_DISTANCE;
         
         List<ScoredCover> scored = coverPoints.stream()
             .filter(cp -> includeReserved || CoverReservationManager.isAvailable(cp.getPosition()))
-            .filter(cp -> cp.getType() != CoverType.NONE || 
-                         (threatDir != null && cp.getProtectedDirections().contains(threatDir)))
+            .filter(cp -> cp.getType() != CoverType.NONE)
             .filter(cp -> ownerPos == null || cp.getPosition().getCenter().distanceToSqr(ownerPos) <= maxOwnerDistSq)
             .map(cp -> new ScoredCover(cp, cp.getCombatScore()))
             .sorted(Comparator.comparingDouble((ScoredCover s) -> s.score).reversed())
@@ -334,24 +328,25 @@ public class CoverFinder {
 
         LivingEntity primaryThreat = allThreats != null && !allThreats.isEmpty() ? allThreats.get(0) : null;
         CoverQualityEvaluator evaluator = new CoverQualityEvaluator(level);
+        CoverProtectionContext protection = resolveProtectionContext(soldier, threatDirection);
 
         for (CoverPoint coverPoint : coverPoints) {
             if (!CoverReservationManager.isAvailableFor(coverPoint.getPosition(), soldier)) {
                 continue;
             }
-            if (threatDirection != null && threatDirection.lengthSqr() > 0.001) {
-                evaluator.evaluateWithCone(coverPoint, threatDirection);
+            Vec3 evaluationDirection = protection.directionFrom(coverPoint.getPosition());
+            if (evaluationDirection != null) {
+                evaluator.evaluateWithCone(coverPoint, evaluationDirection);
             }
             candidatesEvaluated++;
             float score = calculateThreatAwareScore(coverPoint, soldier, threatDirection, allThreats, primaryThreat, squadCtx,
-                searchCenter, radius);
+                searchCenter, radius, protection);
             coverPoint.setQuality(score);
             coverPoint.setCombatScore(score);
         }
 
         List<ScoredCover> scored = coverPoints.stream()
-            .filter(cp -> cp.getType() != CoverType.NONE || 
-                         (threatDirection != null && cp.getProtectedDirections().contains(getDirectionFromVector(threatDirection))))
+            .filter(cp -> cp.getType() != CoverType.NONE)
             .filter(cp -> CoverReservationManager.isAvailableFor(cp.getPosition(), soldier))
             .map(cp -> new ScoredCover(cp, cp.getCombatScore()))
             .sorted(Comparator.comparingDouble((ScoredCover s) -> s.score).reversed())
@@ -371,7 +366,8 @@ public class CoverFinder {
     }
     
     private float calculateThreatAwareScore(CoverPoint coverPoint, LivingEntity soldier,
-                                            Vec3 threatDirection, List<LivingEntity> allThreats, LivingEntity primaryThreat) {
+                                            Vec3 threatDirection, List<LivingEntity> allThreats, LivingEntity primaryThreat,
+                                            CoverProtectionContext protection) {
         if (com.stevesarmy.debug.DiagnosticLogManager.isCoverScoreLoggingEnabled()) {
             StevesArmyMod.LOGGER.info("[ThreatAwareScore] coverPos={}, threatDirection=({}, {}, {}), primaryThreat={}",
                 coverPoint.getPosition(),
@@ -381,7 +377,7 @@ public class CoverFinder {
                 primaryThreat != null ? primaryThreat.blockPosition() : "null");
         }
         
-        float primaryProtection = calculatePrimaryProtection(coverPoint, threatDirection);
+        float primaryProtection = calculatePrimaryProtection(coverPoint, protection);
         float flankingProtection = calculateFlankingProtection(coverPoint, allThreats);
         float firingQuality = calculateFiringQuality(coverPoint, threatDirection);
         FiringLaneResult firingLane = calculateFiringLane(coverPoint, threatDirection, primaryThreat, null);
@@ -454,15 +450,18 @@ public class CoverFinder {
 
     private float calculateThreatAwareScore(CoverPoint coverPoint, LivingEntity soldier,
                                             Vec3 threatDirection, List<LivingEntity> allThreats,
-                                            LivingEntity primaryThreat, SquadCoverContext squadCtx) {
-        return calculateThreatAwareScore(coverPoint, soldier, threatDirection, allThreats, primaryThreat, squadCtx, null, 0);
+                                            LivingEntity primaryThreat, SquadCoverContext squadCtx,
+                                            CoverProtectionContext protection) {
+        return calculateThreatAwareScore(coverPoint, soldier, threatDirection, allThreats, primaryThreat, squadCtx,
+            null, 0, protection);
     }
 
     private float calculateThreatAwareScore(CoverPoint coverPoint, LivingEntity soldier,
                                             Vec3 threatDirection, List<LivingEntity> allThreats,
                                             LivingEntity primaryThreat, SquadCoverContext squadCtx,
-                                            BlockPos searchCenter, int searchRadius) {
-        float primaryProtection = calculatePrimaryProtection(coverPoint, threatDirection);
+                                            BlockPos searchCenter, int searchRadius,
+                                            CoverProtectionContext protection) {
+        float primaryProtection = calculatePrimaryProtection(coverPoint, protection);
         float flankingProtection = calculateFlankingProtection(coverPoint, allThreats);
         float firingQuality = calculateFiringQuality(coverPoint, threatDirection);
         FiringLaneResult firingLane = calculateFiringLane(coverPoint, threatDirection, primaryThreat, squadCtx);
@@ -589,6 +588,42 @@ public class CoverFinder {
         }
         
         return 0.0f;
+    }
+
+    private float calculatePrimaryProtection(CoverPoint coverPoint, CoverProtectionContext protection) {
+        Vec3 direction = protection.directionFrom(coverPoint.getPosition());
+        if (direction == null) {
+            return coverPoint.getQuality();
+        }
+
+        boolean protectedFromThreat = new CoverQualityEvaluator(level).isDirectionProtected(coverPoint, direction);
+        if (com.stevesarmy.debug.DiagnosticLogManager.isCoverScoreLoggingEnabled()) {
+            StevesArmyMod.LOGGER.info("[PrimaryProtection] coverPos={} source={} direction=({}, {}, {}) physicalProtected={}",
+                coverPoint.getPosition(), protection.source(), String.format("%.2f", direction.x),
+                String.format("%.2f", direction.y), String.format("%.2f", direction.z), protectedFromThreat);
+        }
+        return protectedFromThreat ? coverPoint.getQuality() : 0.0f;
+    }
+
+    private CoverProtectionContext resolveProtectionContext(LivingEntity soldier, Vec3 fallbackDirection) {
+        if (soldier instanceof SoldierEntity soldierEntity && soldierEntity.getCombatGoal() != null) {
+            return soldierEntity.getCombatGoal().resolveCoverProtectionContext();
+        }
+        if (fallbackDirection != null && fallbackDirection.lengthSqr() > 0.001D) {
+            return new CoverProtectionContext(CoverProtectionContext.Source.THREAT_AWARENESS,
+                null, fallbackDirection);
+        }
+        return CoverProtectionContext.NONE;
+    }
+
+    public boolean isPrimaryThreatProtected(CoverPoint coverPoint, LivingEntity soldier, Vec3 fallbackDirection) {
+        CoverProtectionContext protection = resolveProtectionContext(soldier, fallbackDirection);
+        Vec3 direction = protection.directionFrom(coverPoint.getPosition());
+        return direction == null || new CoverQualityEvaluator(level).isDirectionProtected(coverPoint, direction);
+    }
+
+    public boolean hasPrimaryThreat(LivingEntity soldier, Vec3 fallbackDirection) {
+        return resolveProtectionContext(soldier, fallbackDirection).hasThreat();
     }
     
     private float calculateFlankingProtection(CoverPoint coverPoint, List<LivingEntity> allThreats) {

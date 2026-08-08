@@ -2112,11 +2112,8 @@ private boolean shouldExitCoverForFollow() {
                 }
 
                 // Hard primary-threat protection preference
-                if (threatDir != null) {
-                    Set<Direction> protectedDirs = cover.getProtectedDirections();
-                    if (protectedDirs == null || !protectedDirs.contains(threatDir)) {
-                        continue;
-                    }
+                if (!finder.isPrimaryThreatProtected(cover, soldier, threatDirection)) {
+                    continue;
                 }
 
                 bestCover = Optional.of(cover);
@@ -2139,11 +2136,8 @@ private boolean shouldExitCoverForFollow() {
                     }
 
                     // Fallback still requires primary-threat protection
-                    if (threatDir != null) {
-                        Set<Direction> protectedDirs = cover.getProtectedDirections();
-                        if (protectedDirs == null || !protectedDirs.contains(threatDir)) {
-                            continue;
-                        }
+                    if (!finder.isPrimaryThreatProtected(cover, soldier, threatDirection)) {
+                        continue;
                     }
 
                     bestCover = Optional.of(cover);
@@ -2536,6 +2530,9 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
         CoverPoint bestCover = null;
         int bestPathNodes = Integer.MAX_VALUE;
         boolean bestProtected = false;
+        CoverFinder protectionFinder = new CoverFinder(soldier.level());
+        boolean requiresProtection = protectionFinder.hasPrimaryThreat(soldier,
+            getThreats().getPrimaryDirection(soldier.position()));
 
         for (CoverFinder.ScoredCover sc : scored) {
             CoverPoint cover = sc.cover;
@@ -2553,9 +2550,8 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
             Path path = navigation.createPath(standingPos.x, standingPos.y, standingPos.z, 1);
             if (path == null || !path.canReach()) continue;
 
-            boolean protectedFromThreat = threatDir != null
-                && cover.getProtectedDirections() != null
-                && cover.getProtectedDirections().contains(threatDir);
+            boolean protectedFromThreat = protectionFinder
+                .isPrimaryThreatProtected(cover, soldier, getThreats().getPrimaryDirection(soldier.position()));
             int pathNodes = path.getNodeCount();
             if (bestCover == null || (protectedFromThreat && !bestProtected)
                 || (protectedFromThreat == bestProtected && pathNodes < bestPathNodes)) {
@@ -2565,7 +2561,7 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
             }
         }
 
-        return Optional.ofNullable(bestCover);
+        return requiresProtection && !bestProtected ? Optional.empty() : Optional.ofNullable(bestCover);
     }
 
     private void logRejectedAttackCover(CoverPoint cover, BlockPos objective, Vec3 objectiveDir) {
@@ -3030,11 +3026,8 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
             if (distToObj <= ATTACK_OBJECTIVE_RADIUS * ATTACK_OBJECTIVE_RADIUS) continue;
 
             // Hard primary-threat protection preference
-            if (threatDir != null) {
-                Set<Direction> protectedDirs = cover.getProtectedDirections();
-                if (protectedDirs == null || !protectedDirs.contains(threatDir)) {
-                    continue;
-                }
+            if (!finder.isPrimaryThreatProtected(cover, soldier, threatDirection)) {
+                continue;
             }
 
             // Use canonical repositioning transition instead of direct moveToCover

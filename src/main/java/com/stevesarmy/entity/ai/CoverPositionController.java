@@ -436,7 +436,7 @@ public class CoverPositionController extends MoveControl {
         soldier.traceRotationWrite("cqb-caution-steer", previousYaw, previousBodyYaw, previousHeadYaw,
             "steerTarget=" + steerTarget + ", targetYaw=" + String.format("%.1f", targetYaw)
                 + ", reason=" + steeringAdvisor.getCautionReason());
-        double cautionSpeed = steeringAdvisor.getCautionSpeed(this.speedModifier);
+        double cautionSpeed = steeringAdvisor.getCautionSpeed(soldier, this.speedModifier);
         this.mob.setSpeed((float) (cautionSpeed * this.mob.getAttributeValue(Attributes.MOVEMENT_SPEED)));
         this.mob.setZza(1.0F);
         this.mob.setXxa(0.0F);
