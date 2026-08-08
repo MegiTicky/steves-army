@@ -1310,8 +1310,7 @@ private void tickRepositioning() {
 
         if (currentCover != null && currentCover.getType() == CoverType.HALF
             && soldier.isLowCrouching() && !getCoverManager().isSuppressed()) {
-            soldier.setLowCrouching(false);
-            getPeekController().enterStandingInHalfCover(soldier, false);
+            getPeekController().recoverStandingInHalfCover(soldier, "unsuppressed-fallback");
         }
 
         if (currentCover != null) {
@@ -1508,9 +1507,7 @@ private void tickRepositioning() {
 
         if (!coverManager.isSuppressed()) {
             if (currentCover != null && currentCover.getType() == CoverType.HALF) {
-                boolean wasLowCrouching = soldier.isLowCrouching();
-                soldier.setLowCrouching(false);
-                getPeekController().enterStandingInHalfCover(soldier, wasLowCrouching);
+                getPeekController().recoverStandingInHalfCover(soldier, "suppression-recovery");
             }
             coverManager.setState(CoverBehaviorManager.CoverState.IN_COVER);
             return;
@@ -3552,7 +3549,7 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
         soldier.refreshDimensions();
         doLowCrouchIfHalfCover();
         if (cover.getType() == CoverType.HALF && !getCoverManager().isSuppressed()) {
-            getPeekController().enterStandingInHalfCover(soldier, false);
+            getPeekController().enterStandingInHalfCover(soldier, "cover-arrival");
         }
 
         if (relocationType == RelocationType.GO_TO) {

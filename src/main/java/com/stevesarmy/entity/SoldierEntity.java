@@ -1421,11 +1421,15 @@ public BlockPos getPingMoveTarget() {
         this.entityData.set(COVER_CURRENT_QUALITY, quality);
         this.entityData.set(COVER_CURRENT_HEIGHT, height);
         if (changedCover) {
-            cancelHalfCoverRise();
+            cancelHalfCoverRise("cover-changed");
         }
     }
 
     public void beginHalfCoverRise() {
+        beginHalfCoverRise("unspecified");
+    }
+
+    public void beginHalfCoverRise(String source) {
         if (this.level().isClientSide || entityData.get(LOW_CROUCHING) || !halfCoverRisePending) {
             return;
         }
@@ -1433,10 +1437,14 @@ public BlockPos getPingMoveTarget() {
         this.entityData.set(HALF_COVER_RISE_PROGRESS, 0.0f);
         this.entityData.set(HALF_COVER_RISING, true);
         this.refreshDimensions();
-        tracePeek("half-cover-rise", "started");
+        tracePeek("half-cover-rise", "action=started, source=" + source);
     }
 
     public void cancelHalfCoverRise() {
+        cancelHalfCoverRise("unspecified");
+    }
+
+    public void cancelHalfCoverRise(String source) {
         if (this.level().isClientSide) {
             return;
         }
@@ -1444,7 +1452,7 @@ public BlockPos getPingMoveTarget() {
         this.entityData.set(HALF_COVER_RISE_PROGRESS, 1.0f);
         this.entityData.set(HALF_COVER_RISING, false);
         this.refreshDimensions();
-        tracePeek("half-cover-rise", "cancelled");
+        tracePeek("half-cover-rise", "action=cancelled, source=" + source);
     }
 
     public float getHalfCoverRiseProgress() {
@@ -1568,7 +1576,7 @@ public BlockPos getPingMoveTarget() {
         
         this.entityData.set(LOW_CROUCHING, lowCrouch);
         if (lowCrouch) {
-            cancelHalfCoverRise();
+            cancelHalfCoverRise("low-crouch");
         } else {
             halfCoverRisePending = true;
         }
@@ -1696,6 +1704,8 @@ public BlockPos getPingMoveTarget() {
         tracePeek(pinnedAndExposed ? "ANOMALY-pinned-exposed" : "snapshot",
             "peekElapsedMs=" + peekController.getTimeInCurrentState()
                 + ", emergencyOverride=" + emergency
+                + ", riseActive=" + isHalfCoverRising()
+                + ", riseProgress=" + String.format("%.3f", getHalfCoverRiseProgress())
                 + ", pinnedAndExposed=" + pinnedAndExposed);
     }
 
@@ -1716,6 +1726,8 @@ public BlockPos getPingMoveTarget() {
             + ", coverType=" + (cover == null ? "NONE" : cover.getType())
             + ", peek=" + getPeekController().getState()
             + ", lowCrouch=" + isLowCrouching()
+            + ", riseActive=" + isHalfCoverRising()
+            + ", riseProgress=" + String.format("%.3f", getHalfCoverRiseProgress())
             + ", emergency=" + hasEmergencyEngagementPosture()
             + ", emergencyRemaining=" + getEmergencyEngagementPostureRemainingTicks()
             + ", target=" + targetDescription;

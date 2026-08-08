@@ -87,15 +87,27 @@ public class PeekController {
     /** True for either non-peeking cover posture. */
     public boolean isIdleInCover() { return isHiding() || isStandingInHalfCover(); }
 
-    public void enterStandingInHalfCover(SoldierEntity soldier, boolean animateRise) {
+    /** Restores the standing half-cover posture after a genuine defensive low crouch. */
+    public void recoverStandingInHalfCover(SoldierEntity soldier, String riseSource) {
+        boolean wasLowCrouching = soldier.isLowCrouching();
+        soldier.setLowCrouching(false);
+        enterStandingInHalfCover(soldier, wasLowCrouching, riseSource);
+    }
+
+    /** Enters a normal standing half-cover idle posture without changing low crouch. */
+    public void enterStandingInHalfCover(SoldierEntity soldier, String transitionSource) {
+        enterStandingInHalfCover(soldier, false, transitionSource);
+    }
+
+    private void enterStandingInHalfCover(SoldierEntity soldier, boolean animateRise, String transitionSource) {
         setState(soldier, State.STANDING_IN_HALF_COVER);
         stateStartTime = 0;
         currentPeekPos = null;
         returnAllowedDuringReload = false;
         if (animateRise) {
-            soldier.beginHalfCoverRise();
+            soldier.beginHalfCoverRise(transitionSource);
         } else {
-            soldier.cancelHalfCoverRise();
+            soldier.cancelHalfCoverRise(transitionSource);
         }
     }
 
@@ -425,9 +437,13 @@ public class PeekController {
         
         boolean isHalf = cover.getType() == CoverType.HALF;
         if (isHalf) {
-            // Normal half-cover peeks do not alter posture.
+            // A real defensive low-crouch exit gets the visible reaction window;
+            // normal standing half-cover peeks have no pending rise and stay still.
+            String riseSource = soldier.getCoverBehaviorManager().isSuppressed()
+                ? "pressured-peek" : "half-cover-exposure";
+            soldier.beginHalfCoverRise(riseSource);
             if (!soldier.isHalfCoverRising()) {
-                soldier.cancelHalfCoverRise();
+                soldier.cancelHalfCoverRise("normal-half-cover-peek");
             }
         } else {
             CoverPositionController mover = (CoverPositionController) soldier.getMoveControl();
@@ -585,7 +601,7 @@ public class PeekController {
 
     private void setIdleState(SoldierEntity soldier, CoverPoint cover) {
         if (cover != null && cover.getType() == CoverType.HALF && !soldier.isLowCrouching()) {
-            enterStandingInHalfCover(soldier, false);
+            enterStandingInHalfCover(soldier, "peek-return");
         } else {
             enterHiding(soldier);
         }

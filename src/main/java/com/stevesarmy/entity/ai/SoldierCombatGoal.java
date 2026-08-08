@@ -2385,7 +2385,7 @@ public class SoldierCombatGoal extends Goal {
             soldier.setLowCrouching(false);
             CoverPoint cover = soldier.getCoverBehaviorManager().getCurrentCover();
             if (cover != null && cover.getType() == CoverType.HALF) {
-                soldier.beginHalfCoverRise();
+                soldier.beginHalfCoverRise("emergency-engagement");
             }
             engagementPostureState = EngagementPostureState.EXITING_LOW_CROUCH;
             return false;
