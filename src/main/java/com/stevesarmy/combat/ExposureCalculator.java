@@ -8,10 +8,17 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.Vec3;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
+import java.util.WeakHashMap;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class ExposureCalculator {
+    /** Full exposure is reused only within the current level game tick. */
+    private static final Map<Level, TickExposureCache> exposureCaches =
+        Collections.synchronizedMap(new WeakHashMap<>());
     
     public enum AimPointType {
         HEAD(4, "HEAD"),
@@ -55,6 +62,16 @@ public class ExposureCalculator {
     
     public static int calculateExposure(LivingEntity observer, LivingEntity target) {
         if (observer.level() != target.level()) return 0;
+
+        Level level = observer.level();
+        TickExposureCache cache = getExposureCache(level);
+        long key = ((long) observer.getId() << 32) | (target.getId() & 0xFFFFFFFFL);
+        return cache.exposureByPair.computeIfAbsent(
+            key, ignored -> calculateExposureUncached(observer, target));
+    }
+
+    private static int calculateExposureUncached(LivingEntity observer, LivingEntity target) {
+        if (observer.level() != target.level()) return 0;
         
         Level level = observer.level();
         Vec3 observerEye = observer.getEyePosition();
@@ -69,6 +86,30 @@ public class ExposureCalculator {
         }
         
         return visiblePoints;
+    }
+
+    private static TickExposureCache getExposureCache(Level level) {
+        long currentTick = level.getGameTime();
+        synchronized (exposureCaches) {
+            TickExposureCache cache = exposureCaches.get(level);
+            if (cache == null) {
+                cache = new TickExposureCache(currentTick);
+                exposureCaches.put(level, cache);
+            } else if (cache.tick != currentTick) {
+                cache.tick = currentTick;
+                cache.exposureByPair.clear();
+            }
+            return cache;
+        }
+    }
+
+    private static final class TickExposureCache {
+        private long tick;
+        private final Map<Long, Integer> exposureByPair = new ConcurrentHashMap<>();
+
+        private TickExposureCache(long tick) {
+            this.tick = tick;
+        }
     }
     
     public static double getExposureFactor(LivingEntity observer, LivingEntity target) {

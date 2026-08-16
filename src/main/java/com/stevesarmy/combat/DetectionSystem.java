@@ -8,6 +8,7 @@ public class DetectionSystem {
     
     private final Map<UUID, DetectionState> detectionStates = new HashMap<>();
     private final UUID soldierId;
+    private final Set<UUID> seenThisTick = new HashSet<>();
     
     public static final double FOCUSED_RANGE = 96.0;
     public static final double PERIPHERAL_RANGE = 32.0;
@@ -31,7 +32,7 @@ public class DetectionSystem {
                      SquadThreatIntel squadIntel) {
         long currentTime = soldier.level().getGameTime();
         
-        Set<UUID> seenThisTick = new HashSet<>();
+        seenThisTick.clear();
         
         for (LivingEntity target : potentialTargets) {
             if (!TargetAcquisition.isValidTarget(soldier, target)) continue;

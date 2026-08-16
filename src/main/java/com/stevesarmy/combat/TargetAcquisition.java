@@ -4,15 +4,18 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.Vec3;
 
+import java.util.Collections;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 public class TargetAcquisition {
     
-    private static final Map<Long, VisibilityRay.Result> losCache = new ConcurrentHashMap<>();
-    private static long lastCacheClearTick = -1;
+    /** Visibility results are only reused during one level game tick. */
+    private static final Map<Level, TickVisibilityCache> losCaches =
+        Collections.synchronizedMap(new java.util.WeakHashMap<>());
     
     public static boolean canSeeTarget(LivingEntity observer, LivingEntity target) {
         if (observer.level() != target.level()) return false;
@@ -48,16 +51,8 @@ public class TargetAcquisition {
     
     public static boolean hasLineOfSight(LivingEntity observer, LivingEntity target) {
         if (observer.level() != target.level()) return false;
-        
-        long currentTick = observer.tickCount;
-        if (lastCacheClearTick != currentTick) {
-            losCache.clear();
-            lastCacheClearTick = currentTick;
-        }
-        
-        long key = ((long) observer.getId() << 32) | (target.getId() & 0xFFFFFFFFL);
-        
-        return losCache.computeIfAbsent(key, k -> computeVisibility(observer, target)).hasContact();
+
+        return getVisibility(observer, target).hasContact();
     }
 
     private static VisibilityRay.Result computeVisibility(LivingEntity observer, LivingEntity target) {
@@ -69,14 +64,9 @@ public class TargetAcquisition {
             return new VisibilityRay.Result(false, 1.0, 0.0);
         }
 
-        long currentTick = observer.tickCount;
-        if (lastCacheClearTick != currentTick) {
-            losCache.clear();
-            lastCacheClearTick = currentTick;
-        }
-
         long key = ((long) observer.getId() << 32) | (target.getId() & 0xFFFFFFFFL);
-        return losCache.computeIfAbsent(key, k -> computeVisibility(observer, target));
+        TickVisibilityCache cache = getVisibilityCache(observer.level());
+        return cache.results.computeIfAbsent(key, k -> computeVisibility(observer, target));
     }
 
     public static boolean hasLineOfSightToPosition(LivingEntity observer, Vec3 targetPos) {
@@ -118,5 +108,29 @@ public class TargetAcquisition {
             0,
             (int) Math.round(offsetZ)
         );
+    }
+
+    private static TickVisibilityCache getVisibilityCache(Level level) {
+        long currentTick = level.getGameTime();
+        synchronized (losCaches) {
+            TickVisibilityCache cache = losCaches.get(level);
+            if (cache == null) {
+                cache = new TickVisibilityCache(currentTick);
+                losCaches.put(level, cache);
+            } else if (cache.tick != currentTick) {
+                cache.tick = currentTick;
+                cache.results.clear();
+            }
+            return cache;
+        }
+    }
+
+    private static final class TickVisibilityCache {
+        private long tick;
+        private final Map<Long, VisibilityRay.Result> results = new ConcurrentHashMap<>();
+
+        private TickVisibilityCache(long tick) {
+            this.tick = tick;
+        }
     }
 }
