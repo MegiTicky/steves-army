@@ -37,6 +37,8 @@ public class StevesArmyConfig {
     public static final ForgeConfigSpec.BooleanValue VS2_AUTO_TRANSPORT;
     public static final ForgeConfigSpec.IntValue VS2_MAX_TRANSPORTED_SOLDIERS;
 
+    public static final ForgeConfigSpec.IntValue OPTIMIZATION_LEVEL;
+
     static {
         BUILDER.push("aim_quality");
         
@@ -221,6 +223,17 @@ BUILDER.pop();
 
         BUILDER.pop();
 
+        BUILDER.push("performance");
+
+        OPTIMIZATION_LEVEL = BUILDER
+            .comment("Performance optimization profile: 0=compatibility, 1=conservative, 2=balanced, 3=aggressive.",
+                     "Higher profiles reuse perception data for longer and share nearby target queries.",
+                     "Level 0 keeps the existing target-query behavior; final firing validation is always exact.",
+                     "Default: 1")
+            .defineInRange("optimizationLevel", 1, 0, 3);
+
+        BUILDER.pop();
+
         SPEC = BUILDER.build();
     }
     
@@ -310,5 +323,51 @@ BUILDER.pop();
 
     public static float getExplosionBurstMultiplier() {
         return EXPLOSION_BURST_MULTIPLIER.get().floatValue();
+    }
+
+    public static int getOptimizationLevel() {
+        return OPTIMIZATION_LEVEL.get();
+    }
+
+    /** Number of ticks a soldier reuses its nearby-target snapshot. */
+    public static int getTargetCandidateCacheTicks() {
+        return switch (getOptimizationLevel()) {
+            case 2 -> 8;
+            case 3 -> 12;
+            default -> 5;
+        };
+    }
+
+    /** Number of ticks exact positional visibility results may be reused. */
+    public static int getPositionVisibilityCacheTicks() {
+        return switch (getOptimizationLevel()) {
+            case 0 -> 0;
+            case 2 -> 2;
+            case 3 -> 4;
+            default -> 1;
+        };
+    }
+
+    /** Number of ticks exact aim-point results may be reused. */
+    public static int getAimPointCacheTicks() {
+        return switch (getOptimizationLevel()) {
+            case 0 -> 1;
+            case 2 -> 2;
+            case 3 -> 4;
+            default -> 1;
+        };
+    }
+
+    /** Number of ticks exact exposure results may be reused. */
+    public static int getExposureCacheTicks() {
+        return switch (getOptimizationLevel()) {
+            case 2 -> 2;
+            case 3 -> 4;
+            default -> 1;
+        };
+    }
+
+    public static boolean useSharedTargetQueryCache() {
+        return getOptimizationLevel() >= 1;
     }
 }

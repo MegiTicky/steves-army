@@ -1,5 +1,6 @@
 package com.stevesarmy.combat;
 
+import com.stevesarmy.StevesArmyConfig;
 import net.minecraft.core.BlockPos;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.LivingEntity;
@@ -14,8 +15,10 @@ import java.util.concurrent.ConcurrentHashMap;
 
 public class TargetAcquisition {
     
-    /** Visibility results are only reused during one level game tick. */
+    /** Exact entity-pair visibility results are reused according to the server profile. */
     private static final Map<Level, TickVisibilityCache> losCaches =
+        Collections.synchronizedMap(new java.util.WeakHashMap<>());
+    private static final Map<Level, PositionVisibilityCache> positionCaches =
         Collections.synchronizedMap(new java.util.WeakHashMap<>());
     
     public static boolean canSeeTarget(LivingEntity observer, LivingEntity target) {
@@ -56,6 +59,15 @@ public class TargetAcquisition {
         return getVisibility(observer, target).hasContact();
     }
 
+    public static void invalidateCaches(Level level) {
+        synchronized (losCaches) {
+            losCaches.remove(level);
+        }
+        synchronized (positionCaches) {
+            positionCaches.remove(level);
+        }
+    }
+
     private static VisibilityRay.Result computeVisibility(LivingEntity observer, LivingEntity target) {
         return VisibilityRay.trace(observer.level(), observer.getEyePosition(), target.getEyePosition(), observer);
     }
@@ -65,33 +77,75 @@ public class TargetAcquisition {
             return new VisibilityRay.Result(false, 1.0, 0.0);
         }
 
+        // Entity-pair LOS has always had a one-tick cache. Higher profiles only
+        // extend it when the exact endpoint positions remain unchanged.
+        int cacheTicks = Math.max(1, StevesArmyConfig.getPositionVisibilityCacheTicks());
+
         long key = ((long) observer.getId() << 32) | (target.getId() & 0xFFFFFFFFL);
         TickVisibilityCache cache = getVisibilityCache(observer.level());
-        VisibilityRay.Result cached = cache.results.get(key);
-        if (cached != null) {
+        long currentTick = observer.level().getGameTime();
+        Vec3 from = observer.getEyePosition();
+        Vec3 to = target.getEyePosition();
+        CachedVisibility cached = cache.results.get(key);
+        if (cached != null && cached.expiresAt >= currentTick
+            && cached.from.equals(from) && cached.to.equals(to)) {
             PerformanceMetrics.recordVisibilityCacheHit();
-            return cached;
+            return cached.result;
         }
 
         PerformanceMetrics.recordVisibilityCacheMiss();
-        return cache.results.computeIfAbsent(key, k -> computeVisibility(observer, target));
+        VisibilityRay.Result result = VisibilityRay.trace(observer.level(), from, to, observer);
+        cache.results.put(key, new CachedVisibility(result, from, to, currentTick + cacheTicks - 1));
+        return result;
     }
 
     public static boolean hasLineOfSightToPosition(LivingEntity observer, Vec3 targetPos) {
-        return VisibilityRay.trace(observer.level(), observer.getEyePosition(), targetPos, observer).hasContact();
+        return getPositionVisibility(observer, targetPos, false).hasContact();
     }
 
     public static boolean hasLineOfSightToPositionIgnoringSmoke(LivingEntity observer, Vec3 targetPos) {
-        return VisibilityRay.traceIgnoringSmoke(
-            observer.level(), observer.getEyePosition(), targetPos, observer).hasContact();
+        return getPositionVisibility(observer, targetPos, true).hasContact();
     }
 
     public static boolean hasNearLineOfSightToPosition(LivingEntity observer, Vec3 targetPos, double distanceThreshold) {
-        VisibilityRay.Result visibility = VisibilityRay.trace(
-            observer.level(), observer.getEyePosition(), targetPos, observer);
+        VisibilityRay.Result visibility = getPositionVisibility(observer, targetPos, false);
         double targetDistance = observer.getEyePosition().distanceTo(targetPos);
         return visibility.hasContact()
             || (!visibility.clear() && targetDistance - visibility.blockedDistance() <= distanceThreshold);
+    }
+
+    private static VisibilityRay.Result getPositionVisibility(LivingEntity observer, Vec3 targetPos,
+                                                               boolean ignoreSmoke) {
+        Vec3 from = observer.getEyePosition();
+        int cacheTicks = StevesArmyConfig.getPositionVisibilityCacheTicks();
+        if (cacheTicks <= 0) {
+            PerformanceMetrics.recordVisibilityCacheMiss();
+            return tracePosition(observer, from, targetPos, ignoreSmoke);
+        }
+
+        long currentTick = observer.level().getGameTime();
+        PositionVisibilityCache cache = getPositionCache(observer.level());
+        PositionKey key = new PositionKey(observer.getId(), from, targetPos, ignoreSmoke);
+        CachedVisibility cached = cache.results.get(key);
+        if (cached != null && cached.expiresAt >= currentTick) {
+            PerformanceMetrics.recordVisibilityCacheHit();
+            return cached.result;
+        }
+
+        PerformanceMetrics.recordVisibilityCacheMiss();
+        VisibilityRay.Result result = tracePosition(observer, from, targetPos, ignoreSmoke);
+        if (cache.results.size() >= 4096) {
+            cache.results.clear();
+        }
+        cache.results.put(key, new CachedVisibility(result, from, targetPos, currentTick + cacheTicks - 1));
+        return result;
+    }
+
+    private static VisibilityRay.Result tracePosition(LivingEntity observer, Vec3 from, Vec3 targetPos,
+                                                       boolean ignoreSmoke) {
+        return ignoreSmoke
+            ? VisibilityRay.traceIgnoringSmoke(observer.level(), from, targetPos, observer)
+            : VisibilityRay.trace(observer.level(), from, targetPos, observer);
     }
     
     public static boolean isValidTarget(LivingEntity observer, LivingEntity target) {
@@ -125,9 +179,27 @@ public class TargetAcquisition {
             if (cache == null) {
                 cache = new TickVisibilityCache(currentTick);
                 losCaches.put(level, cache);
-            } else if (cache.tick != currentTick) {
+            } else if (cache.tick != currentTick && StevesArmyConfig.getPositionVisibilityCacheTicks() <= 1) {
                 cache.tick = currentTick;
                 cache.results.clear();
+            } else if (cache.tick != currentTick) {
+                cache.tick = currentTick;
+                cache.results.entrySet().removeIf(entry -> entry.getValue().expiresAt < currentTick);
+            }
+            return cache;
+        }
+    }
+
+    private static PositionVisibilityCache getPositionCache(Level level) {
+        long currentTick = level.getGameTime();
+        synchronized (positionCaches) {
+            PositionVisibilityCache cache = positionCaches.get(level);
+            if (cache == null) {
+                cache = new PositionVisibilityCache(currentTick);
+                positionCaches.put(level, cache);
+            } else if (cache.tick != currentTick) {
+                cache.tick = currentTick;
+                cache.results.entrySet().removeIf(entry -> entry.getValue().expiresAt < currentTick);
             }
             return cache;
         }
@@ -135,10 +207,23 @@ public class TargetAcquisition {
 
     private static final class TickVisibilityCache {
         private long tick;
-        private final Map<Long, VisibilityRay.Result> results = new ConcurrentHashMap<>();
+        private final Map<Long, CachedVisibility> results = new ConcurrentHashMap<>();
 
         private TickVisibilityCache(long tick) {
             this.tick = tick;
         }
     }
+
+    private static final class PositionVisibilityCache {
+        private long tick;
+        private final Map<PositionKey, CachedVisibility> results = new ConcurrentHashMap<>();
+
+        private PositionVisibilityCache(long tick) {
+            this.tick = tick;
+        }
+    }
+
+    private record PositionKey(long observerId, Vec3 from, Vec3 to, boolean ignoreSmoke) {}
+
+    private record CachedVisibility(VisibilityRay.Result result, Vec3 from, Vec3 to, long expiresAt) {}
 }

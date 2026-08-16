@@ -78,6 +78,22 @@ public class DetectionSystem {
         });
     }
 
+    /** Applies passive decay while an optimization profile defers a scan. */
+    public void advanceWithoutScan(long currentTime) {
+        for (DetectionState state : detectionStates.values()) {
+            if (state.lastCheckTime <= 0) {
+                state.lastCheckTime = currentTime;
+                continue;
+            }
+            long elapsed = Math.max(0, currentTime - state.lastCheckTime);
+            if (elapsed == 0) continue;
+            state.accumulatedPoints = Math.max(0,
+                state.accumulatedPoints - DECAY_RATE * elapsed);
+            state.ticksSinceLastSeen += (int) Math.min(Integer.MAX_VALUE - state.ticksSinceLastSeen, elapsed);
+            state.lastCheckTime = currentTime;
+        }
+    }
+
     private boolean hasFreshSharedIntel(LivingEntity soldier, LivingEntity target,
                                         SquadThreatIntel squadIntel, long currentTime) {
         if (squadIntel == null || squadIntel.isThreatStale(target.getUUID(), currentTime)) {
@@ -210,6 +226,12 @@ public class DetectionSystem {
         state.accumulatedPoints = DETECTION_THRESHOLD;
         state.wasInLOSLastCheck = true;
         state.ticksSinceLastSeen = 0;
+    }
+
+    /** Returns the most recent LOS result used by the detection state machine. */
+    public boolean wasTargetInLOS(LivingEntity target) {
+        DetectionState state = detectionStates.get(target.getUUID());
+        return state != null && state.wasInLOSLastCheck;
     }
 
     /** Adds a bounded detection impulse from a discrete cue such as a gunshot. */

@@ -21,6 +21,12 @@ public final class PerformanceMetrics {
     private static final LongAdder coverCandidatesEvaluated = new LongAdder();
     private static final LongAdder coverCandidatesScored = new LongAdder();
     private static final LongAdder coverSearchNanos = new LongAdder();
+    private static final LongAdder visibilityRays = new LongAdder();
+    private static final LongAdder visibilityRayCacheHits = new LongAdder();
+    private static final LongAdder visibilityRayCacheMisses = new LongAdder();
+    private static final LongAdder visibilityRayRequests = new LongAdder();
+    private static final LongAdder aimPointCacheHits = new LongAdder();
+    private static final LongAdder aimPointCacheMisses = new LongAdder();
 
     private PerformanceMetrics() {}
 
@@ -47,6 +53,12 @@ public final class PerformanceMetrics {
         coverCandidatesEvaluated.reset();
         coverCandidatesScored.reset();
         coverSearchNanos.reset();
+        visibilityRays.reset();
+        visibilityRayCacheHits.reset();
+        visibilityRayCacheMisses.reset();
+        visibilityRayRequests.reset();
+        aimPointCacheHits.reset();
+        aimPointCacheMisses.reset();
     }
 
     public static void recordVisibilityCacheHit() {
@@ -55,6 +67,25 @@ public final class PerformanceMetrics {
 
     public static void recordVisibilityCacheMiss() {
         if (enabled) visibilityCacheMisses.increment();
+    }
+
+    public static void recordVisibilityRay() {
+        if (!enabled) return;
+        visibilityRayRequests.increment();
+        visibilityRays.increment();
+    }
+
+    public static void recordVisibilityRayCacheHit() {
+        if (!enabled) return;
+        visibilityRayRequests.increment();
+        visibilityRayCacheHits.increment();
+    }
+
+    public static void recordVisibilityRayCacheMiss() {
+        if (!enabled) return;
+        visibilityRayRequests.increment();
+        visibilityRays.increment();
+        visibilityRayCacheMisses.increment();
     }
 
     public static void recordExposureCacheHit() {
@@ -67,6 +98,14 @@ public final class PerformanceMetrics {
 
     public static void recordExposureCalculation() {
         if (enabled) exposureCalculations.increment();
+    }
+
+    public static void recordAimPointCacheHit() {
+        if (enabled) aimPointCacheHits.increment();
+    }
+
+    public static void recordAimPointCacheMiss() {
+        if (enabled) aimPointCacheMisses.increment();
     }
 
     public static void recordDetectionTick(int candidates) {
@@ -106,6 +145,12 @@ public final class PerformanceMetrics {
         return "=== PERFORMANCE METRICS ===\n"
             + "  Enabled: " + enabled + "\n"
             + "  Visibility cache: " + visibilityHits + " hits, " + visibilityMisses + " misses\n"
+            + "  Visibility ray requests: " + visibilityRayRequests.sum()
+            + " (" + visibilityRays.sum() + " actual traces, "
+            + visibilityRayCacheHits.sum() + " cache hits, "
+            + visibilityRayCacheMisses.sum() + " cache misses)\n"
+            + "  Aim-point cache: " + aimPointCacheHits.sum() + " hits, "
+            + aimPointCacheMisses.sum() + " misses\n"
             + "  Exposure cache: " + exposureHits + " hits, " + exposureMisses + " misses\n"
             + "  Exposure calculations: " + exposureCalculations.sum() + "\n"
             + "  Detection ticks: " + detectionTicks.sum() + "\n"

@@ -1,5 +1,7 @@
 package com.stevesarmy.combat;
 
+import com.stevesarmy.StevesArmyConfig;
+import com.stevesarmy.debug.PerformanceMetrics;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
@@ -16,8 +18,10 @@ import net.minecraft.world.phys.shapes.VoxelShape;
 
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.WeakHashMap;
 
 public final class VisibilityRay {
     private static final double EPSILON = 1.0e-7;
@@ -25,6 +29,8 @@ public final class VisibilityRay {
 
     private static boolean smokeTypeResolved;
     private static EntityType<?> smokeEmitterType;
+    private static final Map<Level, TraceCache> TRACE_CACHES =
+        java.util.Collections.synchronizedMap(new WeakHashMap<>());
 
     private VisibilityRay() {}
 
@@ -55,12 +61,69 @@ public final class VisibilityRay {
         return trace(level, from, to, observer, SmokePolicy.BLOCK, ignored);
     }
 
+    public static void invalidateCache(Level level) {
+        synchronized (TRACE_CACHES) {
+            TRACE_CACHES.remove(level);
+        }
+    }
+
     public static Result traceIgnoringSmoke(Level level, Vec3 from, Vec3 to, LivingEntity observer) {
         return trace(level, from, to, observer, SmokePolicy.IGNORE, Set.of());
     }
 
+    /** Bypasses the optimization cache for immediate firing validation. */
+    public static Result traceFresh(Level level, Vec3 from, Vec3 to, LivingEntity observer) {
+        return traceFresh(level, from, to, observer, new BlockPos[0]);
+    }
+
+    /** Bypasses the optimization cache while preserving cover-peek exclusions. */
+    public static Result traceFresh(Level level, Vec3 from, Vec3 to, LivingEntity observer,
+                                    BlockPos... ignoredBlocks) {
+        PerformanceMetrics.recordVisibilityRay();
+        Set<BlockPos> ignored = new HashSet<>();
+        for (BlockPos ignoredBlock : ignoredBlocks) {
+            if (ignoredBlock != null) ignored.add(ignoredBlock);
+        }
+        return traceUncached(level, from, to, observer, SmokePolicy.BLOCK, Set.copyOf(ignored));
+    }
+
+    /** Bypasses the optimization cache for an immediate smoke-ignoring shot check. */
+    public static Result traceFreshIgnoringSmoke(Level level, Vec3 from, Vec3 to,
+                                                  LivingEntity observer) {
+        PerformanceMetrics.recordVisibilityRay();
+        return traceUncached(level, from, to, observer, SmokePolicy.IGNORE, Set.of());
+    }
+
     private static Result trace(Level level, Vec3 from, Vec3 to, LivingEntity observer,
                                 SmokePolicy smokePolicy, Set<BlockPos> ignoredBlocks) {
+        int cacheTicks = StevesArmyConfig.getPositionVisibilityCacheTicks();
+        Set<BlockPos> immutableIgnored = Set.copyOf(ignoredBlocks);
+        if (cacheTicks <= 0) {
+            PerformanceMetrics.recordVisibilityRay();
+            return traceUncached(level, from, to, observer, smokePolicy, immutableIgnored);
+        }
+
+        long currentTick = level.getGameTime();
+        TraceCache cache = getTraceCache(level, currentTick);
+        TraceKey key = new TraceKey(observer == null ? 0 : observer.getId(), from, to,
+            smokePolicy, immutableIgnored);
+        CachedTrace cached = cache.results.get(key);
+        if (cached != null && cached.expiresAt >= currentTick) {
+            PerformanceMetrics.recordVisibilityRayCacheHit();
+            return cached.result;
+        }
+
+        PerformanceMetrics.recordVisibilityRayCacheMiss();
+        Result result = traceUncached(level, from, to, observer, smokePolicy, immutableIgnored);
+        if (cache.results.size() >= 8192) {
+            cache.results.clear();
+        }
+        cache.results.put(key, new CachedTrace(result, currentTick + cacheTicks - 1));
+        return result;
+    }
+
+    private static Result traceUncached(Level level, Vec3 from, Vec3 to, LivingEntity observer,
+                                        SmokePolicy smokePolicy, Set<BlockPos> ignoredBlocks) {
         if (from.distanceToSqr(to) < EPSILON) {
             return new Result(true, 0.0, Double.POSITIVE_INFINITY);
         }
@@ -139,6 +202,20 @@ public final class VisibilityRay {
         }
 
         return new Result(true, concealment, Double.POSITIVE_INFINITY);
+    }
+
+    private static TraceCache getTraceCache(Level level, long currentTick) {
+        synchronized (TRACE_CACHES) {
+            TraceCache cache = TRACE_CACHES.get(level);
+            if (cache == null) {
+                cache = new TraceCache(currentTick);
+                TRACE_CACHES.put(level, cache);
+            } else if (cache.tick != currentTick) {
+                cache.tick = currentTick;
+                cache.results.entrySet().removeIf(entry -> entry.getValue().expiresAt < currentTick);
+            }
+            return cache;
+        }
     }
 
     private static double findSmokeIntersection(Level level, Vec3 from, Vec3 to) {
@@ -220,5 +297,19 @@ public final class VisibilityRay {
         if (Math.abs(direction) < EPSILON) return Double.POSITIVE_INFINITY;
         double boundary = direction > 0.0 ? block + 1.0 : block;
         return (boundary - coordinate) / direction;
+    }
+
+    private record TraceKey(int observerId, Vec3 from, Vec3 to,
+                            SmokePolicy smokePolicy, Set<BlockPos> ignoredBlocks) {}
+
+    private record CachedTrace(Result result, long expiresAt) {}
+
+    private static final class TraceCache {
+        private long tick;
+        private final Map<TraceKey, CachedTrace> results = new java.util.HashMap<>();
+
+        private TraceCache(long tick) {
+            this.tick = tick;
+        }
     }
 }

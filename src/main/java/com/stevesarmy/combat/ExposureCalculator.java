@@ -1,5 +1,6 @@
 package com.stevesarmy.combat;
 
+import com.stevesarmy.StevesArmyConfig;
 import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.debug.DiagnosticLogManager;
 import com.stevesarmy.debug.PerformanceMetrics;
@@ -17,8 +18,10 @@ import java.util.WeakHashMap;
 import java.util.concurrent.ConcurrentHashMap;
 
 public class ExposureCalculator {
-    /** Full exposure is reused only within the current level game tick. */
+    /** Full exposure is reused according to the server profile when geometry is unchanged. */
     private static final Map<Level, TickExposureCache> exposureCaches =
+        Collections.synchronizedMap(new WeakHashMap<>());
+    private static final Map<Level, AimPointCache> aimPointCaches =
         Collections.synchronizedMap(new WeakHashMap<>());
     
     public enum AimPointType {
@@ -67,15 +70,36 @@ public class ExposureCalculator {
         Level level = observer.level();
         TickExposureCache cache = getExposureCache(level);
         long key = ((long) observer.getId() << 32) | (target.getId() & 0xFFFFFFFFL);
-        Integer cached = cache.exposureByPair.get(key);
-        if (cached != null) {
+        int cacheTicks = StevesArmyConfig.getExposureCacheTicks();
+        long currentTick = level.getGameTime();
+        Vec3 observerEye = observer.getEyePosition();
+        Vec3 targetPosition = target.position();
+        CachedExposure cached = cache.exposureByPair.get(key);
+        if (cached != null && cached.expiresAt >= currentTick
+            && cached.observerEye.equals(observerEye)
+            && cached.targetPosition.equals(targetPosition)
+            && cached.targetPose == target.getPose()
+            && cached.targetWidth == target.getBbWidth()
+            && cached.targetHeight == target.getBbHeight()) {
             PerformanceMetrics.recordExposureCacheHit();
-            return cached;
+            return cached.visiblePoints;
         }
 
         PerformanceMetrics.recordExposureCacheMiss();
-        return cache.exposureByPair.computeIfAbsent(
-            key, ignored -> calculateExposureUncached(observer, target));
+        int visiblePoints = calculateExposureUncached(observer, target);
+        cache.exposureByPair.put(key, new CachedExposure(visiblePoints, observerEye, targetPosition,
+            target.getPose(), target.getBbWidth(), target.getBbHeight(),
+            currentTick + cacheTicks - 1));
+        return visiblePoints;
+    }
+
+    public static void invalidateCaches(Level level) {
+        synchronized (exposureCaches) {
+            exposureCaches.remove(level);
+        }
+        synchronized (aimPointCaches) {
+            aimPointCaches.remove(level);
+        }
     }
 
     private static int calculateExposureUncached(LivingEntity observer, LivingEntity target) {
@@ -105,9 +129,26 @@ public class ExposureCalculator {
             if (cache == null) {
                 cache = new TickExposureCache(currentTick);
                 exposureCaches.put(level, cache);
-            } else if (cache.tick != currentTick) {
+            } else if (cache.tick != currentTick && StevesArmyConfig.getExposureCacheTicks() <= 1) {
                 cache.tick = currentTick;
                 cache.exposureByPair.clear();
+            } else if (cache.tick != currentTick) {
+                cache.tick = currentTick;
+                cache.exposureByPair.entrySet().removeIf(entry -> entry.getValue().expiresAt < currentTick);
+            }
+            return cache;
+        }
+    }
+
+    private static AimPointCache getAimPointCache(Level level, long currentTick) {
+        synchronized (aimPointCaches) {
+            AimPointCache cache = aimPointCaches.get(level);
+            if (cache == null) {
+                cache = new AimPointCache(currentTick);
+                aimPointCaches.put(level, cache);
+            } else if (cache.tick != currentTick) {
+                cache.tick = currentTick;
+                cache.results.entrySet().removeIf(entry -> entry.getValue().expiresAt < currentTick);
             }
             return cache;
         }
@@ -115,12 +156,16 @@ public class ExposureCalculator {
 
     private static final class TickExposureCache {
         private long tick;
-        private final Map<Long, Integer> exposureByPair = new ConcurrentHashMap<>();
+        private final Map<Long, CachedExposure> exposureByPair = new ConcurrentHashMap<>();
 
         private TickExposureCache(long tick) {
             this.tick = tick;
         }
     }
+
+    private record CachedExposure(int visiblePoints, Vec3 observerEye, Vec3 targetPosition,
+                                  net.minecraft.world.entity.Pose targetPose,
+                                  float targetWidth, float targetHeight, long expiresAt) {}
     
     public static double getExposureFactor(LivingEntity observer, LivingEntity target) {
         int visiblePoints = calculateExposure(observer, target);
@@ -139,7 +184,33 @@ public class ExposureCalculator {
             return new AimPointResult(target.getEyePosition(), AimPointType.FALLBACK, false, false, 1.0);
         }
         
-        return getBestAimPointFrom(observer.getEyePosition(), target, observer, skipBlock);
+        int cacheTicks = StevesArmyConfig.getAimPointCacheTicks();
+        Vec3 observerEye = observer.getEyePosition();
+        Vec3 targetPosition = target.position();
+        net.minecraft.world.entity.Pose targetPose = target.getPose();
+        float targetWidth = target.getBbWidth();
+        float targetHeight = target.getBbHeight();
+        long currentTick = observer.level().getGameTime();
+        AimPointCache cache = getAimPointCache(observer.level(), currentTick);
+        AimPointKey key = new AimPointKey(observer.getId(), target.getUUID(), observerEye,
+            targetPosition, targetPose, targetWidth, targetHeight, skipBlock);
+        if (cacheTicks > 0) {
+            CachedAimPoint cached = cache.results.get(key);
+            if (cached != null && cached.expiresAt >= currentTick) {
+                PerformanceMetrics.recordAimPointCacheHit();
+                return cached.result;
+            }
+            PerformanceMetrics.recordAimPointCacheMiss();
+        }
+
+        AimPointResult result = getBestAimPointFrom(observerEye, target, observer, skipBlock);
+        if (cacheTicks > 0) {
+            if (cache.results.size() >= 4096) {
+                cache.results.clear();
+            }
+            cache.results.put(key, new CachedAimPoint(result, currentTick + cacheTicks - 1));
+        }
+        return result;
     }
 
     /**
@@ -288,6 +359,23 @@ public class ExposureCalculator {
         TargetPoint(Vec3 position, AimPointType type) {
             this.position = position;
             this.type = type;
+        }
+    }
+
+    private record AimPointKey(int observerId, java.util.UUID targetId,
+                               Vec3 observerEye, Vec3 targetPosition,
+                               net.minecraft.world.entity.Pose targetPose,
+                               float targetWidth, float targetHeight,
+                               BlockPos skipBlock) {}
+
+    private record CachedAimPoint(AimPointResult result, long expiresAt) {}
+
+    private static final class AimPointCache {
+        private long tick;
+        private final Map<AimPointKey, CachedAimPoint> results = new ConcurrentHashMap<>();
+
+        private AimPointCache(long tick) {
+            this.tick = tick;
         }
     }
 }

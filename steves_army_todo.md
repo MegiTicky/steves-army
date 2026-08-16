@@ -18,7 +18,7 @@
 - [ ] Dodge artillery ping (find cover with roof, switch to crawl)
 - [x] Suppressive fire ping
     - [x] Machine gun suppressive fire more intensive
-- [ ] Spotted target info: When soldiers in squad spots enemy, ping it/set glow effect to notify the player
+- [x] Spotted target info: When soldiers in squad spots enemy, ping it/set glow effect to notify the player
 - [x] Make GO_TO/Follow more similar to how attack mode work. Instead of reaching the location->wait like 3s->start seeking cover. Do like relocation needed->search cover near destination->pathfind to cover directly. And only fall back to location based (current behavior) if no cover is found
 - [ ] <idk what name> flag: A item, something that the player can place on key defensive location (etc. a bunker, high ground). And soldier will go there, prioritizing machine gunner first. The soldier should stay at that exact block (and maybe only crawl to take cover if needed). A new soldier will automatically come to replace the old one if the old one is dead. Give player some sort of option to just look there and press a button to cancel it
 - [ ] Squad activity display. Persistance ping? that tells the player each fire team what they are doing (GO_TO?Attack?Suppress?)
@@ -49,11 +49,13 @@
 - [x] Stabilized prone firing for high-recoil weapons (terrain/LOS checked, delayed and cooldown-limited)
 - [ ] Enemy fire awareness->alert(increase detection) when hearing/seeing enemy fire
 - [ ] Fireteam suppression level. A fireteam level
+  - [ ] Stop peek if fireteam pinned (When peeking just lead to loses and no result, just hide and ask for further instruction [notice player])
 - [ ] Recoverable Fire-Superiority System
 - [ ] Fix random rotation in cover problem
 - [ ] Variable aim quality threshold. More variety. And 2 different mode, normal and suppressive fire (suppressive fire threshold would be very low, for suppressive fire in direct engagement senario)
 - [x] Is the soldier not canceling suppressive fire when active target is visible?
-- [ ] Soldier not finishing downed target
+- [ ] Soldier not finishing downed target, should be able to finish downed player just like enemy soldier
+- [ ] They are picking up things on the ground and replace their main hand gun. And in the middle of battle, somehow everyone decide to throw their gun away and pick up knife
 
 ## Cover System
 - [x] Cover detection (HALF / FULL classification)
@@ -68,6 +70,7 @@
 - [x] Suppression integration (duck-back on fire)
 - [x] Non-peekable cover → reposition
 - [x] Height-aware cover posture
+- [ ] Fix Copycat partial-layer cover height: include layers below 1/2 block when stacked above solid cover, and use the same crouch/standing posture for firing-lane LOS and the live peek. A solid block plus a 3/8 Copycat layer must not test from a blocked crouch eye while the soldier stands to fire.
 - [x] Fix suppression near-miss detection
 - [x] Fix non-peekable slide into wall
 - [x] Reconsider cover when non-peekable
@@ -79,12 +82,11 @@
 - [x] Reposition if heavily suppressed. This need to work with cover path exposure or else the soldier is just going to reposition and run into the open and die
     - **Suppression-driven reposition now use cover path exposure
 - [x] Fix enemy crawl pose. Currently just use vanilla crawl. Should use the same as soldier
-- [ ] Hurt when in cover reposition (if you are hurt when hiding in cover, that mean your cover is not good, re-evaluate cover now)
+- [-] Hurt when in cover reposition (if you are hurt when hiding in cover, that mean your cover is not good, re-evaluate cover now)
 - [-] Cover angle, sometime they are taking cover that doesnt protect them
 - [-] Soldier got pushed out of cover problem. Velocity manupulation back when in cover?
 - [x] Some time soldier still tries to velocity manupulate their way through walls
-- [ ] Stop peeking when really pinned, and notify player. Or actually a "hide" ping?
-- [ ] A few soldier in the squad peeking repeatly but see no target. But part of soldier is actively engaging with enemy-->the soldier in the front "tell" the soldier not engaging the firing position of enemy, and use that to raycast, and reloate to appropriate firing position
+- [-] A few soldier in the squad peeking repeatly but see no target. But part of soldier is actively engaging with enemy-->the soldier in the front "tell" the soldier not engaging the firing position of enemy, and use that to raycast, and reloate to appropriate firing position
 
 ## Respawn System
 - [x] Death event handler
