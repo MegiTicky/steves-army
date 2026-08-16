@@ -17,6 +17,7 @@ import com.stevesarmy.combat.cover.CoverPoint;
 import com.stevesarmy.combat.cover.CoverQualityEvaluator;
 import com.stevesarmy.combat.cover.CoverReservationManager;
 import com.stevesarmy.debug.DiagnosticLogManager;
+import com.stevesarmy.debug.PerformanceMetrics;
 import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.entity.TargetEntity;
 import com.stevesarmy.entity.ai.CoverPositionController;
@@ -59,6 +60,16 @@ public class CombatDebugCommand {
                 .executes(CombatDebugCommand::enableAllDebug))
             .then(Commands.literal("none")
                 .executes(CombatDebugCommand::disableAllDebug))
+
+            // === PERFORMANCE METRICS ===
+            .then(Commands.literal("metrics")
+                .executes(CombatDebugCommand::showPerformanceMetrics)
+                .then(Commands.literal("on")
+                    .executes(ctx -> setPerformanceMetrics(ctx, true)))
+                .then(Commands.literal("off")
+                    .executes(ctx -> setPerformanceMetrics(ctx, false)))
+                .then(Commands.literal("reset")
+                    .executes(CombatDebugCommand::resetPerformanceMetrics)))
 
             // === LOG TOGGLES ===
             .then(Commands.literal("log")
@@ -238,8 +249,9 @@ public class CombatDebugCommand {
     private static int showHelp(CommandContext<CommandSourceStack> context) {
         context.getSource().sendSuccess(() -> Component.literal(
             "=== /stevesarmy_debug ===\n" +
-            "  all                 - Enable ALL debug (logging + render + combat overlay)\n" +
-            "  none                - Disable ALL debug (logging + render + overlays)\n" +
+             "  all                 - Enable ALL debug (logging + render + combat overlay)\n" +
+             "  none                - Disable ALL debug (logging + render + overlays)\n" +
+             "  metrics [on|off|reset] - Collect/show opt-in performance counters\n" +
             "  log cover [on|off]  - Toggle cover behavior logging\n" +
             "  log coverscore [on|off] - Toggle verbose per-candidate cover scoring traces\n" +
             "  log coverperf [on|off] - Toggle compact cover search/path timing summaries\n" +
@@ -420,6 +432,25 @@ public class CombatDebugCommand {
         context.getSource().sendSuccess(() -> Component.literal(
             "Hole rescue logging: " + (newState ? "ON" : "OFF")
         ), true);
+        return 1;
+    }
+
+    private static int setPerformanceMetrics(CommandContext<CommandSourceStack> context, boolean enabled) {
+        PerformanceMetrics.setEnabled(enabled);
+        context.getSource().sendSuccess(() -> Component.literal(
+            "Performance metrics: " + (enabled ? "ON" : "OFF")
+        ), false);
+        return 1;
+    }
+
+    private static int resetPerformanceMetrics(CommandContext<CommandSourceStack> context) {
+        PerformanceMetrics.reset();
+        context.getSource().sendSuccess(() -> Component.literal("Performance metrics reset"), false);
+        return 1;
+    }
+
+    private static int showPerformanceMetrics(CommandContext<CommandSourceStack> context) {
+        context.getSource().sendSuccess(() -> Component.literal(PerformanceMetrics.report()), false);
         return 1;
     }
 

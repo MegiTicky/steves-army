@@ -1,6 +1,7 @@
 package com.stevesarmy.combat;
 
 import com.stevesarmy.squad.SquadThreatIntel;
+import com.stevesarmy.debug.PerformanceMetrics;
 import net.minecraft.world.entity.LivingEntity;
 import java.util.*;
 
@@ -31,6 +32,7 @@ public class DetectionSystem {
     public void tick(LivingEntity soldier, List<LivingEntity> potentialTargets,
                      SquadThreatIntel squadIntel) {
         long currentTime = soldier.level().getGameTime();
+        PerformanceMetrics.recordDetectionTick(potentialTargets.size());
         
         seenThisTick.clear();
         

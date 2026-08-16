@@ -64,7 +64,9 @@ custom traversal's edge cases.
 ## Current Implementation Status
 
 Stage 1 is implemented first. The visibility and allocation changes are ready
-for gameplay testing. Cover-search deduplication remains deferred because the
+for gameplay testing. Stage 2 opt-in metrics are available through
+`/stevesarmy_debug metrics on|off|reset` and `/stevesarmy_debug metrics`.
+Cover-search deduplication remains deferred because the
 current alternative-cover path uses a different scoring context and needs a
 separate behavior-preserving design. No Stage 2 or later behavior changes
 should be added until the current build has been tested with representative

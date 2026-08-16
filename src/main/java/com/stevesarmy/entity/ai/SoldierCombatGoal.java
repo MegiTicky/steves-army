@@ -18,6 +18,7 @@ import com.stevesarmy.combat.cover.CoverPoint;
 import com.stevesarmy.combat.cover.CoverProtectionContext;
 import com.stevesarmy.combat.cover.CoverType;
 import com.stevesarmy.debug.DiagnosticLogManager;
+import com.stevesarmy.debug.PerformanceMetrics;
 import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.entity.EnemySoldierEntity;
 import com.stevesarmy.entity.TargetEntity;
@@ -1612,6 +1613,7 @@ public class SoldierCombatGoal extends Goal {
         
         cachedPotentialTargets = computePotentialTargets();
         cachedPotentialTargetsTick = currentTick;
+        PerformanceMetrics.recordTargetRefresh(cachedPotentialTargets.size());
         return cachedPotentialTargets;
     }
     

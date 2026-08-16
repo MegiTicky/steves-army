@@ -6,6 +6,7 @@ import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.Vec3;
+import com.stevesarmy.debug.PerformanceMetrics;
 
 import java.util.Collections;
 import java.util.Map;
@@ -66,6 +67,13 @@ public class TargetAcquisition {
 
         long key = ((long) observer.getId() << 32) | (target.getId() & 0xFFFFFFFFL);
         TickVisibilityCache cache = getVisibilityCache(observer.level());
+        VisibilityRay.Result cached = cache.results.get(key);
+        if (cached != null) {
+            PerformanceMetrics.recordVisibilityCacheHit();
+            return cached;
+        }
+
+        PerformanceMetrics.recordVisibilityCacheMiss();
         return cache.results.computeIfAbsent(key, k -> computeVisibility(observer, target));
     }
 

@@ -16,6 +16,7 @@ import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.combat.ExposureCalculator;
 import com.stevesarmy.combat.ModBlockTags;
 import com.stevesarmy.combat.VisibilityRay;
+import com.stevesarmy.debug.PerformanceMetrics;
 import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.squad.SquadCoverContext;
 import com.stevesarmy.squad.SquadCoverPeekabilityCache;
@@ -130,8 +131,10 @@ public class CoverFinder {
     }
 
     private List<CoverPoint> finishCoverPointSearch(List<CoverPoint> coverPoints, long started) {
-        candidateDiscoveryNanos += System.nanoTime() - started;
+        long elapsed = System.nanoTime() - started;
+        candidateDiscoveryNanos += elapsed;
         candidatesDiscovered += coverPoints.size();
+        PerformanceMetrics.recordCoverSearch(elapsed, coverPoints.size());
         return coverPoints;
     }
     
@@ -244,6 +247,7 @@ public class CoverFinder {
         LivingEntity primaryThreat = allThreats != null && !allThreats.isEmpty() ? allThreats.get(0) : null;
         CoverQualityEvaluator evaluator = new CoverQualityEvaluator(level);
         CoverProtectionContext protection = resolveProtectionContext(soldier, threatDirection);
+        int evaluatedBefore = candidatesEvaluated;
 
         for (CoverPoint coverPoint : coverPoints) {
             if (!includeReserved && !CoverReservationManager.isAvailable(coverPoint.getPosition())) {
@@ -259,6 +263,8 @@ public class CoverFinder {
             coverPoint.setCombatScore(score);
         }
 
+        PerformanceMetrics.recordCoverCandidatesEvaluated(candidatesEvaluated - evaluatedBefore);
+
         List<ScoredCover> scored = coverPoints.stream()
             .filter(cp -> includeReserved || CoverReservationManager.isAvailable(cp.getPosition()))
             .filter(cp -> cp.getType() != CoverType.NONE)
@@ -267,6 +273,7 @@ public class CoverFinder {
             .collect(java.util.stream.Collectors.toList());
         tacticalScoringNanos += System.nanoTime() - scoringStarted;
         candidatesScored += scored.size();
+        PerformanceMetrics.recordCoverCandidatesScored(scored.size());
         return scored;
     }
 
@@ -282,6 +289,7 @@ public class CoverFinder {
         LivingEntity primaryThreat = allThreats != null && !allThreats.isEmpty() ? allThreats.get(0) : null;
         CoverQualityEvaluator evaluator = new CoverQualityEvaluator(level);
         CoverProtectionContext protection = resolveProtectionContext(soldier, threatDirection);
+        int evaluatedBefore = candidatesEvaluated;
 
         for (CoverPoint coverPoint : coverPoints) {
             if (!includeReserved && !CoverReservationManager.isAvailable(coverPoint.getPosition())) {
@@ -298,6 +306,8 @@ public class CoverFinder {
             coverPoint.setCombatScore(score);
         }
 
+        PerformanceMetrics.recordCoverCandidatesEvaluated(candidatesEvaluated - evaluatedBefore);
+
         Vec3 ownerPos = squadCtx != null ? squadCtx.ownerPosition() : null;
         double maxOwnerDistSq = FOLLOW_MODE_MAX_OWNER_DISTANCE * FOLLOW_MODE_MAX_OWNER_DISTANCE;
         
@@ -310,6 +320,7 @@ public class CoverFinder {
             .collect(java.util.stream.Collectors.toList());
         tacticalScoringNanos += System.nanoTime() - scoringStarted;
         candidatesScored += scored.size();
+        PerformanceMetrics.recordCoverCandidatesScored(scored.size());
         return scored;
     }
 
@@ -329,6 +340,7 @@ public class CoverFinder {
         LivingEntity primaryThreat = allThreats != null && !allThreats.isEmpty() ? allThreats.get(0) : null;
         CoverQualityEvaluator evaluator = new CoverQualityEvaluator(level);
         CoverProtectionContext protection = resolveProtectionContext(soldier, threatDirection);
+        int evaluatedBefore = candidatesEvaluated;
 
         for (CoverPoint coverPoint : coverPoints) {
             if (!CoverReservationManager.isAvailableFor(coverPoint.getPosition(), soldier)) {
@@ -345,6 +357,8 @@ public class CoverFinder {
             coverPoint.setCombatScore(score);
         }
 
+        PerformanceMetrics.recordCoverCandidatesEvaluated(candidatesEvaluated - evaluatedBefore);
+
         List<ScoredCover> scored = coverPoints.stream()
             .filter(cp -> cp.getType() != CoverType.NONE)
             .filter(cp -> CoverReservationManager.isAvailableFor(cp.getPosition(), soldier))
@@ -353,6 +367,7 @@ public class CoverFinder {
             .collect(java.util.stream.Collectors.toList());
         tacticalScoringNanos += System.nanoTime() - scoringStarted;
         candidatesScored += scored.size();
+        PerformanceMetrics.recordCoverCandidatesScored(scored.size());
         return scored;
     }
 

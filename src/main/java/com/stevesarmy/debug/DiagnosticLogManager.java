@@ -88,5 +88,6 @@ public final class DiagnosticLogManager {
         holeRescueLoggingEnabled = false;
         rotationTraceSoldierId = null;
         peekTraceSoldierId = null;
+        PerformanceMetrics.setEnabled(false);
     }
 }

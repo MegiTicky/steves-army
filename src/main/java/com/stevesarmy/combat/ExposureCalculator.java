@@ -2,6 +2,7 @@ package com.stevesarmy.combat;
 
 import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.debug.DiagnosticLogManager;
+import com.stevesarmy.debug.PerformanceMetrics;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.level.Level;
@@ -66,12 +67,21 @@ public class ExposureCalculator {
         Level level = observer.level();
         TickExposureCache cache = getExposureCache(level);
         long key = ((long) observer.getId() << 32) | (target.getId() & 0xFFFFFFFFL);
+        Integer cached = cache.exposureByPair.get(key);
+        if (cached != null) {
+            PerformanceMetrics.recordExposureCacheHit();
+            return cached;
+        }
+
+        PerformanceMetrics.recordExposureCacheMiss();
         return cache.exposureByPair.computeIfAbsent(
             key, ignored -> calculateExposureUncached(observer, target));
     }
 
     private static int calculateExposureUncached(LivingEntity observer, LivingEntity target) {
         if (observer.level() != target.level()) return 0;
+
+        PerformanceMetrics.recordExposureCalculation();
         
         Level level = observer.level();
         Vec3 observerEye = observer.getEyePosition();
