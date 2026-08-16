@@ -50,7 +50,7 @@ public class EnemySoldierEntity extends SoldierEntity {
         this.goalSelector.addGoal(0, new FloatGoal(this));
         this.goalSelector.addGoal(1, new OpenDoorGoal(this, true));
         this.goalSelector.addGoal(1, new SoldierHealGoal(this));
-        this.goalSelector.addGoal(2, new CoverTacticalGoal(this));
+        this.goalSelector.addGoal(2, initializeCoverTacticalGoal());
         this.goalSelector.addGoal(2, initializeCombatGoal());
         this.goalSelector.addGoal(3, new EnemyDefendGoal(this));
         this.goalSelector.addGoal(4, new LookAtPlayerGoal(this, Player.class, 8.0F));

@@ -383,7 +383,7 @@ public class SoldierEntity extends PathfinderMob implements Container {
         this.goalSelector.addGoal(1, new OpenDoorGoal(this, true));
         this.goalSelector.addGoal(1, new SoldierHealGoal(this));
         this.goalSelector.addGoal(1, new SoldierMoveToPingGoal(this));
-        this.goalSelector.addGoal(2, (this.coverTacticalGoal = new CoverTacticalGoal(this)));
+        this.goalSelector.addGoal(2, initializeCoverTacticalGoal());
         this.goalSelector.addGoal(3, new SoldierFollowOwnerGoal(this));
         this.goalSelector.addGoal(3, new SoldierHoldPositionGoal(this));
         this.goalSelector.addGoal(4, combatGoal);
@@ -399,6 +399,12 @@ public class SoldierEntity extends PathfinderMob implements Container {
     protected final SoldierCombatGoal initializeCombatGoal() {
         this.combatGoal = new SoldierCombatGoal(this);
         return this.combatGoal;
+    }
+
+    /** Creates the shared cover goal instance used by squad cover coordination. */
+    protected final CoverTacticalGoal initializeCoverTacticalGoal() {
+        this.coverTacticalGoal = new CoverTacticalGoal(this);
+        return this.coverTacticalGoal;
     }
 
     @Override

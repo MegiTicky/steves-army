@@ -2310,6 +2310,10 @@ private boolean shouldExitCoverForFollow() {
             logCoverSearchPerformance(finder, searchStarted, CoverMoveResult.COVER_STARTED, "prone-no-cover");
             return CoverMoveResult.COVER_STARTED;
         }
+        // Leave the active seeking state when this search found no route. The goal's
+        // normal stop/cooldown lifecycle prevents a stationary soldier from rebuilding
+        // the same failed candidate paths every tick.
+        getCoverManager().setState(CoverBehaviorManager.CoverState.NO_COVER);
         logCoverSearchPerformance(finder, searchStarted, CoverMoveResult.NO_COVER_FOUND, "none");
         return CoverMoveResult.NO_COVER_FOUND;
     }
