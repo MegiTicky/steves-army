@@ -1,6 +1,7 @@
 package com.stevesarmy.inventory;
 
 import com.mojang.datafixers.util.Pair;
+import com.stevesarmy.combat.GunIntegration;
 import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.network.NetworkHandler;
 import com.stevesarmy.network.SyncSoldierInventoryPacket;
@@ -15,13 +16,13 @@ import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.inventory.InventoryMenu;
 import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.item.SwordItem;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
 
 import javax.annotation.Nullable;
 
 public class SoldierInventoryMenu extends AbstractContainerMenu {
+    private static final int SOLDIER_MENU_SLOT_COUNT = SoldierInventory.INVENTORY_SIZE - 1;
     private static final ResourceLocation[] TEXTURE_EMPTY_ARMOR_SLOTS = new ResourceLocation[]{
         InventoryMenu.EMPTY_ARMOR_SLOT_HELMET,
         InventoryMenu.EMPTY_ARMOR_SLOT_CHESTPLATE,
@@ -45,7 +46,6 @@ public class SoldierInventoryMenu extends AbstractContainerMenu {
         this.soldier = soldier;
 
         addArmorSlots();
-        addOffhandSlot();
         addMainHandSlot();
         addGeneralSlots();
         addPlayerInventorySlots(playerInventory);
@@ -87,7 +87,7 @@ public class SoldierInventoryMenu extends AbstractContainerMenu {
         this.addSlot(new Slot(soldierInventory, SoldierInventory.SLOT_MAIN_HAND, 26, 90) {
             @Override
             public boolean mayPlace(ItemStack stack) {
-                return stack.getItem() instanceof SwordItem || !stack.isEmpty();
+                return GunIntegration.isGun(stack);
             }
 
             @Override
@@ -95,18 +95,6 @@ public class SoldierInventoryMenu extends AbstractContainerMenu {
                 super.set(stack);
                 if (soldier != null) {
                     soldier.setItemSlot(EquipmentSlot.MAINHAND, stack);
-                }
-            }
-        });
-    }
-
-    private void addOffhandSlot() {
-        this.addSlot(new Slot(soldierInventory, SoldierInventory.SLOT_OFF_HAND, 44, 90) {
-            @Override
-            public void set(ItemStack stack) {
-                super.set(stack);
-                if (soldier != null) {
-                    soldier.setItemSlot(EquipmentSlot.OFFHAND, stack);
                 }
             }
         });
@@ -140,12 +128,12 @@ public class SoldierInventoryMenu extends AbstractContainerMenu {
             ItemStack slotItem = slot.getItem();
             result = slotItem.copy();
 
-            if (index < SoldierInventory.INVENTORY_SIZE) {
-                if (!this.moveItemStackTo(slotItem, SoldierInventory.INVENTORY_SIZE, this.slots.size(), true)) {
+            if (index < SOLDIER_MENU_SLOT_COUNT) {
+                if (!this.moveItemStackTo(slotItem, SOLDIER_MENU_SLOT_COUNT, this.slots.size(), true)) {
                     return ItemStack.EMPTY;
                 }
             } else {
-                if (!this.moveItemStackTo(slotItem, 0, SoldierInventory.INVENTORY_SIZE, false)) {
+                if (!this.moveItemStackTo(slotItem, 0, SOLDIER_MENU_SLOT_COUNT, false)) {
                     return ItemStack.EMPTY;
                 }
             }
@@ -184,14 +172,13 @@ public class SoldierInventoryMenu extends AbstractContainerMenu {
 
     public ItemStack getSoldierInventoryItem(int inventorySlot) {
         if (inventorySlot == SoldierInventory.SLOT_OFF_HAND) {
-            return this.getSlot(4).getItem();
+            return ItemStack.EMPTY;
         }
-        if (inventorySlot == SoldierInventory.SLOT_MAIN_HAND) {
-            return this.getSlot(5).getItem();
-        }
-        if (inventorySlot >= SoldierInventory.SLOT_GENERAL_START
-            && inventorySlot < SoldierInventory.INVENTORY_SIZE) {
-            return this.getSlot(6 + inventorySlot - SoldierInventory.SLOT_GENERAL_START).getItem();
+        if (inventorySlot >= 0 && inventorySlot < SoldierInventory.INVENTORY_SIZE) {
+            int menuSlot = inventorySlot < SoldierInventory.SLOT_OFF_HAND
+                ? inventorySlot
+                : inventorySlot - 1;
+            return this.getSlot(menuSlot).getItem();
         }
         return ItemStack.EMPTY;
     }

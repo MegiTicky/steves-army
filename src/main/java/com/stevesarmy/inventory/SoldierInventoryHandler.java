@@ -21,6 +21,7 @@ public class SoldierInventoryHandler implements IItemHandlerModifiable {
     @Nonnull
     @Override
     public ItemStack getStackInSlot(int slot) {
+        if (slot == SoldierInventory.SLOT_OFF_HAND) return ItemStack.EMPTY;
         return inventory.getItem(slot);
     }
 
@@ -28,6 +29,7 @@ public class SoldierInventoryHandler implements IItemHandlerModifiable {
     @Override
     public ItemStack insertItem(int slot, @Nonnull ItemStack stack, boolean simulate) {
         if (slot < 0 || slot >= getSlots()) return stack;
+        if (slot == SoldierInventory.SLOT_OFF_HAND) return stack;
         
         ItemStack existing = inventory.getItem(slot);
         int maxStackSize = Math.min(stack.getMaxStackSize(), 64);
@@ -67,6 +69,7 @@ public class SoldierInventoryHandler implements IItemHandlerModifiable {
     @Override
     public ItemStack extractItem(int slot, int amount, boolean simulate) {
         if (slot < 0 || slot >= getSlots() || amount <= 0) return ItemStack.EMPTY;
+        if (slot == SoldierInventory.SLOT_OFF_HAND) return ItemStack.EMPTY;
         
         ItemStack existing = inventory.getItem(slot);
         if (existing.isEmpty()) return ItemStack.EMPTY;
@@ -89,11 +92,13 @@ public class SoldierInventoryHandler implements IItemHandlerModifiable {
 
     @Override
     public boolean isItemValid(int slot, @Nonnull ItemStack stack) {
-        return true;
+        return slot >= 0 && slot < getSlots() && slot != SoldierInventory.SLOT_OFF_HAND;
     }
 
     @Override
     public void setStackInSlot(int slot, @Nonnull ItemStack stack) {
-        inventory.setItem(slot, stack);
+        if (slot != SoldierInventory.SLOT_OFF_HAND) {
+            inventory.setItem(slot, stack);
+        }
     }
 }

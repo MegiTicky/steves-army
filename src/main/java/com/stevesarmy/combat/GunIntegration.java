@@ -47,6 +47,7 @@ public class GunIntegration {
     public static ShootResult shootAtPosition(LivingEntity shooter, Vec3 targetPosition) { return gunHandler.shootAtPosition(shooter, targetPosition); }
     public static boolean canReload(LivingEntity entity) { return gunHandler.canReload(entity); }
     public static void reload(LivingEntity entity) { gunHandler.reload(entity); }
+    public static void refillMagazine(LivingEntity entity) { gunHandler.refillMagazine(entity); }
     public static void cancelReload(LivingEntity entity) { gunHandler.cancelReload(entity); }
     public static void bolt(LivingEntity entity) { gunHandler.bolt(entity); }
     public static void aim(LivingEntity entity, boolean isAiming) { gunHandler.aim(entity, isAiming); }
@@ -106,6 +107,7 @@ public class GunIntegration {
         ShootResult shootAtPosition(LivingEntity shooter, Vec3 targetPosition);
         boolean canReload(LivingEntity entity);
         void reload(LivingEntity entity);
+        void refillMagazine(LivingEntity entity);
         void cancelReload(LivingEntity entity);
         void bolt(LivingEntity entity);
         void aim(LivingEntity entity, boolean isAiming);
@@ -146,6 +148,7 @@ public class GunIntegration {
         @Override public ShootResult shootAtPosition(LivingEntity shooter, Vec3 targetPosition) { return ShootResult.NOT_GUN; }
         @Override public boolean canReload(LivingEntity entity) { return false; }
         @Override public void reload(LivingEntity entity) {}
+        @Override public void refillMagazine(LivingEntity entity) {}
         @Override public void cancelReload(LivingEntity entity) {}
         @Override public void bolt(LivingEntity entity) {}
         @Override public void aim(LivingEntity entity, boolean isAiming) {}
@@ -486,6 +489,26 @@ public class GunIntegration {
                 }
             } catch (Exception e) {
                 StevesArmyMod.LOGGER.warn("[TaCZ] Reload failed", e);
+            }
+        }
+
+        @Override
+        public void refillMagazine(LivingEntity entity) {
+            if (!hasGun(entity)) return;
+            try {
+                ItemStack gunStack = entity.getMainHandItem();
+                Class<?> iGunClass = Class.forName("com.tacz.guns.api.item.IGun");
+                Method getIGunOrNull = iGunClass.getMethod("getIGunOrNull", ItemStack.class);
+                Object iGun = getIGunOrNull.invoke(null, gunStack);
+                if (iGun == null) return;
+
+                int magazineSize = getMagazineSize(entity);
+                iGunClass.getMethod("setCurrentAmmoCount", ItemStack.class, int.class)
+                    .invoke(iGun, gunStack, magazineSize);
+                iGunClass.getMethod("setBulletInBarrel", ItemStack.class, boolean.class)
+                    .invoke(iGun, gunStack, true);
+            } catch (Exception e) {
+                StevesArmyMod.LOGGER.warn("[TaCZ] Failed to refill respawned gun: {}", e.toString());
             }
         }
 

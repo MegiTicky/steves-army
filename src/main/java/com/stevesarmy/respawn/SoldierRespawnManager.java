@@ -84,13 +84,9 @@ public class SoldierRespawnManager {
             }
         }
         
-        ItemStack offHand = soldier.getOffhandItem().copy();
-        if (!offHand.isEmpty()) {
-            player.getInventory().offhand.set(0, offHand);
-        }
-        
         ItemStack transferredGun = player.getMainHandItem();
         if (GunIntegration.isTaczLoaded() && !transferredGun.isEmpty() && GunIntegration.hasGun(player)) {
+            GunIntegration.refillMagazine(player);
             StevesArmyMod.LOGGER.info("[Respawn] Initializing TaCZ state for player's transferred gun");
             GunIntegration.initialData(player);
             GunIntegration.draw(player);

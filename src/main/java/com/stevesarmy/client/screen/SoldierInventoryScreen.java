@@ -30,6 +30,8 @@ public class SoldierInventoryScreen extends AbstractContainerScreen<SoldierInven
         int x = (this.width - this.imageWidth) / 2;
         int y = (this.height - this.imageHeight) / 2;
         guiGraphics.blit(CONTAINER_LOCATION, x, y, 0, 0, this.imageWidth, this.imageHeight, GUI_WIDTH, GUI_HEIGHT);
+        // The texture predates the removal of the persistent offhand slot.
+        guiGraphics.fill(x + 44, y + 90, x + 62, y + 108, 0xFFC6C6C6);
     }
 
     @Override

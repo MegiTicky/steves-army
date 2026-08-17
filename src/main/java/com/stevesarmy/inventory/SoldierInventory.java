@@ -10,7 +10,6 @@ import net.minecraft.world.ContainerHelper;
 import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.item.SwordItem;
 
 import javax.annotation.Nullable;
 import java.util.function.Consumer;
@@ -45,7 +44,9 @@ public class SoldierInventory implements Container {
         for (int i = 0; i < 4; i++) {
             soldier.setItemSlot(ARMOR_SLOTS[i], items.get(i));
         }
-        soldier.setItemSlot(EquipmentSlot.OFFHAND, items.get(SLOT_OFF_HAND));
+        // The offhand is reserved for temporary healing use and is never
+        // restored from the persisted soldier inventory.
+        soldier.setItemSlot(EquipmentSlot.OFFHAND, ItemStack.EMPTY);
         soldier.setItemSlot(EquipmentSlot.MAINHAND, items.get(SLOT_MAIN_HAND));
     }
 
@@ -56,11 +57,6 @@ public class SoldierInventory implements Container {
             if (!ItemStack.matches(currentInSlot, entityItem)) {
                 items.set(i, entityItem.copy());
             }
-        }
-        ItemStack currentOffhand = items.get(SLOT_OFF_HAND);
-        ItemStack entityOffhand = soldier.getOffhandItem();
-        if (!ItemStack.matches(currentOffhand, entityOffhand)) {
-            items.set(SLOT_OFF_HAND, entityOffhand.copy());
         }
         ItemStack currentMainHand = items.get(SLOT_MAIN_HAND);
         ItemStack entityMainHand = soldier.getMainHandItem();
@@ -108,6 +104,25 @@ public class SoldierInventory implements Container {
     @Override
     public void setItem(int slot, ItemStack stack) {
         if (slot >= 0 && slot < items.size()) {
+            if (slot == SLOT_OFF_HAND && !stack.isEmpty()) {
+                for (int generalSlot = SLOT_GENERAL_START; generalSlot < INVENTORY_SIZE; generalSlot++) {
+                    ItemStack existing = items.get(generalSlot);
+                    if (!existing.isEmpty()
+                        && ItemStack.isSameItemSameTags(existing, stack)
+                        && existing.getCount() + stack.getCount() <= existing.getMaxStackSize()) {
+                        existing.grow(stack.getCount());
+                        return;
+                    }
+                }
+                for (int generalSlot = SLOT_GENERAL_START; generalSlot < INVENTORY_SIZE; generalSlot++) {
+                    if (items.get(generalSlot).isEmpty()) {
+                        items.set(generalSlot, stack);
+                        return;
+                    }
+                }
+                // Preserve the item in the hidden legacy slot rather than
+                // silently deleting it when every general slot is occupied.
+            }
             items.set(slot, stack);
             if (slot == SLOT_MAIN_HAND && mainHandChangedCallback != null) {
                 mainHandChangedCallback.accept(stack);
@@ -152,12 +167,30 @@ public class SoldierInventory implements Container {
 
     public void load(CompoundTag tag) {
         items.clear();
+        ItemStack legacyOffhand = ItemStack.EMPTY;
         ListTag list = tag.getList("Items", 10);
         for (int i = 0; i < list.size(); i++) {
             CompoundTag itemTag = list.getCompound(i);
             int slot = itemTag.getInt("Slot");
             if (slot >= 0 && slot < items.size()) {
-                items.set(slot, ItemStack.of(itemTag));
+                ItemStack stack = ItemStack.of(itemTag);
+                if (slot == SLOT_OFF_HAND) {
+                    legacyOffhand = stack;
+                } else {
+                    items.set(slot, stack);
+                }
+            }
+        }
+
+        // Move the old persistent offhand item into the regular inventory so
+        // it cannot block the temporary offhand used by the healing goal.
+        if (!legacyOffhand.isEmpty()) {
+            for (int slot = SLOT_GENERAL_START; slot < INVENTORY_SIZE; slot++) {
+                if (items.get(slot).isEmpty()) {
+                    items.set(slot, legacyOffhand);
+                    legacyOffhand = ItemStack.EMPTY;
+                    break;
+                }
             }
         }
     }

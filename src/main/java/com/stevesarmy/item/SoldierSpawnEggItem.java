@@ -10,7 +10,6 @@ import com.stevesarmy.squad.SquadMode;
 import com.stevesarmy.squad.FireTeamAssignment;
 import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
-import net.minecraft.nbt.ListTag;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.InteractionResult;
@@ -190,27 +189,7 @@ public class SoldierSpawnEggItem extends ForgeSpawnEggItem {
             CompoundTag inventoryTag = entityTag.getCompound("Inventory");
             StevesArmyMod.LOGGER.info("[SoldierSpawnEgg] Inventory tag: {}", inventoryTag.toString());
             SoldierInventory inventory = soldier.getSoldierInventory();
-            
-            if (inventoryTag.contains("Items")) {
-                ListTag itemsList = inventoryTag.getList("Items", 10);
-                StevesArmyMod.LOGGER.info("[SoldierSpawnEgg] Items list size: {}", itemsList.size());
-                
-                for (int i = 0; i < itemsList.size(); i++) {
-                    CompoundTag itemTag = itemsList.getCompound(i);
-                    int slot = itemTag.getInt("Slot");
-                    StevesArmyMod.LOGGER.info("[SoldierSpawnEgg]   Item {}: slot={}, tag={}", i, slot, itemTag.toString());
-                    if (slot >= 0 && slot < inventory.getContainerSize()) {
-                        ItemStack itemStack = ItemStack.of(itemTag);
-                        StevesArmyMod.LOGGER.info("[SoldierSpawnEgg]   Restored item for slot {}: {} x{}", 
-                            slot, itemStack.getItem().toString(), itemStack.getCount());
-                        inventory.setItem(slot, itemStack);
-                    } else {
-                        StevesArmyMod.LOGGER.warn("[SoldierSpawnEgg]   Invalid slot {} (max: {})", slot, inventory.getContainerSize());
-                    }
-                }
-            } else {
-                StevesArmyMod.LOGGER.warn("[SoldierSpawnEgg] Inventory tag has no Items key!");
-            }
+            inventory.load(inventoryTag);
             
             StevesArmyMod.LOGGER.info("[SoldierSpawnEgg] Calling syncArmorToEntity...");
             inventory.syncArmorToEntity(soldier);

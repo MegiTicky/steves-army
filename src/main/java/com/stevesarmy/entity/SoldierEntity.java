@@ -763,19 +763,16 @@ public class SoldierEntity extends PathfinderMob implements Container {
             }
         }
         
-        // Try main hand
+        // The main hand is reserved for firearms. Do not let vanilla pickup
+        // behavior replace a soldier's gun with a knife or other item.
         ItemStack mainHand = inventory.getItem(SoldierInventory.SLOT_MAIN_HAND);
-        if (mainHand.isEmpty()) {
+        if (mainHand.isEmpty() && GunIntegration.isGun(stack)) {
             ItemStack toInsert = stack.split(count);
             inventory.setItem(SoldierInventory.SLOT_MAIN_HAND, toInsert);
             inventory.setChanged();
             itemEntity.discard();
             return;
         }
-        
-        // Fall back to vanilla behavior (let super handle it)
-        // This will call setItemSlot which our override syncs to inventory
-        super.pickUpItem(itemEntity);
     }
 
     public SoldierInventory getSoldierInventory() {
@@ -842,8 +839,6 @@ public class SoldierEntity extends PathfinderMob implements Container {
         try {
             if (slot == EquipmentSlot.MAINHAND) {
                 inventory.setItem(SoldierInventory.SLOT_MAIN_HAND, stack.copy());
-            } else if (slot == EquipmentSlot.OFFHAND) {
-                inventory.setItem(SoldierInventory.SLOT_OFF_HAND, stack.copy());
             } else if (slot.getType() == EquipmentSlot.Type.ARMOR) {
                 int invSlot;
                 switch (slot) {
