@@ -177,6 +177,28 @@ public class MachineGunnerSupportGoal extends CoverTacticalGoal {
         lastIssuedDestination = best.destination();
     }
 
+    /** Forces the same firing-lane evaluation used by the support AI. */
+    public FiringPositionFinder.EvaluationReport forceEvaluateSupportPosition() {
+        MachineGunnerEntity mg = (MachineGunnerEntity) soldier;
+        BlockPos suppressionCenter = mg.getSuppressionCenter();
+        BlockPos supportAnchor = SupportPositionFinder.findSupportPosition(mg);
+        FiringPositionFinder.EvaluationReport report = FiringPositionFinder.evaluate(
+            mg, suppressionCenter, supportAnchor);
+        FiringPosition best = report.selected();
+        if (best == null) {
+            clearFiringPosition();
+            lastIssuedDestination = null;
+        } else {
+            // The debug command is an explicit reposition request, not merely a
+            // preview. Drop the current lane so the selected result is consumed
+            // by the normal support-relocation branch.
+            invalidateFiringPosition();
+            setFiringPosition(best);
+            lastIssuedDestination = best.destination();
+        }
+        return report;
+    }
+
     /**
      * Aims the base cover scorer at the suppression center when the threat
      * awareness has no direction (area suppression with no living threat), so

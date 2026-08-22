@@ -25,6 +25,7 @@ import com.stevesarmy.entity.MachineGunnerEntity;
 import com.stevesarmy.entity.TargetEntity;
 import com.stevesarmy.entity.ai.CoverPositionController;
 import com.stevesarmy.entity.ai.CoverTacticalGoal;
+import com.stevesarmy.entity.ai.MachineGunnerSupportGoal;
 import com.stevesarmy.entity.ai.PeekController;
 import com.stevesarmy.entity.ai.SupportPositionFinder;
 import com.stevesarmy.network.NetworkHandler;
@@ -842,6 +843,7 @@ public class CombatDebugCommand {
         
         SquadData squad = squadOpt.get();
         SquadThreatIntel intel = squad.getThreatIntel();
+        long now = serverLevel.getGameTime();
         
         source.sendSuccess(() -> Component.literal("=== SQUAD THREAT INTEL ==="), false);
         
@@ -851,12 +853,21 @@ public class CombatDebugCommand {
         for (SquadThreatIntel.ThreatKnowledge threat : threats) {
             BlockPos pos = threat.lastKnownPosition;
             String posStr = pos != null ? (pos.getX() + "," + pos.getY() + "," + pos.getZ()) : "unknown";
+            long age = Math.max(0L, now - threat.lastSeenTime);
+            String aimStr = threat.lastVisibleAimPoint != null
+                ? String.format("%.2f,%.2f,%.2f", threat.lastVisibleAimPoint.x,
+                    threat.lastVisibleAimPoint.y, threat.lastVisibleAimPoint.z) : "none";
             String status = threat.isAlive ? (threat.isSuppressed ? "SUPPRESSED" : "ACTIVE") : "DEAD";
             String suppressedBy = threat.suppressedBy != null ? threat.suppressedBy.toString().substring(0, 8) : "none";
+            String reporter = threat.lastSeenBySoldier != null
+                ? threat.lastSeenBySoldier.toString().substring(0, 8) : "none";
             
             source.sendSuccess(() -> Component.literal(
                 "  Threat " + threat.threatEntityId.toString().substring(0, 8) +
                 " | Pos: " + posStr +
+                " | Aim: " + aimStr +
+                " | Age: " + age + "t" +
+                " | SeenBy: " + reporter +
                 " | Acc: " + String.format("%.2f", threat.accuracy) +
                 " | Status: " + status +
                 " | SuppressedBy: " + suppressedBy
@@ -923,9 +934,14 @@ public class CombatDebugCommand {
     }
 
     private static int sendMachineGunnerEvaluation(CommandSourceStack source, MachineGunnerEntity mg) {
+        MachineGunnerSupportGoal supportGoal = mg.getCoverTacticalGoal() instanceof MachineGunnerSupportGoal goal
+            ? goal : null;
+        FiringPositionFinder.EvaluationReport report = supportGoal != null
+            ? supportGoal.forceEvaluateSupportPosition()
+            : FiringPositionFinder.evaluate(mg, mg.getSuppressionCenter(),
+                SupportPositionFinder.findSupportPosition(mg));
         BlockPos center = mg.getSuppressionCenter();
         BlockPos anchor = center != null ? SupportPositionFinder.findSupportPosition(mg) : null;
-        FiringPositionFinder.EvaluationReport report = FiringPositionFinder.evaluate(mg, center, anchor);
         String failure = evaluationFailure(center, anchor, report);
         if (source.getEntity() instanceof ServerPlayer serverPlayer) {
             NetworkHandler.sendTo(serverPlayer, MachineGunnerEvaluationPacket.from(
@@ -942,6 +958,8 @@ public class CombatDebugCommand {
                 + " | Target=" + (mg.getTarget() != null ? mg.getTarget().getId() : "none")
                 + " | Squad=" + (mg.getSquadId() != null)
                 + " | Owner=" + (mg.getOwner() != null)), false);
+        source.sendSuccess(() -> Component.literal(
+            "Action: forced support firing-position evaluation and reposition request"), false);
         source.sendSuccess(() -> Component.literal("Support anchor: " + formatNullablePos(anchor)), false);
 
         String targetSource = center == null ? "none"

@@ -233,16 +233,19 @@ public class CoverDebugManager {
         public final int activeTargetCount;
         public final int lastSeenCount;
         public final int peekTargetCount;
-        public final List<Vec3> targets;
+        public final List<TargetDebugEntry> targets;
         public final List<FiringPositionDebugEntry> candidates;
         public final String failure;
+
+        public record TargetDebugEntry(Vec3 position, int category) {}
 
         public MachineGunnerEvaluationDebugData(int entityId, BlockPos center, BlockPos anchor,
                                                  int targetCount, int coverTargetCount, boolean gridFallback,
                                                  int coverChecked, int proneChecked, int rejectedAccess,
                                                  int activeTargetCount, int lastSeenCount, int peekTargetCount,
-                                                 List<Vec3> targets, List<FiringPositionDebugEntry> candidates,
-                                                String failure) {
+                                                 List<TargetDebugEntry> targets,
+                                                 List<FiringPositionDebugEntry> candidates,
+                                                 String failure) {
             this.entityId = entityId;
             this.center = center;
             this.anchor = anchor;

@@ -160,10 +160,11 @@ public class MachineGunnerEvaluationPacket {
         ctx.get().enqueueWork(() -> DistExecutor.unsafeRunWhenOn(Dist.CLIENT, () -> () ->
             CoverDebugManager.setMachineGunnerEvaluation(new CoverDebugManager.MachineGunnerEvaluationDebugData(
                 packet.entityId, packet.center, packet.anchor, packet.targetCount, packet.coverTargetCount,
-                packet.gridFallback, packet.coverChecked, packet.proneChecked, packet.rejectedAccess,
-                packet.activeTargetCount, packet.lastSeenCount, packet.peekTargetCount,
-                packet.targets.stream().map(Target::position).toList(), packet.candidates.stream().map(candidate ->
-                    new CoverDebugManager.FiringPositionDebugEntry(candidate.position(), candidate.rank(),
+                 packet.gridFallback, packet.coverChecked, packet.proneChecked, packet.rejectedAccess,
+                 packet.activeTargetCount, packet.lastSeenCount, packet.peekTargetCount,
+                 packet.targets.stream().map(target -> new CoverDebugManager.MachineGunnerEvaluationDebugData.TargetDebugEntry(
+                     target.position(), target.category())).toList(), packet.candidates.stream().map(candidate ->
+                     new CoverDebugManager.FiringPositionDebugEntry(candidate.position(), candidate.rank(),
                         candidate.posture(), candidate.access(), candidate.protection(), candidate.score(),
                         candidate.pathChecked(), candidate.pathExists(), candidate.canReach())).toList(),
                 packet.failure))

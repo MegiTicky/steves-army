@@ -1254,6 +1254,7 @@ return qualityScore + shootBonus - distancePenalty;
             double radius) {
         
         java.util.List<Vec3> aimPoints = new java.util.ArrayList<>();
+        java.util.Set<BlockPos> sampledPeekBlocks = new java.util.HashSet<>();
         
         java.util.List<CoverPoint> covers = findCoverPoints(pingCenter, (int) radius);
         
@@ -1265,7 +1266,7 @@ return qualityScore + shootBonus - distancePenalty;
             java.util.Set<Direction> protectedDirs = cover.getProtectedDirections();
 
             if (cover.getType() == CoverType.HALF) {
-                addHalfCoverOpeningAimPoints(soldier, cover, aimPoints);
+                addHalfCoverOpeningAimPoints(soldier, cover, aimPoints, sampledPeekBlocks);
                 continue;
             }
             
@@ -1274,6 +1275,7 @@ return qualityScore + shootBonus - distancePenalty;
                 
                 BlockPos peekPos = cover.getPosition().relative(peekDir);
                 if (!isValidPeekPosition(peekPos, level)) continue;
+                if (!sampledPeekBlocks.add(peekPos)) continue;
                 
                 // Keep the existing non-half-cover target height. Half cover uses
                 // collision-shape-based opening points above instead.
@@ -1288,39 +1290,25 @@ return qualityScore + shootBonus - distancePenalty;
         return aimPoints;
     }
 
-    /**
-     * Adds likely enemy exposure points above each half-cover wall. The points are
-     * validated from the real soldier eye position so suppression does not target
-     * the solid cover block itself.
-     */
+    /** Adds one raycast-validated exposure point for each half-cover peek block. */
     private void addHalfCoverOpeningAimPoints(SoldierEntity soldier, CoverPoint cover,
-                                               java.util.List<Vec3> aimPoints) {
+                                               java.util.List<Vec3> aimPoints,
+                                               java.util.Set<BlockPos> sampledPeekBlocks) {
         for (Direction wallDirection : cover.getProtectedDirections()) {
             BlockPos coverBlock = cover.getPosition().relative(wallDirection);
             VoxelShape shape = level.getBlockState(coverBlock).getCollisionShape(level, coverBlock);
             if (shape.isEmpty()) {
                 continue;
             }
+            if (!sampledPeekBlocks.add(coverBlock)) {
+                continue;
+            }
 
             double coverTop = coverBlock.getY() + shape.max(Direction.Axis.Y);
-            Direction.Axis lateralAxis = wallDirection.getAxis() == Direction.Axis.Z
-                ? Direction.Axis.X : Direction.Axis.Z;
-
-            for (double lateralOffset : HALF_COVER_LATERAL_OFFSETS) {
-                double x = coverBlock.getX() + 0.5;
-                double z = coverBlock.getZ() + 0.5;
-                if (lateralAxis == Direction.Axis.X) {
-                    x += lateralOffset;
-                } else {
-                    z += lateralOffset;
-                }
-
-                for (double openingHeight : HALF_COVER_OPENING_HEIGHTS) {
-                    Vec3 opening = new Vec3(x, coverTop + openingHeight, z);
-                    if (VisibilityRay.traceIgnoringSmoke(level, soldier.getEyePosition(), opening, soldier).hasContact()) {
-                        aimPoints.add(opening);
-                    }
-                }
+            Vec3 opening = new Vec3(coverBlock.getX() + 0.5, coverTop + 0.25,
+                coverBlock.getZ() + 0.5);
+            if (VisibilityRay.traceIgnoringSmoke(level, soldier.getEyePosition(), opening, soldier).hasContact()) {
+                aimPoints.add(opening);
             }
         }
     }

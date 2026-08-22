@@ -16,7 +16,6 @@ import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.level.pathfinder.Path;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.phys.Vec3;
-import net.minecraft.world.phys.shapes.VoxelShape;
 
 import javax.annotation.Nullable;
 import java.util.ArrayList;
@@ -68,9 +67,6 @@ public final class FiringPositionFinder {
     private static final float GRID_FALLBACK_WEIGHT = 0.10f;
     private static final float MIN_MEANINGFUL_ACCESS = 0.20f;
     private static final float MIN_PEEK_COVERAGE = 0.35f;
-
-    private static final double[] HALF_COVER_LATERAL_OFFSETS = {-0.28, 0.0, 0.28};
-    private static final double[] HALF_COVER_OPENING_HEIGHTS = {0.12, 0.42};
 
     private FiringPositionFinder() {}
 
@@ -277,10 +273,14 @@ public final class FiringPositionFinder {
             }
         }
         int peekBefore = targets.size();
-        for (int i = 0; i < threatCenters.size() && i < MAX_PEEK_CONTEXT_CENTERS; i++) {
+        int contextCount = Math.min(MAX_PEEK_CONTEXT_CENTERS, threatCenters.size());
+        for (int i = 0; i < contextCount; i++) {
             BlockPos threatCenter = threatCenters.get(i);
-            addPotentialPeekSamples(level, finder, threatCenter, radius, targets);
-            if (targets.size() - peekBefore >= MAX_PEEK_TARGET_SAMPLES) break;
+            int remainingContexts = contextCount - i;
+            int remainingSamples = MAX_PEEK_TARGET_SAMPLES
+                - (targets.size() - peekBefore);
+            int contextQuota = (remainingSamples + remainingContexts - 1) / remainingContexts;
+            addPotentialPeekSamples(level, finder, mg, threatCenter, radius, targets, contextQuota);
         }
         int coverTargetCount = targets.size() - peekBefore;
         boolean usedGridFallback = targets.isEmpty();
@@ -331,6 +331,7 @@ public final class FiringPositionFinder {
         threats.sort(Comparator.comparingDouble((SquadThreatIntel.ThreatKnowledge t) -> -t.accuracy));
         for (SquadThreatIntel.ThreatKnowledge threat : threats) {
             if (!threat.isAlive || threat.lastKnownPosition == null
+                || squad.getThreatIntel().isThreatStale(threat.threatEntityId, now)
                 || countTargets(targets, TargetCategory.LAST_SEEN) >= MAX_LAST_SEEN_SAMPLES) {
                 continue;
             }
@@ -344,62 +345,61 @@ public final class FiringPositionFinder {
         }
     }
 
-    private static void addPotentialPeekSamples(Level level, CoverFinder finder, BlockPos center,
-                                                 double radius, List<TargetSample> targets) {
-        if (countTargets(targets, TargetCategory.POTENTIAL_PEEK) >= MAX_PEEK_TARGET_SAMPLES) return;
+    private static void addPotentialPeekSamples(Level level, CoverFinder finder,
+                                                 @Nullable MachineGunnerEntity mg, BlockPos center,
+                                                 double radius, List<TargetSample> targets, int quota) {
+        if (quota <= 0) return;
+        if (mg != null) {
+            int added = 0;
+            for (Vec3 target : finder.findSuppressionAimPoints(mg, center, radius)) {
+                if (added >= quota || countTargets(targets, TargetCategory.POTENTIAL_PEEK)
+                    >= MAX_PEEK_TARGET_SAMPLES) {
+                    break;
+                }
+                if (hasPeekSampleAtBlock(targets, BlockPos.containing(target))) {
+                    continue;
+                }
+                addTarget(targets, target, TargetCategory.POTENTIAL_PEEK,
+                    PEEK_TARGET_WEIGHT, 1.0f);
+                added++;
+            }
+            return;
+        }
+
+        int added = 0;
         for (CoverPoint cover : finder.findCoverPoints(center, (int) Math.ceil(radius))) {
-            if (countTargets(targets, TargetCategory.POTENTIAL_PEEK) >= MAX_PEEK_TARGET_SAMPLES) {
+            if (added >= quota || countTargets(targets, TargetCategory.POTENTIAL_PEEK)
+                >= MAX_PEEK_TARGET_SAMPLES) {
                 break;
             }
-            if (cover.getType() == CoverType.HALF) {
-                addHalfCoverTargets(level, cover, targets);
-            } else {
-                for (Direction peekDir : Direction.Plane.HORIZONTAL) {
-                    if (cover.getProtectedDirections().contains(peekDir)) {
-                        continue;
-                    }
-                    BlockPos peekPos = cover.getPosition().relative(peekDir);
-                    if (!isValidTargetCell(level, peekPos)) {
-                        continue;
-                    }
-                    addTarget(targets, new Vec3(peekPos.getX() + 0.5,
-                        peekPos.getY() + TARGET_EXPOSURE_HEIGHT, peekPos.getZ() + 0.5),
-                        TargetCategory.POTENTIAL_PEEK, PEEK_TARGET_WEIGHT, 1.0f);
-                    if (countTargets(targets, TargetCategory.POTENTIAL_PEEK) >= MAX_PEEK_TARGET_SAMPLES) {
-                        break;
-                    }
+            for (Direction peekDir : Direction.Plane.HORIZONTAL) {
+                if (cover.getProtectedDirections().contains(peekDir)) {
+                    continue;
                 }
+                BlockPos peekPos = cover.getPosition().relative(peekDir);
+                if (!isValidTargetCell(level, peekPos)) {
+                    continue;
+                }
+                Vec3 target = new Vec3(peekPos.getX() + 0.5,
+                    peekPos.getY() + TARGET_EXPOSURE_HEIGHT, peekPos.getZ() + 0.5);
+                if (hasPeekSampleAtBlock(targets, BlockPos.containing(target))) {
+                    continue;
+                }
+                addTarget(targets, target, TargetCategory.POTENTIAL_PEEK,
+                    PEEK_TARGET_WEIGHT, 1.0f);
+                added++;
             }
         }
     }
 
-    private static void addHalfCoverTargets(Level level, CoverPoint cover, List<TargetSample> targets) {
-        for (Direction wallDirection : cover.getProtectedDirections()) {
-            BlockPos coverBlock = cover.getPosition().relative(wallDirection);
-            VoxelShape shape = level.getBlockState(coverBlock).getCollisionShape(level, coverBlock);
-            if (shape.isEmpty()) {
-                continue;
-            }
-            double coverTop = coverBlock.getY() + shape.max(Direction.Axis.Y);
-            Direction.Axis lateralAxis = wallDirection.getAxis() == Direction.Axis.Z
-                ? Direction.Axis.X : Direction.Axis.Z;
-            for (double lateralOffset : HALF_COVER_LATERAL_OFFSETS) {
-                double x = coverBlock.getX() + 0.5;
-                double z = coverBlock.getZ() + 0.5;
-                if (lateralAxis == Direction.Axis.X) {
-                    x += lateralOffset;
-                } else {
-                    z += lateralOffset;
-                }
-                for (double openingHeight : HALF_COVER_OPENING_HEIGHTS) {
-                    addTarget(targets, new Vec3(x, coverTop + openingHeight, z),
-                        TargetCategory.POTENTIAL_PEEK, PEEK_TARGET_WEIGHT, 1.0f);
-                    if (countTargets(targets, TargetCategory.POTENTIAL_PEEK) >= MAX_PEEK_TARGET_SAMPLES) {
-                        return;
-                    }
-                }
+    private static boolean hasPeekSampleAtBlock(List<TargetSample> targets, BlockPos block) {
+        for (TargetSample target : targets) {
+            if (target.category() == TargetCategory.POTENTIAL_PEEK
+                && BlockPos.containing(target.position()).equals(block)) {
+                return true;
             }
         }
+        return false;
     }
 
     private static void addGridFallbackTargets(BlockPos center, double radius, List<TargetSample> targets) {
@@ -609,9 +609,15 @@ public final class FiringPositionFinder {
     private static void deduplicateTargets(List<TargetSample> targets) {
         Map<String, TargetSample> unique = new LinkedHashMap<>();
         for (TargetSample target : targets) {
-            String key = target.category() + ":" + Math.round(target.position().x * 10)
-                + ":" + Math.round(target.position().y * 10)
-                + ":" + Math.round(target.position().z * 10);
+            String key;
+            if (target.category() == TargetCategory.POTENTIAL_PEEK) {
+                BlockPos block = BlockPos.containing(target.position());
+                key = target.category() + ":" + block.getX() + ":" + block.getY() + ":" + block.getZ();
+            } else {
+                key = target.category() + ":" + Math.round(target.position().x * 10)
+                    + ":" + Math.round(target.position().y * 10)
+                    + ":" + Math.round(target.position().z * 10);
+            }
             unique.putIfAbsent(key, target);
         }
         targets.clear();

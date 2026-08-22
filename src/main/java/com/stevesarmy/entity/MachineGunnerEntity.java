@@ -7,9 +7,12 @@ import com.stevesarmy.entity.ai.CoverTacticalGoal;
 import com.stevesarmy.entity.ai.SoldierCombatGoal;
 import com.stevesarmy.ping.PingType;
 import com.stevesarmy.squad.SquadMode;
+import com.stevesarmy.squad.SquadManager;
+import com.stevesarmy.squad.SquadThreatIntel;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.level.Level;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.phys.Vec3;
 
 import javax.annotation.Nullable;
@@ -86,15 +89,19 @@ public class MachineGunnerEntity extends SoldierEntity {
     }
 
     /**
-     * Suppression center priority: attack objective, then the strongest tracked
-     * threat, then the pinged threat direction. Drives auto-suppression and the
-     * rear support position search.
+     * Suppression center priority: attack objective, then the strongest local
+     * threat, then the newest shared squad threat, then the pinged threat
+     * direction. Drives auto-suppression and the rear support position search.
      */
     @Nullable
     public BlockPos getSuppressionCenter() {
         BlockPos objective = getSupportObjectivePos();
         if (objective != null) {
             return objective;
+        }
+        BlockPos squadThreatPos = getNewestSquadThreatPosition();
+        if (squadThreatPos != null) {
+            return squadThreatPos;
         }
         BlockPos threatPos = getThreatAwareness().getPrimaryThreatPosition();
         if (threatPos != null) {
@@ -104,5 +111,18 @@ public class MachineGunnerEntity extends SoldierEntity {
             return getPingThreatPos();
         }
         return null;
+    }
+
+    @Nullable
+    private BlockPos getNewestSquadThreatPosition() {
+        if (!(level() instanceof ServerLevel serverLevel) || getSquadId() == null) {
+            return null;
+        }
+        return SquadManager.get(serverLevel).getSquadById(getSquadId())
+            .flatMap(squad -> squad.getThreatIntel().getAllThreats().stream()
+                .filter(threat -> threat.isAlive && threat.lastKnownPosition != null)
+                .max(java.util.Comparator.comparingLong(threat -> threat.lastSeenTime))
+                .map(threat -> threat.lastKnownPosition))
+            .orElse(null);
     }
 }

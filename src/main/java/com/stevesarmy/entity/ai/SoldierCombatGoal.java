@@ -2275,8 +2275,12 @@ public class SoldierCombatGoal extends Goal {
         // Squad knowledge must represent what this observer actually saw. Do not
         // use the combat cache here because that may ignore the observer's cover.
         ExposureCalculator.AimPointResult aimPoint = ExposureCalculator.getBestAimPoint(soldier, threat);
-        intel.reportThreat(soldier.getUUID(), threat, threat.blockPosition(),
-            aimPoint != null && aimPoint.canShoot() ? aimPoint.position : threat.getEyePosition(), accuracy);
+        boolean hasVisibleAimPoint = aimPoint != null && aimPoint.pointVisible;
+        BlockPos lastKnownPosition = hasVisibleAimPoint
+            ? BlockPos.containing(aimPoint.position) : threat.blockPosition();
+        Vec3 lastVisibleAimPoint = hasVisibleAimPoint ? aimPoint.position : threat.getEyePosition();
+        intel.reportThreat(soldier.getUUID(), threat, lastKnownPosition,
+            lastVisibleAimPoint, accuracy);
     }
 
     private boolean shouldSuppressTarget() {
