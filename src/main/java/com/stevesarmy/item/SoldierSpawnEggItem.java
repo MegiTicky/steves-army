@@ -1,13 +1,11 @@
 package com.stevesarmy.item;
 
 import com.stevesarmy.StevesArmyMod;
+import com.stevesarmy.entity.SoldierSpawner;
 import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.inventory.SoldierInventory;
 import com.stevesarmy.registry.ModEntities;
-import com.stevesarmy.squad.SquadData;
-import com.stevesarmy.squad.SquadManager;
 import com.stevesarmy.squad.SquadMode;
-import com.stevesarmy.squad.FireTeamAssignment;
 import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
@@ -20,7 +18,6 @@ import net.minecraft.world.item.context.UseOnContext;
 import net.minecraft.world.level.Level;
 import net.minecraftforge.common.ForgeSpawnEggItem;
 
-import java.util.Optional;
 import java.util.UUID;
 import java.util.function.Supplier;
 
@@ -105,37 +102,20 @@ public class SoldierSpawnEggItem extends ForgeSpawnEggItem {
             }
         }
 
-        if (player != null && soldier.isOwnedBy(player)) {
-            FireTeamAssignment fireTeams = FireTeamAssignment.get(serverLevel, player.getUUID());
-            soldier.setFireTeam(fireTeams.getSelectedSpawnTeam());
-            fireTeams.assignToTeam(soldier.getUUID(), soldier.getFireTeam());
+        SoldierSpawner.SpawnResult spawnResult = SoldierSpawner.finishSpawn(serverLevel, soldier, player, false);
+        if (!spawnResult.success()) {
+            return InteractionResult.FAIL;
         }
-        
-        soldier.setPersistenceRequired();
-        serverLevel.addFreshEntity(soldier);
         
         StevesArmyMod.LOGGER.info("[SoldierSpawnEgg] Entity added to world");
         
         if (player != null && !player.isCreative()) {
             stack.shrink(1);
         }
-        
-        if (player != null) {
-            SquadManager squadManager = SquadManager.get(serverLevel);
-            Optional<SquadData> existingSquad = squadManager.getSquadByLeader(player.getUUID());
-            
-            SquadData squad;
-            if (existingSquad.isPresent()) {
-                squad = existingSquad.get();
-            } else {
-                squad = squadManager.createSquad(player.getUUID());
-            }
-            
-            soldier.setSquadId(squad.getSquadId());
-            squadManager.addMemberToSquad(squad.getSquadId(), soldier.getUUID());
-            
+
+        if (player != null && soldier.getSquadId() != null) {
             player.sendSystemMessage(Component.literal(
-                "Soldier added to squad (" + squad.getMemberCount() + " total)"
+                "Soldier added to squad"
             ));
         }
         

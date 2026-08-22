@@ -65,6 +65,6 @@ public class StevesArmyMod {
         CombatDebugCommand.register(event.getDispatcher());
         StevesArmyCommand.register(event.getDispatcher());
         TransportCommand.register(event.getDispatcher());
-        LOGGER.info("Registered commands: /stevesarmy, /stevesarmy_debug, /stevesarmy transport");
+        LOGGER.info("Registered commands: /stevesarmy, /steves_army, /stevesarmy_debug, /stevesarmy transport");
     }
 }
