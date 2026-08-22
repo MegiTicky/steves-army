@@ -20,8 +20,8 @@ import java.util.Optional;
  * Range and exposure are NOT used to weaken precision — they affect target angular
  * size instead, so geometry naturally determines difficulty.
  * 
- * Raw aimQuality normally tops out at the configured baseAccuracy (0.50 by
- * default), so dispersion uses normalized stability rather than treating 0.50
+ * Raw aimQuality normally tops out at the configured baseAccuracy (0.75 by
+ * default), so dispersion uses normalized stability rather than treating 0.75
  * as only half of the attainable aim. The resulting curve is:
  *   stability 0.0 -> 2.50° horizontal, 0.75° vertical
  *   stability 0.35 -> ~1.60° horizontal, ~0.51° vertical

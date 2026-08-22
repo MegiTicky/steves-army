@@ -45,23 +45,23 @@ public class StevesArmyConfig {
         AIM_QUALITY_BASE_ACCURACY = BUILDER
             .comment("Maximum aimQuality achievable under ideal conditions (0.0 to 1.0).",
                      "Multiplied by distance, movement, and exposure factors to get targetAimQuality.",
-                     "Default: 0.50 (50% max hit probability)")
-            .defineInRange("baseAccuracy", 0.50, 0.1, 1.0);
+                     "Default: 0.75 (75% max hit probability)")
+            .defineInRange("baseAccuracy", 0.75, 0.1, 1.0);
         
         AIM_QUALITY_THRESHOLD_SCALE = BUILDER
             .comment("Fraction of targetAimQuality required before firing (0.0 to 1.0).",
                      "Used for guns that don't need bolting (auto/semi-auto).",
                      "shotThreshold = max(0.15, targetAimQuality * thresholdScale).",
                      "Higher = soldier waits longer for better aim. Default: 0.35",
-                     "At baseAccuracy=0.50 close range: 0.50 * 0.35 = 0.175 threshold",
-                     "At baseAccuracy=0.50 long range: max(0.15, 0.25 * 0.35) = 0.15 (floor)")
+                     "At baseAccuracy=0.75 close range: 0.75 * 0.35 = 0.2625 threshold",
+                     "At baseAccuracy=0.75 long range: max(0.15, 0.25 * 0.35) = 0.15 (floor)")
             .defineInRange("thresholdScale", 0.35, 0.0, 1.0);
         
         AIM_QUALITY_SLOW_GUN_THRESHOLD_SCALE = BUILDER
             .comment("Fraction of targetAimQuality required for guns that need bolting (bolt-action).",
                      "shotThreshold = max(0.15, targetAimQuality * slowGunThresholdScale).",
                      "Bolt-action rifles get a higher scale since each shot is more precious.",
-                     "Default: 0.60 (at close range: 0.50 * 0.60 = 0.30 threshold)")
+                     "Default: 0.60 (at close range: 0.75 * 0.60 = 0.45 threshold)")
             .defineInRange("slowGunThresholdScale", 0.60, 0.0, 1.0);
         
         AIM_QUALITY_BUILD_RATE = BUILDER
