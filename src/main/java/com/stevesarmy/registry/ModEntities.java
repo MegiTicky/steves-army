@@ -2,6 +2,7 @@ package com.stevesarmy.registry;
 
 import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.entity.EnemySoldierEntity;
+import com.stevesarmy.entity.MachineGunnerEntity;
 import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.entity.TargetEntity;
 import net.minecraft.world.entity.EntityType;
@@ -49,6 +50,15 @@ public class ModEntities {
             .build(StevesArmyMod.MODID + ":enemy_soldier")
     );
 
+    public static final RegistryObject<EntityType<MachineGunnerEntity>> MACHINE_GUNNER = ENTITIES.register(
+        "machine_gunner",
+        () -> EntityType.Builder.of(MachineGunnerEntity::new, MobCategory.CREATURE)
+            .sized(0.6F, 1.8F)
+            .clientTrackingRange(10)
+            .updateInterval(3)
+            .build(StevesArmyMod.MODID + ":machine_gunner")
+    );
+
     @SubscribeEvent
     public static void registerAttributes(EntityAttributeCreationEvent event) {
         event.put(SOLDIER.get(), Monster.createMonsterAttributes()
@@ -62,6 +72,14 @@ public class ModEntities {
         event.put(TARGET.get(), TargetEntity.createAttributes().build());
         
         event.put(ENEMY_SOLDIER.get(), Monster.createMonsterAttributes()
+            .add(Attributes.MAX_HEALTH, 20.0D)
+            .add(Attributes.MOVEMENT_SPEED, 0.35D)
+            .add(Attributes.ARMOR, 4.0D)
+            .add(Attributes.ATTACK_DAMAGE, 3.0D)
+            .add(Attributes.FOLLOW_RANGE, 32.0D)
+            .build());
+
+        event.put(MACHINE_GUNNER.get(), Monster.createMonsterAttributes()
             .add(Attributes.MAX_HEALTH, 20.0D)
             .add(Attributes.MOVEMENT_SPEED, 0.35D)
             .add(Attributes.ARMOR, 4.0D)

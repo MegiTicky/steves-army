@@ -228,6 +228,13 @@ public class PlayerDeathHandler {
             data.soldierId.equals(expectedSoldierId) ? null : data
         );
     }
+
+    /** True when the soldier is the target of an in-flight respawn possession.
+     *  Such soldiers must not be converted or otherwise removed from the world. */
+    public static boolean isPendingRespawnTarget(UUID soldierId) {
+        return pendingRespawns.values().stream()
+            .anyMatch(data -> data.soldierId.equals(soldierId));
+    }
     
     private static SoldierEntity findNearestSoldier(net.minecraft.world.phys.Vec3 deathPos, List<LivingEntity> soldiers) {
         SoldierEntity nearest = null;

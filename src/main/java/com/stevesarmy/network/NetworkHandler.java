@@ -92,6 +92,10 @@ public class NetworkHandler {
             EnemyContactSyncPacket::encode,
             EnemyContactSyncPacket::new,
             EnemyContactSyncPacket::handle);
+        INSTANCE.registerMessage(id++, SetSoldierRolePacket.class,
+            SetSoldierRolePacket::encode,
+            SetSoldierRolePacket::decode,
+            SetSoldierRolePacket::handle);
     }
 
     public static void sendTo(ServerPlayer player, Object message) {

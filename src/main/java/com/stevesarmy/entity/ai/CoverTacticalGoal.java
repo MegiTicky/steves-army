@@ -5,6 +5,7 @@ import com.stevesarmy.combat.ThreatAwareness;
 import com.stevesarmy.combat.VisibilityRay;
 import com.stevesarmy.combat.cover.*;
 import com.stevesarmy.debug.DiagnosticLogManager;
+import com.stevesarmy.entity.MachineGunnerEntity;
 import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.squad.SquadCoverContext;
 import com.stevesarmy.squad.SquadManager;
@@ -39,7 +40,7 @@ public class CoverTacticalGoal extends Goal {
         NO_ELIGIBLE_COVER
     }
 
-    private final SoldierEntity soldier;
+    protected final SoldierEntity soldier;
     private final PathNavigation navigation;
     
     private int cooldown = 0;
@@ -175,7 +176,7 @@ public class CoverTacticalGoal extends Goal {
     private boolean reloadHoldActive;
     private int reloadMovementLogCooldown;
 
-    private enum RelocationType { NONE, GO_TO, FOLLOW }
+    private enum RelocationType { NONE, GO_TO, FOLLOW, SUPPORT }
 
     private enum RouteNodeExposure { PROTECTED, CRAWL_SAFE, EXPOSED }
 
@@ -305,6 +306,36 @@ public class CoverTacticalGoal extends Goal {
             && relocationCommandGeneration == commandGeneration;
     }
 
+    /**
+     * Gives the machine gunner role first claim on reachable cover near its
+     * rear support position. Unlike GO_TO it does not depend on a ping move
+     * target; the support goal re-requests while the objective stays relevant.
+     */
+    public boolean requestSupportRelocation(BlockPos destination) {
+        if (destination == null) {
+            return false;
+        }
+        if (relocationType == RelocationType.SUPPORT && relocationCenter != null
+            && relocationCenter.distSqr(destination) < 16) {
+            return true;
+        }
+        clearRelocationTarget();
+        relocationType = RelocationType.SUPPORT;
+        relocationCenter = destination.immutable();
+        relocationCommandGeneration = -1;
+        return true;
+    }
+
+    public boolean isHandlingSupportRelocation() {
+        return relocationType == RelocationType.SUPPORT;
+    }
+
+    public void clearSupportRelocation() {
+        if (relocationType == RelocationType.SUPPORT) {
+            clearRelocationTarget();
+        }
+    }
+
     private boolean beginFollowRelocationIfNeeded() {
         if (relocationType != RelocationType.NONE || soldier.getSquadMode() != SquadMode.FOLLOW
             || getCoverManager().isSuppressed() || soldier.tickCount < nextFollowRelocationSearchTick) {
@@ -332,6 +363,10 @@ public class CoverTacticalGoal extends Goal {
             LivingEntity owner = soldier.getOwner();
             return soldier.getSquadMode() == SquadMode.FOLLOW && owner != null
                 && owner.isAlive() && !owner.isSpectator();
+        }
+        if (relocationType == RelocationType.SUPPORT) {
+            return soldier instanceof MachineGunnerEntity
+                && ((MachineGunnerEntity) soldier).getSuppressionCenter() != null;
         }
         return false;
     }

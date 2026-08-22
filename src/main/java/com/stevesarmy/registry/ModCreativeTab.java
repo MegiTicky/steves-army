@@ -21,6 +21,7 @@ public class ModCreativeTab {
             .displayItems((parameters, output) -> {
                 output.accept(ModItems.RECRUIT_ITEM.get());
                 output.accept(ModItems.SOLDIER_SPAWN_EGG.get());
+                output.accept(ModItems.MACHINE_GUNNER_SPAWN_EGG.get());
                 output.accept(ModItems.ENEMY_SOLDIER_SPAWN_EGG.get());
                 output.accept(ModItems.TARGET_SPAWN_EGG.get());
             })

@@ -56,7 +56,7 @@ import java.util.UUID;
 import java.util.stream.Collectors;
 
 public class SoldierCombatGoal extends Goal {
-    private final SoldierEntity soldier;
+    protected final SoldierEntity soldier;
     private final ThreatTracker threatTracker;
     private final DetectionSystem detectionSystem;
     private LivingEntity target;

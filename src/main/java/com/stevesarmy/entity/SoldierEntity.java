@@ -169,10 +169,10 @@ public class SoldierEntity extends PathfinderMob implements Container {
     private final SoldierInventoryHandler inventoryHandler;
     private final LazyOptional<IItemHandler> itemHandlerCap;
     
-    private SoldierCombatGoal combatGoal;
+    protected SoldierCombatGoal combatGoal;
     private CoverBehaviorManager coverBehaviorManager;
     private PeekController peekController;
-    private CoverTacticalGoal coverTacticalGoal;
+    protected CoverTacticalGoal coverTacticalGoal;
     private final ThreatAwareness threatAwareness;
     
     private boolean healing = false;
@@ -396,15 +396,20 @@ public class SoldierEntity extends PathfinderMob implements Container {
      * Stores the combat goal so cover and combat coordination use the same instance.
      * Subclasses with custom goal layouts must use this instead of constructing one directly.
      */
-    protected final SoldierCombatGoal initializeCombatGoal() {
+    protected SoldierCombatGoal initializeCombatGoal() {
         this.combatGoal = new SoldierCombatGoal(this);
         return this.combatGoal;
     }
 
     /** Creates the shared cover goal instance used by squad cover coordination. */
-    protected final CoverTacticalGoal initializeCoverTacticalGoal() {
+    protected CoverTacticalGoal initializeCoverTacticalGoal() {
         this.coverTacticalGoal = new CoverTacticalGoal(this);
         return this.coverTacticalGoal;
+    }
+
+    /** The role is determined by the entity type, not by the equipped weapon. */
+    public SoldierRole getRole() {
+        return SoldierRole.RIFLEMAN;
     }
 
     @Override
@@ -1280,6 +1285,11 @@ public BlockPos getPingMoveTarget() {
     public boolean hasValidPingSuppressPos() {
         return pingSuppressPos != null &&
                System.currentTimeMillis() - pingSuppressTimestamp < PING_SUPPRESS_MEMORY_MS;
+    }
+
+    public void setPingSuppressPos(BlockPos pos) {
+        this.pingSuppressPos = pos;
+        this.pingSuppressTimestamp = System.currentTimeMillis();
     }
     
     public void clearPingSuppressPos() {
