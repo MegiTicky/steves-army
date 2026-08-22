@@ -9,6 +9,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.common.capabilities.ForgeCapabilities;
 
+import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.Optional;
 
@@ -76,6 +77,9 @@ public class GunIntegration {
     public static int getRPM(LivingEntity entity) { return gunHandler.getRPM(entity); }
     public static float getBurstMinInterval(LivingEntity entity) { return gunHandler.getBurstMinInterval(entity); }
     public static float getAimInaccuracy(LivingEntity entity) { return gunHandler.getAimInaccuracy(entity); }
+    public static float getAimPitch(LivingEntity entity, Vec3 targetPosition) {
+        return gunHandler.getAimPitch(entity, targetPosition);
+    }
     public static GunshotSignature getGunshotSignature(LivingEntity entity) {
         return gunHandler.getGunshotSignature(entity);
     }
@@ -136,6 +140,7 @@ public class GunIntegration {
         int getRPM(LivingEntity entity);
         float getBurstMinInterval(LivingEntity entity);
         float getAimInaccuracy(LivingEntity entity);
+        float getAimPitch(LivingEntity entity, Vec3 targetPosition);
         GunshotSignature getGunshotSignature(LivingEntity entity);
         String getGunTabType(LivingEntity entity);
         boolean isMachineGun(LivingEntity entity);
@@ -177,6 +182,12 @@ public class GunIntegration {
         @Override public int getRPM(LivingEntity entity) { return 600; }
         @Override public float getBurstMinInterval(LivingEntity entity) { return 0.8f; }
         @Override public float getAimInaccuracy(LivingEntity entity) { return 0.15f; }
+        @Override public float getAimPitch(LivingEntity entity, Vec3 targetPosition) {
+            Vec3 origin = entity.getEyePosition();
+            Vec3 toTarget = targetPosition.subtract(origin);
+            double horizontalDistance = Math.sqrt(toTarget.x * toTarget.x + toTarget.z * toTarget.z);
+            return (float) -Math.toDegrees(Math.atan2(toTarget.y, horizontalDistance));
+        }
         @Override public GunshotSignature getGunshotSignature(LivingEntity entity) { return GunshotSignature.UNSUPPRESSED; }
         @Override public String getGunTabType(LivingEntity entity) { return "rifle"; }
         @Override public boolean isMachineGun(LivingEntity entity) { return false; }
@@ -227,10 +238,8 @@ public class GunIntegration {
                 Object gunOperator = fromLivingEntity.invoke(null, shooter);
 
                 double dx = target.getX() - shooter.getX();
-                double dy = target.getEyeY() - shooter.getEyeY();
                 double dz = target.getZ() - shooter.getZ();
-                double horizontalDist = Math.sqrt(dx * dx + dz * dz);
-                float pitch = (float) -Math.toDegrees(Math.atan2(dy, horizontalDist));
+                float pitch = getAimPitch(shooter, target.getEyePosition());
                 float yaw = (float) Math.toDegrees(Math.atan2(dz, dx)) - 90.0F;
 
                 if (DiagnosticLogManager.isDamageLoggingEnabled()) {
@@ -298,10 +307,8 @@ public class GunIntegration {
                 Vec3 aimPosition = aimPoint.position;
                 
                 double dx = aimPosition.x - shooter.getX();
-                double dy = aimPosition.y - shooter.getEyeY();
                 double dz = aimPosition.z - shooter.getZ();
-                double horizontalDist = Math.sqrt(dx * dx + dz * dz);
-                float basePitch = (float) -Math.toDegrees(Math.atan2(dy, horizontalDist));
+                float basePitch = getAimPitch(shooter, aimPosition);
                 float baseYaw = (float) Math.toDegrees(Math.atan2(dz, dx)) - 90.0F;
                 
                 float pitch = basePitch + pitchDeviation;
@@ -345,10 +352,8 @@ public class GunIntegration {
                 Object gunOperator = fromLivingEntity.invoke(null, shooter);
 
                 double dx = targetPosition.x - shooter.getX();
-                double dy = targetPosition.y - shooter.getEyeY();
                 double dz = targetPosition.z - shooter.getZ();
-                double horizontalDist = Math.sqrt(dx * dx + dz * dz);
-                float pitch = (float) -Math.toDegrees(Math.atan2(dy, horizontalDist));
+                float pitch = getAimPitch(shooter, targetPosition);
                 float yaw = (float) Math.toDegrees(Math.atan2(dz, dx)) - 90.0F;
 
                 Method shootMethod = gunOperatorClass.getMethod("shoot", java.util.function.Supplier.class, java.util.function.Supplier.class);
@@ -491,6 +496,187 @@ public class GunIntegration {
                 StevesArmyMod.LOGGER.warn("[TaCZ] Reload failed", e);
             }
         }
+
+        @Override
+        public float getAimPitch(LivingEntity shooter, Vec3 targetPosition) {
+            float fallback = straightPitch(shooter, targetPosition);
+            BallisticProfile profile = getBallisticProfile(shooter);
+            if (profile == null) {
+                return fallback;
+            }
+
+            Vec3 origin = shooter.getEyePosition();
+            double dx = targetPosition.x - origin.x;
+            double dz = targetPosition.z - origin.z;
+            double horizontalDistance = Math.sqrt(dx * dx + dz * dz);
+            if (horizontalDistance < 0.05 || !Double.isFinite(horizontalDistance)) {
+                return fallback;
+            }
+
+            double verticalDistance = targetPosition.y - origin.y;
+            Double elevation = solveBallisticElevation(horizontalDistance, verticalDistance, profile);
+            if (elevation == null) {
+                return fallback;
+            }
+
+            float pitch = (float) -Math.toDegrees(elevation);
+            return Float.isFinite(pitch) ? pitch : fallback;
+        }
+
+        private BallisticProfile getBallisticProfile(LivingEntity entity) {
+            try {
+                Class<?> gunOperatorClass = Class.forName("com.tacz.guns.api.entity.IGunOperator");
+                Object gunOperator = gunOperatorClass
+                    .getMethod("fromLivingEntity", LivingEntity.class)
+                    .invoke(null, entity);
+                Object cacheProperty = gunOperatorClass.getMethod("getCacheProperty").invoke(gunOperator);
+                Method getCache = cacheProperty.getClass().getMethod("getCache", String.class);
+                Object cachedSpeed = getCache.invoke(cacheProperty, "ammo_speed");
+                if (!(cachedSpeed instanceof Number speedValue)) {
+                    return null;
+                }
+
+                Class<?> gunInterface = Class.forName("com.tacz.guns.api.item.IGun");
+                Object gun = gunInterface.getMethod("getIGunOrNull", ItemStack.class)
+                    .invoke(null, entity.getMainHandItem());
+                if (gun == null) {
+                    return null;
+                }
+                ResourceLocation gunId = (ResourceLocation) gunInterface
+                    .getMethod("getGunId", ItemStack.class)
+                    .invoke(gun, entity.getMainHandItem());
+                Class<?> timelessApi = Class.forName("com.tacz.guns.api.TimelessAPI");
+                Object indexOptional = timelessApi.getMethod("getCommonGunIndex", ResourceLocation.class)
+                    .invoke(null, gunId);
+                if (!(indexOptional instanceof Optional<?> optional) || optional.isEmpty()) {
+                    return null;
+                }
+
+                Object gunIndex = optional.get();
+                Object gunData = gunIndex.getClass().getMethod("getGunData").invoke(gunIndex);
+                Object bulletData = gunData.getClass().getMethod("getBulletData").invoke(gunData);
+                double gravity = ((Number) bulletData.getClass().getMethod("getGravity").invoke(bulletData)).doubleValue();
+                double friction = ((Number) bulletData.getClass().getMethod("getFriction").invoke(bulletData)).doubleValue();
+                double globalSpeedModifier = getGlobalBulletSpeedModifier();
+                double speed = speedValue.doubleValue() * globalSpeedModifier / 20.0;
+
+                if (!Double.isFinite(speed) || !Double.isFinite(gravity) || !Double.isFinite(friction)
+                    || speed <= 0.0 || gravity < 0.0 || friction < 0.0 || friction >= 1.0) {
+                    return null;
+                }
+                return new BallisticProfile(speed, gravity, friction);
+            } catch (Exception e) {
+                StevesArmyMod.LOGGER.debug("[TaCZ] Failed to resolve ballistic profile: {}", e.getMessage());
+                return null;
+            }
+        }
+
+        private double getGlobalBulletSpeedModifier() {
+            try {
+                Class<?> ammoConfig = Class.forName("com.tacz.guns.config.common.AmmoConfig");
+                Field field = ammoConfig.getField("GLOBAL_BULLET_SPEED_MODIFIER");
+                Object configValue = field.get(null);
+                Object value = configValue.getClass().getMethod("get").invoke(configValue);
+                if (value instanceof Number number && number.doubleValue() > 0.0) {
+                    return number.doubleValue();
+                }
+            } catch (Exception ignored) {
+                // TaCZ 1.1.x defaults this value to 2.0; retain compatibility if
+                // a build does not expose the config field through reflection.
+            }
+            return 2.0;
+        }
+
+        private static Double solveBallisticElevation(double horizontalDistance, double verticalDistance,
+                                                       BallisticProfile profile) {
+            final double minimumElevation = Math.toRadians(-30.0);
+            final double maximumElevation = Math.toRadians(75.0);
+            final int samples = 42;
+            double previousAngle = minimumElevation;
+            double previousError = trajectoryHeightAtDistance(horizontalDistance, previousAngle,
+                profile) - verticalDistance;
+            if (!Double.isFinite(previousError)) {
+                return null;
+            }
+
+            for (int i = 1; i <= samples; i++) {
+                double angle = minimumElevation + (maximumElevation - minimumElevation) * i / samples;
+                double error = trajectoryHeightAtDistance(horizontalDistance, angle, profile)
+                    - verticalDistance;
+                if (!Double.isFinite(error)) {
+                    previousAngle = angle;
+                    previousError = error;
+                    continue;
+                }
+                if (Math.abs(error) < 0.02) {
+                    return angle;
+                }
+                if (previousError * error < 0.0) {
+                    double low = previousAngle;
+                    double high = angle;
+                    double lowError = previousError;
+                    for (int iteration = 0; iteration < 18; iteration++) {
+                        double midpoint = (low + high) * 0.5;
+                        double midpointError = trajectoryHeightAtDistance(horizontalDistance, midpoint,
+                            profile) - verticalDistance;
+                        if (!Double.isFinite(midpointError)) {
+                            return null;
+                        }
+                        if (Math.abs(midpointError) < 0.005) {
+                            return midpoint;
+                        }
+                        if (lowError * midpointError <= 0.0) {
+                            high = midpoint;
+                        } else {
+                            low = midpoint;
+                            lowError = midpointError;
+                        }
+                    }
+                    return (low + high) * 0.5;
+                }
+                previousAngle = angle;
+                previousError = error;
+            }
+            return null;
+        }
+
+        /** Matches EntityKineticBullet: move, then apply friction and gravity. */
+        private static double trajectoryHeightAtDistance(double horizontalDistance, double elevation,
+                                                         BallisticProfile profile) {
+            double horizontalVelocity = profile.speed * Math.cos(elevation);
+            double verticalVelocity = profile.speed * Math.sin(elevation);
+            double horizontalPosition = 0.0;
+            double verticalPosition = 0.0;
+            double previousHorizontal = 0.0;
+            double previousVertical = 0.0;
+            double frictionMultiplier = 1.0 - profile.friction;
+
+            for (int tick = 0; tick < 200; tick++) {
+                previousHorizontal = horizontalPosition;
+                previousVertical = verticalPosition;
+                horizontalPosition += horizontalVelocity;
+                verticalPosition += verticalVelocity;
+                if (horizontalPosition >= horizontalDistance) {
+                    double fraction = (horizontalDistance - previousHorizontal)
+                        / Math.max(horizontalPosition - previousHorizontal, 1.0E-9);
+                    return previousVertical + (verticalPosition - previousVertical) * fraction;
+                }
+                horizontalVelocity *= frictionMultiplier;
+                verticalVelocity = verticalVelocity * frictionMultiplier - profile.gravity;
+            }
+            return Double.NaN;
+        }
+
+        private static float straightPitch(LivingEntity shooter, Vec3 targetPosition) {
+            Vec3 origin = shooter.getEyePosition();
+            double dx = targetPosition.x - origin.x;
+            double dy = targetPosition.y - origin.y;
+            double dz = targetPosition.z - origin.z;
+            double horizontalDistance = Math.sqrt(dx * dx + dz * dz);
+            return (float) -Math.toDegrees(Math.atan2(dy, horizontalDistance));
+        }
+
+        private record BallisticProfile(double speed, double gravity, double friction) {}
 
         @Override
         public void refillMagazine(LivingEntity entity) {

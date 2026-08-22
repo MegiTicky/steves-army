@@ -2574,9 +2574,7 @@ public class SoldierCombatGoal extends Goal {
     }
 
     private float getPitchTo(Vec3 targetPos) {
-        Vec3 toTarget = targetPos.subtract(soldier.getEyePosition());
-        double horizontalDistance = Math.sqrt(toTarget.x * toTarget.x + toTarget.z * toTarget.z);
-        return (float) -Math.toDegrees(Math.atan2(toTarget.y, horizontalDistance));
+        return GunIntegration.getAimPitch(soldier, targetPos);
     }
 
     private int getTicksBetweenBurstShots() {
