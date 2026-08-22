@@ -1,6 +1,7 @@
 {
   "replace": false,
   "values": [
+    "#minecraft:leaves",
     "#forge:glass/colorless",
     "#forge:glass_panes",
     "minecraft:glass",

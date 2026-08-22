@@ -26,6 +26,7 @@ import java.util.WeakHashMap;
 public final class VisibilityRay {
     private static final double EPSILON = 1.0e-7;
     private static final double MAX_CONCEALMENT = 1.0;
+    private static final double LEAF_CONCEALMENT = 0.75;
 
     private static boolean smokeTypeResolved;
     private static EntityType<?> smokeEmitterType;
@@ -147,7 +148,13 @@ public final class VisibilityRay {
             BlockPos pos = new BlockPos(x, y, z);
             if (visited.add(pos)) {
                 BlockState state = level.getBlockState(pos);
-                if (ignoredBlocks.contains(pos) || isTransparent(state)) {
+                if (ignoredBlocks.contains(pos)) {
+                    // Cover-peek callers explicitly ignore the cover block.
+                } else if (isLeaf(state)) {
+                    if (outlineIntersectsRay(level, state, pos, from, to)) {
+                        concealment = Math.min(MAX_CONCEALMENT, concealment + LEAF_CONCEALMENT);
+                    }
+                } else if (isTransparent(state)) {
                     // Cover-peek callers explicitly ignore the cover block. Glass is
                     // transparent both to the AI and to TaCZ through its block tag.
                 } else if (isConcealment(state)) {
@@ -274,6 +281,10 @@ public final class VisibilityRay {
 
     private static boolean isTransparent(BlockState state) {
         return state.is(ModBlockTags.TRANSPARENT_PENETRABLE);
+    }
+
+    private static boolean isLeaf(BlockState state) {
+        return state.is(net.minecraft.tags.BlockTags.LEAVES);
     }
 
     private static boolean isConcealment(BlockState state) {
