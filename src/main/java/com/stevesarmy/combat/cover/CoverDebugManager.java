@@ -230,14 +230,18 @@ public class CoverDebugManager {
         public final int coverChecked;
         public final int proneChecked;
         public final int rejectedAccess;
+        public final int activeTargetCount;
+        public final int lastSeenCount;
+        public final int peekTargetCount;
         public final List<Vec3> targets;
         public final List<FiringPositionDebugEntry> candidates;
         public final String failure;
 
         public MachineGunnerEvaluationDebugData(int entityId, BlockPos center, BlockPos anchor,
-                                                int targetCount, int coverTargetCount, boolean gridFallback,
-                                                int coverChecked, int proneChecked, int rejectedAccess,
-                                                List<Vec3> targets, List<FiringPositionDebugEntry> candidates,
+                                                 int targetCount, int coverTargetCount, boolean gridFallback,
+                                                 int coverChecked, int proneChecked, int rejectedAccess,
+                                                 int activeTargetCount, int lastSeenCount, int peekTargetCount,
+                                                 List<Vec3> targets, List<FiringPositionDebugEntry> candidates,
                                                 String failure) {
             this.entityId = entityId;
             this.center = center;
@@ -248,6 +252,9 @@ public class CoverDebugManager {
             this.coverChecked = coverChecked;
             this.proneChecked = proneChecked;
             this.rejectedAccess = rejectedAccess;
+            this.activeTargetCount = activeTargetCount;
+            this.lastSeenCount = lastSeenCount;
+            this.peekTargetCount = peekTargetCount;
             this.targets = targets != null ? targets : Collections.emptyList();
             this.candidates = candidates != null ? candidates : Collections.emptyList();
             this.failure = failure != null ? failure : "unknown";

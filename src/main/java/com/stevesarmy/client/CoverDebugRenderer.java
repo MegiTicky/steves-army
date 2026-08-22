@@ -1185,8 +1185,16 @@ private static void renderSoldierCoverLabels(PoseStack poseStack, Vec3 cameraPos
                 renderDebugLine(buffer, matrix, cameraPos, mg.getEyePosition(),
                     data.anchor.getCenter(), 0, 220, 255, 180);
             }
-            for (Vec3 target : data.targets) {
-                renderDebugCross(buffer, matrix, cameraPos, target, 255, 140, 0, 220, 0.16f);
+            for (int targetIndex = 0; targetIndex < data.targets.size(); targetIndex++) {
+                Vec3 target = data.targets.get(targetIndex);
+                int targetColor = targetIndex < data.activeTargetCount ? 255
+                    : targetIndex < data.activeTargetCount + data.lastSeenCount ? 0 : 255;
+                int targetGreen = targetIndex < data.activeTargetCount ? 40
+                    : targetIndex < data.activeTargetCount + data.lastSeenCount ? 180 : 140;
+                int targetBlue = targetIndex < data.activeTargetCount ? 40
+                    : targetIndex < data.activeTargetCount + data.lastSeenCount ? 255 : 0;
+                renderDebugCross(buffer, matrix, cameraPos, target,
+                    targetColor, targetGreen, targetBlue, 220, 0.16f);
             }
             boolean selectedRendered = false;
             for (CoverDebugManager.FiringPositionDebugEntry candidate : data.candidates) {
@@ -1233,9 +1241,10 @@ private static void renderSoldierCoverLabels(PoseStack poseStack, Vec3 cameraPos
                 mc.player.getBoundingBox().inflate(96))) {
             if (mg.getId() != data.entityId) continue;
             String title = "MG EVAL #" + data.entityId + " " + data.failure;
-            String summary = "targets=" + data.targetCount + " candidates=" + data.candidates.size()
-                + " accessReject=" + data.rejectedAccess;
-            String legend = "orange=targets cyan=anchor purple=unchecked red=blocked green=reachable yellow=selected";
+            String summary = "targets=" + data.targetCount + " active=" + data.activeTargetCount
+                + " last=" + data.lastSeenCount + " peeks=" + data.peekTargetCount
+                + " candidates=" + data.candidates.size() + " accessReject=" + data.rejectedAccess;
+            String legend = "red=active blue=last-seen orange=peek cyan=anchor purple=unchecked blocked=red reachable=green selected=yellow";
             poseStack.pushPose();
             poseStack.translate(mg.getX() - cameraPos.x + 0.5, mg.getY() - cameraPos.y + 3.0,
                 mg.getZ() - cameraPos.z + 0.5);

@@ -956,6 +956,9 @@ public class CombatDebugCommand {
 
         source.sendSuccess(() -> Component.literal(
             "Targets: total=" + report.suppressionTargetCount()
+                + " | active=" + report.activeTargetCount()
+                + " | lastSeen=" + report.lastSeenCount()
+                + " | peeks=" + report.peekTargetCount()
                 + " | cover=" + report.coverTargetCount()
                 + " | gridFallback=" + report.usedGridFallback()), false);
         source.sendSuccess(() -> Component.literal(
@@ -979,7 +982,11 @@ public class CombatDebugCommand {
         for (FiringPositionFinder.CandidateDiagnostic check : report.pathChecks()) {
             source.sendSuccess(() -> Component.literal(
                 "  Path #" + check.rank() + " " + formatPos(check.position().destination())
-                    + " | exists=" + check.pathExists() + " | canReach=" + check.canReach()), false);
+                    + " | exists=" + check.pathExists() + " | canReach=" + check.canReach()
+                    + " | access=" + String.format("%.2f", check.access().access())
+                    + " | active=" + String.format("%.0f%%", check.access().activeCoverage() * 100)
+                    + " | lastSeen=" + String.format("%.0f%%", check.access().lastSeenCoverage() * 100)
+                    + " | peeks=" + String.format("%.0f%%", check.access().peekCoverage() * 100)), false);
         }
 
         source.sendSuccess(() -> Component.literal("Result: " + (report.selected() != null
