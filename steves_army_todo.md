@@ -47,15 +47,15 @@
 - [x] Friendly fire prevention (raycast check before shooting)
 - [Canceled] Recoil simulation (aim drift per weapon, recovery time scales with recoil)
 - [x] Stabilized prone firing for high-recoil weapons (terrain/LOS checked, delayed and cooldown-limited)
-- [ ] Enemy fire awareness->alert(increase detection) when hearing/seeing enemy fire
+- [x] Enemy fire awareness->alert(increase detection) when hearing/seeing enemy fire
 - [ ] Fireteam suppression level. A fireteam level
   - [ ] Stop peek if fireteam pinned (When peeking just lead to loses and no result, just hide and ask for further instruction [notice player])
-- [ ] Recoverable Fire-Superiority System
-- [ ] Fix random rotation in cover problem
+- [x] Recoverable Fire-Superiority System
+- [x] Fix random rotation in cover problem
 - [ ] Variable aim quality threshold. More variety. And 2 different mode, normal and suppressive fire (suppressive fire threshold would be very low, for suppressive fire in direct engagement senario)
 - [x] Is the soldier not canceling suppressive fire when active target is visible?
 - [ ] Soldier not finishing downed target, should be able to finish downed player just like enemy soldier
-- [ ] They are picking up things on the ground and replace their main hand gun. And in the middle of battle, somehow everyone decide to throw their gun away and pick up knife
+- [x] They are picking up things on the ground and replace their main hand gun. And in the middle of battle, somehow everyone decide to throw their gun away and pick up knife
 
 ## Cover System
 - [x] Cover detection (HALF / FULL classification)
