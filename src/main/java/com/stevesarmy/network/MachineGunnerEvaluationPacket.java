@@ -30,8 +30,10 @@ public class MachineGunnerEvaluationPacket {
     private final int activeTargetCount;
     private final int lastSeenCount;
     private final int peekTargetCount;
+    private final int rejectedProtection;
     private final List<Target> targets;
     private final List<Candidate> candidates;
+    private final List<Protection> protectionCandidates;
     private final String failure;
 
     public record Candidate(BlockPos position, int rank, int posture, float access,
@@ -39,12 +41,15 @@ public class MachineGunnerEvaluationPacket {
                             boolean pathExists, boolean canReach) {}
 
     public record Target(Vec3 position, int category, float weight, float freshness) {}
+    public record Protection(BlockPos position, int posture, float protection,
+                             boolean directionallyProtected) {}
 
     public MachineGunnerEvaluationPacket(int entityId, BlockPos center, BlockPos anchor,
                                          int targetCount, int coverTargetCount, boolean gridFallback,
                                          int coverChecked, int proneChecked, int rejectedAccess,
                                          int activeTargetCount, int lastSeenCount, int peekTargetCount,
-                                         List<Target> targets, List<Candidate> candidates, String failure) {
+                                         int rejectedProtection, List<Target> targets, List<Candidate> candidates,
+                                         List<Protection> protectionCandidates, String failure) {
         this.entityId = entityId;
         this.center = center;
         this.anchor = anchor;
@@ -57,8 +62,10 @@ public class MachineGunnerEvaluationPacket {
         this.activeTargetCount = activeTargetCount;
         this.lastSeenCount = lastSeenCount;
         this.peekTargetCount = peekTargetCount;
+        this.rejectedProtection = rejectedProtection;
         this.targets = targets != null ? List.copyOf(targets) : List.of();
         this.candidates = candidates != null ? List.copyOf(candidates) : List.of();
+        this.protectionCandidates = protectionCandidates != null ? List.copyOf(protectionCandidates) : List.of();
         this.failure = failure != null ? failure : "unknown";
     }
 
@@ -75,6 +82,7 @@ public class MachineGunnerEvaluationPacket {
         activeTargetCount = buf.readVarInt();
         lastSeenCount = buf.readVarInt();
         peekTargetCount = buf.readVarInt();
+        rejectedProtection = buf.readVarInt();
         int targetSize = buf.readVarInt();
         targets = new ArrayList<>();
         for (int i = 0; i < targetSize; i++) {
@@ -87,6 +95,12 @@ public class MachineGunnerEvaluationPacket {
             candidates.add(new Candidate(buf.readBlockPos(), buf.readVarInt(), buf.readVarInt(),
                 buf.readFloat(), buf.readFloat(), buf.readFloat(), buf.readBoolean(),
                 buf.readBoolean(), buf.readBoolean()));
+        }
+        int protectionSize = buf.readVarInt();
+        protectionCandidates = new ArrayList<>();
+        for (int i = 0; i < protectionSize; i++) {
+            protectionCandidates.add(new Protection(buf.readBlockPos(), buf.readVarInt(),
+                buf.readFloat(), buf.readBoolean()));
         }
         failure = buf.readUtf(128);
     }
@@ -112,11 +126,15 @@ public class MachineGunnerEvaluationPacket {
             .map(target -> new Target(target.position(), target.category().ordinal(),
                 target.weight(), target.freshness()))
             .toList();
+        List<Protection> protection = report.protectionDiagnostics().stream()
+            .map(entry -> new Protection(entry.position(), entry.posture().ordinal() + 1,
+                entry.protection(), entry.directionallyProtected()))
+            .toList();
         return new MachineGunnerEvaluationPacket(entityId, center, anchor,
             report.suppressionTargetCount(), report.coverTargetCount(), report.usedGridFallback(),
             report.coverPositionsChecked(), report.pronePositionsChecked(), report.rejectedForAccess(),
-            report.activeTargetCount(), report.lastSeenCount(), report.peekTargetCount(), targets,
-            candidates, failure);
+            report.activeTargetCount(), report.lastSeenCount(), report.peekTargetCount(),
+            report.rejectedForProtection(), targets, candidates, protection, failure);
     }
 
     public static void encode(MachineGunnerEvaluationPacket packet, FriendlyByteBuf buf) {
@@ -132,6 +150,7 @@ public class MachineGunnerEvaluationPacket {
         buf.writeVarInt(packet.activeTargetCount);
         buf.writeVarInt(packet.lastSeenCount);
         buf.writeVarInt(packet.peekTargetCount);
+        buf.writeVarInt(packet.rejectedProtection);
         buf.writeVarInt(packet.targets.size());
         for (Target target : packet.targets) {
             buf.writeDouble(target.position().x);
@@ -153,6 +172,13 @@ public class MachineGunnerEvaluationPacket {
             buf.writeBoolean(candidate.pathExists());
             buf.writeBoolean(candidate.canReach());
         }
+        buf.writeVarInt(packet.protectionCandidates.size());
+        for (Protection protection : packet.protectionCandidates) {
+            buf.writeBlockPos(protection.position());
+            buf.writeVarInt(protection.posture());
+            buf.writeFloat(protection.protection());
+            buf.writeBoolean(protection.directionallyProtected());
+        }
         buf.writeUtf(packet.failure, 128);
     }
 
@@ -161,13 +187,17 @@ public class MachineGunnerEvaluationPacket {
             CoverDebugManager.setMachineGunnerEvaluation(new CoverDebugManager.MachineGunnerEvaluationDebugData(
                 packet.entityId, packet.center, packet.anchor, packet.targetCount, packet.coverTargetCount,
                  packet.gridFallback, packet.coverChecked, packet.proneChecked, packet.rejectedAccess,
-                 packet.activeTargetCount, packet.lastSeenCount, packet.peekTargetCount,
+                 packet.activeTargetCount, packet.lastSeenCount, packet.peekTargetCount, packet.rejectedProtection,
                  packet.targets.stream().map(target -> new CoverDebugManager.MachineGunnerEvaluationDebugData.TargetDebugEntry(
                      target.position(), target.category())).toList(), packet.candidates.stream().map(candidate ->
                      new CoverDebugManager.FiringPositionDebugEntry(candidate.position(), candidate.rank(),
                         candidate.posture(), candidate.access(), candidate.protection(), candidate.score(),
-                        candidate.pathChecked(), candidate.pathExists(), candidate.canReach())).toList(),
-                packet.failure))
+                         candidate.pathChecked(), candidate.pathExists(), candidate.canReach())).toList(),
+                 packet.protectionCandidates.stream().map(protection ->
+                     new CoverDebugManager.MachineGunnerEvaluationDebugData.ProtectionDebugEntry(
+                         protection.position(), protection.posture(), protection.protection(),
+                         protection.directionallyProtected())).toList(),
+                 packet.failure))
         ));
         ctx.get().setPacketHandled(true);
     }

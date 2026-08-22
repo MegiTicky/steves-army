@@ -56,9 +56,9 @@ public final class FiringPositionFinder {
     private static final int TARGET_GRID_STEP = 3;
 
     private static final double FIRING_WEIGHT = 0.60;
-    private static final double PROTECTION_WEIGHT = 0.20;
+    private static final double PROTECTION_WEIGHT = 0.30;
     private static final double POSTURE_WEIGHT = 0.10;
-    private static final double PROXIMITY_WEIGHT = 0.10;
+    private static final double PROXIMITY_WEIGHT = 0.05;
     private static final float COVER_POSTURE_BONUS = 1.0f;
     private static final float OPEN_PRONE_POSTURE_BONUS = 0.8f;
     private static final float ACTIVE_TARGET_WEIGHT = 1.0f;
@@ -67,6 +67,8 @@ public final class FiringPositionFinder {
     private static final float GRID_FALLBACK_WEIGHT = 0.10f;
     private static final float MIN_MEANINGFUL_ACCESS = 0.20f;
     private static final float MIN_PEEK_COVERAGE = 0.35f;
+    public static final float MIN_COVER_PROTECTION = 0.45f;
+    private static final float OPEN_PRONE_PROTECTION = 0.45f;
 
     private FiringPositionFinder() {}
 
@@ -90,24 +92,31 @@ public final class FiringPositionFinder {
                                       boolean pathExists, boolean canReach,
                                       AccessDiagnostic access) {}
 
+    /** Protection data for accepted and rejected candidate geometry. */
+    public record ProtectionDiagnostic(BlockPos position, FiringPosition.FiringPosture posture,
+                                       float protection, boolean directionallyProtected) {}
+
     public record EvaluationReport(int suppressionTargetCount, int coverTargetCount,
                                    boolean usedGridFallback, int coverPositionsChecked,
                                    int pronePositionsChecked, int rejectedForAccess,
-                                   List<TargetSample> suppressionTargets,
-                                   int activeTargetCount, int lastSeenCount, int peekTargetCount,
-                                   List<FiringPosition> candidates,
-                                   List<CandidateDiagnostic> pathChecks,
-                                   FiringPosition selected) {}
+                                    List<TargetSample> suppressionTargets,
+                                    int activeTargetCount, int lastSeenCount, int peekTargetCount,
+                                    int rejectedForProtection,
+                                    List<FiringPosition> candidates,
+                                    List<CandidateDiagnostic> pathChecks,
+                                    List<ProtectionDiagnostic> protectionDiagnostics,
+                                    FiringPosition selected) {}
 
     private record TargetGeneration(List<TargetSample> targets, int coverTargetCount,
                                     boolean usedGridFallback, int activeTargetCount,
                                     int lastSeenCount, int peekTargetCount) {}
 
     private record CandidateCollection(List<FiringPosition> positions, int positionsChecked,
-                                       int rejectedForAccess) {}
+                                       int rejectedForAccess, int rejectedForProtection,
+                                       List<ProtectionDiagnostic> protectionDiagnostics) {}
 
     private record CandidateGeometry(BlockPos position, FiringPosition.FiringPosture posture,
-                                     float protection) {}
+                                     float protection, boolean directionallyProtected) {}
 
     private record CoarseCandidate(CandidateGeometry geometry, float access) {}
 
@@ -136,8 +145,8 @@ public final class FiringPositionFinder {
             return new EvaluationReport(0, targetGeneration.coverTargetCount(),
                 targetGeneration.usedGridFallback(), 0, 0, 0, targets,
                 targetGeneration.activeTargetCount(), targetGeneration.lastSeenCount(),
-                targetGeneration.peekTargetCount(),
-                List.of(), List.of(), null);
+                targetGeneration.peekTargetCount(), 0,
+                List.of(), List.of(), List.of(), null);
         }
 
         CandidateCollection coverCandidates = collectCoverCandidates(
@@ -153,7 +162,9 @@ public final class FiringPositionFinder {
                 proneCandidates.positionsChecked(), coverCandidates.rejectedForAccess()
                     + proneCandidates.rejectedForAccess(), targets,
                 targetGeneration.activeTargetCount(), targetGeneration.lastSeenCount(),
-                targetGeneration.peekTargetCount(), List.of(), List.of(), null);
+                targetGeneration.peekTargetCount(), coverCandidates.rejectedForProtection()
+                    + proneCandidates.rejectedForProtection(), List.of(), List.of(),
+                mergeProtectionDiagnostics(coverCandidates, proneCandidates), null);
         }
 
         candidates.sort((a, b) -> Float.compare(b.score(), a.score()));
@@ -192,7 +203,9 @@ public final class FiringPositionFinder {
             proneCandidates.positionsChecked(), coverCandidates.rejectedForAccess()
             + proneCandidates.rejectedForAccess(), targets,
             targetGeneration.activeTargetCount(), targetGeneration.lastSeenCount(),
-            targetGeneration.peekTargetCount(), candidates, pathChecks, best);
+            targetGeneration.peekTargetCount(), coverCandidates.rejectedForProtection()
+            + proneCandidates.rejectedForProtection(), candidates, pathChecks,
+            mergeProtectionDiagnostics(coverCandidates, proneCandidates), best);
     }
 
     private static boolean isPathReachableForCandidate(Level level, CoverFinder finder,
@@ -210,7 +223,7 @@ public final class FiringPositionFinder {
 
     private static EvaluationReport emptyReport() {
         return new EvaluationReport(0, 0, false, 0, 0, 0,
-            List.of(), 0, 0, 0, List.of(), List.of(), null);
+            List.of(), 0, 0, 0, 0, List.of(), List.of(), List.of(), null);
     }
 
     /** Evaluates the firing access from an already selected destination. */
@@ -465,8 +478,9 @@ public final class FiringPositionFinder {
         for (CoverPoint cover : finder.findCoverPoints(anchor, SEARCH_RADIUS)) {
             positionsChecked++;
             BlockPos pos = cover.getPosition();
+            float protection = directionalCoverProtection(level, cover, targets);
             geometries.add(new CandidateGeometry(pos, FiringPosition.FiringPosture.COVER_PEEK,
-                protectionScore(level, cover)));
+                protection, protection >= MIN_COVER_PROTECTION));
         }
         return evaluateCandidateGeometries(level, mg, anchor, targets, geometries,
             positionsChecked);
@@ -489,9 +503,9 @@ public final class FiringPositionFinder {
                     continue;
                 }
                 positionsChecked++;
-                float protection = adjacentCover(level, pos) ? 0.15f : 0.0f;
+                float protection = OPEN_PRONE_PROTECTION + (adjacentCover(level, pos) ? 0.10f : 0.0f);
                 geometries.add(new CandidateGeometry(pos, FiringPosition.FiringPosture.OPEN_PRONE,
-                    protection));
+                    protection, false));
             }
         }
         return evaluateCandidateGeometries(level, mg, anchor, targets, geometries,
@@ -504,7 +518,7 @@ public final class FiringPositionFinder {
                                                                     List<CandidateGeometry> geometries,
                                                                     int positionsChecked) {
         if (geometries.isEmpty()) {
-            return new CandidateCollection(List.of(), positionsChecked, 0);
+            return new CandidateCollection(List.of(), positionsChecked, 0, 0, List.of());
         }
         List<TargetSample> coarseTargets = selectCoarseTargets(targets);
         List<CoarseCandidate> coarseCandidates = new ArrayList<>(geometries.size());
@@ -516,9 +530,20 @@ public final class FiringPositionFinder {
         coarseCandidates.sort(Comparator.comparingDouble(CoarseCandidate::access).reversed());
 
         List<FiringPosition> out = new ArrayList<>();
+        List<ProtectionDiagnostic> protectionDiagnostics = new ArrayList<>();
+        int rejectedForProtection = 0;
         int fullChecks = Math.min(MAX_FULL_ACCESS_CANDIDATES, coarseCandidates.size());
         for (int i = 0; i < fullChecks; i++) {
             CandidateGeometry geometry = coarseCandidates.get(i).geometry();
+            if (protectionDiagnostics.size() < MAX_PATH_CHECK_CANDIDATES * 2) {
+                protectionDiagnostics.add(new ProtectionDiagnostic(geometry.position(), geometry.posture(),
+                    geometry.protection(), geometry.directionallyProtected()));
+            }
+            if (geometry.posture() == FiringPosition.FiringPosture.COVER_PEEK
+                && !geometry.directionallyProtected()) {
+                rejectedForProtection++;
+                continue;
+            }
             AccessDiagnostic access = evaluateAccess(level,
                 candidateEye(geometry.position(), geometry.posture()), targets, mg);
             if (access.access() < MIN_FIRING_ACCESS || !access.meaningful()) {
@@ -531,7 +556,16 @@ public final class FiringPositionFinder {
                     geometry.position(), anchor)));
         }
         return new CandidateCollection(out, positionsChecked,
-            fullChecks - out.size());
+            fullChecks - out.size() - rejectedForProtection, rejectedForProtection,
+            protectionDiagnostics);
+    }
+
+    private static List<ProtectionDiagnostic> mergeProtectionDiagnostics(CandidateCollection... collections) {
+        List<ProtectionDiagnostic> merged = new ArrayList<>();
+        for (CandidateCollection collection : collections) {
+            merged.addAll(collection.protectionDiagnostics());
+        }
+        return merged;
     }
 
     private static List<TargetSample> selectCoarseTargets(List<TargetSample> targets) {
@@ -569,22 +603,24 @@ public final class FiringPositionFinder {
         float peekVisibleWeight = 0.0f;
         float peekWeight = 0.0f;
         for (TargetSample target : targets) {
-            boolean visible = VisibilityRay.traceIgnoringSmoke(level, eye, target.position(), observer).hasContact();
+            VisibilityRay.Result visibility = VisibilityRay.traceIgnoringSmoke(
+                level, eye, target.position(), observer);
+            float laneQuality = (float) visibility.firingLaneQuality();
             switch (target.category()) {
                 case ACTIVE_TARGET -> {
                     activeWeight += target.weight();
-                    if (visible) activeVisibleWeight += target.weight();
-                    if (visible) active++;
+                    activeVisibleWeight += target.weight() * laneQuality;
+                    if (visibility.hasContact()) active++;
                 }
                 case LAST_SEEN -> {
                     lastSeenWeight += target.weight();
-                    if (visible) lastSeenVisibleWeight += target.weight();
-                    if (visible) lastSeen++;
+                    lastSeenVisibleWeight += target.weight() * laneQuality;
+                    if (visibility.hasContact()) lastSeen++;
                 }
                 case POTENTIAL_PEEK, GRID_FALLBACK -> {
                     peekWeight += target.weight();
-                    if (visible) peekVisibleWeight += target.weight();
-                    if (visible) peek++;
+                    peekVisibleWeight += target.weight() * laneQuality;
+                    if (visibility.hasContact()) peek++;
                 }
             }
         }
@@ -674,6 +710,37 @@ public final class FiringPositionFinder {
             return 0.25f;
         }
         return adjacentCover(level, cover.getPosition()) ? 0.15f : 0.0f;
+    }
+
+    /**
+     * Measures physical protection against the actual suppression samples. A
+     * cover block only protects when its enemy-facing side blocks the incoming
+     * direction; cover on the opposite side is not useful to the MG.
+     */
+    private static float directionalCoverProtection(Level level, CoverPoint cover,
+                                                     List<TargetSample> targets) {
+        if (targets.isEmpty()) {
+            return 0.0f;
+        }
+        CoverQualityEvaluator evaluator = new CoverQualityEvaluator(level);
+        float totalWeight = 0.0f;
+        float protectedWeight = 0.0f;
+        for (TargetSample target : targets) {
+            if (target.category() != TargetCategory.ACTIVE_TARGET
+                && target.category() != TargetCategory.LAST_SEEN) {
+                continue;
+            }
+            Vec3 direction = target.position().subtract(cover.getPosition().getCenter());
+            if (direction.horizontalDistanceSqr() < 0.001) {
+                continue;
+            }
+            float weight = Math.max(0.01f, target.weight());
+            totalWeight += weight;
+            if (evaluator.isDirectionProtected(cover, direction)) {
+                protectedWeight += weight;
+            }
+        }
+        return totalWeight > 0.0f ? protectedWeight / totalWeight : 0.0f;
     }
 
     private static float proximityScore(BlockPos pos, BlockPos anchor) {

@@ -163,6 +163,8 @@ public class CombatDebugCommand {
                     .executes(CombatDebugCommand::toggleSoldierVisualization))
                 .then(Commands.literal("mg")
                     .executes(CombatDebugCommand::toggleMachineGunnerVisualization))
+                .then(Commands.literal("mgprotection")
+                    .executes(CombatDebugCommand::toggleMachineGunnerProtectionVisualization))
                 .then(Commands.literal("peekcandidates")
                     .executes(CombatDebugCommand::togglePeekCandidates))
                 .then(Commands.literal("rays")
@@ -281,6 +283,7 @@ public class CombatDebugCommand {
             "  log holerescue [on|off] - Toggle hole rescue diagnostic logging\n" +
              "  render soldiers     - Toggle soldier cover visualization lines/labels\n" +
              "  render mg           - Toggle machine gunner firing-position visualization\n" +
+             "  render mgprotection - Toggle MG firing-position protection visualization\n" +
             "  render peekcandidates - Toggle peek candidate boxes/LOS rays\n" +
             "  render rays         - Toggle cover raycast visualization\n" +
             "  render solid        - Toggle solid block visualization\n" +
@@ -550,6 +553,17 @@ public class CombatDebugCommand {
         CoverDebugManager.setVisualizationEnabled(true);
         context.getSource().sendSuccess(() -> Component.literal(
             "Machine gunner firing-position visualization: " + (enabled ? "ON" : "OFF")
+        ), true);
+        return 1;
+    }
+
+    private static int toggleMachineGunnerProtectionVisualization(CommandContext<CommandSourceStack> context) {
+        boolean enabled = !CoverDebugManager.isShowMachineGunnerProtection();
+        CoverDebugManager.setShowMachineGunnerProtection(enabled);
+        CoverDebugManager.setShowMachineGunners(true);
+        CoverDebugManager.setVisualizationEnabled(true);
+        context.getSource().sendSuccess(() -> Component.literal(
+            "Machine gunner protection visualization: " + (enabled ? "ON" : "OFF")
         ), true);
         return 1;
     }
@@ -989,7 +1003,8 @@ public class CombatDebugCommand {
             "Candidates: coverChecked=" + report.coverPositionsChecked()
                 + " | proneChecked=" + report.pronePositionsChecked()
                 + " | accepted=" + report.candidates().size()
-                + " | rejectedAccess=" + report.rejectedForAccess()), false);
+                + " | rejectedAccess=" + report.rejectedForAccess()
+                + " | rejectedProtection=" + report.rejectedForProtection()), false);
 
         int topCount = Math.min(5, report.candidates().size());
         for (int i = 0; i < topCount; i++) {
@@ -1463,6 +1478,7 @@ public class CombatDebugCommand {
             "  Combat overlay: " + CombatDebugRenderer.getDebugModeName() + "\n" +
              "  Soldier viz: " + (CoverDebugManager.isShowSoldierCover() ? "ON" : "OFF") + "\n" +
              "  Machine gunner viz: " + (CoverDebugManager.isShowMachineGunners() ? "ON" : "OFF") + "\n" +
+             "  MG protection viz: " + (CoverDebugManager.isShowMachineGunnerProtection() ? "ON" : "OFF") + "\n" +
             "  Peek candidates: " + (CoverDebugManager.isShowPeekCandidates() ? "ON" : "OFF") + "\n" +
             "  Cover points: " + (CoverDebugManager.isVisualizationEnabled() ? "ON" : "OFF") + "\n" +
             "  Rays: " + (CoverDebugManager.isShowRays() ? "ON" : "OFF") + "\n" +

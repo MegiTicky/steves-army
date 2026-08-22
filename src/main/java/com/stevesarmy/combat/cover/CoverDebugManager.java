@@ -19,6 +19,7 @@ public class CoverDebugManager {
     private static boolean showSoldierCover = false;
     private static boolean showPeekCandidates = false;
     private static boolean showMachineGunners = false;
+    private static boolean showMachineGunnerProtection = false;
     private static MachineGunnerEvaluationDebugData machineGunnerEvaluation = null;
     private static boolean showSearchCenter = false;
     private static BlockPos searchCenterPos = null;
@@ -166,6 +167,14 @@ public class CoverDebugManager {
         return showMachineGunners;
     }
 
+    public static void setShowMachineGunnerProtection(boolean enabled) {
+        showMachineGunnerProtection = enabled;
+    }
+
+    public static boolean isShowMachineGunnerProtection() {
+        return showMachineGunnerProtection;
+    }
+
     public static void setMachineGunnerEvaluation(MachineGunnerEvaluationDebugData data) {
         machineGunnerEvaluation = data;
         visualizationEnabled = data != null;
@@ -213,6 +222,7 @@ public class CoverDebugManager {
         showSoldierCover = false;
         showPeekCandidates = false;
         showMachineGunners = false;
+        showMachineGunnerProtection = false;
         machineGunnerEvaluation = null;
         showSearchCenter = false;
         searchCenterPos = null;
@@ -233,19 +243,25 @@ public class CoverDebugManager {
         public final int activeTargetCount;
         public final int lastSeenCount;
         public final int peekTargetCount;
+        public final int rejectedProtection;
         public final List<TargetDebugEntry> targets;
         public final List<FiringPositionDebugEntry> candidates;
+        public final List<ProtectionDebugEntry> protectionCandidates;
         public final String failure;
 
         public record TargetDebugEntry(Vec3 position, int category) {}
+        public record ProtectionDebugEntry(BlockPos position, int posture, float protection,
+                                           boolean directionallyProtected) {}
 
         public MachineGunnerEvaluationDebugData(int entityId, BlockPos center, BlockPos anchor,
                                                  int targetCount, int coverTargetCount, boolean gridFallback,
                                                  int coverChecked, int proneChecked, int rejectedAccess,
-                                                 int activeTargetCount, int lastSeenCount, int peekTargetCount,
-                                                 List<TargetDebugEntry> targets,
-                                                 List<FiringPositionDebugEntry> candidates,
-                                                 String failure) {
+                                                  int activeTargetCount, int lastSeenCount, int peekTargetCount,
+                                                  int rejectedProtection,
+                                                  List<TargetDebugEntry> targets,
+                                                  List<FiringPositionDebugEntry> candidates,
+                                                  List<ProtectionDebugEntry> protectionCandidates,
+                                                  String failure) {
             this.entityId = entityId;
             this.center = center;
             this.anchor = anchor;
@@ -258,8 +274,10 @@ public class CoverDebugManager {
             this.activeTargetCount = activeTargetCount;
             this.lastSeenCount = lastSeenCount;
             this.peekTargetCount = peekTargetCount;
+            this.rejectedProtection = rejectedProtection;
             this.targets = targets != null ? targets : Collections.emptyList();
             this.candidates = candidates != null ? candidates : Collections.emptyList();
+            this.protectionCandidates = protectionCandidates != null ? protectionCandidates : Collections.emptyList();
             this.failure = failure != null ? failure : "unknown";
         }
     }

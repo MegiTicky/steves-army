@@ -186,6 +186,9 @@ public class SoldierCombatGoal extends Goal {
 
     private int getBurstTarget() {
         if (GunIntegration.isMachineGun(soldier)) {
+            if (soldier instanceof MachineGunnerEntity) {
+                return MACHINE_GUNNER_SUPPRESSIVE_BURST_SHOTS;
+            }
             return soldier.getFireDiscipline() == FireDiscipline.SUPPRESSIVE
                 ? MACHINE_GUN_SUPPRESSIVE_BURST_SHOTS : MACHINE_GUN_STANDARD_BURST_SHOTS;
         }
@@ -197,6 +200,7 @@ public class SoldierCombatGoal extends Goal {
     private static final int SUPPRESSIVE_BURST_SHOTS = 6;
     private static final int MACHINE_GUN_STANDARD_BURST_SHOTS = 8;
     private static final int MACHINE_GUN_SUPPRESSIVE_BURST_SHOTS = 12;
+    private static final int MACHINE_GUNNER_SUPPRESSIVE_BURST_SHOTS = 15;
     private static final float BURST_INTERVAL_RIFLE_SECONDS = 0.8f;
     private static final float BURST_INTERVAL_MG_SECONDS = 0.35f;
     private int burstShotsFired = 0;
@@ -216,7 +220,8 @@ public class SoldierCombatGoal extends Goal {
         SINGLE_SHOT(1, 0),
         AUTO_RIFLE(4, 8),
         SMG(4, 7),
-        MACHINE_GUN(5, 10);
+        MACHINE_GUN(5, 10),
+        MACHINE_GUNNER(8, 5);
 
         final int burstShots;
         final int recoveryTicks;
@@ -232,7 +237,8 @@ public class SoldierCombatGoal extends Goal {
         RIFLE(4, 10),
         AUTO_RIFLE(6, 7),
         SMG(5, 7),
-        MACHINE_GUN(12, 4);
+        MACHINE_GUN(12, 4),
+        MACHINE_GUNNER(15, 2);
 
         final int burstShots;
         final int pauseTicks;
@@ -2593,11 +2599,17 @@ public class SoldierCombatGoal extends Goal {
     }
     
     private float getBurstIntervalSeconds() {
+        if (soldier instanceof MachineGunnerEntity && GunIntegration.isMachineGun(soldier)) {
+            return 0.15f;
+        }
         return GunIntegration.isMachineGun(soldier) ? BURST_INTERVAL_MG_SECONDS : BURST_INTERVAL_RIFLE_SECONDS;
     }
 
     private DirectFireWeaponProfile getDirectFireWeaponProfile() {
         if (GunIntegration.isManualBolt(soldier)) return DirectFireWeaponProfile.SINGLE_SHOT;
+        if (soldier instanceof MachineGunnerEntity && GunIntegration.isMachineGun(soldier)) {
+            return DirectFireWeaponProfile.MACHINE_GUNNER;
+        }
         if (GunIntegration.isSuppressiveMachineGun(soldier)) return DirectFireWeaponProfile.MACHINE_GUN;
 
         String tabType = GunIntegration.getGunTabType(soldier);
@@ -2609,6 +2621,9 @@ public class SoldierCombatGoal extends Goal {
     }
 
     private float getDirectBurstContinuationThreshold(float startThreshold) {
+        if (soldier instanceof MachineGunnerEntity && GunIntegration.isMachineGun(soldier)) {
+            return Math.max(0.08f, startThreshold * 0.30f);
+        }
         float scale = switch (soldier.getFireDiscipline()) {
             case CONSERVE -> 0.70f;
             case SUPPRESSIVE -> 0.40f;
@@ -2861,6 +2876,9 @@ public class SoldierCombatGoal extends Goal {
 
     private SuppressionWeaponProfile getSuppressionWeaponProfile() {
         if (GunIntegration.isManualBolt(soldier)) return SuppressionWeaponProfile.BOLT;
+        if (soldier instanceof MachineGunnerEntity && GunIntegration.isMachineGun(soldier)) {
+            return SuppressionWeaponProfile.MACHINE_GUNNER;
+        }
         if (GunIntegration.isSuppressiveMachineGun(soldier)) return SuppressionWeaponProfile.MACHINE_GUN;
 
         String tabType = GunIntegration.getGunTabType(soldier);
