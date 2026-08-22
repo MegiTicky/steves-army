@@ -46,13 +46,29 @@ Diagnostic command planned:
 
 ### 3. Suppression Exposure Targets
 
-Verify that the suppression center produces exposure samples. Report whether the
-samples came from nearby cover or the grid fallback and the total sample count.
-An empty sample set makes every candidate fail firing-access evaluation.
+Verify that the firing evaluator builds a threat context instead of treating one
+suppression-center position as the only enemy. The context is made from typed,
+deduplicated samples in four categories:
+
+- `ACTIVE_TARGET`: representative points on the current live target.
+- `LAST_SEEN`: squad threat-intel aim points and last-known positions, reduced by
+  contact freshness.
+- `POTENTIAL_PEEK`: likely exposure points around the suppression center and known
+  threat positions.
+- `GRID_FALLBACK`: deterministic area samples used only when no cover openings are
+  available.
+
+Each category has a separate normalized visibility ratio. The final firing-access
+score weights active target visibility highest, last-seen visibility next, and
+potential peek visibility lowest. A position cannot pass merely by seeing one weak
+peek sample: it must see a meaningful active/last-seen sample or a minimum fraction
+of the potential-peek set.
 
 Primary code:
 
 - `FiringPositionFinder.generateSuppressionTargets()`
+- `SquadThreatIntel.ThreatKnowledge`
+- `ExposureCalculator` target-point conventions
 
 Diagnostic command planned:
 
@@ -71,6 +87,10 @@ Primary code:
 - `FiringPositionFinder.collectCoverCandidates()`
 - `FiringPositionFinder.collectOpenProneCandidates()`
 - `FiringPositionFinder.computeFiringAccess()`
+
+Candidate evaluation must reuse the same target context for cover and open-prone
+positions. Full target-ray scoring is bounded and uses the visibility cache; target
+and candidate caps are intentional performance controls.
 
 Diagnostic command planned:
 
@@ -152,14 +172,18 @@ Diagnostic command planned:
 - Keep expensive full scans command-driven; do not add per-tick logging for every
   candidate.
 - Use the exact production thresholds and path-check limit in diagnostics.
+- Do not add one raycast per arbitrary world position without a fixed sample cap.
+- Keep active-target, last-seen, and potential-peek coverage visible in diagnostics so
+  a position behind a building cannot appear valid because of one synthetic point.
 
 ## Current Deliverable
 
 Implement `mg evaluate` first. It exposes objective context, support anchor,
-suppression target count, candidate counts, top candidates, and the production
-top-ranked path selection result. The command sends a one-shot world overlay to the
-commanding player: orange crosses are suppression targets, cyan is the support
-anchor, purple boxes are candidates not path-checked, red boxes are unreachable,
-green boxes are reachable alternatives, and yellow is the selected candidate.
-The output is intended to determine whether the next investigation should focus on
-target generation, firing raycasts, pathfinding, or movement handoff.
+typed target counts, category coverage, candidate counts, top candidates, and the
+production top-ranked path selection result. The command sends a one-shot world
+overlay to the commanding player: active-target, last-seen, and potential-peek
+samples use separate colors; cyan is the support anchor; purple boxes are
+candidates not path-checked; red boxes are unreachable; green boxes are reachable
+alternatives; and yellow is the selected candidate. The output is intended to
+determine whether the next investigation should focus on target generation,
+weighted visibility, pathfinding, or movement handoff.
