@@ -153,6 +153,22 @@ public class SoldierEntity extends PathfinderMob implements Container {
 
     private static final EntityDataAccessor<Integer> RECALL_TICKS =
         SynchedEntityData.defineId(SoldierEntity.class, EntityDataSerializers.INT);
+    private static final EntityDataAccessor<BlockPos> MG_DEBUG_POSITION =
+        SynchedEntityData.defineId(SoldierEntity.class, EntityDataSerializers.BLOCK_POS);
+    private static final EntityDataAccessor<BlockPos> MG_DEBUG_CENTER =
+        SynchedEntityData.defineId(SoldierEntity.class, EntityDataSerializers.BLOCK_POS);
+    private static final EntityDataAccessor<Float> MG_DEBUG_ACCESS =
+        SynchedEntityData.defineId(SoldierEntity.class, EntityDataSerializers.FLOAT);
+    private static final EntityDataAccessor<Integer> MG_DEBUG_POSTURE =
+        SynchedEntityData.defineId(SoldierEntity.class, EntityDataSerializers.INT);
+    private static final EntityDataAccessor<Boolean> MG_DEBUG_ACTIVE =
+        SynchedEntityData.defineId(SoldierEntity.class, EntityDataSerializers.BOOLEAN);
+    private static final EntityDataAccessor<Boolean> MG_DEBUG_SUPPRESSED =
+        SynchedEntityData.defineId(SoldierEntity.class, EntityDataSerializers.BOOLEAN);
+    private static final EntityDataAccessor<BlockPos> MG_DEBUG_MOVEMENT_POSITION =
+        SynchedEntityData.defineId(SoldierEntity.class, EntityDataSerializers.BLOCK_POS);
+    private static final EntityDataAccessor<Boolean> MG_DEBUG_FALLBACK =
+        SynchedEntityData.defineId(SoldierEntity.class, EntityDataSerializers.BOOLEAN);
 
     private static final int HALF_COVER_RISE_TICKS = 8;
     private static final int NAVIGATION_LANDING_LOCK_TICKS = 4;
@@ -372,6 +388,14 @@ public class SoldierEntity extends PathfinderMob implements Container {
         this.entityData.define(FIRE_DISCIPLINE, FireDiscipline.STANDARD.ordinal());
         this.entityData.define(FIRE_TEAM, FireTeam.ALPHA.ordinal());
         this.entityData.define(RECALL_TICKS, 0);
+        this.entityData.define(MG_DEBUG_POSITION, BlockPos.ZERO);
+        this.entityData.define(MG_DEBUG_CENTER, BlockPos.ZERO);
+        this.entityData.define(MG_DEBUG_ACCESS, 0.0f);
+        this.entityData.define(MG_DEBUG_POSTURE, 0);
+        this.entityData.define(MG_DEBUG_ACTIVE, false);
+        this.entityData.define(MG_DEBUG_SUPPRESSED, false);
+        this.entityData.define(MG_DEBUG_MOVEMENT_POSITION, BlockPos.ZERO);
+        this.entityData.define(MG_DEBUG_FALLBACK, false);
     }
 
     @Override
@@ -1342,6 +1366,30 @@ public BlockPos getPingMoveTarget() {
     public SoldierCombatGoal getCombatGoal() {
         return combatGoal;
     }
+
+    public void syncMachineGunnerDebug(BlockPos position, BlockPos movementPosition, BlockPos center,
+                                       float access, int posture, boolean active, boolean fallback,
+                                       boolean suppressed) {
+        if (level().isClientSide) return;
+        entityData.set(MG_DEBUG_POSITION, position != null ? position : BlockPos.ZERO);
+        entityData.set(MG_DEBUG_MOVEMENT_POSITION,
+            movementPosition != null ? movementPosition : BlockPos.ZERO);
+        entityData.set(MG_DEBUG_CENTER, center != null ? center : BlockPos.ZERO);
+        entityData.set(MG_DEBUG_ACCESS, access);
+        entityData.set(MG_DEBUG_POSTURE, posture);
+        entityData.set(MG_DEBUG_ACTIVE, active);
+        entityData.set(MG_DEBUG_FALLBACK, fallback);
+        entityData.set(MG_DEBUG_SUPPRESSED, suppressed);
+    }
+
+    public BlockPos getMachineGunnerDebugPosition() { return entityData.get(MG_DEBUG_POSITION); }
+    public BlockPos getMachineGunnerDebugMovementPosition() { return entityData.get(MG_DEBUG_MOVEMENT_POSITION); }
+    public BlockPos getMachineGunnerDebugCenter() { return entityData.get(MG_DEBUG_CENTER); }
+    public float getMachineGunnerDebugAccess() { return entityData.get(MG_DEBUG_ACCESS); }
+    public int getMachineGunnerDebugPosture() { return entityData.get(MG_DEBUG_POSTURE); }
+    public boolean isMachineGunnerDebugActive() { return entityData.get(MG_DEBUG_ACTIVE); }
+    public boolean isMachineGunnerDebugFallback() { return entityData.get(MG_DEBUG_FALLBACK); }
+    public boolean isMachineGunnerDebugSuppressed() { return entityData.get(MG_DEBUG_SUPPRESSED); }
 
     @Override
     public void onSyncedDataUpdated(EntityDataAccessor<?> accessor) {

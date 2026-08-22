@@ -18,6 +18,8 @@ public class CoverDebugManager {
     private static boolean showSolidBlocks = false;
     private static boolean showSoldierCover = false;
     private static boolean showPeekCandidates = false;
+    private static boolean showMachineGunners = false;
+    private static MachineGunnerEvaluationDebugData machineGunnerEvaluation = null;
     private static boolean showSearchCenter = false;
     private static BlockPos searchCenterPos = null;
     private static final Map<Integer, PeekCandidateDebugData> soldierPeekCandidates = new HashMap<>();
@@ -156,6 +158,23 @@ public class CoverDebugManager {
         return showPeekCandidates;
     }
 
+    public static void setShowMachineGunners(boolean enabled) {
+        showMachineGunners = enabled;
+    }
+
+    public static boolean isShowMachineGunners() {
+        return showMachineGunners;
+    }
+
+    public static void setMachineGunnerEvaluation(MachineGunnerEvaluationDebugData data) {
+        machineGunnerEvaluation = data;
+        visualizationEnabled = data != null;
+    }
+
+    public static MachineGunnerEvaluationDebugData getMachineGunnerEvaluation() {
+        return machineGunnerEvaluation;
+    }
+
     public static void setShowSearchCenter(boolean enabled) {
         showSearchCenter = enabled;
     }
@@ -193,10 +212,72 @@ public class CoverDebugManager {
         showSolidBlocks = false;
         showSoldierCover = false;
         showPeekCandidates = false;
+        showMachineGunners = false;
+        machineGunnerEvaluation = null;
         showSearchCenter = false;
         searchCenterPos = null;
         soldierPeekCandidates.clear();
         soldierTopCovers.clear();
+    }
+
+    public static class MachineGunnerEvaluationDebugData {
+        public final int entityId;
+        public final BlockPos center;
+        public final BlockPos anchor;
+        public final int targetCount;
+        public final int coverTargetCount;
+        public final boolean gridFallback;
+        public final int coverChecked;
+        public final int proneChecked;
+        public final int rejectedAccess;
+        public final List<Vec3> targets;
+        public final List<FiringPositionDebugEntry> candidates;
+        public final String failure;
+
+        public MachineGunnerEvaluationDebugData(int entityId, BlockPos center, BlockPos anchor,
+                                                int targetCount, int coverTargetCount, boolean gridFallback,
+                                                int coverChecked, int proneChecked, int rejectedAccess,
+                                                List<Vec3> targets, List<FiringPositionDebugEntry> candidates,
+                                                String failure) {
+            this.entityId = entityId;
+            this.center = center;
+            this.anchor = anchor;
+            this.targetCount = targetCount;
+            this.coverTargetCount = coverTargetCount;
+            this.gridFallback = gridFallback;
+            this.coverChecked = coverChecked;
+            this.proneChecked = proneChecked;
+            this.rejectedAccess = rejectedAccess;
+            this.targets = targets != null ? targets : Collections.emptyList();
+            this.candidates = candidates != null ? candidates : Collections.emptyList();
+            this.failure = failure != null ? failure : "unknown";
+        }
+    }
+
+    public static class FiringPositionDebugEntry {
+        public final BlockPos position;
+        public final int rank;
+        public final int posture;
+        public final float access;
+        public final float protection;
+        public final float score;
+        public final boolean pathChecked;
+        public final boolean pathExists;
+        public final boolean canReach;
+
+        public FiringPositionDebugEntry(BlockPos position, int rank, int posture, float access,
+                                       float protection, float score, boolean pathChecked,
+                                       boolean pathExists, boolean canReach) {
+            this.position = position;
+            this.rank = rank;
+            this.posture = posture;
+            this.access = access;
+            this.protection = protection;
+            this.score = score;
+            this.pathChecked = pathChecked;
+            this.pathExists = pathExists;
+            this.canReach = canReach;
+        }
     }
     
     public static class PeekCandidateDebugData {

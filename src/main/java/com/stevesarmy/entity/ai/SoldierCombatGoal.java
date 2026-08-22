@@ -21,6 +21,7 @@ import com.stevesarmy.combat.cover.CoverType;
 import com.stevesarmy.debug.DiagnosticLogManager;
 import com.stevesarmy.debug.PerformanceMetrics;
 import com.stevesarmy.entity.SoldierEntity;
+import com.stevesarmy.entity.MachineGunnerEntity;
 import com.stevesarmy.entity.EnemySoldierEntity;
 import com.stevesarmy.entity.TargetEntity;
 import com.stevesarmy.inventory.SoldierInventory;
@@ -2460,6 +2461,13 @@ public class SoldierCombatGoal extends Goal {
                 return turnHeadToward(targetYaw, targetPitch) <= FIRING_ALIGNMENT_DEGREES;
             }
 
+            // A machine gunner's dedicated prone lane is selected for its
+            // firing angle. Turn the body into that lane instead of applying
+            // the rifleman's narrow 30-degree low-crouch gate.
+            if (!isDirectTarget && soldier instanceof MachineGunnerEntity) {
+                return turnToward(targetYaw, targetPitch) <= FIRING_ALIGNMENT_DEGREES;
+            }
+
             // A moving crawl keeps the body aligned to travel. Do not stand or
             // fire backward just to engage a target behind the soldier.
             if (soldier.isCrawlMoving()) {
@@ -2953,9 +2961,8 @@ public class SoldierCombatGoal extends Goal {
         }
         
         if (soldier.getSuppressionAimPoints().isEmpty()) {
-            CoverFinder finder = new CoverFinder(soldier.level());
-            List<Vec3> aimPoints = finder.findSuppressionAimPoints(
-                soldier, suppressPos, SoldierEntity.SUPPRESSION_ZONE_RADIUS);
+            List<Vec3> aimPoints = com.stevesarmy.combat.cover.FiringPositionFinder
+                .findVisibleSuppressionTargets(soldier, suppressPos);
             soldier.setSuppressionAimPoints(aimPoints);
             
             if (isSuppressionDebugLogging()) {
@@ -3042,6 +3049,11 @@ public class SoldierCombatGoal extends Goal {
         
         if (pingSuppressionTarget == null
             || !TargetAcquisition.hasLineOfSightToPositionIgnoringSmoke(soldier, pingSuppressionTarget)) {
+            if (soldier instanceof MachineGunnerEntity && soldier.isFiringProne()) {
+                soldier.setSuppressionAimPoints(
+                    com.stevesarmy.combat.cover.FiringPositionFinder
+                        .findVisibleSuppressionTargets(soldier, soldier.getPingSuppressPos()));
+            }
             pingSuppressionTarget = getClearPingSuppressionTarget();
             pingSuppressionSweepEnd = null;
             pingSuppressionShotTarget = null;

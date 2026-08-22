@@ -16,14 +16,19 @@ import com.stevesarmy.combat.cover.CoverFinder;
 import com.stevesarmy.combat.cover.CoverPoint;
 import com.stevesarmy.combat.cover.CoverQualityEvaluator;
 import com.stevesarmy.combat.cover.CoverReservationManager;
+import com.stevesarmy.combat.cover.FiringPosition;
+import com.stevesarmy.combat.cover.FiringPositionFinder;
 import com.stevesarmy.debug.DiagnosticLogManager;
 import com.stevesarmy.debug.PerformanceMetrics;
 import com.stevesarmy.entity.SoldierEntity;
+import com.stevesarmy.entity.MachineGunnerEntity;
 import com.stevesarmy.entity.TargetEntity;
 import com.stevesarmy.entity.ai.CoverPositionController;
 import com.stevesarmy.entity.ai.CoverTacticalGoal;
 import com.stevesarmy.entity.ai.PeekController;
+import com.stevesarmy.entity.ai.SupportPositionFinder;
 import com.stevesarmy.network.NetworkHandler;
+import com.stevesarmy.network.MachineGunnerEvaluationPacket;
 import com.stevesarmy.network.SpacingDebugPacket;
 import com.stevesarmy.network.SpacingDebugPacket.SpacingDebugEntry;
 import com.stevesarmy.squad.SquadLaneAssignment;
@@ -60,6 +65,13 @@ public class CombatDebugCommand {
                 .executes(CombatDebugCommand::enableAllDebug))
             .then(Commands.literal("none")
                 .executes(CombatDebugCommand::disableAllDebug))
+
+            // === MACHINE GUNNER PIPELINE ===
+            .then(Commands.literal("mg")
+                .then(Commands.literal("evaluate")
+                    .executes(CombatDebugCommand::evaluateNearestMachineGunner)
+                    .then(Commands.argument("entity", EntityArgument.entity())
+                        .executes(CombatDebugCommand::evaluateMachineGunner))))
 
             // === PERFORMANCE METRICS ===
             .then(Commands.literal("metrics")
@@ -148,6 +160,8 @@ public class CombatDebugCommand {
             .then(Commands.literal("render")
                 .then(Commands.literal("soldiers")
                     .executes(CombatDebugCommand::toggleSoldierVisualization))
+                .then(Commands.literal("mg")
+                    .executes(CombatDebugCommand::toggleMachineGunnerVisualization))
                 .then(Commands.literal("peekcandidates")
                     .executes(CombatDebugCommand::togglePeekCandidates))
                 .then(Commands.literal("rays")
@@ -251,6 +265,7 @@ public class CombatDebugCommand {
             "=== /stevesarmy_debug ===\n" +
              "  all                 - Enable ALL debug (logging + render + combat overlay)\n" +
              "  none                - Disable ALL debug (logging + render + overlays)\n" +
+             "  mg evaluate [entity] - Evaluate MG firing-position pipeline (read-only)\n" +
              "  metrics [on|off|reset] - Collect/show opt-in performance counters\n" +
             "  log cover [on|off]  - Toggle cover behavior logging\n" +
             "  log coverscore [on|off] - Toggle verbose per-candidate cover scoring traces\n" +
@@ -263,7 +278,8 @@ public class CombatDebugCommand {
             "  log suppression [on|off] - Toggle suppression and incoming-fire logging\n" +
             "  log spacing [on|off] - Toggle formation spacing logging\n" +
             "  log holerescue [on|off] - Toggle hole rescue diagnostic logging\n" +
-            "  render soldiers     - Toggle soldier cover visualization lines/labels\n" +
+             "  render soldiers     - Toggle soldier cover visualization lines/labels\n" +
+             "  render mg           - Toggle machine gunner firing-position visualization\n" +
             "  render peekcandidates - Toggle peek candidate boxes/LOS rays\n" +
             "  render rays         - Toggle cover raycast visualization\n" +
             "  render solid        - Toggle solid block visualization\n" +
@@ -296,6 +312,7 @@ public class CombatDebugCommand {
     private static int enableAllDebug(CommandContext<CommandSourceStack> context) {
         CombatDebugRenderer.setDebugMode(CombatDebugRenderer.DEBUG_MODE_VERBOSE);
         CoverDebugManager.setShowSoldierCover(true);
+        CoverDebugManager.setShowMachineGunners(true);
         CoverDebugManager.setShowPeekCandidates(true);
         CoverDebugManager.setVisualizationEnabled(true);
         DiagnosticLogManager.enableAll();
@@ -322,6 +339,7 @@ public class CombatDebugCommand {
     private static int disableAllDebug(CommandContext<CommandSourceStack> context) {
         CombatDebugRenderer.setDebugMode(CombatDebugRenderer.DEBUG_MODE_OFF);
         CoverDebugManager.setShowSoldierCover(false);
+        CoverDebugManager.setShowMachineGunners(false);
         CoverDebugManager.setShowPeekCandidates(false);
         CoverDebugManager.setVisualizationEnabled(false);
         DiagnosticLogManager.disableAll();
@@ -521,6 +539,16 @@ public class CombatDebugCommand {
         CoverDebugManager.setVisualizationEnabled(true);
         context.getSource().sendSuccess(() -> Component.literal(
             "Soldier cover visualization: " + (enabled ? "ON" : "OFF")
+        ), true);
+        return 1;
+    }
+
+    private static int toggleMachineGunnerVisualization(CommandContext<CommandSourceStack> context) {
+        boolean enabled = !CoverDebugManager.isShowMachineGunners();
+        CoverDebugManager.setShowMachineGunners(enabled);
+        CoverDebugManager.setVisualizationEnabled(true);
+        context.getSource().sendSuccess(() -> Component.literal(
+            "Machine gunner firing-position visualization: " + (enabled ? "ON" : "OFF")
         ), true);
         return 1;
     }
@@ -855,6 +883,135 @@ public class CombatDebugCommand {
         }
         
         return 1;
+    }
+
+    private static int evaluateNearestMachineGunner(CommandContext<CommandSourceStack> context) {
+        CommandSourceStack source = context.getSource();
+        if (!(source.getEntity() instanceof Player player)) {
+            source.sendFailure(Component.literal("Player only command"));
+            return 0;
+        }
+        MachineGunnerEntity nearest = player.level().getEntitiesOfClass(
+                MachineGunnerEntity.class, player.getBoundingBox().inflate(32)).stream()
+            .min((a, b) -> Double.compare(a.distanceToSqr(player), b.distanceToSqr(player)))
+            .orElse(null);
+        if (nearest == null) {
+            source.sendFailure(Component.literal("No machine gunner within 32 blocks"));
+            return 0;
+        }
+        return sendMachineGunnerEvaluation(source, nearest);
+    }
+
+    private static int evaluateMachineGunner(CommandContext<CommandSourceStack> context) {
+        CommandSourceStack source = context.getSource();
+        if (!(source.getEntity() instanceof Player)) {
+            source.sendFailure(Component.literal("Player only command"));
+            return 0;
+        }
+        LivingEntity entity;
+        try {
+            entity = (LivingEntity) EntityArgument.getEntity(context, "entity");
+        } catch (Exception exception) {
+            source.sendFailure(Component.literal("Invalid entity"));
+            return 0;
+        }
+        if (!(entity instanceof MachineGunnerEntity machineGunner)) {
+            source.sendFailure(Component.literal("Entity is not a machine gunner"));
+            return 0;
+        }
+        return sendMachineGunnerEvaluation(source, machineGunner);
+    }
+
+    private static int sendMachineGunnerEvaluation(CommandSourceStack source, MachineGunnerEntity mg) {
+        BlockPos center = mg.getSuppressionCenter();
+        BlockPos anchor = center != null ? SupportPositionFinder.findSupportPosition(mg) : null;
+        FiringPositionFinder.EvaluationReport report = FiringPositionFinder.evaluate(mg, center, anchor);
+        String failure = evaluationFailure(center, anchor, report);
+        if (source.getEntity() instanceof ServerPlayer serverPlayer) {
+            NetworkHandler.sendTo(serverPlayer, MachineGunnerEvaluationPacket.from(
+                mg.getId(), center, anchor, report, failure));
+        }
+
+        source.sendSuccess(() -> Component.literal("=== MG FIRING EVALUATION: " + mg.getId() + " ==="), false);
+        source.sendSuccess(() -> Component.literal(
+            "Entity: " + formatPos(mg.blockPosition()) + " | State: "
+                + mg.getCoverBehaviorManager().getState()
+                + " | InCover=" + mg.getCoverBehaviorManager().isInCover()), false);
+        source.sendSuccess(() -> Component.literal(
+            "Objective: " + formatNullablePos(center)
+                + " | Target=" + (mg.getTarget() != null ? mg.getTarget().getId() : "none")
+                + " | Squad=" + (mg.getSquadId() != null)
+                + " | Owner=" + (mg.getOwner() != null)), false);
+        source.sendSuccess(() -> Component.literal("Support anchor: " + formatNullablePos(anchor)), false);
+
+        String targetSource = center == null ? "none"
+            : mg.getSupportObjectivePos() != null ? "attack objective"
+            : mg.getThreatAwareness().getPrimaryThreatPosition() != null ? "tracked threat"
+            : mg.hasValidPingThreatPos() ? "ping threat" : "unknown";
+        source.sendSuccess(() -> Component.literal(
+            "Objective source: " + targetSource
+                + " | Healing=" + mg.isHealing()
+                + " | Reloading=" + mg.isPreparingOrReloading()
+                + " | Recalling=" + mg.isRecalling()), false);
+
+        source.sendSuccess(() -> Component.literal(
+            "Targets: total=" + report.suppressionTargetCount()
+                + " | cover=" + report.coverTargetCount()
+                + " | gridFallback=" + report.usedGridFallback()), false);
+        source.sendSuccess(() -> Component.literal(
+            "Candidates: coverChecked=" + report.coverPositionsChecked()
+                + " | proneChecked=" + report.pronePositionsChecked()
+                + " | accepted=" + report.candidates().size()
+                + " | rejectedAccess=" + report.rejectedForAccess()), false);
+
+        int topCount = Math.min(5, report.candidates().size());
+        for (int i = 0; i < topCount; i++) {
+            FiringPosition candidate = report.candidates().get(i);
+            int rank = i + 1;
+            source.sendSuccess(() -> Component.literal(
+                "  Candidate #" + rank + " " + formatPos(candidate.destination())
+                    + " | " + candidate.posture()
+                    + " | access=" + String.format("%.2f", candidate.firingAccess())
+                    + " | protection=" + String.format("%.2f", candidate.protection())
+                    + " | score=" + String.format("%.2f", candidate.score())), false);
+        }
+
+        for (FiringPositionFinder.CandidateDiagnostic check : report.pathChecks()) {
+            source.sendSuccess(() -> Component.literal(
+                "  Path #" + check.rank() + " " + formatPos(check.position().destination())
+                    + " | exists=" + check.pathExists() + " | canReach=" + check.canReach()), false);
+        }
+
+        source.sendSuccess(() -> Component.literal("Result: " + (report.selected() != null
+            ? formatPosition(report.selected()) : "none") + " | First failure: " + failure), false);
+        return report.selected() != null ? 1 : 0;
+    }
+
+    private static String evaluationFailure(BlockPos center, BlockPos anchor,
+                                             FiringPositionFinder.EvaluationReport report) {
+        if (center == null) return "no suppression center";
+        if (anchor == null) return "support anchor unavailable";
+        if (report.suppressionTargetCount() == 0) return "no suppression targets";
+        if (report.candidates().isEmpty()) return "all candidates rejected for firing access";
+         if (report.selected() == null) {
+             return report.pathChecks().size() >= FiringPositionFinder.MAX_PATH_CHECK_CANDIDATES
+                 ? "no reachable candidate in top " + FiringPositionFinder.MAX_PATH_CHECK_CANDIDATES
+                 : "all checked candidates are unreachable";
+         }
+        return "none; evaluation passed";
+    }
+
+    private static String formatPosition(FiringPosition position) {
+        return formatPos(position.destination()) + " " + position.posture()
+            + " access=" + String.format("%.2f", position.firingAccess());
+    }
+
+    private static String formatNullablePos(BlockPos pos) {
+        return pos == null ? "none" : formatPos(pos);
+    }
+
+    private static String formatPos(BlockPos pos) {
+        return pos.getX() + "," + pos.getY() + "," + pos.getZ();
     }
 
     // --- Scan sub-commands ---
@@ -1273,7 +1430,8 @@ public class CombatDebugCommand {
             "  Peek trace: " + (DiagnosticLogManager.getPeekTraceSoldierId() == null
                 ? "OFF" : "ON (" + DiagnosticLogManager.getPeekTraceSoldierId() + ")") + "\n" +
             "  Combat overlay: " + CombatDebugRenderer.getDebugModeName() + "\n" +
-            "  Soldier viz: " + (CoverDebugManager.isShowSoldierCover() ? "ON" : "OFF") + "\n" +
+             "  Soldier viz: " + (CoverDebugManager.isShowSoldierCover() ? "ON" : "OFF") + "\n" +
+             "  Machine gunner viz: " + (CoverDebugManager.isShowMachineGunners() ? "ON" : "OFF") + "\n" +
             "  Peek candidates: " + (CoverDebugManager.isShowPeekCandidates() ? "ON" : "OFF") + "\n" +
             "  Cover points: " + (CoverDebugManager.isVisualizationEnabled() ? "ON" : "OFF") + "\n" +
             "  Rays: " + (CoverDebugManager.isShowRays() ? "ON" : "OFF") + "\n" +

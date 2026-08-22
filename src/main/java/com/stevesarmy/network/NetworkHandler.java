@@ -68,6 +68,10 @@ public class NetworkHandler {
             SpacingDebugPacket::encode,
             SpacingDebugPacket::new,
             SpacingDebugPacket::handle);
+        INSTANCE.registerMessage(id++, MachineGunnerEvaluationPacket.class,
+            MachineGunnerEvaluationPacket::encode,
+            MachineGunnerEvaluationPacket::new,
+            MachineGunnerEvaluationPacket::handle);
         INSTANCE.registerMessage(id++, FormationMessage.class,
             FormationMessage::encode,
             FormationMessage::new,

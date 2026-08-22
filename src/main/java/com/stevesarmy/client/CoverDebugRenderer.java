@@ -12,6 +12,7 @@ import com.stevesarmy.combat.cover.CoverFinder;
 import com.stevesarmy.combat.cover.CoverPoint;
 import com.stevesarmy.combat.cover.CoverType;
 import com.stevesarmy.entity.SoldierEntity;
+import com.stevesarmy.entity.MachineGunnerEntity;
 import com.stevesarmy.entity.TargetEntity;
 import com.stevesarmy.entity.ai.CoverPositionController;
 import com.stevesarmy.entity.ai.CoverTacticalGoal;
@@ -117,6 +118,26 @@ public class CoverDebugRenderer {
             MultiBufferSource.BufferSource topCoversBufferSource = mc.renderBuffers().bufferSource();
             renderTopCoversLabels(poseStack, cameraPos, mc.level, mc, topCoversBufferSource);
             topCoversBufferSource.endBatch();
+        }
+
+        if (CoverDebugManager.isShowMachineGunners()) {
+            buffer.begin(VertexFormat.Mode.DEBUG_LINES, DefaultVertexFormat.POSITION_COLOR);
+            renderMachineGunnerVisualization(buffer, poseStack, cameraPos, mc.level);
+            tesselator.end();
+
+            MultiBufferSource.BufferSource mgBufferSource = mc.renderBuffers().bufferSource();
+            renderMachineGunnerLabels(poseStack, cameraPos, mc.level, mc, mgBufferSource);
+            mgBufferSource.endBatch();
+        }
+
+        if (CoverDebugManager.getMachineGunnerEvaluation() != null) {
+            buffer.begin(VertexFormat.Mode.DEBUG_LINES, DefaultVertexFormat.POSITION_COLOR);
+            renderMachineGunnerEvaluation(buffer, poseStack, cameraPos, mc.level);
+            tesselator.end();
+
+            MultiBufferSource.BufferSource evaluationBufferSource = mc.renderBuffers().bufferSource();
+            renderMachineGunnerEvaluationLabels(poseStack, cameraPos, mc.level, mc, evaluationBufferSource);
+            evaluationBufferSource.endBatch();
         }
         
         if (CoverDebugManager.isShowPeekCandidates()) {
@@ -1043,6 +1064,194 @@ private static void renderSoldierCoverLabels(PoseStack poseStack, Vec3 cameraPos
                     // A malformed debug sample must not break world rendering.
                 }
             }
+        }
+    }
+
+    private static void renderMachineGunnerVisualization(BufferBuilder buffer, PoseStack poseStack,
+                                                         Vec3 cameraPos, Level level) {
+        Matrix4f matrix = poseStack.last().pose();
+        Player player = Minecraft.getInstance().player;
+        if (player == null) return;
+
+        for (MachineGunnerEntity mg : level.getEntitiesOfClass(MachineGunnerEntity.class,
+                player.getBoundingBox().inflate(64))) {
+            BlockPos destination = mg.getMachineGunnerDebugPosition();
+            BlockPos movementDestination = mg.getMachineGunnerDebugMovementPosition();
+            BlockPos center = mg.getMachineGunnerDebugCenter();
+            boolean active = mg.isMachineGunnerDebugActive();
+            float access = mg.getMachineGunnerDebugAccess();
+            int color = access >= 0.25f ? 0 : 255;
+            int green = access >= 0.25f ? 220 : 70;
+            int blue = mg.getMachineGunnerDebugPosture() == 2 ? 255 : 40;
+
+            if (active && destination != null && !destination.equals(BlockPos.ZERO)) {
+                // Yellow is the selected lane; cyan/green below is the lane
+                // currently consumed by the movement state.
+                renderCoverBlockBox(buffer, matrix, destination, cameraPos, 255, 255, 0, 230);
+                renderDebugLine(buffer, matrix, cameraPos, mg.getEyePosition(),
+                    destination.getCenter().add(0, mg.getMachineGunnerDebugPosture() == 2 ? 0.45 : 1.6, 0),
+                    255, 255, 0, 220);
+            }
+            if (active && movementDestination != null && !movementDestination.equals(BlockPos.ZERO)) {
+                renderCoverBlockBox(buffer, matrix, movementDestination, cameraPos, color, green, blue, 230);
+                renderDebugLine(buffer, matrix, cameraPos, mg.getEyePosition(),
+                    movementDestination.getCenter().add(0, mg.getMachineGunnerDebugPosture() == 2 ? 0.45 : 1.6, 0),
+                    color, green, blue, 220);
+            }
+            if (center != null && !center.equals(BlockPos.ZERO)) {
+                renderThreatPositionBox(buffer, matrix, center, cameraPos);
+                renderDebugLine(buffer, matrix, cameraPos, mg.getEyePosition(), center.getCenter().add(0, 1.0, 0),
+                    255, 170, 0, 150);
+            }
+        }
+    }
+
+    private static void renderDebugLine(BufferBuilder buffer, Matrix4f matrix, Vec3 cameraPos,
+                                        Vec3 from, Vec3 to, int r, int g, int b, int a) {
+        buffer.vertex(matrix, (float)(from.x - cameraPos.x), (float)(from.y - cameraPos.y),
+            (float)(from.z - cameraPos.z)).color(r, g, b, a).endVertex();
+        buffer.vertex(matrix, (float)(to.x - cameraPos.x), (float)(to.y - cameraPos.y),
+            (float)(to.z - cameraPos.z)).color(r, g, b, a).endVertex();
+    }
+
+    private static void renderMachineGunnerLabels(PoseStack poseStack, Vec3 cameraPos, Level level,
+                                                   Minecraft mc, MultiBufferSource bufferSource) {
+        if (mc.font == null || mc.player == null) return;
+        for (MachineGunnerEntity mg : level.getEntitiesOfClass(MachineGunnerEntity.class,
+                mc.player.getBoundingBox().inflate(64))) {
+            BlockPos destination = mg.getMachineGunnerDebugPosition();
+            BlockPos movementDestination = mg.getMachineGunnerDebugMovementPosition();
+            BlockPos center = mg.getMachineGunnerDebugCenter();
+            boolean active = mg.isMachineGunnerDebugActive();
+            float access = mg.getMachineGunnerDebugAccess();
+            String posture = switch (mg.getMachineGunnerDebugPosture()) {
+                case 1 -> "COVER";
+                case 2 -> "PRONE";
+                default -> "NONE";
+            };
+            String label = "MG " + (active ? posture : mg.isMachineGunnerDebugFallback() ? "FALLBACK" : "IDLE")
+                + " access=" + String.format("%.2f", access)
+                + (mg.isMachineGunnerDebugSuppressed() ? " SUPPRESSED" : "");
+            String destinationLabel = destination != null && !destination.equals(BlockPos.ZERO)
+                ? "pos=" + destination.getX() + "," + destination.getY() + "," + destination.getZ() : "pos=none";
+            String movementLabel = movementDestination != null && !movementDestination.equals(BlockPos.ZERO)
+                ? "moving=" + movementDestination.getX() + "," + movementDestination.getY() + "," + movementDestination.getZ()
+                : "moving=none";
+            String centerLabel = center != null && !center.equals(BlockPos.ZERO)
+                ? "obj=" + center.getX() + "," + center.getY() + "," + center.getZ() : "obj=none";
+
+            double x = mg.getX() - cameraPos.x + 0.5;
+            double y = mg.getY() - cameraPos.y + 2.35;
+            double z = mg.getZ() - cameraPos.z + 0.5;
+            poseStack.pushPose();
+            poseStack.translate(x, y, z);
+            poseStack.mulPose(mc.gameRenderer.getMainCamera().rotation());
+            poseStack.scale(-0.025f, -0.025f, 0.025f);
+            int color = access >= 0.25f ? 0x55FF55 : 0xFF5555;
+            int line = 0;
+            mc.font.drawInBatch(label, -mc.font.width(label) / 2.0f, line, color | 0xFF000000, false,
+                poseStack.last().pose(), bufferSource, net.minecraft.client.gui.Font.DisplayMode.NORMAL, 0, 15728880);
+            line += 10;
+            mc.font.drawInBatch(destinationLabel, -mc.font.width(destinationLabel) / 2.0f, line, 0xFFFFFF | 0xFF000000, false,
+                poseStack.last().pose(), bufferSource, net.minecraft.client.gui.Font.DisplayMode.NORMAL, 0, 15728880);
+            line += 10;
+            mc.font.drawInBatch(movementLabel, -mc.font.width(movementLabel) / 2.0f, line, 0x55FFFF | 0xFF000000, false,
+                poseStack.last().pose(), bufferSource, net.minecraft.client.gui.Font.DisplayMode.NORMAL, 0, 15728880);
+            line += 10;
+            mc.font.drawInBatch(centerLabel, -mc.font.width(centerLabel) / 2.0f, line, 0xFFAA00 | 0xFF000000, false,
+                poseStack.last().pose(), bufferSource, net.minecraft.client.gui.Font.DisplayMode.NORMAL, 0, 15728880);
+            poseStack.popPose();
+        }
+    }
+
+    private static void renderMachineGunnerEvaluation(BufferBuilder buffer, PoseStack poseStack,
+                                                      Vec3 cameraPos, Level level) {
+        CoverDebugManager.MachineGunnerEvaluationDebugData data =
+            CoverDebugManager.getMachineGunnerEvaluation();
+        if (data == null) return;
+        Matrix4f matrix = poseStack.last().pose();
+        EntityLookup:
+        for (MachineGunnerEntity mg : level.getEntitiesOfClass(MachineGunnerEntity.class,
+                Minecraft.getInstance().player.getBoundingBox().inflate(96))) {
+            if (mg.getId() != data.entityId) continue;
+
+            if (data.center != null) {
+                renderThreatPositionBox(buffer, matrix, data.center, cameraPos);
+                renderDebugLine(buffer, matrix, cameraPos, mg.getEyePosition(),
+                    data.center.getCenter().add(0, 1.0, 0), 255, 170, 0, 180);
+            }
+            if (data.anchor != null) {
+                renderCoverBlockBox(buffer, matrix, data.anchor, cameraPos, 0, 220, 255, 230);
+                renderDebugLine(buffer, matrix, cameraPos, mg.getEyePosition(),
+                    data.anchor.getCenter(), 0, 220, 255, 180);
+            }
+            for (Vec3 target : data.targets) {
+                renderDebugCross(buffer, matrix, cameraPos, target, 255, 140, 0, 220, 0.16f);
+            }
+            boolean selectedRendered = false;
+            for (CoverDebugManager.FiringPositionDebugEntry candidate : data.candidates) {
+                int r;
+                int g;
+                int b;
+                boolean selected = candidate.pathChecked && candidate.canReach && !selectedRendered;
+                if (selected) {
+                    selectedRendered = true;
+                    r = 255; g = 255; b = 0;
+                } else if (candidate.pathChecked && candidate.canReach) {
+                    r = 0; g = 255; b = 0;
+                } else if (candidate.pathChecked) {
+                    r = 255; g = 40; b = 40;
+                } else {
+                    r = 170; g = 80; b = 255;
+                }
+                renderCoverBlockBox(buffer, matrix, candidate.position, cameraPos, r, g, b, 210);
+            }
+            break EntityLookup;
+        }
+    }
+
+    private static void renderDebugCross(BufferBuilder buffer, Matrix4f matrix, Vec3 cameraPos,
+                                         Vec3 point, int r, int g, int b, int a, float size) {
+        float x = (float) (point.x - cameraPos.x);
+        float y = (float) (point.y - cameraPos.y);
+        float z = (float) (point.z - cameraPos.z);
+        buffer.vertex(matrix, x - size, y, z).color(r, g, b, a).endVertex();
+        buffer.vertex(matrix, x + size, y, z).color(r, g, b, a).endVertex();
+        buffer.vertex(matrix, x, y - size, z).color(r, g, b, a).endVertex();
+        buffer.vertex(matrix, x, y + size, z).color(r, g, b, a).endVertex();
+        buffer.vertex(matrix, x, y, z - size).color(r, g, b, a).endVertex();
+        buffer.vertex(matrix, x, y, z + size).color(r, g, b, a).endVertex();
+    }
+
+    private static void renderMachineGunnerEvaluationLabels(PoseStack poseStack, Vec3 cameraPos,
+                                                             Level level, Minecraft mc,
+                                                             MultiBufferSource bufferSource) {
+        CoverDebugManager.MachineGunnerEvaluationDebugData data =
+            CoverDebugManager.getMachineGunnerEvaluation();
+        if (data == null || mc.font == null || mc.player == null) return;
+        for (MachineGunnerEntity mg : level.getEntitiesOfClass(MachineGunnerEntity.class,
+                mc.player.getBoundingBox().inflate(96))) {
+            if (mg.getId() != data.entityId) continue;
+            String title = "MG EVAL #" + data.entityId + " " + data.failure;
+            String summary = "targets=" + data.targetCount + " candidates=" + data.candidates.size()
+                + " accessReject=" + data.rejectedAccess;
+            String legend = "orange=targets cyan=anchor purple=unchecked red=blocked green=reachable yellow=selected";
+            poseStack.pushPose();
+            poseStack.translate(mg.getX() - cameraPos.x + 0.5, mg.getY() - cameraPos.y + 3.0,
+                mg.getZ() - cameraPos.z + 0.5);
+            poseStack.mulPose(mc.gameRenderer.getMainCamera().rotation());
+            poseStack.scale(-0.022f, -0.022f, 0.022f);
+            mc.font.drawInBatch(title, -mc.font.width(title) / 2.0f, 0, 0xFFFF55 | 0xFF000000,
+                false, poseStack.last().pose(), bufferSource,
+                net.minecraft.client.gui.Font.DisplayMode.NORMAL, 0, 15728880);
+            mc.font.drawInBatch(summary, -mc.font.width(summary) / 2.0f, 10, 0xFFFFFF | 0xFF000000,
+                false, poseStack.last().pose(), bufferSource,
+                net.minecraft.client.gui.Font.DisplayMode.NORMAL, 0, 15728880);
+            mc.font.drawInBatch(legend, -mc.font.width(legend) / 2.0f, 20, 0xAAAAAA | 0xFF000000,
+                false, poseStack.last().pose(), bufferSource,
+                net.minecraft.client.gui.Font.DisplayMode.NORMAL, 0, 15728880);
+            poseStack.popPose();
+            break;
         }
     }
 
