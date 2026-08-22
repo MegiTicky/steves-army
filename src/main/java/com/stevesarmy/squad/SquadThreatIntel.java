@@ -34,6 +34,7 @@ public class SquadThreatIntel {
         public final Set<UUID> suppressors = new HashSet<>();
         public final Map<UUID, Long> suppressionHeartbeats = new HashMap<>();
         @Nullable public Vec3 lastVisibleAimPoint;
+        @Nullable public Vec3 lastVisibleHeadPoint;
 
         public ThreatKnowledge(UUID threatEntityId) {
             this.threatEntityId = threatEntityId;
@@ -66,6 +67,11 @@ public class SquadThreatIntel {
                 tag.putDouble("AimX", lastVisibleAimPoint.x);
                 tag.putDouble("AimY", lastVisibleAimPoint.y);
                 tag.putDouble("AimZ", lastVisibleAimPoint.z);
+            }
+            if (lastVisibleHeadPoint != null) {
+                tag.putDouble("HeadX", lastVisibleHeadPoint.x);
+                tag.putDouble("HeadY", lastVisibleHeadPoint.y);
+                tag.putDouble("HeadZ", lastVisibleHeadPoint.z);
             }
             ListTag suppressorList = new ListTag();
             for (UUID suppressor : suppressors) {
@@ -102,6 +108,10 @@ public class SquadThreatIntel {
                 knowledge.lastVisibleAimPoint = new Vec3(
                     tag.getDouble("AimX"), tag.getDouble("AimY"), tag.getDouble("AimZ"));
             }
+            if (tag.contains("HeadX")) {
+                knowledge.lastVisibleHeadPoint = new Vec3(
+                    tag.getDouble("HeadX"), tag.getDouble("HeadY"), tag.getDouble("HeadZ"));
+            }
             ListTag suppressorList = tag.getList("Suppressors", Tag.TAG_COMPOUND);
             for (int i = 0; i < suppressorList.size(); i++) {
                 CompoundTag suppressorTag = suppressorList.getCompound(i);
@@ -119,11 +129,16 @@ public class SquadThreatIntel {
     }
 
     public void reportThreat(UUID reporterId, LivingEntity threat, BlockPos pos, float accuracy) {
-        reportThreat(reporterId, threat, pos, null, accuracy);
+        reportThreat(reporterId, threat, pos, null, null, accuracy);
     }
 
     public void reportThreat(UUID reporterId, LivingEntity threat, BlockPos pos,
                              @Nullable Vec3 aimPoint, float accuracy) {
+        reportThreat(reporterId, threat, pos, aimPoint, null, accuracy);
+    }
+
+    public void reportThreat(UUID reporterId, LivingEntity threat, BlockPos pos,
+                             @Nullable Vec3 aimPoint, @Nullable Vec3 headPoint, float accuracy) {
         ThreatKnowledge knowledge = knownThreats.getOrDefault(threat.getUUID(), 
             new ThreatKnowledge(threat.getUUID()));
         
@@ -133,6 +148,7 @@ public class SquadThreatIntel {
         if (aimPoint != null) {
             knowledge.lastVisibleAimPoint = aimPoint;
         }
+        knowledge.lastVisibleHeadPoint = headPoint;
         knowledge.accuracy = Math.max(knowledge.accuracy, accuracy);
         knowledge.isAlive = true;
         

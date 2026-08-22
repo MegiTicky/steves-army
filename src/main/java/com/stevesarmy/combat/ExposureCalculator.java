@@ -8,6 +8,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.Vec3;
+import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -174,6 +175,25 @@ public class ExposureCalculator {
     
     public static AimPointResult getBestAimPoint(LivingEntity observer, LivingEntity target) {
         return getBestAimPoint(observer, target, null);
+    }
+
+    /** Returns the first visible head point, independent of combat aim-point priority. */
+    @Nullable
+    public static Vec3 getVisibleHeadPoint(LivingEntity observer, LivingEntity target) {
+        if (observer.level() != target.level()) {
+            return null;
+        }
+
+        Vec3 observerEye = observer.getEyePosition();
+        for (TargetPoint point : getTargetPointsWithPriority(target)) {
+            if (point.type != AimPointType.HEAD) {
+                continue;
+            }
+            if (VisibilityRay.trace(target.level(), observerEye, point.position, observer).hasContact()) {
+                return point.position;
+            }
+        }
+        return null;
     }
 
     public static AimPointResult getBestAimPoint(LivingEntity observer, LivingEntity target, BlockPos skipBlock) {

@@ -857,6 +857,9 @@ public class CombatDebugCommand {
             String aimStr = threat.lastVisibleAimPoint != null
                 ? String.format("%.2f,%.2f,%.2f", threat.lastVisibleAimPoint.x,
                     threat.lastVisibleAimPoint.y, threat.lastVisibleAimPoint.z) : "none";
+            String headStr = threat.lastVisibleHeadPoint != null
+                ? String.format("%.2f,%.2f,%.2f", threat.lastVisibleHeadPoint.x,
+                    threat.lastVisibleHeadPoint.y, threat.lastVisibleHeadPoint.z) : "none";
             String status = threat.isAlive ? (threat.isSuppressed ? "SUPPRESSED" : "ACTIVE") : "DEAD";
             String suppressedBy = threat.suppressedBy != null ? threat.suppressedBy.toString().substring(0, 8) : "none";
             String reporter = threat.lastSeenBySoldier != null
@@ -866,6 +869,7 @@ public class CombatDebugCommand {
                 "  Threat " + threat.threatEntityId.toString().substring(0, 8) +
                 " | Pos: " + posStr +
                 " | Aim: " + aimStr +
+                " | Head: " + headStr +
                 " | Age: " + age + "t" +
                 " | SeenBy: " + reporter +
                 " | Acc: " + String.format("%.2f", threat.accuracy) +

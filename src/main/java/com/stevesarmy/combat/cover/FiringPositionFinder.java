@@ -337,7 +337,9 @@ public final class FiringPositionFinder {
             }
             long age = Math.max(0L, now - threat.lastSeenTime);
             float freshness = Math.max(0.1f, 1.0f - age / 200.0f);
-            Vec3 position = threat.lastVisibleAimPoint != null
+            Vec3 position = threat.lastVisibleHeadPoint != null
+                ? threat.lastVisibleHeadPoint
+                : threat.lastVisibleAimPoint != null
                 ? threat.lastVisibleAimPoint
                 : threat.lastKnownPosition.getCenter().add(0, 1.0, 0);
             addTarget(targets, position, TargetCategory.LAST_SEEN,
