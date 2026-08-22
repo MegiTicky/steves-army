@@ -131,7 +131,9 @@ public class CoverDebugRenderer {
             mgBufferSource.endBatch();
         }
 
-        if (CoverDebugManager.getMachineGunnerEvaluation() != null) {
+        if (CoverDebugManager.isShowMachineGunners()
+            && CoverDebugManager.getMachineGunnerEvaluation() != null) {
+            RenderSystem.setShader(GameRenderer::getPositionColorShader);
             buffer.begin(VertexFormat.Mode.DEBUG_LINES, DefaultVertexFormat.POSITION_COLOR);
             renderMachineGunnerEvaluation(buffer, poseStack, cameraPos, mc.level);
             tesselator.end();
@@ -1166,7 +1168,7 @@ private static void renderSoldierCoverLabels(PoseStack poseStack, Vec3 cameraPos
     }
 
     private static void renderMachineGunnerEvaluation(BufferBuilder buffer, PoseStack poseStack,
-                                                      Vec3 cameraPos, Level level) {
+                                                       Vec3 cameraPos, Level level) {
         CoverDebugManager.MachineGunnerEvaluationDebugData data =
             CoverDebugManager.getMachineGunnerEvaluation();
         if (data == null) return;
@@ -1238,11 +1240,12 @@ private static void renderSoldierCoverLabels(PoseStack poseStack, Vec3 cameraPos
     }
 
     private static void renderMachineGunnerEvaluationLabels(PoseStack poseStack, Vec3 cameraPos,
-                                                             Level level, Minecraft mc,
-                                                             MultiBufferSource bufferSource) {
+                                                              Level level, Minecraft mc,
+                                                              MultiBufferSource bufferSource) {
+        if (mc.font == null || mc.player == null) return;
         CoverDebugManager.MachineGunnerEvaluationDebugData data =
             CoverDebugManager.getMachineGunnerEvaluation();
-        if (data == null || mc.font == null || mc.player == null) return;
+        if (data == null) return;
         for (MachineGunnerEntity mg : level.getEntitiesOfClass(MachineGunnerEntity.class,
                 mc.player.getBoundingBox().inflate(96))) {
             if (mg.getId() != data.entityId) continue;

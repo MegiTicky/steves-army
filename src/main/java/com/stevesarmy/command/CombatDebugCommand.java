@@ -975,6 +975,8 @@ public class CombatDebugCommand {
                 + " | Healing=" + mg.isHealing()
                 + " | Reloading=" + mg.isPreparingOrReloading()
                 + " | Recalling=" + mg.isRecalling()), false);
+        source.sendSuccess(() -> Component.literal(
+            "Suppression sector: " + mg.getSuppressionSectorDebug()), false);
 
         source.sendSuccess(() -> Component.literal(
             "Targets: total=" + report.suppressionTargetCount()

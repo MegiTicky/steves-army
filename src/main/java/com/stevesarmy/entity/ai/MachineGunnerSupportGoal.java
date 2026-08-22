@@ -4,6 +4,8 @@ import com.stevesarmy.combat.cover.FiringPosition;
 import com.stevesarmy.combat.cover.FiringPositionFinder;
 import com.stevesarmy.entity.MachineGunnerEntity;
 import com.stevesarmy.entity.SoldierEntity;
+import com.stevesarmy.network.MachineGunnerEvaluationPacket;
+import com.stevesarmy.network.NetworkHandler;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.phys.Vec3;
 
@@ -21,7 +23,12 @@ public class MachineGunnerSupportGoal extends CoverTacticalGoal {
 
     private int evaluationCooldown = 0;
     private int laneValidationCooldown = 0;
+    private int debugSyncCooldown = 0;
     private BlockPos lastIssuedDestination = null;
+    private BlockPos activeFiringCenter = null;
+    private FiringPositionFinder.EvaluationReport latestEvaluationReport = null;
+    private BlockPos latestEvaluationCenter = null;
+    private BlockPos latestEvaluationAnchor = null;
 
     public MachineGunnerSupportGoal(SoldierEntity soldier) {
         super(soldier);
@@ -33,9 +40,17 @@ public class MachineGunnerSupportGoal extends CoverTacticalGoal {
             laneValidationCooldown = ACTIVE_LANE_VALIDATION_INTERVAL;
             validateActiveFiringPosition();
         }
-        if (--evaluationCooldown <= 0) {
+        BlockPos currentCenter = soldier instanceof MachineGunnerEntity mg ? mg.getSuppressionCenter() : null;
+        if (isFiringPositionActive() && (currentCenter == null || !currentCenter.equals(activeFiringCenter))) {
             evaluationCooldown = SUPPORT_EVALUATION_INTERVAL;
             maybeEvaluateSupportPosition();
+        } else if (--evaluationCooldown <= 0) {
+            evaluationCooldown = SUPPORT_EVALUATION_INTERVAL;
+            maybeEvaluateSupportPosition();
+        }
+        if (--debugSyncCooldown <= 0) {
+            debugSyncCooldown = SUPPORT_EVALUATION_INTERVAL;
+            sendLatestEvaluationDebug();
         }
         super.tick();
         syncMachineGunnerDebug();
@@ -71,7 +86,10 @@ public class MachineGunnerSupportGoal extends CoverTacticalGoal {
 
     @Override
     protected boolean shouldDeferNormalCoverEvaluation() {
-        return isFiringPositionOccupied();
+        // A dedicated firing lane owns cover selection from the moment it is
+        // selected until it explicitly fails or is cleared. Waiting until the
+        // lane is occupied lets generic cover scoring replace it mid-movement.
+        return isFiringPositionActive();
     }
 
     @Override
@@ -83,6 +101,7 @@ public class MachineGunnerSupportGoal extends CoverTacticalGoal {
             && getActiveFiringPosition().destination().equals(position.destination())) {
             releaseFiringPositionForFallback();
             lastIssuedDestination = null;
+            activeFiringCenter = null;
             evaluationCooldown = SUPPORT_EVALUATION_INTERVAL;
         }
     }
@@ -124,10 +143,15 @@ public class MachineGunnerSupportGoal extends CoverTacticalGoal {
         if (center == null) {
             clearFiringPosition();
             lastIssuedDestination = null;
+            activeFiringCenter = null;
             return;
         }
-        float access = FiringPositionFinder.evaluateFiringAccess(
+        FiringPositionFinder.ConfirmedFiringAccess validation = FiringPositionFinder.evaluateConfirmedFiringAccess(
             mg, center, active.destination(), active.posture());
+        if (!validation.hasConfirmedTargets()) {
+            return;
+        }
+        float access = validation.access();
         updateActiveFiringAccess(access);
         if (access >= FiringPositionFinder.MIN_FIRING_ACCESS) {
             return;
@@ -156,15 +180,30 @@ public class MachineGunnerSupportGoal extends CoverTacticalGoal {
                 clearFiringPosition();
             }
             lastIssuedDestination = null;
+            activeFiringCenter = null;
             return;
         }
 
-        FiringPosition best = FiringPositionFinder.findBest(mg, suppressionCenter, supportAnchor);
+        // A valid occupied or in-progress lane owns the unchanged objective.
+        // Do not re-score it periodically just because predicted peek samples or
+        // nearby squad members changed after the lane was selected.
+        if (isFiringPositionActive() && suppressionCenter.equals(activeFiringCenter)) {
+            return;
+        }
+
+        FiringPositionFinder.EvaluationReport report = FiringPositionFinder.evaluate(
+            mg, suppressionCenter, supportAnchor);
+        latestEvaluationReport = report;
+        latestEvaluationCenter = suppressionCenter.immutable();
+        latestEvaluationAnchor = supportAnchor.immutable();
+        sendLatestEvaluationDebug();
+        FiringPosition best = report.selected();
         if (best == null) {
             if (isFiringPositionActive()) {
                 clearFiringPosition();
             }
             lastIssuedDestination = null;
+            activeFiringCenter = null;
             return;
         }
 
@@ -175,6 +214,7 @@ public class MachineGunnerSupportGoal extends CoverTacticalGoal {
         }
         setFiringPosition(best);
         lastIssuedDestination = best.destination();
+        activeFiringCenter = suppressionCenter.immutable();
     }
 
     /** Forces the same firing-lane evaluation used by the support AI. */
@@ -184,10 +224,14 @@ public class MachineGunnerSupportGoal extends CoverTacticalGoal {
         BlockPos supportAnchor = SupportPositionFinder.findSupportPosition(mg);
         FiringPositionFinder.EvaluationReport report = FiringPositionFinder.evaluate(
             mg, suppressionCenter, supportAnchor);
+        latestEvaluationReport = report;
+        latestEvaluationCenter = suppressionCenter != null ? suppressionCenter.immutable() : null;
+        latestEvaluationAnchor = supportAnchor != null ? supportAnchor.immutable() : null;
         FiringPosition best = report.selected();
         if (best == null) {
             clearFiringPosition();
             lastIssuedDestination = null;
+            activeFiringCenter = null;
         } else {
             // The debug command is an explicit reposition request, not merely a
             // preview. Drop the current lane so the selected result is consumed
@@ -195,8 +239,20 @@ public class MachineGunnerSupportGoal extends CoverTacticalGoal {
             invalidateFiringPosition();
             setFiringPosition(best);
             lastIssuedDestination = best.destination();
+            activeFiringCenter = suppressionCenter != null ? suppressionCenter.immutable() : null;
         }
+        evaluationCooldown = SUPPORT_EVALUATION_INTERVAL;
+        laneValidationCooldown = ACTIVE_LANE_VALIDATION_INTERVAL;
         return report;
+    }
+
+    private void sendLatestEvaluationDebug() {
+        if (!(soldier instanceof MachineGunnerEntity mg) || latestEvaluationReport == null) {
+            return;
+        }
+        NetworkHandler.sendToTracking(mg, MachineGunnerEvaluationPacket.from(
+            mg.getId(), latestEvaluationCenter, latestEvaluationAnchor, latestEvaluationReport,
+            latestEvaluationReport.selected() != null ? "live evaluation" : "no firing lane"));
     }
 
     /**

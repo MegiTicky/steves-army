@@ -83,6 +83,9 @@ public final class FiringPositionFinder {
                                    float peekCoverage, int activeVisible, int lastSeenVisible,
                                    int peekVisible, boolean meaningful) {}
 
+    /** Access to confirmed enemy information only, excluding speculative peek samples. */
+    public record ConfirmedFiringAccess(float access, boolean hasConfirmedTargets) {}
+
     public record CandidateDiagnostic(FiringPosition position, int rank,
                                       boolean pathExists, boolean canReach,
                                       AccessDiagnostic access) {}
@@ -229,6 +232,40 @@ public final class FiringPositionFinder {
             destination.getZ() + 0.5);
         AccessDiagnostic access = evaluateAccess(soldier.level(), eye, targets, soldier);
         return access.meaningful() ? access.access() : 0.0f;
+    }
+
+    /**
+     * Revalidates an occupied lane using only active and last-seen enemy points.
+     * Predicted peek points are useful to select a lane but must not make an
+     * already-occupied lane churn when those speculative samples change.
+     */
+    public static ConfirmedFiringAccess evaluateConfirmedFiringAccess(SoldierEntity soldier,
+                                                                        BlockPos suppressionCenter,
+                                                                        BlockPos destination,
+                                                                        FiringPosition.FiringPosture posture) {
+        if (suppressionCenter == null || destination == null || posture == null) {
+            return new ConfirmedFiringAccess(0.0f, false);
+        }
+        List<TargetSample> generated = generateSuppressionTargets(
+            soldier instanceof MachineGunnerEntity mg ? mg : null, soldier.level(),
+            new CoverFinder(soldier.level()), suppressionCenter,
+            SoldierEntity.SUPPRESSION_ZONE_RADIUS).targets();
+        List<TargetSample> confirmed = new ArrayList<>();
+        for (TargetSample target : generated) {
+            if (target.category() == TargetCategory.ACTIVE_TARGET
+                || target.category() == TargetCategory.LAST_SEEN) {
+                confirmed.add(target);
+            }
+        }
+        if (confirmed.isEmpty()) {
+            return new ConfirmedFiringAccess(0.0f, false);
+        }
+        double eyeHeight = posture == FiringPosition.FiringPosture.OPEN_PRONE
+            ? PRONE_EYE_HEIGHT : STANDING_EYE_HEIGHT;
+        Vec3 eye = new Vec3(destination.getX() + 0.5, destination.getY() + eyeHeight,
+            destination.getZ() + 0.5);
+        AccessDiagnostic access = evaluateAccess(soldier.level(), eye, confirmed, soldier);
+        return new ConfirmedFiringAccess(access.meaningful() ? access.access() : 0.0f, true);
     }
 
     /**

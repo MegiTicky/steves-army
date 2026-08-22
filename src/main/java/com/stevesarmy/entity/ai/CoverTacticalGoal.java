@@ -465,6 +465,21 @@ public class CoverTacticalGoal extends Goal {
     protected void onFiringPositionExecutionFailed(FiringPosition position) {
     }
 
+    /**
+     * Lets a dedicated firing lane explicitly yield to fallback cover after its
+     * already-issued movement has failed. The pending-lane execution path calls
+     * the same hook directly; this covers later navigation and positioning
+     * failures after that pending state has been consumed.
+     */
+    private void failActiveFiringPositionForFallback(BlockPos failedDestination) {
+        if (!firingPositionActive || activeFiringPosition == null
+            || failedDestination == null
+            || !activeFiringPosition.destination().equals(failedDestination)) {
+            return;
+        }
+        onFiringPositionExecutionFailed(activeFiringPosition);
+    }
+
     protected boolean shouldDeferNormalCoverEvaluation() {
         return false;
     }
@@ -1260,6 +1275,7 @@ public class CoverTacticalGoal extends Goal {
                             soldier.getId(), soldier.getName().getString(), targetCover.getPosition());
                     }
                     blacklistCover(targetCover.getPosition(), BlacklistReason.STUCK_SEEKING);
+                    failActiveFiringPositionForFallback(targetCover.getPosition());
                 }
                 getCoverManager().clearTargetCover();
                 stuckTicks = 0;
@@ -1299,6 +1315,7 @@ public class CoverTacticalGoal extends Goal {
             }
             getCoverManager().resetPeekState();
             getPositionController().clear();
+            failActiveFiringPositionForFallback(targetCover != null ? targetCover.getPosition() : null);
             getCoverManager().clearTargetCover();
             getCoverManager().setState(CoverBehaviorManager.CoverState.NO_COVER);
             seekingTicks = 0;
@@ -1331,7 +1348,8 @@ private void tickRepositioning() {
         // ATTACK owns the chosen bound until deterministic path recovery rejects it.
         // Its path may temporarily lead away from the objective to exit a structure,
         // so the generic threat-shift reconsideration must not replace it mid-route.
-        if (!soldier.hasValidAttackTarget() && soldier.getRandom().nextFloat() < 0.5f) {
+        if (!soldier.hasValidAttackTarget() && !shouldDeferNormalCoverEvaluation()
+            && soldier.getRandom().nextFloat() < 0.5f) {
             Vec3 currentThreatDir = getThreats().getPrimaryDirection(soldier.position());
             Vec3 entryThreatDir = getCoverManager().getEntryThreatDirection();
             
@@ -1452,6 +1470,7 @@ private void tickRepositioning() {
             if (stuckTicks > MAX_STUCK_TICKS) {
                 if (targetCover != null) {
                     blacklistCover(targetCover.getPosition(), BlacklistReason.STUCK_REPOSITIONING);
+                    failActiveFiringPositionForFallback(targetCover.getPosition());
                 }
                 getCoverManager().clearTargetCover();
                 if (currentCover != null) {
@@ -1501,6 +1520,7 @@ private void tickRepositioning() {
         }
         if (navigation.isDone()) {
             proneFiringController.cancel("path_failed");
+            failActiveFiringPositionForFallback(proneFiringDestination);
             proneFiringDestination = null;
             getCoverManager().setState(CoverBehaviorManager.CoverState.SEEKING_COVER);
         }
@@ -2316,8 +2336,12 @@ private boolean shouldExitCoverForFollow() {
                     return firingResult;
                 }
             }
-            if (firingPositionActive && isFiringPositionOccupied()) {
-                logCoverSearchPerformance(finder, searchStarted, CoverMoveResult.NO_COVER_FOUND, "firing-position-hold");
+            if (firingPositionActive) {
+                // The dedicated lane remains authoritative while it is being
+                // approached as well as after occupation. executeFiringPosition
+                // clears it before reaching this point when the lane fails.
+                logCoverSearchPerformance(finder, searchStarted, CoverMoveResult.NO_COVER_FOUND,
+                    "firing-position-active");
                 return CoverMoveResult.NO_COVER_FOUND;
             }
 
