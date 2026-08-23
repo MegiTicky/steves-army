@@ -5,6 +5,7 @@ import com.stevesarmy.combat.VisibilityRay;
 import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.debug.DiagnosticLogManager;
 import com.stevesarmy.entity.SoldierEntity;
+import com.stevesarmy.entity.MachineGunnerEntity;
 import com.stevesarmy.entity.ai.SoldierCombatGoal;
 import com.stevesarmy.squad.SquadCoverContext;
 import net.minecraft.core.BlockPos;
@@ -99,7 +100,10 @@ public final class DefensivePositionSelector {
             terrainValid++;
             Vec3 eye = new Vec3(pos.getX() + .5, pos.getY() + .45, pos.getZ() + .5);
             VisibilityRay.Result visibility = VisibilityRay.trace(level, eye, aimPoint, soldier);
-            if (visibility.firingLaneQuality() < CoverFinder.MIN_RELIABLE_FIRING_LANE) continue;
+            boolean firingLaneAccepted = soldier instanceof MachineGunnerEntity
+                ? visibility.firingLaneQuality() >= CoverFinder.MIN_RELIABLE_FIRING_LANE
+                : visibility.hasContact();
+            if (!firingLaneAccepted) continue;
             proneLos++;
             boolean currentPosition = pos.equals(origin);
             if (!currentPosition) {

@@ -780,9 +780,8 @@ public class CoverFinder {
     private FiringLaneResult evaluateFiringOrigin(Vec3 origin, Vec3 threatDirection,
                                                    LivingEntity primaryThreat, SquadCoverContext squadCtx) {
         if (primaryThreat != null && primaryThreat.isAlive()) {
-            float activeLane = (float) ExposureCalculator.getBestFiringLaneQualityFrom(origin, primaryThreat);
-            if (activeLane >= MIN_RELIABLE_FIRING_LANE) {
-                return new FiringLaneResult(activeLane, "active", 0, 0);
+            if (ExposureCalculator.hasAnyAimPointFrom(origin, primaryThreat)) {
+                return new FiringLaneResult(1.0f, "active", 0, 0);
             }
         }
 
@@ -826,13 +825,7 @@ public class CoverFinder {
             VisibilityRay.Result visibility = cache != null
                 ? cache.getContactVisibility(level, origin, contact.threatEntityId(), contact.exposedPoint(), currentTick)
                 : VisibilityRay.trace(level, origin, contact.exposedPoint(), null);
-            double laneQuality = visibility.firingLaneQuality();
-            if (laneQuality >= MIN_RELIABLE_FIRING_LANE) {
-                reachable++;
-                reachableWeight += freshness * (float) laneQuality;
-            } else if (isNearLastSeenContact(origin, contact.exposedPoint(), visibility)) {
-                // Preserve the existing last-seen fallback for a physically
-                // blocked point; it is distinct from a foliage-obscured lane.
+            if (visibility.hasContact() || isNearLastSeenContact(origin, contact.exposedPoint(), visibility)) {
                 reachable++;
                 reachableWeight += freshness;
             }
@@ -919,8 +912,8 @@ return qualityScore + shootBonus - distancePenalty;
     /**
      * Calculates how much of a cone has clear line-of-sight from peek position toward threat direction.
      * Returns a score from 0.0 (no opening) to 1.0 (full cone coverage).
-     * Uses area covered and visibility quality: solid blocks stop a ray, while
-     * concealment reduces its contribution without pretending to be physical cover.
+     * Uses "area covered" approach - measures how far each ray travels before hitting a block,
+     * then normalizes by expected distance.
     */
     public static float calculateConeCoverage(BlockPos peekPos, Vec3 threatDirection, net.minecraft.world.level.Level level) {
         Vec3 peekEye = new Vec3(peekPos.getX() + 0.5, peekPos.getY() + 1.62, peekPos.getZ() + 0.5);
@@ -944,15 +937,12 @@ return qualityScore + shootBonus - distancePenalty;
             double angleOffset = -CONE_HALF_ANGLE_DEG + (2.0 * CONE_HALF_ANGLE_DEG * i / (RAY_COUNT - 1));
             
             Vec3 rayDir = rotateVectorY(threatDir, angleOffset);
-            VisibilityRay.Result visibility = VisibilityRay.trace(level, peekEye,
-                peekEye.add(rayDir.scale(MAX_RAY_DISTANCE)), null);
-            double distance = Math.min(MAX_RAY_DISTANCE, visibility.blockedDistance());
-            double laneQuality = visibility.firingLaneQuality();
+            double distance = raycastDistanceStatic(peekEye, rayDir, MAX_RAY_DISTANCE, level);
             
             double normalizedDistance = distance / MAX_RAY_DISTANCE;
             
-            if (distance >= MIN_OPENING_DISTANCE && laneQuality > 0.0) {
-                totalCoverage += normalizedDistance * laneQuality;
+            if (distance >= MIN_OPENING_DISTANCE) {
+                totalCoverage += normalizedDistance;
                 validRays++;
             }
         }

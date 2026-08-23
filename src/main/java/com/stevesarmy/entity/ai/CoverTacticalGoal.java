@@ -371,6 +371,11 @@ public class CoverTacticalGoal extends Goal {
         return soldier.isFiringProne() ? 2 : 0;
     }
 
+    /** MG-only movement safeguards; riflemen retain the pre-MG cover flow. */
+    private boolean isMachineGunnerMovementOwner() {
+        return soldier instanceof MachineGunnerEntity;
+    }
+
     /** Synchronizes the physical cover target and movement marker from the shared goal. */
     private void syncMachineGunnerDebug() {
         if (!(soldier instanceof MachineGunnerEntity mg)) {
@@ -881,7 +886,7 @@ public class CoverTacticalGoal extends Goal {
     @Override
     public void tick() {
         CoverBehaviorManager.CoverState state = getCoverManager().getState();
-        if (proneFiringDestination != null
+        if (isMachineGunnerMovementOwner() && proneFiringDestination != null
             && !CoverReservationManager.reserveProne(proneFiringDestination, soldier)) {
             if (DiagnosticLogManager.isCoverLoggingEnabled()) {
                 StevesArmyMod.LOGGER.info("[ProneReservation] Soldier {} lost prone lane {}", soldier.getId(), proneFiringDestination);
@@ -892,7 +897,7 @@ public class CoverTacticalGoal extends Goal {
         getCoverManager().tickSuppression(getCoverManager().isInCover());
         trackSuppressionEpisode();
 
-        if (reconcileOccupiedCover()) {
+        if (isMachineGunnerMovementOwner() && reconcileOccupiedCover()) {
             tickProneFiringPlan();
             populateCoverDebugData();
             return;
@@ -1057,11 +1062,11 @@ public class CoverTacticalGoal extends Goal {
     }
     
     private void tickSeekingCover() {
-        if (reconcileOccupiedCover()) {
+        if (isMachineGunnerMovementOwner() && reconcileOccupiedCover()) {
             return;
         }
         CoverPoint movingTarget = getCoverManager().getTargetCover();
-        if (movingTarget != null && !getCoverManager().isInCover()
+        if (isMachineGunnerMovementOwner() && movingTarget != null && !getCoverManager().isInCover()
             && soldier.tickCount % 20 == 0
             && !CoverReservationManager.reserve(movingTarget.getPosition(), soldier)) {
             if (DiagnosticLogManager.isCoverLoggingEnabled()) {
@@ -1258,7 +1263,7 @@ public class CoverTacticalGoal extends Goal {
     }
     
     private void tickRepositioning() {
-        if (reconcileOccupiedCover()) {
+        if (isMachineGunnerMovementOwner() && reconcileOccupiedCover()) {
             return;
         }
         // Handle pending retry from previous tick
@@ -2370,7 +2375,8 @@ private boolean shouldExitCoverForFollow() {
                     CoverPoint cover = sc.cover;
                     if (currentCover != null && cover.getPosition().equals(currentCover.getPosition())) continue;
                     if (failedCoverPositions.contains(cover.getPosition())) continue;
-                    if (!CoverReservationManager.isAvailableFor(cover.getPosition(), soldier)) continue;
+                    if (isMachineGunnerMovementOwner()
+                        && !CoverReservationManager.isAvailableFor(cover.getPosition(), soldier)) continue;
 
                 if (!isAttackCorridorCandidate(cover.getPosition(), soldier.getAttackTargetPos(), objectiveDir)) {
                     logRejectedAttackCover(cover, soldier.getAttackTargetPos(), objectiveDir);
@@ -2395,7 +2401,8 @@ private boolean shouldExitCoverForFollow() {
                     CoverPoint cover = sc.cover;
                     if (currentCover != null && cover.getPosition().equals(currentCover.getPosition())) continue;
                     if (failedCoverPositions.contains(cover.getPosition())) continue;
-                    if (!CoverReservationManager.isAvailableFor(cover.getPosition(), soldier)) continue;
+                    if (isMachineGunnerMovementOwner()
+                        && !CoverReservationManager.isAvailableFor(cover.getPosition(), soldier)) continue;
 
                     if (!isAttackCorridorCandidate(cover.getPosition(), soldier.getAttackTargetPos(), objectiveDir)) {
                         logRejectedAttackCover(cover, soldier.getAttackTargetPos(), objectiveDir);
@@ -2481,7 +2488,8 @@ private boolean shouldExitCoverForFollow() {
                 
                 scored = scored.stream()
                     .filter(sc -> !failedCoverPositions.contains(sc.cover.getPosition()))
-                    .filter(sc -> CoverReservationManager.isAvailableFor(sc.cover.getPosition(), soldier))
+                    .filter(sc -> !isMachineGunnerMovementOwner()
+                        || CoverReservationManager.isAvailableFor(sc.cover.getPosition(), soldier))
                     .filter(sc -> !emergencyCoverSearchActive || currentCover == null
                         || !sc.cover.getPosition().equals(currentCover.getPosition()))
                     .collect(java.util.stream.Collectors.toList());
@@ -2834,7 +2842,8 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
             CoverPoint cover = sc.cover;
             if (currentCover != null && cover.getPosition().equals(currentCover.getPosition())) continue;
             if (failedCoverPositions.contains(cover.getPosition())) continue;
-            if (!CoverReservationManager.isAvailableFor(cover.getPosition(), soldier)) continue;
+            if (isMachineGunnerMovementOwner()
+                && !CoverReservationManager.isAvailableFor(cover.getPosition(), soldier)) continue;
             if (!isForwardCoverCandidate(cover.getPosition(), objective, objectiveDir)) continue;
             if (cover.getPosition().distSqr(objective) <= ATTACK_OBJECTIVE_RADIUS * ATTACK_OBJECTIVE_RADIUS) continue;
 
@@ -3593,7 +3602,8 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
     }
 
     protected boolean moveToCover(CoverPoint cover) {
-        if (!CoverReservationManager.isReservedBy(cover.getPosition(), soldier)
+        if (isMachineGunnerMovementOwner()
+            && !CoverReservationManager.isReservedBy(cover.getPosition(), soldier)
             && !CoverReservationManager.reserve(cover.getPosition(), soldier)) {
             logMachineGunnerState("cover-reservation-failed", cover.getPosition());
             return false;
@@ -3787,7 +3797,8 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
     }
     
     private void onCoverReached(CoverPoint cover) {
-        if (!CoverReservationManager.isReservedBy(cover.getPosition(), soldier)) {
+        if (isMachineGunnerMovementOwner()
+            && !CoverReservationManager.isReservedBy(cover.getPosition(), soldier)) {
             if (DiagnosticLogManager.isCoverLoggingEnabled()) {
                 StevesArmyMod.LOGGER.info("[CoverReservation] Soldier {} arrived at unowned cover {}, refusing occupancy",
                     soldier.getId(), cover.getPosition());
@@ -3934,11 +3945,18 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
     }
     
     public static BlockPos computePeekPositionStatic(CoverPoint cover, Vec3 threatDirection, LivingEntity target, net.minecraft.world.level.Level level, double soldierY) {
-        return computePeekPositionStatic(cover, threatDirection, target, level, soldierY, -1);
+        return computePeekPositionStatic(cover, threatDirection, target, level, soldierY, -1, false);
     }
     
     public static BlockPos computePeekPositionStatic(CoverPoint cover, Vec3 threatDirection, LivingEntity target, 
                                                       net.minecraft.world.level.Level level, double soldierY, int debugSoldierId) {
+        return computePeekPositionStatic(cover, threatDirection, target, level, soldierY, debugSoldierId, false);
+    }
+
+    private static BlockPos computePeekPositionStatic(CoverPoint cover, Vec3 threatDirection,
+                                                       LivingEntity target, net.minecraft.world.level.Level level,
+                                                       double soldierY, int debugSoldierId,
+                                                       boolean strictFiringLane) {
         if (threatDirection == null || threatDirection.lengthSqr() < 0.001) {
             return null;
         }
@@ -3994,13 +4012,20 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
                 if (debugTargetEye == null) {
                     debugTargetEye = targetEye;
                 }
-                VisibilityRay.Result directVisibility = VisibilityRay.trace(level, peekEye, targetEye, null);
-                losOk = directVisibility.hasContact();
-                coneCoverageScore = (float) directVisibility.firingLaneQuality();
+                if (strictFiringLane) {
+                    VisibilityRay.Result directVisibility = VisibilityRay.trace(level, peekEye, targetEye, null);
+                    losOk = directVisibility.hasContact();
+                    coneCoverageScore = (float) directVisibility.firingLaneQuality();
+                } else {
+                    losOk = com.stevesarmy.combat.cover.CoverFinder.hasLineOfSightStatic(peekEye, targetEye, level);
+                    coneCoverageScore = losOk ? 1.0f : 0.0f;
+                }
 
-                if (coneCoverageScore < com.stevesarmy.combat.cover.CoverFinder.MIN_RELIABLE_FIRING_LANE) {
+                float minimumCoverage = strictFiringLane
+                    ? com.stevesarmy.combat.cover.CoverFinder.MIN_RELIABLE_FIRING_LANE : 0.01f;
+                if (coneCoverageScore < minimumCoverage) {
                     coneCoverageScore = com.stevesarmy.combat.cover.CoverFinder.calculateConeCoverage(peekPos, threatDirection, level);
-                    if (coneCoverageScore < com.stevesarmy.combat.cover.CoverFinder.MIN_RELIABLE_FIRING_LANE) {
+                    if (coneCoverageScore < minimumCoverage) {
                         debugRejectionReasons.add(CoverDebugManager.PeekCandidateDebugData.REASON_NO_LOS);
                         debugAngleScores.add(0.0);
                         debugLosResults.add(false);
@@ -4011,7 +4036,9 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
                 }
             } else {
                 coneCoverageScore = com.stevesarmy.combat.cover.CoverFinder.calculateConeCoverage(peekPos, threatDirection, level);
-                if (coneCoverageScore < com.stevesarmy.combat.cover.CoverFinder.MIN_RELIABLE_FIRING_LANE) {
+                float minimumCoverage = strictFiringLane
+                    ? com.stevesarmy.combat.cover.CoverFinder.MIN_RELIABLE_FIRING_LANE : 0.01f;
+                if (coneCoverageScore < minimumCoverage) {
                     debugRejectionReasons.add(CoverDebugManager.PeekCandidateDebugData.REASON_NO_LOS);
                     debugAngleScores.add(0.0);
                     debugLosResults.add(false);
@@ -4072,7 +4099,8 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
     }
     
     private BlockPos computePeekPosition(CoverPoint cover, Vec3 threatDirection, LivingEntity target) {
-        return computePeekPositionStatic(cover, threatDirection, target, soldier.level(), soldier.getY(), soldier.getId());
+        return computePeekPositionStatic(cover, threatDirection, target, soldier.level(), soldier.getY(),
+            soldier.getId(), isMachineGunnerMovementOwner());
     }
     
     public static boolean isPathClearStatic(BlockPos from, BlockPos to, net.minecraft.world.level.Level level) {
