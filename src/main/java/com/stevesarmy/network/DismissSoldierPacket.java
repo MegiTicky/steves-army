@@ -3,6 +3,7 @@ package com.stevesarmy.network;
 import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.squad.FireTeamAssignment;
 import com.stevesarmy.squad.OwnedSoldierRegistry;
+import com.stevesarmy.squad.SquadActivityManager;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
@@ -51,6 +52,7 @@ public class DismissSoldierPacket {
                 }
             }
             registry.dismiss(message.soldierId);
+            SquadActivityManager.removeSoldier(message.soldierId, player.getServer());
             NetworkHandler.sendTo(player, SquadStatusSyncPacket.createForPlayer(player));
         });
         context.setPacketHandled(true);

@@ -85,6 +85,7 @@ public class TeamEventHandler {
         if (event.getEntity() instanceof SoldierEntity soldier && soldier.level() instanceof ServerLevel level
             && level.getServer() != null) {
             OwnedSoldierRegistry.get(level.getServer()).remove(soldier.getUUID());
+            SquadActivityManager.removeSoldier(soldier.getUUID(), level.getServer());
         }
     }
 
@@ -95,6 +96,7 @@ public class TeamEventHandler {
         LAST_PLAYER_TEAMS.put(playerUUID, getTeamName(player));
         FireTeamAssignment assignment = FireTeamAssignment.get((ServerLevel) player.level(), playerUUID);
         NetworkHandler.sendTo(player, new FireTeamScopeSyncPacket(assignment.getTeamCount()));
+        SquadActivityManager.sync(player);
     }
 
     @SubscribeEvent

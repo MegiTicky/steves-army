@@ -8,6 +8,7 @@ import com.stevesarmy.ping.PingType;
 import com.stevesarmy.squad.FireTeam;
 import com.stevesarmy.squad.FireTeamAssignment;
 import com.stevesarmy.squad.SquadLaneAssignment;
+import com.stevesarmy.squad.SquadActivityManager;
 import com.stevesarmy.squad.SquadManager;
 import com.stevesarmy.util.SpacingHelper;
 import net.minecraft.core.BlockPos;
@@ -109,6 +110,8 @@ public class PingMessage {
 
                 if (target != null) {
                     target.receivePing(type, position);
+                    SquadActivityManager.applyCommand(
+                        sender, scope, type, BlockPos.containing(position), dimension, List.of(target));
                     PingBroadcastMessage broadcast = new PingBroadcastMessage(
                         type, position, dimension,
                         sender.getUUID(), sender.getGameProfile().getName(), 0xFF55AAAA,
@@ -158,6 +161,9 @@ public class PingMessage {
             for (SoldierEntity soldier : owned) {
                 soldier.receivePing(type, position);
             }
+
+            SquadActivityManager.applyCommand(
+                sender, scope, type, BlockPos.containing(position), dimension, owned);
 
             // Eagerly create lane assignment and send debug packet for GO_TO and ATTACK
             if ((type == PingType.GO_TO || type == PingType.ATTACK) && !owned.isEmpty()) {

@@ -56,6 +56,10 @@ public class NetworkHandler {
             SquadStatusSyncPacket::encode,
             SquadStatusSyncPacket::decode,
             SquadStatusSyncPacket::handle);
+        INSTANCE.registerMessage(id++, SquadActivitySyncPacket.class,
+            SquadActivitySyncPacket::encode,
+            SquadActivitySyncPacket::new,
+            SquadActivitySyncPacket::handle);
         INSTANCE.registerMessage(id++, SetSoldierConfigPacket.class,
             SetSoldierConfigPacket::encode,
             SetSoldierConfigPacket::decode,

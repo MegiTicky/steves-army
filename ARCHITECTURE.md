@@ -912,6 +912,13 @@ sequenceDiagram
 - Updates screen positions each frame via `MathUtils.worldToScreen()`
 - Scale formula: `2.0 / pow(distance, 0.3)`, clamped to [0.5, 2.0]
 
+### Fire-Team Activity Display
+
+- `SquadActivityManager` stores the current actionable activity for each owner/fire-team pair in runtime server state.
+- Activities are synchronized to the owning client through `SquadActivitySyncPacket` and rendered by `SquadActivityOverlayRenderer`.
+- Activity markers are objective-based and do not use the transient `PingManager` seven-second lifetime.
+- Movement and attack activities complete when all captured living recipients reach their objective; HOLD remains until replaced, while threat and suppression follow their existing memory windows.
+
 ---
 
 ## 13. Network Layer

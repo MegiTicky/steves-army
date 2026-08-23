@@ -4,6 +4,7 @@ import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.network.NetworkHandler;
 import com.stevesarmy.network.SquadStatusSyncPacket;
 import com.stevesarmy.squad.OwnedSoldierRegistry;
+import com.stevesarmy.squad.SquadActivityManager;
 import com.stevesarmy.entity.SoldierEntity;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraftforge.event.TickEvent;
@@ -17,6 +18,8 @@ public class SquadSyncHandler {
     @SubscribeEvent
     public static void onServerTick(TickEvent.ServerTickEvent event) {
         if (event.phase != TickEvent.Phase.END) return;
+
+        SquadActivityManager.tick(event.getServer());
 
         tickCounter++;
         if (tickCounter < 20) return;
@@ -38,6 +41,7 @@ public class SquadSyncHandler {
         for (ServerPlayer player : event.getServer().getPlayerList().getPlayers()) {
             SquadStatusSyncPacket packet = SquadStatusSyncPacket.createForPlayer(player);
             NetworkHandler.sendTo(player, packet);
+            SquadActivityManager.sync(player);
         }
     }
 }

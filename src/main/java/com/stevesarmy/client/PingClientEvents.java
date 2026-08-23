@@ -125,6 +125,7 @@ public class PingClientEvents {
         if (event.getLevel().isClientSide()) {
             soldierDebugDataMap.clear();
             EnemyContactOverlay.clear();
+            ClientSquadActivityData.INSTANCE.clear();
         }
     }
 
@@ -324,6 +325,7 @@ public class PingClientEvents {
             
             EnemyContactOverlay.render(event.getGuiGraphics(), lastWorldRenderContext);
             PingOverlayRenderer.render(event.getGuiGraphics(), lastWorldRenderContext);
+            SquadActivityOverlayRenderer.render(event.getGuiGraphics(), lastWorldRenderContext);
             
             CoverHudRenderer.render(event.getGuiGraphics());
         }
