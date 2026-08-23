@@ -1,5 +1,6 @@
 package com.stevesarmy.debug;
 
+import com.stevesarmy.StevesArmyConfig;
 import java.util.Locale;
 import java.util.concurrent.atomic.LongAdder;
 
@@ -43,6 +44,14 @@ public final class PerformanceMetrics {
     private static final LongAdder coverPathRetries = new LongAdder();
     private static final LongAdder coverPathFailures = new LongAdder();
     private static final LongAdder coverSearchCooldownSkips = new LongAdder();
+    private static final LongAdder coverMaintenanceRuns = new LongAdder();
+    private static final LongAdder coverMaintenanceSkips = new LongAdder();
+    private static final LongAdder coverStateNanos = new LongAdder();
+    private static final LongAdder coverSeekingNanos = new LongAdder();
+    private static final LongAdder coverRepositioningNanos = new LongAdder();
+    private static final LongAdder coverInCoverNanos = new LongAdder();
+    private static final LongAdder coverSuppressedNanos = new LongAdder();
+    private static final LongAdder suppressionPreemptionNanos = new LongAdder();
 
     private PerformanceMetrics() {}
 
@@ -91,6 +100,14 @@ public final class PerformanceMetrics {
         coverPathRetries.reset();
         coverPathFailures.reset();
         coverSearchCooldownSkips.reset();
+        coverMaintenanceRuns.reset();
+        coverMaintenanceSkips.reset();
+        coverStateNanos.reset();
+        coverSeekingNanos.reset();
+        coverRepositioningNanos.reset();
+        coverInCoverNanos.reset();
+        coverSuppressedNanos.reset();
+        suppressionPreemptionNanos.reset();
     }
 
     public static void recordVisibilityCacheHit() {
@@ -196,6 +213,30 @@ public final class PerformanceMetrics {
         if (enabled) coverSearchCooldownSkips.increment();
     }
 
+    public static void recordCoverMaintenanceRun() {
+        if (enabled) coverMaintenanceRuns.increment();
+    }
+
+    public static void recordCoverMaintenanceSkip() {
+        if (enabled) coverMaintenanceSkips.increment();
+    }
+
+    public static void recordCoverStateTime(String state, long nanos) {
+        if (!enabled) return;
+        coverStateNanos.add(nanos);
+        switch (state) {
+            case "SEEKING_COVER" -> coverSeekingNanos.add(nanos);
+            case "REPOSITIONING" -> coverRepositioningNanos.add(nanos);
+            case "IN_COVER" -> coverInCoverNanos.add(nanos);
+            case "SUPPRESSED_IN_COVER" -> coverSuppressedNanos.add(nanos);
+            default -> { }
+        }
+    }
+
+    public static void recordSuppressionPreemptionTime(long nanos) {
+        if (enabled) suppressionPreemptionNanos.add(nanos);
+    }
+
     public static void recordDetectionTick(int candidates) {
         if (!enabled) return;
         detectionTicks.increment();
@@ -232,6 +273,7 @@ public final class PerformanceMetrics {
 
         return "=== PERFORMANCE METRICS ===\n"
             + "  Enabled: " + enabled + "\n"
+            + "  Optimization profile: " + StevesArmyConfig.getOptimizationProfile().displayName() + "\n"
             + "  Visibility cache: " + visibilityHits + " hits, " + visibilityMisses + " misses\n"
             + "  Visibility ray requests: " + visibilityRayRequests.sum()
             + " (" + visibilityRays.sum() + " actual traces, "
@@ -262,6 +304,14 @@ public final class PerformanceMetrics {
             + "  Cover paths: " + coverPathRequests.sum() + " requests, "
             + coverPathRetries.sum() + " retries, " + coverPathFailures.sum() + " failures\n"
             + "  Cover search cooldown skips: " + coverSearchCooldownSkips.sum() + "\n"
+            + "  Cover maintenance: " + coverMaintenanceRuns.sum() + " runs, "
+            + coverMaintenanceSkips.sum() + " skips\n"
+            + "  Cover state time: " + formatMillis(coverStateNanos.sum()) + " ms total"
+            + " (seeking=" + formatMillis(coverSeekingNanos.sum())
+            + ", repositioning=" + formatMillis(coverRepositioningNanos.sum())
+            + ", in-cover=" + formatMillis(coverInCoverNanos.sum())
+            + ", suppressed=" + formatMillis(coverSuppressedNanos.sum()) + ")\n"
+            + "  Suppression preemption time: " + formatMillis(suppressionPreemptionNanos.sum()) + " ms\n"
             + "  Cover search time: " + formatMillis(coverSearchNanos.sum())
             + " ms total, " + formatMillis(searches == 0 ? 0 : coverSearchNanos.sum() / (double) searches)
             + " ms/search";

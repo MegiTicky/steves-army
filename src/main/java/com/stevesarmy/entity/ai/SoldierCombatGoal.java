@@ -472,7 +472,7 @@ public class SoldierCombatGoal extends Goal {
                 EnemyContactTracker.reportContact(soldier, potential);
             }
         }
-        
+
         // Feed ping threat positions into ThreatAwareness if no entity found
         if (soldier.hasValidPingThreatPos() && !threats.hasActiveThreat()) {
             BlockPos threatPos = soldier.getPingThreatPos();
@@ -492,13 +492,13 @@ public class SoldierCombatGoal extends Goal {
 
         maintainSuppressionAssignment();
 
-        // Last-seen suppression must yield to a real visible target immediately,
-        // including while the soldier is exposed from cover. Use a fresh scan so
-        // newly in-range enemies are not delayed by the normal target cache.
+        // Reuse the current detection scan's LOS results for suppression
+        // preemption. On deferred-scan ticks, retain the exact visibility check
+        // so newly visible targets are not delayed.
         if (isSuppressing) {
-            preemptSuppressionForVisibleTarget();
+            preemptSuppressionForVisibleTarget(detectionRefreshed);
         }
-        
+
         boolean inCover = soldier.getCoverBehaviorManager().isInCover();
         
         if (target == null || !target.isAlive()) {
@@ -1691,11 +1691,12 @@ public class SoldierCombatGoal extends Goal {
     }
 
     private boolean shouldRefreshDetection() {
-        int level = StevesArmyConfig.getOptimizationLevel();
-        if (level <= 1) return true;
+        StevesArmyConfig.OptimizationProfile profile = StevesArmyConfig.getOptimizationProfile();
+        if (profile == StevesArmyConfig.OptimizationProfile.COMPATIBILITY
+            || profile == StevesArmyConfig.OptimizationProfile.CONSERVATIVE) return true;
 
         long currentTick = soldier.level().getGameTime();
-        int interval = level == 2 ? 2 : 3;
+        int interval = profile == StevesArmyConfig.OptimizationProfile.BALANCED ? 2 : 3;
         int phase = Math.floorMod(soldier.getUUID().hashCode(), interval);
         if (lastDetectionTick == Long.MIN_VALUE) {
             return Math.floorMod((int) currentTick + phase, interval) == 0;
@@ -1803,17 +1804,32 @@ public class SoldierCombatGoal extends Goal {
         }
     }
 
-    private Optional<LivingEntity> findBestVisibleTarget(List<LivingEntity> potentialTargets) {
+    private Optional<LivingEntity> findBestVisibleTarget(List<LivingEntity> potentialTargets,
+                                                         boolean useCurrentDetectionScan) {
         return potentialTargets.stream()
-            .filter(e -> TargetAcquisition.hasLineOfSight(soldier, e))
+            .filter(e -> (useCurrentDetectionScan
+                && detectionSystem.getDetectionState(e.getUUID()) != null)
+                ? detectionSystem.wasTargetInLOS(e)
+                : TargetAcquisition.hasLineOfSight(soldier, e))
             .map(e -> new TargetScore(e, AimAccuracyManager.calculateHitProbability(soldier, e)))
             .max(Comparator.comparingDouble(ts -> ts.hitProbability))
             .map(ts -> ts.target);
     }
 
-    private void preemptSuppressionForVisibleTarget() {
-        Optional<LivingEntity> visibleTarget = findBestVisibleTarget(computePotentialTargets());
+    private Optional<LivingEntity> findBestVisibleTarget(List<LivingEntity> potentialTargets) {
+        return findBestVisibleTarget(potentialTargets, false);
+    }
+
+    private void preemptSuppressionForVisibleTarget(boolean detectionRefreshed) {
+        long started = PerformanceMetrics.isEnabled() ? System.nanoTime() : 0L;
+        boolean useCurrentDetectionScan = detectionRefreshed
+            && detectionSystem.getLastScanTick() == soldier.level().getGameTime();
+        Optional<LivingEntity> visibleTarget = findBestVisibleTarget(
+            computePotentialTargets(), useCurrentDetectionScan);
         if (visibleTarget.isEmpty()) {
+            if (PerformanceMetrics.isEnabled()) {
+                PerformanceMetrics.recordSuppressionPreemptionTime(System.nanoTime() - started);
+            }
             return;
         }
 
@@ -1834,6 +1850,9 @@ public class SoldierCombatGoal extends Goal {
                 ? "none" : releasedThreatId.toString().substring(0, 8);
             StevesArmyMod.LOGGER.info("[Suppression] Soldier {} preempted last-seen threat {} for visible target {}",
                 soldier.getId(), releasedId, acquiredTarget.getName().getString());
+        }
+        if (PerformanceMetrics.isEnabled()) {
+            PerformanceMetrics.recordSuppressionPreemptionTime(System.nanoTime() - started);
         }
     }
 
@@ -2299,9 +2318,9 @@ public class SoldierCombatGoal extends Goal {
     }
 
     private int getThreatReportInterval() {
-        return switch (StevesArmyConfig.getOptimizationLevel()) {
-            case 2 -> 2;
-            case 3 -> 3;
+        return switch (StevesArmyConfig.getOptimizationProfile()) {
+            case BALANCED -> 2;
+            case AGGRESSIVE -> 3;
             default -> 1;
         };
     }

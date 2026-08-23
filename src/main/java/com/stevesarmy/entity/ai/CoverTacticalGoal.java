@@ -1070,6 +1070,7 @@ public class CoverTacticalGoal extends Goal {
             }
         }
         
+        long stateStart = PerformanceMetrics.isEnabled() ? System.nanoTime() : 0L;
         switch (state) {
             case SEEKING_COVER:
                 tickSeekingCover();
@@ -1090,6 +1091,9 @@ public class CoverTacticalGoal extends Goal {
                     initAttackPhase();
                 }
                 break;
+        }
+        if (PerformanceMetrics.isEnabled()) {
+            PerformanceMetrics.recordCoverStateTime(state.name(), System.nanoTime() - stateStart);
         }
 
         // Cover owns the defensive position, so its prone settling timer must
@@ -1568,6 +1572,14 @@ public class CoverTacticalGoal extends Goal {
             return;
         }
         CoverPoint currentCover = getCoverManager().getCurrentCover();
+        boolean runDeferredMaintenance = shouldRunDeferredCoverMaintenance();
+        PeekController peekCtrl = getPeekController();
+        boolean peeking = peekCtrl.isExposed() || peekCtrl.isMovingToPeek() || peekCtrl.isReturning();
+        if (runDeferredMaintenance) {
+            PerformanceMetrics.recordCoverMaintenanceRun();
+        } else if (!peeking) {
+            PerformanceMetrics.recordCoverMaintenanceSkip();
+        }
         if (soldier.isPreparingOrReloading()) {
             holdForReload(currentCover);
             return;
@@ -1582,9 +1594,6 @@ public class CoverTacticalGoal extends Goal {
             Vec3 standingPos = getCoverStandingPosition(currentCover.getPosition());
             double distance = soldier.position().distanceTo(currentCover.getPosition().getCenter());
             double standingDist = soldier.position().distanceTo(standingPos);
-            PeekController peekCtrl = getPeekController();
-            boolean peeking = peekCtrl.isExposed() || peekCtrl.isMovingToPeek() || peekCtrl.isReturning();
-            
             if (DiagnosticLogManager.isCoverLoggingEnabled()) {
                 tickLogCounter++;
                 if (tickLogCounter >= SNAPSHOT_INTERVAL) {
@@ -1645,7 +1654,7 @@ public class CoverTacticalGoal extends Goal {
         }
 
 // Flank detection (skip during ATTACK — attack phase owns movement decisions)
-        if (!soldier.hasValidAttackTarget()) {
+        if (!soldier.hasValidAttackTarget() && runDeferredMaintenance) {
             Optional<CoverPoint> flankCover = shouldRepositionForFlank();
             if (flankCover.isPresent()) {
                 if (DiagnosticLogManager.isCoverLoggingEnabled()) {
@@ -1693,8 +1702,8 @@ public class CoverTacticalGoal extends Goal {
         }
 
         // Delegate peek to PeekController
-        if (currentCover != null) {
-            getPeekController().tick(soldier, currentCover, getPositionController());
+        if (currentCover != null && (runDeferredMaintenance || peeking)) {
+            peekCtrl.tick(soldier, currentCover, getPositionController());
             maintainCoverAnchorIfHiding(currentCover);
         }
 
@@ -1703,10 +1712,16 @@ public class CoverTacticalGoal extends Goal {
         }
 
         reevaluateCounter++;
-        if (reevaluateCounter >= REEVALUATE_INTERVAL_TICKS) {
+        if (runDeferredMaintenance && reevaluateCounter >= REEVALUATE_INTERVAL_TICKS) {
             reevaluateCounter = 0;
             evaluateCoverState();
         }
+    }
+
+    private boolean shouldRunDeferredCoverMaintenance() {
+        int interval = com.stevesarmy.StevesArmyConfig.getCoverMaintenanceIntervalTicks();
+        if (interval <= 1) return true;
+        return Math.floorMod((long) soldier.tickCount + soldier.getId(), interval) == 0;
     }
 
     private void holdForReload(CoverPoint currentCover) {
@@ -2436,9 +2451,9 @@ private boolean shouldExitCoverForFollow() {
     }
 
     private int getCoverSearchBackoffTicks() {
-        return switch (com.stevesarmy.StevesArmyConfig.getOptimizationLevel()) {
-            case 2 -> 10;
-            case 3 -> 20;
+        return switch (com.stevesarmy.StevesArmyConfig.getOptimizationProfile()) {
+            case BALANCED -> 10;
+            case AGGRESSIVE -> 20;
             default -> 0;
         };
     }
