@@ -1327,7 +1327,7 @@ public class SoldierCombatGoal extends Goal {
 
         if (!FriendlyFireChecker.isSafeToShoot(soldier, aimPoint.position, aimQuality)) {
             if (isDamageDebugLogging()) {
-                StevesArmyMod.LOGGER.info("[FriendlyFire] Soldier {} blocked shot - friendly in cone",
+                StevesArmyMod.LOGGER.info("[FriendlyFire] Soldier {} blocked shot - friendly on firing lane",
                     soldier.getId());
             }
             resetDirectFireBurst();
