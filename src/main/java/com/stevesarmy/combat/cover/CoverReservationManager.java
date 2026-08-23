@@ -12,6 +12,10 @@ public class CoverReservationManager {
     private static final int MAX_RESERVATIONS_PER_COVER = 1;
     private static final long RESERVATION_TIMEOUT_MS = 30000;
     private static final Map<UUID, Map<BlockPos, Long>> reservationTimestamps = new ConcurrentHashMap<>();
+    private static final double PRONE_RESERVATION_SEPARATION_SQ = 9.0;
+    private static final Map<UUID, ProneReservation> proneReservations = new ConcurrentHashMap<>();
+
+    private record ProneReservation(BlockPos position, long timestamp) {}
     
     public static boolean reserve(BlockPos coverPos, LivingEntity soldier) {
         if (coverPos == null || soldier == null) {
@@ -30,7 +34,7 @@ public class CoverReservationManager {
             }
             
             if (reservations.size() >= MAX_RESERVATIONS_PER_COVER) {
-                cleanupExpiredReservations(reservations);
+                cleanupExpiredReservations(key, reservations);
                 if (reservations.size() >= MAX_RESERVATIONS_PER_COVER) {
                     return false;
                 }
@@ -64,7 +68,6 @@ public class CoverReservationManager {
         }
 
         UUID soldierUUID = soldier.getUUID();
-        
         synchronized (coverReservations) {
             Set<UUID> reservations = coverReservations.get(key);
             if (reservations != null) {
@@ -84,6 +87,7 @@ public class CoverReservationManager {
         }
         
         UUID soldierUUID = soldier.getUUID();
+        proneReservations.remove(soldierUUID);
         
         synchronized (coverReservations) {
             Iterator<Map.Entry<BlockPos, Set<UUID>>> iterator = coverReservations.entrySet().iterator();
@@ -118,7 +122,7 @@ public class CoverReservationManager {
             return true;
         }
         
-        cleanupExpiredReservations(reservations);
+        cleanupExpiredReservations(key, reservations);
         
         if (reservations.size() < MAX_RESERVATIONS_PER_COVER) {
             return true;
@@ -143,7 +147,7 @@ public class CoverReservationManager {
             return 0;
         }
         
-        cleanupExpiredReservations(reservations);
+        cleanupExpiredReservations(key, reservations);
         return reservations.size();
     }
     
@@ -159,7 +163,15 @@ public class CoverReservationManager {
             return false;
         }
         
-        return reservations.contains(soldier.getUUID());
+        UUID soldierUUID = soldier.getUUID();
+        if (!reservations.contains(soldierUUID)) {
+            return false;
+        }
+        if (isReservationExpired(soldierUUID, key, System.currentTimeMillis())) {
+            release(key, soldier);
+            return false;
+        }
+        return true;
     }
     
     public static Set<BlockPos> getReservedPositions() {
@@ -167,13 +179,54 @@ public class CoverReservationManager {
             return new HashSet<>(coverReservations.keySet());
         }
     }
+
+    /** Reserves an open-prone firing lane while keeping nearby soldiers apart. */
+    public static boolean reserveProne(BlockPos position, LivingEntity soldier) {
+        if (position == null || soldier == null) return false;
+        UUID soldierUUID = soldier.getUUID();
+        BlockPos key = position.immutable();
+        synchronized (coverReservations) {
+            cleanupProneReservations(System.currentTimeMillis());
+            ProneReservation current = proneReservations.get(soldierUUID);
+            if (current != null && current.position().equals(key)) {
+                proneReservations.put(soldierUUID, new ProneReservation(key, System.currentTimeMillis()));
+                return true;
+            }
+            for (Map.Entry<UUID, ProneReservation> entry : proneReservations.entrySet()) {
+                if (!entry.getKey().equals(soldierUUID)
+                    && entry.getValue().position().distSqr(key) <= PRONE_RESERVATION_SEPARATION_SQ) {
+                    return false;
+                }
+            }
+            proneReservations.put(soldierUUID, new ProneReservation(key, System.currentTimeMillis()));
+            return true;
+        }
+    }
+
+    public static boolean isProneAvailableFor(BlockPos position, LivingEntity soldier) {
+        if (position == null) return false;
+        synchronized (coverReservations) {
+            cleanupProneReservations(System.currentTimeMillis());
+            for (Map.Entry<UUID, ProneReservation> entry : proneReservations.entrySet()) {
+                if (soldier != null && entry.getKey().equals(soldier.getUUID())) continue;
+                if (entry.getValue().position().distSqr(position) <= PRONE_RESERVATION_SEPARATION_SQ) {
+                    return false;
+                }
+            }
+            return true;
+        }
+    }
+
+    public static void releaseProne(LivingEntity soldier) {
+        if (soldier != null) proneReservations.remove(soldier.getUUID());
+    }
     
     public static Map<BlockPos, Integer> getAllReservationCounts() {
         Map<BlockPos, Integer> result = new HashMap<>();
         
         synchronized (coverReservations) {
             for (Map.Entry<BlockPos, Set<UUID>> entry : coverReservations.entrySet()) {
-                cleanupExpiredReservations(entry.getValue());
+                cleanupExpiredReservations(entry.getKey(), entry.getValue());
                 result.put(entry.getKey(), entry.getValue().size());
             }
         }
@@ -197,38 +250,39 @@ public class CoverReservationManager {
         }
     }
     
-    private static void cleanupExpiredReservations(Set<UUID> reservations) {
+    private static void cleanupExpiredReservations(BlockPos coverPos, Set<UUID> reservations) {
         long currentTime = System.currentTimeMillis();
         reservations.removeIf(uuid -> {
             Map<BlockPos, Long> perSoldier = reservationTimestamps.get(uuid);
             if (perSoldier == null) return true;
-            // If any of this soldier's reservations are expired, remove them all
-            // (simplified: check the oldest timestamp)
-            long oldest = perSoldier.values().stream().mapToLong(Long::longValue).min().orElse(0);
-            boolean expired = (currentTime - oldest) > RESERVATION_TIMEOUT_MS;
-            if (expired) {
-                // Actually remove the specific cover timestamps that are expired
-                perSoldier.entrySet().removeIf(e -> (currentTime - e.getValue()) > RESERVATION_TIMEOUT_MS);
-                if (perSoldier.isEmpty()) {
-                    reservationTimestamps.remove(uuid);
-                }
-                // Check if this specific UUID is still in any reservation set
-                return true;
+            // Expiration belongs to this specific (soldier, cover) pair. Do not
+            // use the soldier's oldest reservation to release a newer cover.
+            if (!isReservationExpired(uuid, coverPos, currentTime)) {
+                return false;
             }
-            return false;
+            removeTimestamp(uuid, coverPos);
+            return true;
         });
+    }
+
+    private static boolean isReservationExpired(UUID soldierUUID, BlockPos coverPos, long now) {
+        Map<BlockPos, Long> perSoldier = reservationTimestamps.get(soldierUUID);
+        Long timestamp = perSoldier != null ? perSoldier.get(coverPos) : null;
+        return timestamp == null || now - timestamp > RESERVATION_TIMEOUT_MS;
     }
     
     public static void clear() {
         synchronized (coverReservations) {
             coverReservations.clear();
             reservationTimestamps.clear();
+            proneReservations.clear();
         }
     }
     
     public static void tick() {
         synchronized (coverReservations) {
             long currentTime = System.currentTimeMillis();
+            cleanupProneReservations(currentTime);
             
             Iterator<Map.Entry<BlockPos, Set<UUID>>> iterator = coverReservations.entrySet().iterator();
             while (iterator.hasNext()) {
@@ -251,5 +305,10 @@ public class CoverReservationManager {
                 }
             }
         }
+    }
+
+    private static void cleanupProneReservations(long currentTime) {
+        proneReservations.entrySet().removeIf(entry ->
+            currentTime - entry.getValue().timestamp() > RESERVATION_TIMEOUT_MS);
     }
 }

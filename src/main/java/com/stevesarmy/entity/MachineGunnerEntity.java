@@ -67,9 +67,9 @@ public class MachineGunnerEntity extends SoldierEntity {
     }
 
     /**
-     * ATTACK pings never trigger an advance for the machine gunner. Instead the
-     * pinged position becomes a support objective that the gunner holds and
-     * suppresses from its current line. Any other ping supersedes the objective.
+     * ATTACK pings never redirect the machine gunner's suppression sector. They
+     * hold the gunner in place while the current sticky sector continues to own
+     * firing-lane selection; other pings resume the normal command behavior.
      */
     @Override
     public void receivePing(PingType type, @Nullable Vec3 position) {
@@ -84,16 +84,16 @@ public class MachineGunnerEntity extends SoldierEntity {
     }
 
     private void handleSupportAttackPing(@Nullable Vec3 position) {
-        if (position == null) {
-            return;
-        }
         setSquadMode(SquadMode.HOLD);
         setHoldPosition(blockPosition());
         clearPingMoveTarget();
         clearPingSuppressPos();
-        this.supportObjectivePos = BlockPos.containing(position);
-        this.supportObjectiveTimestamp = System.currentTimeMillis();
-        StevesArmyMod.LOGGER.info("[MachineGunner] ATTACK ping -> support objective at {}", this.supportObjectivePos);
+        // Do not let an ATTACK ping replace the current firing sector or search
+        // anchor. Clear legacy objectives that may have been set before this
+        // behavior was introduced, while preserving the sticky sector itself.
+        this.supportObjectivePos = null;
+        this.supportObjectiveTimestamp = 0;
+        StevesArmyMod.LOGGER.info("[MachineGunner] ATTACK ping -> holding current suppression sector");
     }
 
     public boolean hasValidSupportObjective() {

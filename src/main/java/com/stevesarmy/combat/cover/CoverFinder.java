@@ -49,6 +49,7 @@ public class CoverFinder {
     private static final float FULL_COVER_FIGHTABILITY_BONUS = 0.15f;
     private static final double LAST_SEEN_CONTACT_TOLERANCE = 2.0;
     private static final float FIRING_LANE_EPSILON = 0.01f;
+    public static final float MIN_RELIABLE_FIRING_LANE = 0.35f;
 
     // Suppression targets for half cover must be above the cover's collision shape.
     // A block-center target is commonly inside the block and causes shots to hit cover.
@@ -779,8 +780,9 @@ public class CoverFinder {
     private FiringLaneResult evaluateFiringOrigin(Vec3 origin, Vec3 threatDirection,
                                                    LivingEntity primaryThreat, SquadCoverContext squadCtx) {
         if (primaryThreat != null && primaryThreat.isAlive()) {
-            if (ExposureCalculator.hasAnyAimPointFrom(origin, primaryThreat)) {
-                return new FiringLaneResult(1.0f, "active", 0, 0);
+            float activeLane = (float) ExposureCalculator.getBestFiringLaneQualityFrom(origin, primaryThreat);
+            if (activeLane >= MIN_RELIABLE_FIRING_LANE) {
+                return new FiringLaneResult(activeLane, "active", 0, 0);
             }
         }
 
@@ -824,7 +826,13 @@ public class CoverFinder {
             VisibilityRay.Result visibility = cache != null
                 ? cache.getContactVisibility(level, origin, contact.threatEntityId(), contact.exposedPoint(), currentTick)
                 : VisibilityRay.trace(level, origin, contact.exposedPoint(), null);
-            if (visibility.hasContact() || isNearLastSeenContact(origin, contact.exposedPoint(), visibility)) {
+            double laneQuality = visibility.firingLaneQuality();
+            if (laneQuality >= MIN_RELIABLE_FIRING_LANE) {
+                reachable++;
+                reachableWeight += freshness * (float) laneQuality;
+            } else if (isNearLastSeenContact(origin, contact.exposedPoint(), visibility)) {
+                // Preserve the existing last-seen fallback for a physically
+                // blocked point; it is distinct from a foliage-obscured lane.
                 reachable++;
                 reachableWeight += freshness;
             }
@@ -911,8 +919,8 @@ return qualityScore + shootBonus - distancePenalty;
     /**
      * Calculates how much of a cone has clear line-of-sight from peek position toward threat direction.
      * Returns a score from 0.0 (no opening) to 1.0 (full cone coverage).
-     * Uses "area covered" approach - measures how far each ray travels before hitting a block,
-     * then normalizes by expected distance.
+     * Uses area covered and visibility quality: solid blocks stop a ray, while
+     * concealment reduces its contribution without pretending to be physical cover.
     */
     public static float calculateConeCoverage(BlockPos peekPos, Vec3 threatDirection, net.minecraft.world.level.Level level) {
         Vec3 peekEye = new Vec3(peekPos.getX() + 0.5, peekPos.getY() + 1.62, peekPos.getZ() + 0.5);
@@ -936,12 +944,15 @@ return qualityScore + shootBonus - distancePenalty;
             double angleOffset = -CONE_HALF_ANGLE_DEG + (2.0 * CONE_HALF_ANGLE_DEG * i / (RAY_COUNT - 1));
             
             Vec3 rayDir = rotateVectorY(threatDir, angleOffset);
-            double distance = raycastDistanceStatic(peekEye, rayDir, MAX_RAY_DISTANCE, level);
+            VisibilityRay.Result visibility = VisibilityRay.trace(level, peekEye,
+                peekEye.add(rayDir.scale(MAX_RAY_DISTANCE)), null);
+            double distance = Math.min(MAX_RAY_DISTANCE, visibility.blockedDistance());
+            double laneQuality = visibility.firingLaneQuality();
             
             double normalizedDistance = distance / MAX_RAY_DISTANCE;
             
-            if (distance >= MIN_OPENING_DISTANCE) {
-                totalCoverage += normalizedDistance;
+            if (distance >= MIN_OPENING_DISTANCE && laneQuality > 0.0) {
+                totalCoverage += normalizedDistance * laneQuality;
                 validRays++;
             }
         }

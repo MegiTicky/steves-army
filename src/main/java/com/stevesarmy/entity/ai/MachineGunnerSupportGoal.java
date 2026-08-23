@@ -2,6 +2,8 @@ package com.stevesarmy.entity.ai;
 
 import com.stevesarmy.combat.cover.FiringPosition;
 import com.stevesarmy.combat.cover.FiringPositionFinder;
+import com.stevesarmy.combat.cover.CoverPoint;
+import com.stevesarmy.combat.cover.CoverType;
 import com.stevesarmy.entity.MachineGunnerEntity;
 import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.network.MachineGunnerEvaluationPacket;
@@ -140,6 +142,15 @@ public class MachineGunnerSupportGoal extends CoverTacticalGoal {
         if (!isFiringPositionOccupied()) {
             return;
         }
+        // Defensive suppression owns an occupied physical half-cover position.
+        // Do not invalidate that position and immediately issue a replacement
+        // lane before CoverTacticalGoal can force the normal duck-back posture.
+        CoverPoint currentCover = soldier.getCoverBehaviorManager().getCurrentCover();
+        if (soldier.getCoverBehaviorManager().isSuppressed()
+            && active.posture() == FiringPosition.FiringPosture.COVER_PEEK
+            && currentCover != null && currentCover.getType() == CoverType.HALF) {
+            return;
+        }
         if (center == null) {
             clearFiringPosition();
             lastIssuedDestination = null;
@@ -175,6 +186,13 @@ public class MachineGunnerSupportGoal extends CoverTacticalGoal {
         }
         BlockPos suppressionCenter = mg.getSuppressionCenter();
         BlockPos supportAnchor = SupportPositionFinder.findSupportPosition(mg);
+        CoverPoint currentCover = soldier.getCoverBehaviorManager().getCurrentCover();
+        if (soldier.getCoverBehaviorManager().isSuppressed()
+            && currentCover != null && currentCover.getType() == CoverType.HALF) {
+            // Keep the ordinary soldier suppression flow in charge until the
+            // current half cover has recovered; the lane can be evaluated then.
+            return;
+        }
         if (suppressionCenter == null || supportAnchor == null) {
             if (isFiringPositionActive()) {
                 clearFiringPosition();

@@ -98,7 +98,8 @@ public final class DefensivePositionSelector {
             if (!isProneTerrainValid(level, pos)) continue;
             terrainValid++;
             Vec3 eye = new Vec3(pos.getX() + .5, pos.getY() + .45, pos.getZ() + .5);
-            if (!VisibilityRay.trace(level, eye, aimPoint, soldier).hasContact()) continue;
+            VisibilityRay.Result visibility = VisibilityRay.trace(level, eye, aimPoint, soldier);
+            if (visibility.firingLaneQuality() < CoverFinder.MIN_RELIABLE_FIRING_LANE) continue;
             proneLos++;
             boolean currentPosition = pos.equals(origin);
             if (!currentPosition) {

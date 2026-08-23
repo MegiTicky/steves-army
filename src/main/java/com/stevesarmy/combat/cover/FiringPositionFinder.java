@@ -478,6 +478,9 @@ public final class FiringPositionFinder {
         for (CoverPoint cover : finder.findCoverPoints(anchor, SEARCH_RADIUS)) {
             positionsChecked++;
             BlockPos pos = cover.getPosition();
+            if (!CoverReservationManager.isAvailableFor(pos, mg)) {
+                continue;
+            }
             float protection = directionalCoverProtection(level, cover, targets);
             geometries.add(new CandidateGeometry(pos, FiringPosition.FiringPosture.COVER_PEEK,
                 protection, protection >= MIN_COVER_PROTECTION));
@@ -503,6 +506,9 @@ public final class FiringPositionFinder {
                     continue;
                 }
                 positionsChecked++;
+                if (!CoverReservationManager.isProneAvailableFor(pos, mg)) {
+                    continue;
+                }
                 float protection = OPEN_PRONE_PROTECTION + (adjacentCover(level, pos) ? 0.10f : 0.0f);
                 geometries.add(new CandidateGeometry(pos, FiringPosition.FiringPosture.OPEN_PRONE,
                     protection, false));

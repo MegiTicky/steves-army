@@ -259,6 +259,23 @@ public class ExposureCalculator {
         return false;
     }
 
+    /**
+     * Returns the best concealment-adjusted lane quality to any exposed target
+     * point without changing normal aim-point or target-acquisition semantics.
+     */
+    public static double getBestFiringLaneQualityFrom(Vec3 observerEye, LivingEntity target) {
+        if (target == null || !target.isAlive()) {
+            return 0.0;
+        }
+
+        double bestQuality = 0.0;
+        for (TargetPoint point : getTargetPointsWithPriority(target)) {
+            bestQuality = Math.max(bestQuality,
+                VisibilityRay.trace(target.level(), observerEye, point.position, null).firingLaneQuality());
+        }
+        return bestQuality;
+    }
+
     private static AimPointResult getBestAimPointFrom(Vec3 observerEye, LivingEntity target,
                                                        LivingEntity observer, BlockPos skipBlock) {
         Level level = target.level();

@@ -14,7 +14,6 @@ import java.util.EnumSet;
 
 public class SoldierHealGoal extends Goal {
     private static final float NORMAL_HEALTH_THRESHOLD = 0.50F;
-    private static final float EMERGENCY_HEALTH_THRESHOLD = 0.25F;
     private static final int RETRY_COOLDOWN_TICKS = 40;
 
     private final SoldierEntity soldier;
@@ -39,8 +38,8 @@ public class SoldierHealGoal extends Goal {
         if (GunIntegration.isTaczLoaded() && GunIntegration.isReloading(soldier)) return false;
 
         float healthFraction = soldier.getHealth() / soldier.getMaxHealth();
-        if (healthFraction > NORMAL_HEALTH_THRESHOLD) return false;
-        if (healthFraction > EMERGENCY_HEALTH_THRESHOLD && !soldier.getCoverBehaviorManager().isInCover()) return false;
+        if (healthFraction >= NORMAL_HEALTH_THRESHOLD) return false;
+        if (!soldier.getCoverBehaviorManager().isInCover()) return false;
 
         sourceSlot = findHealingItem();
         return sourceSlot >= SoldierInventory.SLOT_GENERAL_START;

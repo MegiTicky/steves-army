@@ -42,6 +42,15 @@ public final class VisibilityRay {
             return clear && concealment < MAX_CONCEALMENT;
         }
 
+        /**
+         * Scores whether this ray is useful as a tactical firing lane. This is
+         * intentionally separate from hasContact(): foliage is penetrable, but
+         * a heavily concealed lane should not be preferred for cover or peeking.
+         */
+        public double firingLaneQuality() {
+            return clear ? Math.max(0.0, 1.0 - concealment) : 0.0;
+        }
+
         public double spottingMultiplier() {
             return Math.max(0.05, 1.0 - 1.6 * concealment);
         }
