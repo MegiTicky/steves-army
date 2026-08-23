@@ -638,6 +638,13 @@ public class CoverFinder {
         return direction == null || new CoverQualityEvaluator(level).isDirectionProtected(coverPoint, direction);
     }
 
+    /** Tests physical protection against an explicit threat direction. */
+    public boolean isDirectionProtected(CoverPoint coverPoint, Vec3 threatDirection) {
+        return coverPoint != null && threatDirection != null
+            && threatDirection.lengthSqr() > 0.001D
+            && new CoverQualityEvaluator(level).isDirectionProtected(coverPoint, threatDirection);
+    }
+
     public boolean hasPrimaryThreat(LivingEntity soldier, Vec3 fallbackDirection) {
         return resolveProtectionContext(soldier, fallbackDirection).hasThreat();
     }

@@ -168,6 +168,12 @@ public class SoldierCombatGoal extends Goal {
     private Vec3 pingSuppressionTarget = null;
     private Vec3 pingSuppressionSweepEnd = null;
     private Vec3 pingSuppressionShotTarget = null;
+    // A dedicated machine gunner traverses the available threat/peek points as
+    // a persistent beaten zone instead of selecting a new random point each burst.
+    private List<Vec3> machineGunnerSweepPoints = List.of();
+    private List<Vec3> machineGunnerSweepSource = null;
+    private int machineGunnerSweepIndex = -1;
+    private int machineGunnerSweepDirection = 1;
     private static final int PING_SUPPRESS_MIN_DURATION_TICKS = 80;   // 4 seconds
     private static final int PING_SUPPRESS_MAX_DURATION_TICKS = 200; // 10 seconds
     
@@ -3032,6 +3038,7 @@ public class SoldierCombatGoal extends Goal {
             pingSuppressionTarget = null;
             pingSuppressionSweepEnd = null;
             pingSuppressionShotTarget = null;
+            resetMachineGunnerSweep();
             resetBurstState();
 
             boolean isMG = GunIntegration.isMachineGun(soldier);
@@ -3052,6 +3059,7 @@ public class SoldierCombatGoal extends Goal {
             pingSuppressionTarget = null;
             pingSuppressionSweepEnd = null;
             pingSuppressionShotTarget = null;
+            resetMachineGunnerSweep();
             resetBurstState();
             return;
         }
@@ -3184,7 +3192,7 @@ public class SoldierCombatGoal extends Goal {
      */
     private Vec3 getClearPingSuppressionTarget() {
         float aimInaccuracy = GunIntegration.getAimInaccuracy(soldier);
-        Vec3 selected = soldier.getNextSuppressionAimPoint();
+        Vec3 selected = getNextPingSuppressionAimPoint();
 
         if (selected == null) {
             selected = soldier.getHorizontalSpreadFallbackTarget(soldier.getPingSuppressPos());
@@ -3241,6 +3249,21 @@ public class SoldierCombatGoal extends Goal {
         double maxSweepDistance = getPingSuppressionSweepDistance();
         if (maxSweepDistance <= 0.0) return null;
 
+        if (soldier instanceof MachineGunnerEntity mg && mg.isAutonomousSuppressionActive()) {
+            int attempts = machineGunnerSweepPoints.size();
+            for (int i = 0; i < attempts; i++) {
+                Vec3 candidate = getNextMachineGunnerSweepPoint();
+                if (candidate == null || candidate.distanceToSqr(start) <= 0.16
+                    || candidate.distanceToSqr(start) > maxSweepDistance * maxSweepDistance
+                    || Math.abs(candidate.y - start.y) > 0.75
+                    || !hasClearPingSuppressionSweep(start, candidate)) {
+                    continue;
+                }
+                return candidate;
+            }
+            return null;
+        }
+
         List<Vec3> candidates = soldier.getSuppressionAimPoints().stream()
             .filter(point -> point.distanceToSqr(start) > 0.16)
             .filter(point -> {
@@ -3274,6 +3297,83 @@ public class SoldierCombatGoal extends Goal {
         return 0.0;
     }
 
+    private Vec3 getNextPingSuppressionAimPoint() {
+        if (soldier instanceof MachineGunnerEntity mg && mg.isAutonomousSuppressionActive()) {
+            Vec3 point = getNextMachineGunnerSweepPoint();
+            if (point != null) {
+                return point;
+            }
+        }
+        return soldier.getNextSuppressionAimPoint();
+    }
+
+    private Vec3 getNextMachineGunnerSweepPoint() {
+        List<Vec3> source = soldier.getSuppressionAimPoints();
+        if (source.isEmpty()) {
+            resetMachineGunnerSweep();
+            return null;
+        }
+
+        if (machineGunnerSweepSource != source) {
+            machineGunnerSweepSource = source;
+            machineGunnerSweepPoints = buildMachineGunnerSweepPoints(source);
+            machineGunnerSweepIndex = -1;
+            machineGunnerSweepDirection = 1;
+        }
+
+        if (machineGunnerSweepPoints.isEmpty()) {
+            return null;
+        }
+
+        if (machineGunnerSweepIndex < 0) {
+            machineGunnerSweepIndex = machineGunnerSweepDirection > 0
+                ? 0 : machineGunnerSweepPoints.size() - 1;
+        }
+
+        Vec3 result = machineGunnerSweepPoints.get(machineGunnerSweepIndex);
+        int next = machineGunnerSweepIndex + machineGunnerSweepDirection;
+        if (next < 0 || next >= machineGunnerSweepPoints.size()) {
+            machineGunnerSweepDirection = -machineGunnerSweepDirection;
+            next = machineGunnerSweepIndex + machineGunnerSweepDirection;
+        }
+        machineGunnerSweepIndex = Math.max(0, Math.min(machineGunnerSweepPoints.size() - 1, next));
+        return result;
+    }
+
+    private List<Vec3> buildMachineGunnerSweepPoints(List<Vec3> source) {
+        Vec3 center = soldier.getPingSuppressPos() != null
+            ? soldier.getPingSuppressPos().getCenter() : soldier.position();
+        Vec3 forward = center.subtract(soldier.getEyePosition());
+        forward = new Vec3(forward.x, 0.0, forward.z);
+        if (forward.lengthSqr() < 0.001) {
+            forward = new Vec3(0.0, 0.0, 1.0);
+        } else {
+            forward = forward.normalize();
+        }
+        Vec3 lateral = new Vec3(-forward.z, 0.0, forward.x);
+
+        List<Vec3> ordered = new ArrayList<>(source);
+        ordered.sort(Comparator.comparingDouble(point ->
+            point.subtract(center).dot(lateral)));
+
+        List<Vec3> deduplicated = new ArrayList<>();
+        for (Vec3 point : ordered) {
+            boolean nearby = deduplicated.stream().anyMatch(existing ->
+                existing.distanceToSqr(point) <= 1.5 * 1.5);
+            if (!nearby) {
+                deduplicated.add(point);
+            }
+        }
+        return deduplicated;
+    }
+
+    private void resetMachineGunnerSweep() {
+        machineGunnerSweepPoints = List.of();
+        machineGunnerSweepSource = null;
+        machineGunnerSweepIndex = -1;
+        machineGunnerSweepDirection = 1;
+    }
+
     private double getPingSuppressionVerticalVariation() {
         double amplitude = GunIntegration.isSuppressiveMachineGun(soldier) ? 0.14
             : GunIntegration.getRPM(soldier) >= 600 ? 0.09 : 0.05;
@@ -3295,5 +3395,6 @@ public class SoldierCombatGoal extends Goal {
         this.pingSuppressionTarget = null;
         this.pingSuppressionSweepEnd = null;
         this.pingSuppressionShotTarget = null;
+        resetMachineGunnerSweep();
     }
 }

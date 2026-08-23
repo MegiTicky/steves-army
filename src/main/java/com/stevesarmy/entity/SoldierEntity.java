@@ -1312,6 +1312,10 @@ public BlockPos getPingMoveTarget() {
     }
 
     public void setPingSuppressPos(BlockPos pos) {
+        if (pingSuppressPos == null || !pingSuppressPos.equals(pos)) {
+            suppressionAimPoints.clear();
+            lastSuppressionAimPoint = null;
+        }
         this.pingSuppressPos = pos;
         this.pingSuppressTimestamp = System.currentTimeMillis();
     }

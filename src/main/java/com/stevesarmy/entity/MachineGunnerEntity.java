@@ -22,14 +22,12 @@ import javax.annotation.Nullable;
  * area with suppression instead of advancing on ATTACK pings.
  */
 public class MachineGunnerEntity extends SoldierEntity {
-    private static final long SUPPORT_OBJECTIVE_TIMEOUT_MS = 20_000;
     private static final int SECTOR_MIN_HOLD_TICKS = 120;
     private static final int SECTOR_SWITCH_CONFIRM_TICKS = 40;
     private static final int SECTOR_CONTACT_GRACE_TICKS = 160;
     private static final int SECTOR_SWITCH_DISTANCE_SQ = 8 * 8;
 
     public enum SuppressionSectorSource {
-        ATTACK_OBJECTIVE,
         SQUAD_THREAT,
         LOCAL_THREAT,
         PING_THREAT
@@ -37,13 +35,14 @@ public class MachineGunnerEntity extends SoldierEntity {
 
     @Nullable
     private BlockPos supportObjectivePos = null;
-    private long supportObjectiveTimestamp = 0;
+    private boolean supportAttackActive;
     @Nullable private BlockPos activeSuppressionCenter;
     @Nullable private BlockPos pendingSuppressionCenter;
     @Nullable private SuppressionSectorSource activeSectorSource;
     private long activeSectorStartedTick;
     private long activeSectorLastConfirmedTick;
     private long pendingSectorStartedTick;
+    private boolean autonomousSuppressionActive;
 
     public MachineGunnerEntity(EntityType<? extends SoldierEntity> type, Level level) {
         super(type, level);
@@ -77,33 +76,79 @@ public class MachineGunnerEntity extends SoldierEntity {
             handleSupportAttackPing(position);
             return;
         }
-        this.supportObjectivePos = null;
-        this.supportObjectiveTimestamp = 0;
+        boolean wasAutonomousSuppressionActive = autonomousSuppressionActive;
+        clearAutonomousSuppression();
+        if (wasAutonomousSuppressionActive) {
+            clearPingSuppressPos();
+            if (getCombatGoal() != null) {
+                getCombatGoal().forceRestartPingSuppression();
+            }
+        }
+        clearSupportAttack();
         clearSuppressionSector();
         super.receivePing(type, position);
     }
 
+    public boolean isAutonomousSuppressionActive() {
+        return autonomousSuppressionActive;
+    }
+
+    public void beginAutonomousSuppression() {
+        autonomousSuppressionActive = true;
+    }
+
+    public void clearAutonomousSuppression() {
+        autonomousSuppressionActive = false;
+    }
+
     private void handleSupportAttackPing(@Nullable Vec3 position) {
+        if (position == null) {
+            return;
+        }
+        this.supportObjectivePos = BlockPos.containing(position).immutable();
+        this.supportAttackActive = true;
         setSquadMode(SquadMode.HOLD);
         setHoldPosition(blockPosition());
         clearPingMoveTarget();
-        clearPingSuppressPos();
-        // Do not let an ATTACK ping replace the current firing sector or search
-        // anchor. Clear legacy objectives that may have been set before this
-        // behavior was introduced, while preserving the sticky sector itself.
-        this.supportObjectivePos = null;
-        this.supportObjectiveTimestamp = 0;
-        StevesArmyMod.LOGGER.info("[MachineGunner] ATTACK ping -> holding current suppression sector");
+        // The attack point is only an order-lifecycle reference. It must never
+        // replace the threat-driven suppression center or cancel an active
+        // suppression assignment.
+        StevesArmyMod.LOGGER.info("[MachineGunner] ATTACK ping -> support order at {} (holding current threat sector)",
+            this.supportObjectivePos);
     }
 
     public boolean hasValidSupportObjective() {
-        return this.supportObjectivePos != null
-            && System.currentTimeMillis() - this.supportObjectiveTimestamp < SUPPORT_OBJECTIVE_TIMEOUT_MS;
+        return supportAttackActive && this.supportObjectivePos != null;
     }
 
     @Nullable
     public BlockPos getSupportObjectivePos() {
         return hasValidSupportObjective() ? this.supportObjectivePos : null;
+    }
+
+    /** True while this MG is supporting a rifle element's active ATTACK order. */
+    public boolean isAttackSupportActive() {
+        return hasValidSupportObjective();
+    }
+
+    /**
+     * Called by SquadActivityManager once the rifle element reaches the attack
+     * objective. The MG remains in its current cover and may finish suppressing,
+     * but it no longer treats the old attack order as an active support request.
+     */
+    public void completeAttackSupport(@Nullable BlockPos objective) {
+        if (!supportAttackActive || supportObjectivePos == null
+            || (objective != null && !supportObjectivePos.equals(objective))) {
+            return;
+        }
+        BlockPos completed = supportObjectivePos;
+        clearSupportAttack();
+        StevesArmyMod.LOGGER.info("[MachineGunner] ATTACK support complete at {}", completed);
+    }
+
+    private void clearSupportAttack() {
+        supportObjectivePos = null;
+        supportAttackActive = false;
     }
 
     /**
@@ -113,12 +158,6 @@ public class MachineGunnerEntity extends SoldierEntity {
      */
     @Nullable
     public BlockPos getSuppressionCenter() {
-        BlockPos objective = getSupportObjectivePos();
-        if (objective != null) {
-            activateSuppressionSector(objective, SuppressionSectorSource.ATTACK_OBJECTIVE, level().getGameTime());
-            return activeSuppressionCenter;
-        }
-
         BlockPos candidate = getBestSquadThreatPosition();
         SuppressionSectorSource source = candidate != null ? SuppressionSectorSource.SQUAD_THREAT : null;
         BlockPos threatPos = getThreatAwareness().getPrimaryThreatPosition();
@@ -140,12 +179,28 @@ public class MachineGunnerEntity extends SoldierEntity {
         }
         long now = level().getGameTime();
         return SquadManager.get(serverLevel).getSquadById(getSquadId())
-            .flatMap(squad -> squad.getThreatIntel().getAllThreats().stream()
-                .filter(threat -> threat.isAlive && threat.lastKnownPosition != null
-                    && !squad.getThreatIntel().isThreatStale(threat.threatEntityId, now))
-                .max(java.util.Comparator.comparingDouble((SquadThreatIntel.ThreatKnowledge threat) -> threat.accuracy)
-                    .thenComparingLong(threat -> threat.lastSeenTime))
-                .map(threat -> threat.lastKnownPosition))
+            .map(squad -> {
+                double x = 0.0;
+                double y = 0.0;
+                double z = 0.0;
+                double totalWeight = 0.0;
+                for (SquadThreatIntel.ThreatKnowledge threat : squad.getThreatIntel().getAllThreats()) {
+                    if (!threat.isAlive || threat.lastKnownPosition == null
+                        || squad.getThreatIntel().isThreatStale(threat.threatEntityId, now)) {
+                        continue;
+                    }
+                    long age = Math.max(0L, now - threat.lastSeenTime);
+                    double freshness = Math.max(0.25, 1.0 - age / 120.0);
+                    double weight = Math.max(0.25, threat.accuracy) * freshness;
+                    x += (threat.lastKnownPosition.getX() + 0.5) * weight;
+                    y += (threat.lastKnownPosition.getY() + 0.5) * weight;
+                    z += (threat.lastKnownPosition.getZ() + 0.5) * weight;
+                    totalWeight += weight;
+                }
+                return totalWeight > 0.0
+                    ? BlockPos.containing(x / totalWeight, y / totalWeight, z / totalWeight)
+                    : null;
+            })
             .orElse(null);
     }
 
