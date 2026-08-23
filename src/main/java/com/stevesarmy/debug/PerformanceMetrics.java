@@ -27,6 +27,22 @@ public final class PerformanceMetrics {
     private static final LongAdder visibilityRayRequests = new LongAdder();
     private static final LongAdder aimPointCacheHits = new LongAdder();
     private static final LongAdder aimPointCacheMisses = new LongAdder();
+    private static final LongAdder targetQueryCacheHits = new LongAdder();
+    private static final LongAdder targetQueryCacheMisses = new LongAdder();
+    private static final LongAdder targetQueryCacheEntities = new LongAdder();
+    private static final LongAdder threatReportAttempts = new LongAdder();
+    private static final LongAdder threatReportPublished = new LongAdder();
+    private static final LongAdder threatReportGeometryCalculations = new LongAdder();
+    private static final LongAdder threatReportDeduplicated = new LongAdder();
+    private static final LongAdder coverTicks = new LongAdder();
+    private static final LongAdder coverSeekingTicks = new LongAdder();
+    private static final LongAdder coverRepositioningTicks = new LongAdder();
+    private static final LongAdder coverInCoverTicks = new LongAdder();
+    private static final LongAdder coverSuppressedTicks = new LongAdder();
+    private static final LongAdder coverPathRequests = new LongAdder();
+    private static final LongAdder coverPathRetries = new LongAdder();
+    private static final LongAdder coverPathFailures = new LongAdder();
+    private static final LongAdder coverSearchCooldownSkips = new LongAdder();
 
     private PerformanceMetrics() {}
 
@@ -59,6 +75,22 @@ public final class PerformanceMetrics {
         visibilityRayRequests.reset();
         aimPointCacheHits.reset();
         aimPointCacheMisses.reset();
+        targetQueryCacheHits.reset();
+        targetQueryCacheMisses.reset();
+        targetQueryCacheEntities.reset();
+        threatReportAttempts.reset();
+        threatReportPublished.reset();
+        threatReportGeometryCalculations.reset();
+        threatReportDeduplicated.reset();
+        coverTicks.reset();
+        coverSeekingTicks.reset();
+        coverRepositioningTicks.reset();
+        coverInCoverTicks.reset();
+        coverSuppressedTicks.reset();
+        coverPathRequests.reset();
+        coverPathRetries.reset();
+        coverPathFailures.reset();
+        coverSearchCooldownSkips.reset();
     }
 
     public static void recordVisibilityCacheHit() {
@@ -108,6 +140,62 @@ public final class PerformanceMetrics {
         if (enabled) aimPointCacheMisses.increment();
     }
 
+    public static void recordTargetQueryCacheHit(int entityCount) {
+        if (!enabled) return;
+        targetQueryCacheHits.increment();
+        targetQueryCacheEntities.add(entityCount);
+    }
+
+    public static void recordTargetQueryCacheMiss(int entityCount) {
+        if (!enabled) return;
+        targetQueryCacheMisses.increment();
+        targetQueryCacheEntities.add(entityCount);
+    }
+
+    public static void recordThreatReportAttempt() {
+        if (enabled) threatReportAttempts.increment();
+    }
+
+    public static void recordThreatReportPublished() {
+        if (enabled) threatReportPublished.increment();
+    }
+
+    public static void recordThreatReportGeometryCalculation() {
+        if (enabled) threatReportGeometryCalculations.increment();
+    }
+
+    public static void recordThreatReportDeduplicated() {
+        if (enabled) threatReportDeduplicated.increment();
+    }
+
+    public static void recordCoverTick(String state) {
+        if (!enabled) return;
+        coverTicks.increment();
+        switch (state) {
+            case "SEEKING_COVER" -> coverSeekingTicks.increment();
+            case "REPOSITIONING" -> coverRepositioningTicks.increment();
+            case "IN_COVER" -> coverInCoverTicks.increment();
+            case "SUPPRESSED_IN_COVER" -> coverSuppressedTicks.increment();
+            default -> { }
+        }
+    }
+
+    public static void recordCoverPathRequest() {
+        if (enabled) coverPathRequests.increment();
+    }
+
+    public static void recordCoverPathRetry() {
+        if (enabled) coverPathRetries.increment();
+    }
+
+    public static void recordCoverPathFailure() {
+        if (enabled) coverPathFailures.increment();
+    }
+
+    public static void recordCoverSearchCooldownSkip() {
+        if (enabled) coverSearchCooldownSkips.increment();
+    }
+
     public static void recordDetectionTick(int candidates) {
         if (!enabled) return;
         detectionTicks.increment();
@@ -153,6 +241,12 @@ public final class PerformanceMetrics {
             + aimPointCacheMisses.sum() + " misses\n"
             + "  Exposure cache: " + exposureHits + " hits, " + exposureMisses + " misses\n"
             + "  Exposure calculations: " + exposureCalculations.sum() + "\n"
+            + "  Target query cache: " + targetQueryCacheHits.sum() + " hits, "
+            + targetQueryCacheMisses.sum() + " misses, " + targetQueryCacheEntities.sum() + " entities\n"
+            + "  Threat reports: " + threatReportAttempts.sum() + " attempts, "
+            + threatReportPublished.sum() + " published, "
+            + threatReportGeometryCalculations.sum() + " geometry calculations, "
+            + threatReportDeduplicated.sum() + " deduplicated\n"
             + "  Detection ticks: " + detectionTicks.sum() + "\n"
             + "  Detection candidates: " + detectionCandidates.sum() + "\n"
             + "  Target refreshes: " + targetRefreshes.sum() + "\n"
@@ -161,6 +255,13 @@ public final class PerformanceMetrics {
             + "  Cover candidates discovered: " + coverCandidatesDiscovered.sum() + "\n"
             + "  Cover candidates evaluated: " + coverCandidatesEvaluated.sum() + "\n"
             + "  Cover candidates scored: " + coverCandidatesScored.sum() + "\n"
+            + "  Cover ticks: " + coverTicks.sum() + " (seeking=" + coverSeekingTicks.sum()
+            + ", repositioning=" + coverRepositioningTicks.sum()
+            + ", in-cover=" + coverInCoverTicks.sum()
+            + ", suppressed=" + coverSuppressedTicks.sum() + ")\n"
+            + "  Cover paths: " + coverPathRequests.sum() + " requests, "
+            + coverPathRetries.sum() + " retries, " + coverPathFailures.sum() + " failures\n"
+            + "  Cover search cooldown skips: " + coverSearchCooldownSkips.sum() + "\n"
             + "  Cover search time: " + formatMillis(coverSearchNanos.sum())
             + " ms total, " + formatMillis(searches == 0 ? 0 : coverSearchNanos.sum() / (double) searches)
             + " ms/search";

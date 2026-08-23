@@ -5,6 +5,7 @@ import com.stevesarmy.combat.ThreatAwareness;
 import com.stevesarmy.combat.VisibilityRay;
 import com.stevesarmy.combat.cover.*;
 import com.stevesarmy.debug.DiagnosticLogManager;
+import com.stevesarmy.debug.PerformanceMetrics;
 import com.stevesarmy.entity.MachineGunnerEntity;
 import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.squad.SquadCoverContext;
@@ -178,6 +179,10 @@ public class CoverTacticalGoal extends Goal {
     private int peekCycleLogTick = 0;
     
     private CoverPoint pendingRetryCover = null;
+    private long lastCoverSearchTick = Long.MIN_VALUE;
+    private long nextCoverSearchTick = Long.MIN_VALUE;
+    private UUID lastCoverSearchTargetId = null;
+    private BlockPos lastCoverSearchRelocationCenter = null;
     private boolean isRetryAttempt = false;
     private boolean reloadHoldActive;
     private int reloadMovementLogCooldown;
@@ -575,6 +580,7 @@ public class CoverTacticalGoal extends Goal {
                 continuousSuppressionStartTime = System.currentTimeMillis();
             } else if (!continuousSuppressionRepositionStarted
                 && System.currentTimeMillis() - continuousSuppressionStartTime >= CONTINUOUS_SUPPRESSION_REPOSITION_DELAY_MS
+                && !coverManager.isProtectedMachineGunner()
                 && !coverManager.isContinuousSuppressionRepositionRequested()) {
                 continuousSuppressionRepositionStarted = true;
                 coverManager.requestContinuousSuppressionReposition();
@@ -892,6 +898,7 @@ public class CoverTacticalGoal extends Goal {
     public void start() {
         stuckTicks = 0;
         reevaluateCounter = 0;
+        invalidateCoverSearchBackoff();
         
         CoverBehaviorManager.CoverState state = getCoverManager().getState();
         
@@ -941,11 +948,13 @@ public class CoverTacticalGoal extends Goal {
         isRetryAttempt = false;
         cooldown = COOLDOWN_TICKS;
         stuckTicks = 0;
+        invalidateCoverSearchBackoff();
     }
     
     @Override
     public void tick() {
         CoverBehaviorManager.CoverState state = getCoverManager().getState();
+        PerformanceMetrics.recordCoverTick(state.name());
         BlockPos activeProneDestination = getProneFiringDebugDestination();
         if (isMachineGunnerMovementOwner() && activeProneDestination != null
             && !CoverReservationManager.reserveProne(activeProneDestination, soldier)) {
@@ -1145,6 +1154,7 @@ public class CoverTacticalGoal extends Goal {
         }
         // Handle pending retry from previous tick
         if (pendingRetryCover != null) {
+            PerformanceMetrics.recordCoverPathRetry();
             if (DiagnosticLogManager.isCoverLoggingEnabled()) {
                 StevesArmyMod.LOGGER.info("[PathDebug] Soldier {} retrying path to cover {}", 
                     soldier.getId(), pendingRetryCover.getPosition());
@@ -1329,6 +1339,7 @@ public class CoverTacticalGoal extends Goal {
         }
         // Handle pending retry from previous tick
         if (pendingRetryCover != null) {
+            PerformanceMetrics.recordCoverPathRetry();
             if (DiagnosticLogManager.isCoverLoggingEnabled()) {
                 StevesArmyMod.LOGGER.info("[PathDebug] Soldier {} retrying path to cover {}",
                     soldier.getId(), pendingRetryCover.getPosition());
@@ -2342,6 +2353,7 @@ private boolean shouldExitCoverForFollow() {
 
     private void startRepositioning() {
         prepareRepositioning();
+        invalidateCoverSearchBackoff();
         roleSpecificRepositionSearch = false;
         findAndMoveToCover();
         if (getCoverManager().getTargetCover() != null) {
@@ -2396,6 +2408,7 @@ private boolean shouldExitCoverForFollow() {
         // This is the ordinary cover-to-cover path, not a protected low-crouch
         // trench shift. Restore normal movement dimensions before pathfinding.
         activeSuppressionRouteMovement = RouteMovement.NORMAL;
+        invalidateCoverSearchBackoff();
         selectedSuppressionRoute = null;
         soldier.setLowCrouching(false);
         
@@ -2422,7 +2435,56 @@ private boolean shouldExitCoverForFollow() {
         return false;
     }
 
+    private int getCoverSearchBackoffTicks() {
+        return switch (com.stevesarmy.StevesArmyConfig.getOptimizationLevel()) {
+            case 2 -> 10;
+            case 3 -> 20;
+            default -> 0;
+        };
+    }
+
+    private void invalidateCoverSearchBackoff() {
+        nextCoverSearchTick = Long.MIN_VALUE;
+    }
+
+    private boolean shouldBypassCoverSearchBackoff() {
+        UUID targetId = soldier.getTarget() != null && soldier.getTarget().isAlive()
+            ? soldier.getTarget().getUUID() : null;
+        if (!Objects.equals(lastCoverSearchTargetId, targetId)) return true;
+        if (!Objects.equals(lastCoverSearchRelocationCenter, relocationCenter)) return true;
+        if (relocationType != RelocationType.NONE) return true;
+        if (getCoverManager().isRepositionRequested() || getCoverManager().isSuppressed()) return true;
+        return false;
+    }
+
     private CoverMoveResult findAndMoveToCover() {
+        long currentTick = soldier.tickCount;
+        if (lastCoverSearchTick == currentTick) {
+            PerformanceMetrics.recordCoverSearchCooldownSkip();
+            return CoverMoveResult.NO_ELIGIBLE_COVER;
+        }
+
+        int backoffTicks = getCoverSearchBackoffTicks();
+        if (backoffTicks > 0 && currentTick < nextCoverSearchTick
+            && !shouldBypassCoverSearchBackoff()) {
+            PerformanceMetrics.recordCoverSearchCooldownSkip();
+            return CoverMoveResult.NO_ELIGIBLE_COVER;
+        }
+
+        lastCoverSearchTick = currentTick;
+        lastCoverSearchTargetId = soldier.getTarget() != null && soldier.getTarget().isAlive()
+            ? soldier.getTarget().getUUID() : null;
+        lastCoverSearchRelocationCenter = relocationCenter;
+        CoverMoveResult result = findAndMoveToCoverUnscheduled();
+        if (backoffTicks > 0 && result != CoverMoveResult.COVER_STARTED) {
+            nextCoverSearchTick = currentTick + backoffTicks;
+        } else if (result == CoverMoveResult.COVER_STARTED) {
+            invalidateCoverSearchBackoff();
+        }
+        return result;
+    }
+
+    private CoverMoveResult findAndMoveToCoverUnscheduled() {
         long searchStarted = System.nanoTime();
         Level level = soldier.level();
         CoverFinder finder = new CoverFinder(level);
@@ -3902,6 +3964,7 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
         BlockPos wallPos = cover.getPosition();
         ensureMovementAttemptTarget(cover);
         movementAttemptCount++;
+        PerformanceMetrics.recordCoverPathRequest();
 
         long pathStarted = System.nanoTime();
         
@@ -4023,6 +4086,7 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
             }
             return accepted;
         } else {
+            PerformanceMetrics.recordCoverPathFailure();
             if (DiagnosticLogManager.isCoverPerformanceLoggingEnabled()) {
                 StevesArmyMod.LOGGER.info(
                     "[CoverPerf] soldier={} tick={} path=REJECTED reason={} buildMs={} cover={} from={}",
@@ -4062,6 +4126,7 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
     }
 
     private CoverMoveResult findSuppressionMoveToCover() {
+        invalidateCoverSearchBackoff();
         suppressionRouteFiringOrigin = getCoverManager().getRecentSuppressionFiringOrigin();
         suppressionRouteSearchActive = true;
         activeSuppressionRouteMovement = RouteMovement.NORMAL;
