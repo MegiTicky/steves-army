@@ -205,6 +205,8 @@ public class CoverTacticalGoal extends Goal {
 
     private BlockPos movementAttemptTarget = null;
     private int movementAttemptCount = 0;
+    private BlockPos cachedStandingCoverPosition = null;
+    private Vec3 cachedStandingPosition = null;
     private boolean roleSpecificRepositionSearch;
     private int nextRoleSupportFiringCheckTick;
     private int nextRoleSupportRepositionTick;
@@ -225,6 +227,18 @@ public class CoverTacticalGoal extends Goal {
     private int moveCtlLogCounter = 0;
     private int mgStateLogTick = Integer.MIN_VALUE;
     private String lastMgStateEvent = "";
+
+    private long lastObservedTacticalRevision = Long.MIN_VALUE;
+    private long lastObservedSuppressionSequence = Long.MIN_VALUE;
+    private int lastObservedAttackGeneration = Integer.MIN_VALUE;
+    private RelocationType lastObservedRelocationType = RelocationType.NONE;
+    private BlockPos lastObservedRelocationCenter = null;
+    private BlockPos lastObservedOwnerPosition = null;
+    private Vec3 lastObservedPassiveThreatDirection = null;
+    private boolean passiveMaintenanceDirty = true;
+    private long nextPassiveMaintenanceTick = Long.MIN_VALUE;
+    private long maintenancePreparedTick = Long.MIN_VALUE;
+    private boolean maintenanceRunThisTick;
 
     // Debug logging gates — delegates to server-wide DiagnosticLogManager.
     public static void setAttackDebugLogging(boolean enabled) {
@@ -1006,6 +1020,10 @@ public class CoverTacticalGoal extends Goal {
             }
         }
         
+        if (isOptimizedCoverMaintenance()) {
+            observeCoverMaintenanceInputs();
+        }
+
         // Sync threat direction to client for debug rendering
         Vec3 threatDir = getThreats().getThreatDirectionForProactivePeek(soldier.position());
         soldier.syncThreatDirection(threatDir);
@@ -1136,6 +1154,7 @@ public class CoverTacticalGoal extends Goal {
     }
     
     private void tickSeekingCover() {
+        PerformanceMetrics.recordCoverActiveMovementTick();
         if (isMachineGunnerMovementOwner() && reconcileOccupiedCover()) {
             return;
         }
@@ -1191,17 +1210,15 @@ public class CoverTacticalGoal extends Goal {
         
         CoverPositionController moveControl = getPositionController();
         CoverPositionController.MovementResult moveResult = moveControl.getLastResult();
-        Vec3 standingPos = getCoverStandingPosition(targetCover.getPosition());
-        double horizontalDist = Math.sqrt(
-            Math.pow(soldier.position().x - standingPos.x, 2) +
-            Math.pow(soldier.position().z - standingPos.z, 2));
+        Vec3 standingPos = getCachedStandingPosition(targetCover);
+        double horizontalDistSqr = horizontalDistanceSqr(standingPos);
         
         // 1. Position controller reached the target or soldier is already at standing pos
         if (moveResult == CoverPositionController.MovementResult.REACHED_TARGET
-            || horizontalDist < POSITIONING_TOLERANCE) {
+            || horizontalDistSqr < POSITIONING_TOLERANCE * POSITIONING_TOLERANCE) {
             if (soldier.hasValidAttackTarget()) {
                 StevesArmyMod.LOGGER.info("[CoverNav] Soldier {} ({}) reached cover at hDist={} cover={}",
-                    soldier.getId(), soldier.getName().getString(), String.format("%.2f", horizontalDist), targetCover.getPosition());
+                    soldier.getId(), soldier.getName().getString(), String.format("%.2f", Math.sqrt(horizontalDistSqr)), targetCover.getPosition());
             }
             onCoverReached(targetCover);
             seekingTicks = 0;
@@ -1230,10 +1247,10 @@ public class CoverTacticalGoal extends Goal {
         }
         
         // Measure distance to the standing block position, not just the cover center
-        if (horizontalDist < COVER_REACHED_DISTANCE) {
+        if (horizontalDistSqr < COVER_REACHED_DISTANCE * COVER_REACHED_DISTANCE) {
             if (soldier.hasValidAttackTarget()) {
                 StevesArmyMod.LOGGER.info("[CoverNav] Soldier {} ({}) reached standing pos at hDist={} cover={}",
-                    soldier.getId(), soldier.getName().getString(), String.format("%.2f", horizontalDist), targetCover.getPosition());
+                    soldier.getId(), soldier.getName().getString(), String.format("%.2f", Math.sqrt(horizontalDistSqr)), targetCover.getPosition());
             }
             onCoverReached(targetCover);
             seekingTicks = 0;
@@ -1243,10 +1260,10 @@ public class CoverTacticalGoal extends Goal {
         }
         
         // Handoff to position controller when close to standing position
-        if (horizontalDist < COVER_VALID_DISTANCE) {
+        if (horizontalDistSqr < COVER_VALID_DISTANCE * COVER_VALID_DISTANCE) {
             if (soldier.hasValidAttackTarget()) {
                 StevesArmyMod.LOGGER.info("[CoverNav] Soldier {} ({}) handoff to position controller at hDist={} cover={}",
-                    soldier.getId(), soldier.getName().getString(), String.format("%.2f", horizontalDist), targetCover.getPosition());
+                    soldier.getId(), soldier.getName().getString(), String.format("%.2f", Math.sqrt(horizontalDistSqr)), targetCover.getPosition());
             }
             navigation.stop();
             moveControl.moveTo(standingPos, POSITIONING_TOLERANCE, POSITIONING_SPEED, "tickSeekingCover", "recenter to target cover");
@@ -1338,6 +1355,7 @@ public class CoverTacticalGoal extends Goal {
     }
     
     private void tickRepositioning() {
+        PerformanceMetrics.recordCoverActiveMovementTick();
         if (isMachineGunnerMovementOwner() && reconcileOccupiedCover()) {
             return;
         }
@@ -1413,14 +1431,12 @@ public class CoverTacticalGoal extends Goal {
 
         CoverPositionController moveControl = getPositionController();
         CoverPositionController.MovementResult moveResult = moveControl.getLastResult();
-        Vec3 standingPos = getCoverStandingPosition(targetCover.getPosition());
-        double horizontalDist = Math.sqrt(
-            Math.pow(soldier.position().x - standingPos.x, 2) +
-            Math.pow(soldier.position().z - standingPos.z, 2));
+        Vec3 standingPos = getCachedStandingPosition(targetCover);
+        double horizontalDistSqr = horizontalDistanceSqr(standingPos);
 
         // 1. Position controller reached the target or soldier is already at standing pos
         if (moveResult == CoverPositionController.MovementResult.REACHED_TARGET
-            || horizontalDist < POSITIONING_TOLERANCE) {
+            || horizontalDistSqr < POSITIONING_TOLERANCE * POSITIONING_TOLERANCE) {
             onCoverReached(targetCover);
             noProgressTicks = 0;
             lastSeekingPosition = null;
@@ -1445,7 +1461,7 @@ public class CoverTacticalGoal extends Goal {
             return;
         }
         
-        if (horizontalDist < COVER_REACHED_DISTANCE) {
+        if (horizontalDistSqr < COVER_REACHED_DISTANCE * COVER_REACHED_DISTANCE) {
             onCoverReached(targetCover);
             noProgressTicks = 0;
             lastSeekingPosition = null;
@@ -1453,10 +1469,10 @@ public class CoverTacticalGoal extends Goal {
         }
         
         // Handoff to position controller when close to standing position
-        if (horizontalDist < COVER_VALID_DISTANCE) {
+        if (horizontalDistSqr < COVER_VALID_DISTANCE * COVER_VALID_DISTANCE) {
             if (soldier.hasValidAttackTarget()) {
                 StevesArmyMod.LOGGER.info("[CoverNav] Soldier {} ({}) reposition handoff to position controller at hDist={} cover={}",
-                    soldier.getId(), soldier.getName().getString(), String.format("%.2f", horizontalDist), targetCover.getPosition());
+                    soldier.getId(), soldier.getName().getString(), String.format("%.2f", Math.sqrt(horizontalDistSqr)), targetCover.getPosition());
             }
             navigation.stop();
             moveControl.moveTo(standingPos, POSITIONING_TOLERANCE,
@@ -1575,10 +1591,9 @@ public class CoverTacticalGoal extends Goal {
         boolean runDeferredMaintenance = shouldRunDeferredCoverMaintenance();
         PeekController peekCtrl = getPeekController();
         boolean peeking = peekCtrl.isExposed() || peekCtrl.isMovingToPeek() || peekCtrl.isReturning();
-        if (runDeferredMaintenance) {
-            PerformanceMetrics.recordCoverMaintenanceRun();
-        } else if (!peeking) {
-            PerformanceMetrics.recordCoverMaintenanceSkip();
+        PerformanceMetrics.recordCoverPassiveMaintenance("IN_COVER", runDeferredMaintenance);
+        if (!runDeferredMaintenance) {
+            PerformanceMetrics.recordCoverValidationSkip();
         }
         if (soldier.isPreparingOrReloading()) {
             holdForReload(currentCover);
@@ -1591,34 +1606,34 @@ public class CoverTacticalGoal extends Goal {
         }
 
         if (currentCover != null) {
-            Vec3 standingPos = getCoverStandingPosition(currentCover.getPosition());
-            double distance = soldier.position().distanceTo(currentCover.getPosition().getCenter());
-            double standingDist = soldier.position().distanceTo(standingPos);
+            Vec3 standingPos = getCachedStandingPosition(currentCover);
+            double distanceSqr = soldier.position().distanceToSqr(currentCover.getPosition().getCenter());
+            double standingDistSqr = horizontalDistanceSqr(standingPos);
             if (DiagnosticLogManager.isCoverLoggingEnabled()) {
                 tickLogCounter++;
                 if (tickLogCounter >= SNAPSHOT_INTERVAL) {
                     tickLogCounter = 0;
                     StevesArmyMod.LOGGER.info("[CoverGoal] Soldier {} tickInCover: dist={}, standingDist={}, abandon={}, valid={}, peeking={}, target={}",
-                        soldier.getId(), String.format("%.2f", distance), String.format("%.2f", standingDist),
-                        distance > COVER_ABANDON_DISTANCE,
-                        standingDist > COVER_VALID_DISTANCE,
+                        soldier.getId(), String.format("%.2f", Math.sqrt(distanceSqr)), String.format("%.2f", Math.sqrt(standingDistSqr)),
+                        distanceSqr > COVER_ABANDON_DISTANCE * COVER_ABANDON_DISTANCE,
+                        standingDistSqr > COVER_VALID_DISTANCE * COVER_VALID_DISTANCE,
                         peeking,
                         (soldier.getTarget() != null ? soldier.getTarget().getName().getString() : "null"));
                 }
             }
-            if (distance > COVER_ABANDON_DISTANCE) {
+            if (distanceSqr > COVER_ABANDON_DISTANCE * COVER_ABANDON_DISTANCE) {
                 if (DiagnosticLogManager.isCoverLoggingEnabled()) {
                     StevesArmyMod.LOGGER.info("[CoverTacticalGoal] Soldier {} drifted too far from cover ({} > {}), abandoning",
-                        soldier.getId(), String.format("%.1f", distance), COVER_ABANDON_DISTANCE);
+                        soldier.getId(), String.format("%.1f", Math.sqrt(distanceSqr)), COVER_ABANDON_DISTANCE);
                 }
                 getCoverManager().clearCover();
                 getPositionController().clear();
                 return;
             }
-            if (standingDist > COVER_VALID_DISTANCE && !peeking) {
+            if (standingDistSqr > COVER_VALID_DISTANCE * COVER_VALID_DISTANCE && !peeking) {
                 if (DiagnosticLogManager.isCoverLoggingEnabled()) {
                     StevesArmyMod.LOGGER.info("[CoverTacticalGoal] Soldier {} got pushed from cover standing pos ({} > {}), re-seeking",
-                        soldier.getId(), String.format("%.1f", standingDist), COVER_VALID_DISTANCE);
+                        soldier.getId(), String.format("%.1f", Math.sqrt(standingDistSqr)), COVER_VALID_DISTANCE);
                 }
                 getCoverManager().clearCover();
                 getCoverManager().setState(CoverBehaviorManager.CoverState.SEEKING_COVER);
@@ -1643,7 +1658,7 @@ public class CoverTacticalGoal extends Goal {
                 }
                 if (!getPositionController().isWithinCoverAnchorDeadzone(standingPos)) {
                     navigation.stop();
-                    getPositionController().moveTo(getCoverStandingPosition(currentCover.getPosition()), POSITIONING_TOLERANCE, POSITIONING_SPEED, "tickInCover", "recenter to cover");
+                    getPositionController().moveTo(standingPos, POSITIONING_TOLERANCE, POSITIONING_SPEED, "tickInCover", "recenter to cover");
                 }
             }
 // Renew current cover reservation every 5 seconds so it doesn't expire
@@ -1707,21 +1722,106 @@ public class CoverTacticalGoal extends Goal {
             maintainCoverAnchorIfHiding(currentCover);
         }
 
-        if (tickRoleSpecificFiringAccess(currentCover)) {
+        if ((!isOptimizedCoverMaintenance() || runDeferredMaintenance)
+            && tickRoleSpecificFiringAccess(currentCover)) {
             return;
         }
 
         reevaluateCounter++;
-        if (runDeferredMaintenance && reevaluateCounter >= REEVALUATE_INTERVAL_TICKS) {
+        if (runDeferredMaintenance && (isOptimizedCoverMaintenance()
+            || reevaluateCounter >= REEVALUATE_INTERVAL_TICKS)) {
             reevaluateCounter = 0;
             evaluateCoverState();
         }
     }
 
+    private boolean isOptimizedCoverMaintenance() {
+        com.stevesarmy.StevesArmyConfig.OptimizationProfile profile =
+            com.stevesarmy.StevesArmyConfig.getOptimizationProfile();
+        return profile == com.stevesarmy.StevesArmyConfig.OptimizationProfile.BALANCED
+            || profile == com.stevesarmy.StevesArmyConfig.OptimizationProfile.AGGRESSIVE;
+    }
+
+    private void observeCoverMaintenanceInputs() {
+        CoverBehaviorManager coverManager = getCoverManager();
+        boolean changed = false;
+
+        long tacticalRevision = coverManager.getTacticalRevision();
+        if (lastObservedTacticalRevision != Long.MIN_VALUE
+            && tacticalRevision != lastObservedTacticalRevision) {
+            changed = true;
+        }
+        lastObservedTacticalRevision = tacticalRevision;
+
+        long suppressionSequence = coverManager.getSuppressionTracker().getSuppressionEventSequence();
+        if (lastObservedSuppressionSequence != Long.MIN_VALUE
+            && suppressionSequence != lastObservedSuppressionSequence) {
+            changed = true;
+        }
+        lastObservedSuppressionSequence = suppressionSequence;
+
+        int attackGeneration = soldier.getAttackGeneration();
+        if (lastObservedAttackGeneration != Integer.MIN_VALUE
+            && attackGeneration != lastObservedAttackGeneration) {
+            changed = true;
+        }
+        lastObservedAttackGeneration = attackGeneration;
+
+        if (lastObservedRelocationType != relocationType
+            || !Objects.equals(lastObservedRelocationCenter, relocationCenter)) {
+            if (lastObservedTacticalRevision != Long.MIN_VALUE) {
+                changed = true;
+            }
+            lastObservedRelocationType = relocationType;
+            lastObservedRelocationCenter = relocationCenter;
+        }
+
+        LivingEntity owner = soldier.getOwner();
+        BlockPos ownerPosition = owner != null ? owner.blockPosition().immutable() : null;
+        if (!Objects.equals(lastObservedOwnerPosition, ownerPosition)) {
+            if (lastObservedOwnerPosition != null || ownerPosition != null) {
+                changed = true;
+            }
+            lastObservedOwnerPosition = ownerPosition;
+        }
+
+        Vec3 passiveThreatDirection = getThreats().getPrimaryDirection(soldier.position());
+        if (directionChanged(lastObservedPassiveThreatDirection, passiveThreatDirection)) {
+            if (lastObservedPassiveThreatDirection != null || passiveThreatDirection != null) {
+                changed = true;
+            }
+            lastObservedPassiveThreatDirection = passiveThreatDirection;
+        }
+
+        if (changed) {
+            passiveMaintenanceDirty = true;
+            nextPassiveMaintenanceTick = Long.MIN_VALUE;
+        }
+    }
+
+    private static boolean directionChanged(@Nullable Vec3 first, @Nullable Vec3 second) {
+        if (first == second) return false;
+        if (first == null || second == null) return true;
+        return first.distanceToSqr(second) > 0.0001D;
+    }
+
     private boolean shouldRunDeferredCoverMaintenance() {
+        if (!isOptimizedCoverMaintenance()) {
+            return true;
+        }
+        if (maintenancePreparedTick == soldier.tickCount) {
+            return maintenanceRunThisTick;
+        }
+
         int interval = com.stevesarmy.StevesArmyConfig.getCoverMaintenanceIntervalTicks();
-        if (interval <= 1) return true;
-        return Math.floorMod((long) soldier.tickCount + soldier.getId(), interval) == 0;
+        boolean run = passiveMaintenanceDirty || soldier.tickCount >= nextPassiveMaintenanceTick;
+        maintenancePreparedTick = soldier.tickCount;
+        maintenanceRunThisTick = run;
+        if (run) {
+            passiveMaintenanceDirty = false;
+            nextPassiveMaintenanceTick = soldier.tickCount + interval;
+        }
+        return run;
     }
 
     private void holdForReload(CoverPoint currentCover) {
@@ -1847,6 +1947,8 @@ public class CoverTacticalGoal extends Goal {
     private void tickSuppressedInCover() {
         CoverBehaviorManager coverManager = getCoverManager();
         CoverPoint currentCover = getCoverManager().getCurrentCover();
+        boolean runDeferredMaintenance = shouldRunDeferredCoverMaintenance();
+        PerformanceMetrics.recordCoverPassiveMaintenance("SUPPRESSED_IN_COVER", runDeferredMaintenance);
 
         enforceSuppressedHalfCoverPosture(currentCover);
 
@@ -1892,14 +1994,17 @@ public class CoverTacticalGoal extends Goal {
         // evaluate flank repositioning after recovery in tickInCover()
         // (recovery transitions us from SUPPRESSED_IN_COVER back to IN_COVER)
 
-        if (!coverManager.isPinned() && peekCtrl.isHiding()) {
+        if (!coverManager.isPinned() && peekCtrl.isHiding() && runDeferredMaintenance) {
             boolean allowPressuredPeek = shouldAllowPressuredPeek();
             if (currentCover != null && currentCover.getType() == CoverType.HALF) {
                 soldier.setLowCrouching(!allowPressuredPeek);
             }
             peekCtrl.tick(soldier, currentCover, getPositionController(), allowPressuredPeek);
-        } else if (!coverManager.isPinned()) {
+        } else if (!coverManager.isPinned()
+            && (peekCtrl.isExposed() || peekCtrl.isMovingToPeek())) {
             peekCtrl.tick(soldier, currentCover, getPositionController());
+        } else if (!runDeferredMaintenance && !peekCtrl.isReturning()) {
+            PerformanceMetrics.recordSuppressedCoverDeferredSkip();
         }
     }
 
@@ -1963,11 +2068,9 @@ public class CoverTacticalGoal extends Goal {
             return false;
         }
 
-        Vec3 standingPos = getCoverStandingPosition(candidate.getPosition());
-        double horizontalDistance = Math.sqrt(
-            Math.pow(soldier.getX() - standingPos.x, 2)
-                + Math.pow(soldier.getZ() - standingPos.z, 2));
-        if (horizontalDistance > COVER_REACHED_DISTANCE) {
+        Vec3 standingPos = getCachedStandingPosition(candidate);
+        double horizontalDistanceSqr = horizontalDistanceSqr(standingPos);
+        if (horizontalDistanceSqr > COVER_REACHED_DISTANCE * COVER_REACHED_DISTANCE) {
             return false;
         }
 
@@ -1982,7 +2085,7 @@ public class CoverTacticalGoal extends Goal {
                 soldier.getId(), state,
                 currentCover != null ? currentCover.getPosition() : "null",
                 targetCover != null ? targetCover.getPosition() : "null",
-                String.format(java.util.Locale.ROOT, "%.2f", horizontalDistance),
+                String.format(java.util.Locale.ROOT, "%.2f", Math.sqrt(horizontalDistanceSqr)),
                 reservedBySoldier, getCoverManager().isSuppressed(), getCoverManager().isPinned(),
                 soldier.isLowCrouching(), peekController.getState());
         }
@@ -2211,6 +2314,7 @@ public class CoverTacticalGoal extends Goal {
     }
     
     private boolean isCoverStillValid() {
+        PerformanceMetrics.recordCoverValidationRun();
         CoverPoint currentCover = getCoverManager().getCurrentCover();
         if (currentCover == null) return false;
 
@@ -2474,6 +2578,11 @@ private boolean shouldExitCoverForFollow() {
 
     private CoverMoveResult findAndMoveToCover() {
         long currentTick = soldier.tickCount;
+        CoverPoint activeTarget = getCoverManager().getTargetCover();
+        if (activeTarget != null && !navigation.isDone() && navigation.getPath() != null) {
+            PerformanceMetrics.recordCoverSearchCooldownSkip();
+            return CoverMoveResult.NO_ELIGIBLE_COVER;
+        }
         if (lastCoverSearchTick == currentTick) {
             PerformanceMetrics.recordCoverSearchCooldownSkip();
             return CoverMoveResult.NO_ELIGIBLE_COVER;
@@ -2490,6 +2599,7 @@ private boolean shouldExitCoverForFollow() {
         lastCoverSearchTargetId = soldier.getTarget() != null && soldier.getTarget().isAlive()
             ? soldier.getTarget().getUUID() : null;
         lastCoverSearchRelocationCenter = relocationCenter;
+        PerformanceMetrics.recordCoverFullSearchAttempt();
         CoverMoveResult result = findAndMoveToCoverUnscheduled();
         if (backoffTicks > 0 && result != CoverMoveResult.COVER_STARTED) {
             nextCoverSearchTick = currentTick + backoffTicks;
@@ -2992,6 +3102,7 @@ private boolean shouldExitCoverForFollow() {
             return false;
         }
         navigation.moveTo(path, 1.0D);
+        getCoverManager().markTacticalChange("attack_movement_command");
         if (!proneReservation) {
             getCoverManager().clearTargetCover();
         }
@@ -3795,6 +3906,7 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
         }
 
         if (navigation.isDone()) {
+            getCoverManager().markTacticalChange("attack_movement_command");
             navigation.moveTo(
                 fallbackAdvanceTarget.getX() + 0.5,
                 fallbackAdvanceTarget.getY(),
@@ -3819,6 +3931,22 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
 
     private Vec3 getCoverStandingPosition(BlockPos coverPos) {
         return getCoverStandingPositionStatic(coverPos);
+    }
+
+    private Vec3 getCachedStandingPosition(CoverPoint cover) {
+        BlockPos coverPosition = cover.getPosition();
+        if (cachedStandingPosition == null
+            || !coverPosition.equals(cachedStandingCoverPosition)) {
+            cachedStandingCoverPosition = coverPosition.immutable();
+            cachedStandingPosition = getCoverStandingPosition(coverPosition);
+        }
+        return cachedStandingPosition;
+    }
+
+    private double horizontalDistanceSqr(Vec3 target) {
+        double dx = soldier.getX() - target.x;
+        double dz = soldier.getZ() - target.z;
+        return dx * dx + dz * dz;
     }
 
     private double horizontalDistanceToCover(CoverPoint cover) {
@@ -3957,6 +4085,8 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
         if (!target.equals(movementAttemptTarget)) {
             movementAttemptTarget = target.immutable();
             movementAttemptCount = 0;
+            cachedStandingCoverPosition = null;
+            cachedStandingPosition = null;
         }
     }
 
@@ -3969,6 +4099,7 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
         }
         // A concrete physical-cover destination always outranks prone firing.
         cancelProneFiringPlan();
+        getCoverManager().markTacticalChange("movement_command");
         boolean started = startCoverPath(cover);
         logMachineGunnerState(started ? "cover-path-started" : "cover-path-failed", cover.getPosition());
         return started;
@@ -3993,7 +4124,7 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
             return true;
         }
         
-        Vec3 standingPos = getCoverStandingPosition(wallPos);
+        Vec3 standingPos = getCachedStandingPosition(cover);
         // Use tolerance 0 so the pathfinder must route to the exact standing block,
         // not to an adjacent block that may be on the wrong side of cover.
         SuppressionRoutePlan routePlan = selectedSuppressionRoute != null

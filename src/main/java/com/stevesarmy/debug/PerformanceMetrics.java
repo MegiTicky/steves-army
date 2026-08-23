@@ -2,6 +2,8 @@ package com.stevesarmy.debug;
 
 import com.stevesarmy.StevesArmyConfig;
 import java.util.Locale;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.LongAdder;
 
 /** Opt-in counters for diagnosing server-thread performance in live tests. */
@@ -46,6 +48,14 @@ public final class PerformanceMetrics {
     private static final LongAdder coverSearchCooldownSkips = new LongAdder();
     private static final LongAdder coverMaintenanceRuns = new LongAdder();
     private static final LongAdder coverMaintenanceSkips = new LongAdder();
+    private static final LongAdder coverValidationRuns = new LongAdder();
+    private static final LongAdder coverValidationSkips = new LongAdder();
+    private static final LongAdder coverActiveMovementTicks = new LongAdder();
+    private static final LongAdder coverFullSearchAttempts = new LongAdder();
+    private static final LongAdder suppressedCoverDeferredSkips = new LongAdder();
+    private static final Map<String, LongAdder> coverInvalidationReasons = new ConcurrentHashMap<>();
+    private static final Map<String, LongAdder> passiveMaintenanceRunsByState = new ConcurrentHashMap<>();
+    private static final Map<String, LongAdder> passiveMaintenanceSkipsByState = new ConcurrentHashMap<>();
     private static final LongAdder coverStateNanos = new LongAdder();
     private static final LongAdder coverSeekingNanos = new LongAdder();
     private static final LongAdder coverRepositioningNanos = new LongAdder();
@@ -102,6 +112,14 @@ public final class PerformanceMetrics {
         coverSearchCooldownSkips.reset();
         coverMaintenanceRuns.reset();
         coverMaintenanceSkips.reset();
+        coverValidationRuns.reset();
+        coverValidationSkips.reset();
+        coverActiveMovementTicks.reset();
+        coverFullSearchAttempts.reset();
+        suppressedCoverDeferredSkips.reset();
+        coverInvalidationReasons.clear();
+        passiveMaintenanceRunsByState.clear();
+        passiveMaintenanceSkipsByState.clear();
         coverStateNanos.reset();
         coverSeekingNanos.reset();
         coverRepositioningNanos.reset();
@@ -221,6 +239,42 @@ public final class PerformanceMetrics {
         if (enabled) coverMaintenanceSkips.increment();
     }
 
+    public static void recordCoverValidationRun() {
+        if (enabled) coverValidationRuns.increment();
+    }
+
+    public static void recordCoverValidationSkip() {
+        if (enabled) coverValidationSkips.increment();
+    }
+
+    public static void recordCoverInvalidation(String reason) {
+        if (!enabled) return;
+        coverInvalidationReasons.computeIfAbsent(reason, ignored -> new LongAdder()).increment();
+    }
+
+    public static void recordCoverPassiveMaintenance(String state, boolean ran) {
+        if (!enabled) return;
+        Map<String, LongAdder> counters = ran ? passiveMaintenanceRunsByState : passiveMaintenanceSkipsByState;
+        counters.computeIfAbsent(state, ignored -> new LongAdder()).increment();
+        if (ran) {
+            coverMaintenanceRuns.increment();
+        } else {
+            coverMaintenanceSkips.increment();
+        }
+    }
+
+    public static void recordCoverActiveMovementTick() {
+        if (enabled) coverActiveMovementTicks.increment();
+    }
+
+    public static void recordCoverFullSearchAttempt() {
+        if (enabled) coverFullSearchAttempts.increment();
+    }
+
+    public static void recordSuppressedCoverDeferredSkip() {
+        if (enabled) suppressedCoverDeferredSkips.increment();
+    }
+
     public static void recordCoverStateTime(String state, long nanos) {
         if (!enabled) return;
         coverStateNanos.add(nanos);
@@ -306,6 +360,14 @@ public final class PerformanceMetrics {
             + "  Cover search cooldown skips: " + coverSearchCooldownSkips.sum() + "\n"
             + "  Cover maintenance: " + coverMaintenanceRuns.sum() + " runs, "
             + coverMaintenanceSkips.sum() + " skips\n"
+            + "  Cover validation: " + coverValidationRuns.sum() + " runs, "
+            + coverValidationSkips.sum() + " skips\n"
+            + "  Cover invalidations: " + formatCounters(coverInvalidationReasons) + "\n"
+            + "  Passive maintenance runs by state: " + formatCounters(passiveMaintenanceRunsByState) + "\n"
+            + "  Passive maintenance skips by state: " + formatCounters(passiveMaintenanceSkipsByState) + "\n"
+            + "  Cover movement: " + coverActiveMovementTicks.sum() + " active ticks, "
+            + coverFullSearchAttempts.sum() + " full-search attempts\n"
+            + "  Suppressed-cover deferred skips: " + suppressedCoverDeferredSkips.sum() + "\n"
             + "  Cover state time: " + formatMillis(coverStateNanos.sum()) + " ms total"
             + " (seeking=" + formatMillis(coverSeekingNanos.sum())
             + ", repositioning=" + formatMillis(coverRepositioningNanos.sum())
@@ -319,5 +381,15 @@ public final class PerformanceMetrics {
 
     private static String formatMillis(double nanos) {
         return String.format(Locale.ROOT, "%.2f", nanos / 1_000_000.0);
+    }
+
+    private static String formatCounters(Map<String, LongAdder> counters) {
+        if (counters.isEmpty()) return "none";
+        StringBuilder result = new StringBuilder();
+        counters.entrySet().stream().sorted(Map.Entry.comparingByKey()).forEach(entry -> {
+            if (result.length() > 0) result.append(", ");
+            result.append(entry.getKey()).append('=').append(entry.getValue().sum());
+        });
+        return result.toString();
     }
 }

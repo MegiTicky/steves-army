@@ -2,7 +2,9 @@ package com.stevesarmy.combat.cover;
 
 import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.combat.GunIntegration;
+import com.stevesarmy.debug.PerformanceMetrics;
 import com.stevesarmy.entity.SoldierEntity;
+import com.stevesarmy.entity.MachineGunnerEntity;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.phys.Vec3;
@@ -43,11 +45,16 @@ public class CoverBehaviorManager {
     private long recentSuppressionFiringOriginTime = 0L;
 
     private static final long SUPPRESSION_FIRING_ORIGIN_MEMORY_MS = 15000L;
+    private static final float PROTECTED_MG_NEAR_MISS_MULTIPLIER = 0.50f;
+    private static final float PROTECTED_MG_DIRECT_FIRE_MULTIPLIER = 0.65f;
+    private static final float PROTECTED_MG_RECOVERY_MULTIPLIER = 1.25f;
+    private static final float PROTECTED_MG_PEAK_SLOWDOWN_MULTIPLIER = 0.75f;
     
     private int peekCountSameCover = 0;
     private int savedPeekCount = 0;
     private BlockPos savedCoverPosition = null;
     private boolean repositionRequested = false;
+    private long tacticalRevision = 0L;
     
     private float lastSyncedSuppression = -1f;
     private static final float SUPPRESSION_SYNC_THRESHOLD = 0.5f;
@@ -120,10 +127,31 @@ public class CoverBehaviorManager {
     public CoverState getState() {
         return state;
     }
+
+    public long getTacticalRevision() {
+        return tacticalRevision;
+    }
+
+    /** Marks a tactical change that can invalidate passive cover maintenance. */
+    public void markTacticalChange(String reason) {
+        tacticalRevision++;
+        PerformanceMetrics.recordCoverInvalidation(reason);
+    }
+
+    private static boolean sameCover(CoverPoint first, CoverPoint second) {
+        if (first == second) return true;
+        if (first == null || second == null) return false;
+        return first.getPosition().equals(second.getPosition())
+            && first.getType() == second.getType();
+    }
     
     public void setState(CoverState state) {
         CoverState oldState = this.state;
+        boolean changed = oldState != state;
         this.state = state;
+        if (changed) {
+            markTacticalChange("state_change");
+        }
         syncState();
         
         if (debugLog()) {
@@ -158,7 +186,11 @@ public class CoverBehaviorManager {
     
     public void setCurrentCover(CoverPoint cover) {
         CoverPoint oldCover = this.currentCover;
+        boolean changed = !sameCover(oldCover, cover);
         this.currentCover = cover;
+        if (changed) {
+            markTacticalChange(cover == null ? "cover_invalidated" : "current_cover_changed");
+        }
         syncCurrentCover();
         if (debugLog()) {
             StevesArmyMod.LOGGER.info("[CoverBehaviorManager] Soldier {} currentCover: {} -> {}", 
@@ -199,7 +231,11 @@ public class CoverBehaviorManager {
     
     public void setTargetCover(CoverPoint cover) {
         CoverPoint oldTarget = this.targetCover;
+        boolean changed = !sameCover(oldTarget, cover);
         this.targetCover = cover;
+        if (changed) {
+            markTacticalChange(cover == null ? "target_cover_cleared" : "target_cover_changed");
+        }
         syncTargetCover();
         if (debugLog()) {
             StevesArmyMod.LOGGER.info("[CoverBehaviorManager] Soldier {} targetCover: {} -> {}", 
@@ -257,7 +293,11 @@ public class CoverBehaviorManager {
                 state);
         }
 
-if (currentCover != null) {
+        boolean changed = currentCover != null || targetCover != null || state != CoverState.NO_COVER;
+        if (changed) {
+            markTacticalChange("cover_invalidated");
+        }
+        if (currentCover != null) {
             CoverReservationManager.release(currentCover.getPosition(), soldier);
             this.lastCover = currentCover;
             syncLastCover();
@@ -294,6 +334,9 @@ if (currentCover != null) {
             StevesArmyMod.LOGGER.info("[CoverBehaviorManager] Soldier {} clearTargetCover: target={}", 
                 soldier.getId(),
                 targetCover != null ? targetCover.getPosition().toString() : "null");
+        }
+        if (this.targetCover != null) {
+            markTacticalChange("target_cover_cleared");
         }
         this.targetCover = null;
         syncTargetCover();
@@ -411,8 +454,9 @@ if (currentCover != null) {
         if (shooter != null && soldier instanceof com.stevesarmy.entity.SoldierEntity s && s.isFriendlyTo(shooter)) {
             return;
         }
-        suppressionTracker.onNearMiss(bulletPath, soldier, bulletSpeed, shooter);
         recordSuppressionFiringOrigin(firingOrigin);
+        suppressionTracker.onNearMiss(bulletPath, soldier, bulletSpeed, shooter,
+            isProtectedMachineGunner() ? PROTECTED_MG_NEAR_MISS_MULTIPLIER : 1.0f);
     }
 
     /**
@@ -436,16 +480,18 @@ if (currentCover != null) {
         if (soldier.isFriendlyTo(shooter)) {
             return;
         }
-        suppressionTracker.onIncomingFire(shooter);
         recordSuppressionFiringOrigin(shooter.getEyePosition());
+        suppressionTracker.onIncomingFire(shooter, 1.0f,
+            isProtectedMachineGunner() ? PROTECTED_MG_DIRECT_FIRE_MULTIPLIER : 1.0f);
     }
 
     public void onIncomingFire(net.minecraft.world.entity.LivingEntity shooter, float bulletSpeed) {
         if (soldier.isFriendlyTo(shooter)) {
             return;
         }
-        suppressionTracker.onIncomingFire(shooter, bulletSpeed);
         recordSuppressionFiringOrigin(shooter.getEyePosition());
+        suppressionTracker.onIncomingFire(shooter, bulletSpeed,
+            isProtectedMachineGunner() ? PROTECTED_MG_DIRECT_FIRE_MULTIPLIER : 1.0f);
     }
 
     public void onTakeDamage() {
@@ -512,7 +558,10 @@ if (currentCover != null) {
     }
     
     public void tickSuppression(boolean inCover) {
-        suppressionTracker.tick(inCover);
+        boolean protectedMachineGunner = inCover && isProtectedMachineGunner();
+        suppressionTracker.tick(inCover,
+            protectedMachineGunner ? PROTECTED_MG_RECOVERY_MULTIPLIER : 1.0f,
+            protectedMachineGunner ? PROTECTED_MG_PEAK_SLOWDOWN_MULTIPLIER : 1.0f);
 
         if (soldier != null && !soldier.level().isClientSide) {
             soldier.syncSuppressionEventSequence((int) Math.min(Integer.MAX_VALUE,
@@ -587,11 +636,17 @@ if (currentCover != null) {
     }
     
     public void requestReposition() {
-        this.repositionRequested = true;
+        if (!this.repositionRequested) {
+            this.repositionRequested = true;
+            markTacticalChange("reposition_requested");
+        }
     }
     
     public void clearRepositionRequest() {
-        this.repositionRequested = false;
+        if (this.repositionRequested) {
+            this.repositionRequested = false;
+            markTacticalChange("reposition_request_cleared");
+        }
     }
     
     private boolean shotInCoverRepositionRequested = false;
@@ -601,11 +656,17 @@ if (currentCover != null) {
     }
     
     public void requestShotInCoverReposition() {
-        this.shotInCoverRepositionRequested = true;
+        if (!this.shotInCoverRepositionRequested) {
+            this.shotInCoverRepositionRequested = true;
+            markTacticalChange("damage_cover_invalidation");
+        }
     }
     
     public void clearShotInCoverRepositionRequest() {
-        this.shotInCoverRepositionRequested = false;
+        if (this.shotInCoverRepositionRequested) {
+            this.shotInCoverRepositionRequested = false;
+            markTacticalChange("damage_reposition_cleared");
+        }
     }
 
     private boolean continuousSuppressionRepositionRequested = false;
@@ -615,15 +676,35 @@ if (currentCover != null) {
     }
 
     public void requestContinuousSuppressionReposition() {
-        this.continuousSuppressionRepositionRequested = true;
+        if (!this.continuousSuppressionRepositionRequested) {
+            this.continuousSuppressionRepositionRequested = true;
+            markTacticalChange("suppression_reposition_requested");
+        }
     }
 
     public void clearContinuousSuppressionRepositionRequest() {
-        this.continuousSuppressionRepositionRequested = false;
+        if (this.continuousSuppressionRepositionRequested) {
+            this.continuousSuppressionRepositionRequested = false;
+            markTacticalChange("suppression_reposition_cleared");
+        }
     }
     
     public boolean hasCurrentCover() {
         return currentCover != null;
+    }
+
+    /** True when recent fire came from a direction this dedicated MG's cover protects. */
+    public boolean isProtectedMachineGunner() {
+        if (!(soldier instanceof MachineGunnerEntity)
+            || currentCover == null
+            || !isInCover()) {
+            return false;
+        }
+        Vec3 firingOrigin = getRecentSuppressionFiringOrigin();
+        if (firingOrigin == null) return false;
+        Vec3 direction = firingOrigin.subtract(currentCover.getPosition().getCenter());
+        return !direction.equals(Vec3.ZERO)
+            && new CoverFinder(soldier.level()).isDirectionProtected(currentCover, direction);
     }
 
     public Vec3 getEntryThreatDirection() {
