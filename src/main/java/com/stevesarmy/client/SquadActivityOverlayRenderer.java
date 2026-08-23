@@ -34,18 +34,20 @@ public final class SquadActivityOverlayRenderer {
             if (screenPos == null || screenPos.isBehindCamera()) continue;
 
             float scale = calculateScale(distance);
-            renderMarker(guiGraphics, activity, screenPos.x, screenPos.y, scale, distance, mc);
+            PingCrosshairFade.Opacity opacity = PingCrosshairFade.calculate(mc, screenPos.x, screenPos.y);
+            renderMarker(guiGraphics, activity, screenPos.x, screenPos.y, scale, distance, mc, opacity);
         }
     }
 
     private static void renderMarker(GuiGraphics guiGraphics,
                                      SquadActivitySyncPacket.ActivityEntry activity,
-                                     float x, float y, float scale, double distance, Minecraft mc) {
+                                     float x, float y, float scale, double distance, Minecraft mc,
+                                     PingCrosshairFade.Opacity opacity) {
         guiGraphics.pose().pushPose();
         guiGraphics.pose().translate(x, y, 0.0);
         guiGraphics.pose().scale(scale, scale, 1.0f);
 
-        int color = teamColor(activity.fireTeam());
+        int color = PingCrosshairFade.withAlpha(teamColor(activity.fireTeam()), opacity.diamondAlpha());
         int halfSize = MARKER_SIZE / 2;
         RenderSystem.enableBlend();
         RenderSystem.defaultBlendFunc();
@@ -56,13 +58,17 @@ public final class SquadActivityOverlayRenderer {
         guiGraphics.fill(-halfSize, -halfSize, halfSize, halfSize, color);
         guiGraphics.pose().popPose();
 
-        String label = activity.fireTeam().name() + "  " + activity.type().getDisplayName();
-        int labelWidth = mc.font.width(label);
-        guiGraphics.drawString(mc.font, label, -labelWidth / 2, -halfSize - 13, color, true);
+        if (opacity.textAlpha() > 0.0f) {
+            int textColor = PingCrosshairFade.withAlpha(teamColor(activity.fireTeam()), opacity.textAlpha());
+            String label = activity.fireTeam().name() + "  " + activity.type().getDisplayName();
+            int labelWidth = mc.font.width(label);
+            guiGraphics.drawString(mc.font, label, -labelWidth / 2, -halfSize - 13, textColor, true);
 
-        String distanceText = String.format("%.1fm", distance);
-        int distanceWidth = mc.font.width(distanceText);
-        guiGraphics.drawString(mc.font, distanceText, -distanceWidth / 2, halfSize + 4, 0xFFFFFFFF, true);
+            String distanceText = String.format("%.1fm", distance);
+            int distanceWidth = mc.font.width(distanceText);
+            int distanceColor = PingCrosshairFade.withAlpha(0xFFFFFFFF, opacity.textAlpha());
+            guiGraphics.drawString(mc.font, distanceText, -distanceWidth / 2, halfSize + 4, distanceColor, true);
+        }
 
         RenderSystem.enableDepthTest();
         RenderSystem.disableBlend();

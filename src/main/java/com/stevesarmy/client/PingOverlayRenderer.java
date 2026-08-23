@@ -30,19 +30,21 @@ public class PingOverlayRenderer {
             float screenX = screenPos.x;
             float screenY = screenPos.y;
             float scale = ping.getScale();
+            PingCrosshairFade.Opacity opacity = PingCrosshairFade.calculate(mc, screenX, screenY);
             
-            renderPingIcon(guiGraphics, ping, screenX, screenY, scale, distance);
+            renderPingIcon(guiGraphics, ping, screenX, screenY, scale, distance, opacity);
         }
     }
     
-    private static void renderPingIcon(GuiGraphics guiGraphics, Ping ping, float x, float y, float scale, double distance) {
+    private static void renderPingIcon(GuiGraphics guiGraphics, Ping ping, float x, float y, float scale,
+                                       double distance, PingCrosshairFade.Opacity opacity) {
         Minecraft mc = Minecraft.getInstance();
         
         guiGraphics.pose().pushPose();
         guiGraphics.pose().translate(x, y, 0);
         guiGraphics.pose().scale(scale, scale, 1.0f);
         
-        int color = ping.getTeamColor();
+        int color = PingCrosshairFade.withAlpha(ping.getTeamColor(), opacity.diamondAlpha());
         int iconSize = PING_SIZE;
         int halfSize = iconSize / 2;
         
@@ -55,22 +57,27 @@ public class PingOverlayRenderer {
         guiGraphics.fill(-halfSize, -halfSize, halfSize, halfSize, color);
         guiGraphics.pose().popPose();
         
-        String distanceText = String.format("%.1fm", distance);
-        int textWidth = mc.font.width(distanceText);
-        guiGraphics.drawString(mc.font, distanceText, -textWidth / 2, halfSize + 4, 0xFFFFFFFF, true);
-        
-        String authorText = ping.getAuthorName();
-        int authorWidth = mc.font.width(authorText);
-        guiGraphics.drawString(mc.font, authorText, -authorWidth / 2, -halfSize - 14, 0xFFFFFFFF, true);
-        
-        String typeText = ping.getType().name();
-        int typeWidth = mc.font.width(typeText);
-        guiGraphics.drawString(mc.font, typeText, -typeWidth / 2, -halfSize - 4, color, true);
+        if (opacity.textAlpha() > 0.0f) {
+            int textColor = PingCrosshairFade.withAlpha(0xFFFFFFFF, opacity.textAlpha());
+            String distanceText = String.format("%.1fm", distance);
+            int textWidth = mc.font.width(distanceText);
+            guiGraphics.drawString(mc.font, distanceText, -textWidth / 2, halfSize + 4, textColor, true);
 
-        String scopeText = ping.getScopeLabel();
-        if (scopeText != null && !scopeText.isEmpty()) {
-            int scopeWidth = mc.font.width(scopeText);
-            guiGraphics.drawString(mc.font, scopeText, -scopeWidth / 2, -halfSize + 8, 0xFFAAAAAA, true);
+            String authorText = ping.getAuthorName();
+            int authorWidth = mc.font.width(authorText);
+            guiGraphics.drawString(mc.font, authorText, -authorWidth / 2, -halfSize - 14, textColor, true);
+
+            int typeColor = PingCrosshairFade.withAlpha(ping.getTeamColor(), opacity.textAlpha());
+            String typeText = ping.getType().name();
+            int typeWidth = mc.font.width(typeText);
+            guiGraphics.drawString(mc.font, typeText, -typeWidth / 2, -halfSize - 4, typeColor, true);
+
+            String scopeText = ping.getScopeLabel();
+            if (scopeText != null && !scopeText.isEmpty()) {
+                int scopeWidth = mc.font.width(scopeText);
+                int scopeColor = PingCrosshairFade.withAlpha(0xFFAAAAAA, opacity.textAlpha());
+                guiGraphics.drawString(mc.font, scopeText, -scopeWidth / 2, -halfSize + 8, scopeColor, true);
+            }
         }
         
         RenderSystem.enableDepthTest();
