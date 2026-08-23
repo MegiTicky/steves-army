@@ -9,6 +9,7 @@ import com.stevesarmy.squad.FireTeam;
 import com.stevesarmy.squad.FireTeamAssignment;
 import com.stevesarmy.squad.SquadLaneAssignment;
 import com.stevesarmy.squad.SquadActivityManager;
+import com.stevesarmy.squad.SquadActivityType;
 import com.stevesarmy.squad.SquadManager;
 import com.stevesarmy.util.SpacingHelper;
 import net.minecraft.core.BlockPos;
@@ -118,7 +119,9 @@ public class PingMessage {
                         scope.ordinal()
                     );
                     for (ServerPlayer recipient : level.getServer().getPlayerList().getPlayers()) {
-                        NetworkHandler.sendTo(recipient, broadcast);
+                        if (!recipient.getUUID().equals(sender.getUUID())) {
+                            NetworkHandler.sendTo(recipient, broadcast);
+                        }
                     }
                 } else {
                     StevesArmyMod.LOGGER.warn("SEND: no owned soldiers found in squad for player {}", sender.getName().getString());
@@ -127,6 +130,7 @@ public class PingMessage {
             }
 
             if (type != PingType.FOLLOW && type != PingType.HOLD) {
+                boolean hasPersistentActivity = SquadActivityType.fromPingType(type) != null;
                 int teamColor = 0xFFFFFFFF;
                 if (sender.getTeam() != null) {
                     Integer color = sender.getTeam().getColor().getColor();
@@ -139,9 +143,12 @@ public class PingMessage {
                 if (sender.getTeam() != null) {
                     recipients = level.getServer().getPlayerList().getPlayers().stream()
                         .filter(p -> p.getTeam() == sender.getTeam())
+                        .filter(p -> !hasPersistentActivity || !p.getUUID().equals(sender.getUUID()))
                         .collect(Collectors.toList());
                 } else {
-                    recipients = level.getServer().getPlayerList().getPlayers();
+                    recipients = level.getServer().getPlayerList().getPlayers().stream()
+                        .filter(p -> !hasPersistentActivity || !p.getUUID().equals(sender.getUUID()))
+                        .collect(Collectors.toList());
                 }
 
                 for (ServerPlayer recipient : recipients) {

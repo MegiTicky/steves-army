@@ -53,6 +53,21 @@ public final class SquadActivityManager {
             return;
         }
 
+        if (scope == FireTeam.ALL) {
+            BlockPos objective = activityType == SquadActivityType.HOLD
+                ? centerOf(recipients)
+                : requestedObjective;
+            long generation = nextGeneration(ownerId, FireTeam.ALL);
+            Set<UUID> recipientIds = new HashSet<>();
+            for (SoldierEntity soldier : recipients) {
+                recipientIds.add(soldier.getUUID());
+            }
+            getOwnerActivities(ownerId).put(FireTeam.ALL,
+                new Activity(FireTeam.ALL, activityType, objective.immutable(), dimension, recipientIds, generation));
+            sync(owner);
+            return;
+        }
+
         Map<FireTeam, List<SoldierEntity>> byTeam = new EnumMap<>(FireTeam.class);
         for (SoldierEntity soldier : recipients) {
             FireTeam team = soldier.getFireTeam();
@@ -105,12 +120,23 @@ public final class SquadActivityManager {
             UUID ownerId = ownerEntry.getKey();
             EnumMap<FireTeam, Activity> ownerActivities = ownerEntry.getValue();
             List<FireTeam> completed = new ArrayList<>();
+            Map<FireTeam, Activity> transitioned = new EnumMap<>(FireTeam.class);
 
             for (Map.Entry<FireTeam, Activity> activityEntry : ownerActivities.entrySet()) {
                 Activity activity = activityEntry.getValue();
-                if (isComplete(server, activity)) {
+                if (activity.type == SquadActivityType.GO_TO && isGoToComplete(server, activity)) {
+                    List<SoldierEntity> livingRecipients = livingRecipients(server, activity);
+                    if (!livingRecipients.isEmpty()) {
+                        transitioned.put(activityEntry.getKey(), activity.asHold(centerOf(livingRecipients)));
+                    }
+                } else if (activity.type != SquadActivityType.GO_TO && isComplete(server, activity)) {
                     completed.add(activityEntry.getKey());
                 }
+            }
+
+            if (!transitioned.isEmpty()) {
+                ownerActivities.putAll(transitioned);
+                changedOwners.add(ownerId);
             }
 
             if (!completed.isEmpty()) {
@@ -170,8 +196,7 @@ public final class SquadActivityManager {
             foundRecipient = true;
 
             boolean complete = switch (activity.type) {
-                case GO_TO -> soldier.isGoToHolding()
-                    || distanceToObjectiveSqr(soldier, activity.objective) <= 4.0;
+                case GO_TO -> false;
                 case ATTACK -> distanceToObjectiveSqr(soldier, activity.objective) <= 16.0;
                 case SEND -> !soldier.hasValidPingMoveTarget()
                     || distanceToObjectiveSqr(soldier, activity.objective) <= 4.0;
@@ -184,6 +209,35 @@ public final class SquadActivityManager {
             }
         }
         return foundRecipient;
+    }
+
+    private static boolean isGoToComplete(MinecraftServer server, Activity activity) {
+        boolean foundRecipient = false;
+        for (UUID recipientId : activity.recipientIds) {
+            SoldierEntity soldier = findSoldier(server, recipientId);
+            if (soldier == null) {
+                return false;
+            }
+            if (!soldier.isAlive()) {
+                continue;
+            }
+            foundRecipient = true;
+            if (!soldier.isGoToHolding()) {
+                return false;
+            }
+        }
+        return foundRecipient;
+    }
+
+    private static List<SoldierEntity> livingRecipients(MinecraftServer server, Activity activity) {
+        List<SoldierEntity> recipients = new ArrayList<>();
+        for (UUID recipientId : activity.recipientIds) {
+            SoldierEntity soldier = findSoldier(server, recipientId);
+            if (soldier != null && soldier.isAlive()) {
+                recipients.add(soldier);
+            }
+        }
+        return recipients;
     }
 
     private static double distanceToObjectiveSqr(SoldierEntity soldier, BlockPos objective) {
@@ -262,6 +316,11 @@ public final class SquadActivityManager {
             this.dimension = dimension;
             this.recipientIds = recipientIds;
             this.generation = generation;
+        }
+
+        private Activity asHold(BlockPos holdObjective) {
+            return new Activity(fireTeam, SquadActivityType.HOLD, holdObjective.immutable(), dimension,
+                new HashSet<>(recipientIds), generation);
         }
     }
 }

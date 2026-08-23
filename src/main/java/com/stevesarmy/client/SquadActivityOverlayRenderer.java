@@ -26,7 +26,7 @@ public final class SquadActivityOverlayRenderer {
         for (SquadActivitySyncPacket.ActivityEntry activity : ClientSquadActivityData.INSTANCE.getActivities()) {
             if (activity.dimension() != currentDimension) continue;
 
-            Vec3 objective = Vec3.atCenterOf(activity.objective()).add(0.0, 1.25, 0.0);
+            Vec3 objective = Vec3.atCenterOf(activity.objective());
             double distance = context.camera.getPosition().distanceTo(objective);
             if (distance < 1.0 || distance > MAX_DISTANCE) continue;
 
@@ -84,4 +84,5 @@ public final class SquadActivityOverlayRenderer {
             case DELTA -> 0xFFFF5555;
         };
     }
+
 }

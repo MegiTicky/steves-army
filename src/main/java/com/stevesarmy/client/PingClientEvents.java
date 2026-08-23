@@ -283,8 +283,10 @@ public class PingClientEvents {
     @SubscribeEvent
     public static void onRenderLevelStage(RenderLevelStageEvent event) {
         if (event.getStage() == RenderLevelStageEvent.Stage.AFTER_WEATHER) {
-            Matrix4f modelViewMatrix = event.getPoseStack().last().pose();
-            Matrix4f projectionMatrix = event.getProjectionMatrix();
+            // Render stages reuse and mutate these matrices after this event. Keep a stable
+            // snapshot because GUI overlays consume the context later in the frame.
+            Matrix4f modelViewMatrix = new Matrix4f(event.getPoseStack().last().pose());
+            Matrix4f projectionMatrix = new Matrix4f(event.getProjectionMatrix());
             float tickDelta = event.getPartialTick();
             
             lastWorldRenderContext = new WorldRenderContext(
