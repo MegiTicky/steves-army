@@ -977,7 +977,7 @@ public class CombatDebugCommand {
                 + " | Squad=" + (mg.getSquadId() != null)
                 + " | Owner=" + (mg.getOwner() != null)), false);
         source.sendSuccess(() -> Component.literal(
-            "Action: forced support firing-position evaluation and reposition request"), false);
+            "Action: forced read-only MG cover/firing evaluation"), false);
         source.sendSuccess(() -> Component.literal("Support anchor: " + formatNullablePos(anchor)), false);
 
         String targetSource = center == null ? "none"

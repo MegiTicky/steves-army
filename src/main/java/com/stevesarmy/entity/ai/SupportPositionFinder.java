@@ -1,5 +1,8 @@
 package com.stevesarmy.entity.ai;
 
+import com.stevesarmy.StevesArmyMod;
+import com.stevesarmy.combat.VisibilityRay;
+import com.stevesarmy.debug.DiagnosticLogManager;
 import com.stevesarmy.entity.MachineGunnerEntity;
 import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.squad.SquadData;
@@ -9,9 +12,12 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.levelgen.Heightmap;
+import net.minecraft.world.level.pathfinder.Path;
 import net.minecraft.world.phys.Vec3;
 
 import javax.annotation.Nullable;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -21,7 +27,14 @@ import java.util.UUID;
  */
 public final class SupportPositionFinder {
     private static final double SUPPORT_OFFSET_BLOCKS = 10.0;
+    private static final double LATERAL_OFFSET_BLOCKS = 4.0;
     private static final double MIN_AWAY_DISTANCE_SQ = 0.01;
+    private static final double MASKING_RADIUS = 2.0;
+    private static final double MASKING_WEIGHT = 2.0;
+    private static final double LOS_WEIGHT = 2.5;
+    private static final double PATH_WEIGHT = 2.0;
+    private static final double MOVEMENT_WEIGHT = 0.05;
+    private static final double ECHELON_BONUS = 0.35;
 
     private SupportPositionFinder() {}
 
@@ -43,8 +56,97 @@ public final class SupportPositionFinder {
         }
         awayDir = awayDir.normalize();
 
-        Vec3 target = anchor.add(awayDir.scale(SUPPORT_OFFSET_BLOCKS));
-        return snapToGround(mg.level(), BlockPos.containing(target));
+        Vec3 rearAxis = anchor.add(awayDir.scale(SUPPORT_OFFSET_BLOCKS));
+        Vec3 lateral = new Vec3(-awayDir.z, 0.0, awayDir.x);
+        List<AnchorCandidate> candidates = new ArrayList<>(3);
+        addCandidate(candidates, mg, threatPos, rearAxis, lateral, LATERAL_OFFSET_BLOCKS);
+        addCandidate(candidates, mg, threatPos, rearAxis, lateral, 0.0);
+        addCandidate(candidates, mg, threatPos, rearAxis, lateral, -LATERAL_OFFSET_BLOCKS);
+
+        AnchorCandidate selected = null;
+        for (AnchorCandidate candidate : candidates) {
+            if (selected == null || candidate.score() > selected.score()) {
+                selected = candidate;
+            }
+        }
+        if (selected == null) {
+            return null;
+        }
+
+        if (DiagnosticLogManager.isCoverLoggingEnabled()) {
+            StevesArmyMod.LOGGER.info(
+                "[SupportAnchor] MG {} selected={} offset={} score={} candidates={}",
+                mg.getId(), selected.position(), format(selected.lateralOffset()),
+                format(selected.score()), formatCandidates(candidates));
+        }
+        return selected.position();
+    }
+
+    private static void addCandidate(List<AnchorCandidate> candidates, MachineGunnerEntity mg,
+                                     Vec3 threatPos, Vec3 rearAxis,
+                                     Vec3 lateral, double lateralOffset) {
+        Vec3 target = rearAxis.add(lateral.scale(lateralOffset));
+        BlockPos position = snapToGround(mg.level(), BlockPos.containing(target));
+        boolean terrainValid = isValidAnchorCell(mg.level(), position);
+        Path path = !terrainValid || position.equals(mg.blockPosition())
+            ? null : mg.getNavigation().createPath(position, 0);
+        boolean reachable = terrainValid
+            && (position.equals(mg.blockPosition()) || (path != null && path.canReach()));
+
+        Vec3 eye = position.getCenter().add(0.0, 1.6, 0.0);
+        VisibilityRay.Result visibility = VisibilityRay.traceIgnoringSmoke(
+            mg.level(), eye, threatPos, mg);
+        double masking = friendlyMasking(mg, position, threatPos);
+        double movement = Math.sqrt(mg.position().distanceToSqr(position.getCenter()));
+        double score = (reachable ? PATH_WEIGHT : -PATH_WEIGHT * 2.0)
+            + LOS_WEIGHT * visibility.firingLaneQuality()
+            - MASKING_WEIGHT * masking
+            - MOVEMENT_WEIGHT * movement
+            + (Math.abs(lateralOffset) > 0.01 ? ECHELON_BONUS : 0.0);
+        candidates.add(new AnchorCandidate(position, lateralOffset, score, masking,
+            visibility.firingLaneQuality(), reachable));
+    }
+
+    private static double friendlyMasking(MachineGunnerEntity mg, BlockPos position,
+                                          Vec3 threatPos) {
+        List<SoldierEntity> riflemen = riflemen(mg);
+        if (riflemen.isEmpty()) {
+            return 0.0;
+        }
+
+        Vec3 from = position.getCenter();
+        double masking = 0.0;
+        for (SoldierEntity rifleman : riflemen) {
+            Vec3 member = rifleman.position();
+            double projection = segmentProjection(from, threatPos, member);
+            if (projection < 0.05 || projection > 0.95) {
+                continue;
+            }
+            double distance = horizontalDistanceToSegment(from, threatPos, member);
+            if (distance < MASKING_RADIUS) {
+                masking += (MASKING_RADIUS - distance) / MASKING_RADIUS;
+            }
+        }
+        return masking;
+    }
+
+    private static double segmentProjection(Vec3 from, Vec3 to, Vec3 point) {
+        double dx = to.x - from.x;
+        double dz = to.z - from.z;
+        double lengthSqr = dx * dx + dz * dz;
+        if (lengthSqr < MIN_AWAY_DISTANCE_SQ) {
+            return 0.0;
+        }
+        return ((point.x - from.x) * dx + (point.z - from.z) * dz) / lengthSqr;
+    }
+
+    private static double horizontalDistanceToSegment(Vec3 from, Vec3 to, Vec3 point) {
+        double projection = Math.max(0.0, Math.min(1.0, segmentProjection(from, to, point)));
+        double closestX = from.x + (to.x - from.x) * projection;
+        double closestZ = from.z + (to.z - from.z) * projection;
+        double dx = point.x - closestX;
+        double dz = point.z - closestZ;
+        return Math.sqrt(dx * dx + dz * dz);
     }
 
     @Nullable
@@ -56,37 +158,78 @@ public final class SupportPositionFinder {
     /** Average position of the squad's riflemen; falls back to the owner. */
     @Nullable
     private static Vec3 lineAnchor(MachineGunnerEntity mg) {
-        Level level = mg.level();
-        UUID squadId = mg.getSquadId();
-        if (squadId != null && level instanceof ServerLevel serverLevel) {
-            SquadData squad = SquadManager.get(serverLevel).getSquadById(squadId).orElse(null);
-            if (squad != null) {
-                double x = 0, y = 0, z = 0;
-                int count = 0;
-                for (UUID memberId : squad.getMemberIds()) {
-                    if (memberId.equals(mg.getUUID())) {
-                        continue;
-                    }
-                    if (serverLevel.getEntity(memberId) instanceof SoldierEntity soldier
-                        && !(soldier instanceof MachineGunnerEntity)) {
-                        x += soldier.getX();
-                        y += soldier.getY();
-                        z += soldier.getZ();
-                        count++;
-                    }
-                }
-                if (count > 0) {
-                    return new Vec3(x / count, y / count, z / count);
-                }
+        List<SoldierEntity> riflemen = riflemen(mg);
+        if (!riflemen.isEmpty()) {
+            double x = 0.0;
+            double y = 0.0;
+            double z = 0.0;
+            for (SoldierEntity soldier : riflemen) {
+                x += soldier.getX();
+                y += soldier.getY();
+                z += soldier.getZ();
             }
+            return new Vec3(x / riflemen.size(), y / riflemen.size(), z / riflemen.size());
         }
 
         LivingEntity owner = mg.getOwner();
         return owner != null ? owner.position() : null;
     }
 
+    private static List<SoldierEntity> riflemen(MachineGunnerEntity mg) {
+        Level level = mg.level();
+        UUID squadId = mg.getSquadId();
+        if (squadId == null || !(level instanceof ServerLevel serverLevel)) {
+            return List.of();
+        }
+        SquadData squad = SquadManager.get(serverLevel).getSquadById(squadId).orElse(null);
+        if (squad == null) {
+            return List.of();
+        }
+        List<SoldierEntity> riflemen = new ArrayList<>();
+        for (UUID memberId : squad.getMemberIds()) {
+            if (memberId.equals(mg.getUUID())) {
+                continue;
+            }
+            if (serverLevel.getEntity(memberId) instanceof SoldierEntity soldier
+                && !(soldier instanceof MachineGunnerEntity)) {
+                riflemen.add(soldier);
+            }
+        }
+        return riflemen;
+    }
+
     private static BlockPos snapToGround(Level level, BlockPos pos) {
         int surfaceY = level.getHeightmapPos(Heightmap.Types.WORLD_SURFACE, pos).getY();
         return new BlockPos(pos.getX(), surfaceY, pos.getZ());
     }
+
+    private static boolean isValidAnchorCell(Level level, BlockPos pos) {
+        return level.isLoaded(pos)
+            && level.getBlockState(pos).getCollisionShape(level, pos).isEmpty()
+            && level.getBlockState(pos.below()).isSolid();
+    }
+
+    private static String format(double value) {
+        return String.format(java.util.Locale.ROOT, "%.2f", value);
+    }
+
+    private static String formatCandidates(List<AnchorCandidate> candidates) {
+        StringBuilder result = new StringBuilder();
+        for (int i = 0; i < candidates.size(); i++) {
+            if (i > 0) {
+                result.append(';');
+            }
+            AnchorCandidate candidate = candidates.get(i);
+            result.append(format(candidate.lateralOffset()))
+                .append(':').append(candidate.position())
+                .append('/').append(format(candidate.score()))
+                .append(" mask=").append(format(candidate.masking()))
+                .append(" los=").append(format(candidate.losQuality()))
+                .append(" path=").append(candidate.reachable());
+        }
+        return result.toString();
+    }
+
+    private record AnchorCandidate(BlockPos position, double lateralOffset, double score,
+                                   double masking, double losQuality, boolean reachable) {}
 }

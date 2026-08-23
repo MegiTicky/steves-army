@@ -1094,20 +1094,22 @@ private static void renderSoldierCoverLabels(PoseStack poseStack, Vec3 cameraPos
             BlockPos movementDestination = mg.getMachineGunnerDebugMovementPosition();
             BlockPos center = mg.getMachineGunnerDebugCenter();
             boolean active = mg.isMachineGunnerDebugActive();
+            boolean fallback = mg.isMachineGunnerDebugFallback();
             float access = mg.getMachineGunnerDebugAccess();
             int color = access >= 0.25f ? 0 : 255;
             int green = access >= 0.25f ? 220 : 70;
             int blue = mg.getMachineGunnerDebugPosture() == 2 ? 255 : 40;
 
-            if (active && destination != null && !destination.equals(BlockPos.ZERO)) {
-                // Yellow is the selected lane; cyan/green below is the lane
-                // currently consumed by the movement state.
+            if ((active || fallback) && destination != null && !destination.equals(BlockPos.ZERO)) {
+                // Yellow is the authoritative physical cover target. Cyan/green
+                // below is the route or controller destination currently being
+                // consumed by movement.
                 renderCoverBlockBox(buffer, matrix, destination, cameraPos, 255, 255, 0, 230);
                 renderDebugLine(buffer, matrix, cameraPos, mg.getEyePosition(),
                     destination.getCenter().add(0, mg.getMachineGunnerDebugPosture() == 2 ? 0.45 : 1.6, 0),
                     255, 255, 0, 220);
             }
-            if (active && movementDestination != null && !movementDestination.equals(BlockPos.ZERO)) {
+            if ((active || fallback) && movementDestination != null && !movementDestination.equals(BlockPos.ZERO)) {
                 renderCoverBlockBox(buffer, matrix, movementDestination, cameraPos, color, green, blue, 230);
                 renderDebugLine(buffer, matrix, cameraPos, mg.getEyePosition(),
                     movementDestination.getCenter().add(0, mg.getMachineGunnerDebugPosture() == 2 ? 0.45 : 1.6, 0),

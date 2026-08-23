@@ -21,6 +21,7 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.pathfinder.Path;
 import net.minecraft.world.phys.Vec3;
 
+import javax.annotation.Nullable;
 import java.util.*;
 
 public class CoverTacticalGoal extends Goal {
@@ -176,7 +177,7 @@ public class CoverTacticalGoal extends Goal {
     private boolean reloadHoldActive;
     private int reloadMovementLogCooldown;
 
-    private enum RelocationType { NONE, GO_TO, FOLLOW, SUPPORT }
+    private enum RelocationType { NONE, GO_TO, FOLLOW }
 
     private enum RouteNodeExposure { PROTECTED, CRAWL_SAFE, EXPOSED }
 
@@ -191,13 +192,6 @@ public class CoverTacticalGoal extends Goal {
     private int failedGoToRelocationGeneration = -1;
     private int nextFollowRelocationSearchTick = 0;
     private int followReplanCooldownTicks = 0;
-
-    // Dedicated machine gunner firing position (set by MachineGunnerSupportGoal).
-    // pendingFiringPosition is consumed once to issue movement; firingPositionActive
-    // suppresses the rifleman blind-cover fallback while the objective stays relevant.
-    private FiringPosition pendingFiringPosition = null;
-    private FiringPosition activeFiringPosition = null;
-    private boolean firingPositionActive = false;
 
     private BlockPos movementAttemptTarget = null;
     private int movementAttemptCount = 0;
@@ -214,6 +208,8 @@ public class CoverTacticalGoal extends Goal {
     private int threatReportLogCounter = 0;
     private int findNewTargetLogCounter = 0;
     private int moveCtlLogCounter = 0;
+    private int mgStateLogTick = Integer.MIN_VALUE;
+    private String lastMgStateEvent = "";
 
     // Debug logging gates — delegates to server-wide DiagnosticLogManager.
     public static void setAttackDebugLogging(boolean enabled) {
@@ -234,6 +230,27 @@ public class CoverTacticalGoal extends Goal {
 
     public static boolean isDebugLoggingEnabled() {
         return DiagnosticLogManager.isCoverLoggingEnabled();
+    }
+
+    /** Rate-limited lifecycle trace for diagnosing dedicated MG movement. */
+    protected final void logMachineGunnerState(String event, @Nullable BlockPos eventTarget) {
+        if (!(soldier instanceof MachineGunnerEntity) || !DiagnosticLogManager.isCoverLoggingEnabled()) {
+            return;
+        }
+        if (event.equals(lastMgStateEvent) && soldier.tickCount - mgStateLogTick < 10) {
+            return;
+        }
+        lastMgStateEvent = event;
+        mgStateLogTick = soldier.tickCount;
+        CoverPoint current = getCoverManager().getCurrentCover();
+        CoverPoint target = getCoverManager().getTargetCover();
+        StevesArmyMod.LOGGER.info(
+            "[MGState] soldier={} event={} eventTarget={} state={} current={} target={} movement={} attempts={} controller={} reason={}",
+            soldier.getId(), event, eventTarget != null ? eventTarget : "null",
+            getCoverManager().getState(), current != null ? current.getPosition() : "null",
+            target != null ? target.getPosition() : "null",
+            getMovementDebugDestination(), movementAttemptCount,
+            getPositionController().getLastResult(), getPositionController().getLastFailureReason());
     }
 
     public static float calculatePressuredPeekChance(float suppression, int nearbyPeekers) {
@@ -313,131 +330,8 @@ public class CoverTacticalGoal extends Goal {
             && relocationCommandGeneration == commandGeneration;
     }
 
-    /**
-     * Gives the machine gunner role first claim on reachable cover near its
-     * rear support position. Unlike GO_TO it does not depend on a ping move
-     * target; the support goal re-requests while the objective stays relevant.
-     */
-    public boolean requestSupportRelocation(BlockPos destination) {
-        if (destination == null) {
-            return false;
-        }
-        if (relocationType == RelocationType.SUPPORT && relocationCenter != null
-            && relocationCenter.distSqr(destination) < 16) {
-            return true;
-        }
-        clearRelocationTarget();
-        relocationType = RelocationType.SUPPORT;
-        relocationCenter = destination.immutable();
-        relocationCommandGeneration = -1;
-        return true;
-    }
-
-    public boolean isHandlingSupportRelocation() {
-        return relocationType == RelocationType.SUPPORT;
-    }
-
-    public void clearSupportRelocation() {
-        if (relocationType == RelocationType.SUPPORT) {
-            clearRelocationTarget();
-        }
-    }
-
-    /**
-     * Stashes the machine gunner's chosen firing position for the relocation
-     * branch to consume. Also keeps the SUPPORT relocation alive by re-requesting
-     * it so canUse() continues to drive movement.
-     */
-    public void setFiringPosition(FiringPosition position) {
-        if (position == null) {
-            return;
-        }
-        // Replace stale cover movement immediately. The pending lane is
-        // otherwise consumed only by a later cover search.
-        boolean replacingDifferentPosition = activeFiringPosition == null
-            || !activeFiringPosition.destination().equals(position.destination());
-        CoverPoint targetCover = getCoverManager().getTargetCover();
-        boolean staleTargetCover = targetCover != null
-            && !targetCover.getPosition().equals(position.destination());
-        if ((replacingDifferentPosition || staleTargetCover) && targetCover != null) {
-            navigation.stop();
-            getPositionController().clear();
-            cancelProneFiringPlan();
-            pendingRetryCover = null;
-            movementAttemptTarget = null;
-            movementAttemptCount = 0;
-            fallbackAdvanceTarget = null;
-            getCoverManager().clearTargetCover();
-        }
-        this.pendingFiringPosition = position;
-        this.activeFiringPosition = position;
-        this.firingPositionActive = true;
-        requestSupportRelocation(position.destination());
-        getCoverManager().setState(getCoverManager().getCurrentCover() != null
-            ? CoverBehaviorManager.CoverState.REPOSITIONING
-            : CoverBehaviorManager.CoverState.SEEKING_COVER);
-    }
-
-    /** Clears the pending firing position and any active SUPPORT relocation. */
-    public void clearFiringPosition() {
-        this.pendingFiringPosition = null;
-        this.activeFiringPosition = null;
-        this.firingPositionActive = false;
-        if (relocationType == RelocationType.SUPPORT) {
-            cancelProneFiringPlan();
-            clearRelocationTarget();
-        }
-    }
-
-    public boolean isFiringPositionActive() {
-        return firingPositionActive;
-    }
-
     @javax.annotation.Nullable
-    public FiringPosition getActiveFiringPosition() {
-        return activeFiringPosition;
-    }
-
-    public void updateActiveFiringAccess(float access) {
-        if (activeFiringPosition == null) {
-            return;
-        }
-        activeFiringPosition = new FiringPosition(
-            activeFiringPosition.destination(), activeFiringPosition.posture(), access,
-            activeFiringPosition.protection(), activeFiringPosition.score());
-    }
-
-    /**
-     * Drops the current MG lane and leaves the goal in a search-only state. The
-     * support goal immediately supplies a replacement on the same tick; the
-     * active flag prevents the ordinary rifleman cover scorer from selecting a
-     * blind fallback in between those two operations.
-     */
-    public void invalidateFiringPosition() {
-        pendingRetryCover = null;
-        movementAttemptTarget = null;
-        movementAttemptCount = 0;
-        fallbackAdvanceTarget = null;
-        navigation.stop();
-        getPositionController().clear();
-        clearFiringPosition();
-        getCoverManager().clearTargetCover();
-        if (getCoverManager().getCurrentCover() == null) {
-            getCoverManager().setState(CoverBehaviorManager.CoverState.SEEKING_COVER);
-        } else if (getCoverManager().isSuppressed()) {
-            getCoverManager().setState(CoverBehaviorManager.CoverState.SUPPRESSED_IN_COVER);
-        } else {
-            getCoverManager().setState(CoverBehaviorManager.CoverState.IN_COVER);
-        }
-    }
-
-    @javax.annotation.Nullable
-    public BlockPos getPendingFiringPositionDestination() {
-        return pendingFiringPosition != null ? pendingFiringPosition.destination() : null;
-    }
-
-    @javax.annotation.Nullable
-    public BlockPos getFiringPositionMovementDestination() {
+    public BlockPos getMovementDebugDestination() {
         if (proneFiringDestination != null) {
             return proneFiringDestination;
         }
@@ -461,48 +355,60 @@ public class CoverTacticalGoal extends Goal {
         return null;
     }
 
-    /** Called when a selected dedicated lane cannot be executed. */
-    protected void onFiringPositionExecutionFailed(FiringPosition position) {
+    /** Optional role-specific firing metadata for the shared MG debug view. */
+    @Nullable
+    protected Float getMachineGunnerDebugAccess() {
+        return null;
+    }
+
+    /** Read-only firing metadata used to distinguish a lane match from fallback cover. */
+    @Nullable
+    protected FiringPosition getMachineGunnerDebugLane() {
+        return null;
+    }
+
+    protected int getMachineGunnerDebugPosture() {
+        return soldier.isFiringProne() ? 2 : 0;
+    }
+
+    /** Synchronizes the physical cover target and movement marker from the shared goal. */
+    private void syncMachineGunnerDebug() {
+        if (!(soldier instanceof MachineGunnerEntity mg)) {
+            return;
+        }
+        CoverPoint targetCover = getCoverManager().getTargetCover();
+        CoverPoint currentCover = getCoverManager().getCurrentCover();
+        BlockPos authoritativeTarget = targetCover != null ? targetCover.getPosition()
+            : currentCover != null ? currentCover.getPosition() : null;
+        FiringPosition debugLane = getMachineGunnerDebugLane();
+        boolean laneMatchesTarget = debugLane != null
+            && debugLane.posture() != FiringPosition.FiringPosture.OPEN_PRONE
+            && authoritativeTarget != null
+            && debugLane.destination().equals(authoritativeTarget);
+        boolean fallback = authoritativeTarget != null && !laneMatchesTarget;
+        Float access = laneMatchesTarget ? getMachineGunnerDebugAccess() : null;
+        soldier.syncMachineGunnerDebug(
+            authoritativeTarget,
+            getMovementDebugDestination(),
+            mg.getSuppressionCenter(),
+            access != null ? access : 0.0f,
+            laneMatchesTarget ? getMachineGunnerDebugPosture() : 0,
+            laneMatchesTarget,
+            fallback,
+            getCoverManager().isSuppressed());
     }
 
     /**
-     * Lets a dedicated firing lane explicitly yield to fallback cover after its
-     * already-issued movement has failed. The pending-lane execution path calls
-     * the same hook directly; this covers later navigation and positioning
-     * failures after that pending state has been consumed.
+     * Allows a role to choose a normal cover point using additional tactical
+     * information. Returning empty preserves the ordinary rifleman selection.
+     * The returned cover is committed by this goal's normal reservation and
+     * movement pipeline; implementations must not start navigation themselves.
      */
-    private void failActiveFiringPositionForFallback(BlockPos failedDestination) {
-        if (!firingPositionActive || activeFiringPosition == null
-            || failedDestination == null
-            || !activeFiringPosition.destination().equals(failedDestination)) {
-            return;
-        }
-        onFiringPositionExecutionFailed(activeFiringPosition);
-    }
-
-    protected boolean shouldDeferNormalCoverEvaluation() {
-        return false;
-    }
-
-    protected boolean isFiringPositionOccupied() {
-        if (!firingPositionActive || activeFiringPosition == null) {
-            return false;
-        }
-        if (activeFiringPosition.posture() == FiringPosition.FiringPosture.OPEN_PRONE) {
-            return soldier.isFiringProne()
-                && soldier.blockPosition().equals(activeFiringPosition.destination());
-        }
-        CoverPoint currentCover = getCoverManager().getCurrentCover();
-        return currentCover != null
-            && currentCover.getPosition().equals(activeFiringPosition.destination());
-    }
-
-    /** Releases a failed firing lane while leaving normal cover relocation available. */
-    protected void releaseFiringPositionForFallback() {
-        pendingFiringPosition = null;
-        activeFiringPosition = null;
-        firingPositionActive = false;
-        cancelProneFiringPlan();
+    protected Optional<CoverPoint> selectRoleSpecificCover(
+        CoverFinder finder, BlockPos searchCenter, int searchRadius,
+        Vec3 threatDirection, List<LivingEntity> threats,
+        SquadCoverContext squadCtx, List<CoverFinder.ScoredCover> baseCandidates) {
+        return Optional.empty();
     }
 
     protected boolean shouldRunAttackPhase() {
@@ -536,10 +442,6 @@ public class CoverTacticalGoal extends Goal {
             LivingEntity owner = soldier.getOwner();
             return soldier.getSquadMode() == SquadMode.FOLLOW && owner != null
                 && owner.isAlive() && !owner.isSpectator();
-        }
-        if (relocationType == RelocationType.SUPPORT) {
-            return soldier instanceof MachineGunnerEntity
-                && ((MachineGunnerEntity) soldier).getSuppressionCenter() != null;
         }
         return false;
     }
@@ -1158,11 +1060,6 @@ public class CoverTacticalGoal extends Goal {
         if (reconcileOccupiedCover()) {
             return;
         }
-        if (pendingFiringPosition != null) {
-            findAndMoveToCover();
-            return;
-        }
-
         CoverPoint movingTarget = getCoverManager().getTargetCover();
         if (movingTarget != null && !getCoverManager().isInCover()
             && soldier.tickCount % 20 == 0
@@ -1170,10 +1067,6 @@ public class CoverTacticalGoal extends Goal {
             if (DiagnosticLogManager.isCoverLoggingEnabled()) {
                 StevesArmyMod.LOGGER.info("[CoverReservation] Soldier {} lost moving target {}",
                     soldier.getId(), movingTarget.getPosition());
-            }
-            if (firingPositionActive && activeFiringPosition != null
-                && activeFiringPosition.destination().equals(movingTarget.getPosition())) {
-                onFiringPositionExecutionFailed(activeFiringPosition);
             }
             getCoverManager().clearTargetCover();
             navigation.stop();
@@ -1191,6 +1084,7 @@ public class CoverTacticalGoal extends Goal {
                     soldier.getId(), pendingRetryCover.getPosition());
             }
             isRetryAttempt = true;
+            logMachineGunnerState("retry", pendingRetryCover.getPosition());
             moveToCover(pendingRetryCover);
             isRetryAttempt = false;
             pendingRetryCover = null;
@@ -1250,6 +1144,7 @@ public class CoverTacticalGoal extends Goal {
             }
             moveControl.clear();
             navigation.stop();
+            logMachineGunnerState("controller-retry", targetCover.getPosition());
             moveToCover(targetCover);
             return;
         }
@@ -1275,6 +1170,7 @@ public class CoverTacticalGoal extends Goal {
             }
             navigation.stop();
             moveControl.moveTo(standingPos, POSITIONING_TOLERANCE, POSITIONING_SPEED, "tickSeekingCover", "recenter to target cover");
+            logMachineGunnerState("controller-handoff", targetCover.getPosition());
             return;
         }
         
@@ -1296,6 +1192,7 @@ public class CoverTacticalGoal extends Goal {
                     StevesArmyMod.LOGGER.info("[CoverNav] Soldier {} retrying cover path after it ended before arrival: target={}",
                         soldier.getId(), targetCover.getPosition());
                 }
+                logMachineGunnerState("retry", targetCover.getPosition());
                 moveToCover(targetCover);
                 stuckTicks = 0;
                 return;
@@ -1310,7 +1207,7 @@ public class CoverTacticalGoal extends Goal {
                             soldier.getId(), soldier.getName().getString(), targetCover.getPosition());
                     }
                     blacklistCover(targetCover.getPosition(), BlacklistReason.STUCK_SEEKING);
-                    failActiveFiringPositionForFallback(targetCover.getPosition());
+                    logMachineGunnerState("stuck-timeout", targetCover.getPosition());
                 }
                 getCoverManager().clearTargetCover();
                 stuckTicks = 0;
@@ -1329,6 +1226,7 @@ public class CoverTacticalGoal extends Goal {
                                 soldier.getId(), noProgressTicks, String.format("%.2f", moved));
                         }
                         navigation.stop();
+                        logMachineGunnerState("no-progress-retry", targetCover.getPosition());
                         moveToCover(targetCover);
                         noProgressTicks = 0;
                         lastSeekingPosition = currentPos;
@@ -1350,7 +1248,7 @@ public class CoverTacticalGoal extends Goal {
             }
             getCoverManager().resetPeekState();
             getPositionController().clear();
-            failActiveFiringPositionForFallback(targetCover != null ? targetCover.getPosition() : null);
+            logMachineGunnerState("seeking-timeout", targetCover != null ? targetCover.getPosition() : null);
             getCoverManager().clearTargetCover();
             getCoverManager().setState(CoverBehaviorManager.CoverState.NO_COVER);
             seekingTicks = 0;
@@ -1363,15 +1261,6 @@ public class CoverTacticalGoal extends Goal {
         if (reconcileOccupiedCover()) {
             return;
         }
-        if (pendingFiringPosition != null && isSuppressedHalfCoverOccupied()) {
-            getCoverManager().setState(CoverBehaviorManager.CoverState.SUPPRESSED_IN_COVER);
-            enforceSuppressedHalfCoverPosture(getCoverManager().getCurrentCover());
-            return;
-        }
-        if (pendingFiringPosition != null) {
-            findAndMoveToCover();
-            return;
-        }
         // Handle pending retry from previous tick
         if (pendingRetryCover != null) {
             if (DiagnosticLogManager.isCoverLoggingEnabled()) {
@@ -1379,6 +1268,7 @@ public class CoverTacticalGoal extends Goal {
                     soldier.getId(), pendingRetryCover.getPosition());
             }
             isRetryAttempt = true;
+            logMachineGunnerState("retry", pendingRetryCover.getPosition());
             moveToCover(pendingRetryCover);
             isRetryAttempt = false;
             pendingRetryCover = null;
@@ -1391,8 +1281,7 @@ public class CoverTacticalGoal extends Goal {
         // ATTACK owns the chosen bound until deterministic path recovery rejects it.
         // Its path may temporarily lead away from the objective to exit a structure,
         // so the generic threat-shift reconsideration must not replace it mid-route.
-        if (!soldier.hasValidAttackTarget() && !shouldDeferNormalCoverEvaluation()
-            && soldier.getRandom().nextFloat() < 0.5f) {
+        if (!soldier.hasValidAttackTarget() && soldier.getRandom().nextFloat() < 0.5f) {
             Vec3 currentThreatDir = getThreats().getPrimaryDirection(soldier.position());
             Vec3 entryThreatDir = getCoverManager().getEntryThreatDirection();
             
@@ -1470,6 +1359,7 @@ public class CoverTacticalGoal extends Goal {
             }
             moveControl.clear();
             navigation.stop();
+            logMachineGunnerState("controller-retry", targetCover.getPosition());
             moveToCover(targetCover);
             return;
         }
@@ -1491,6 +1381,7 @@ public class CoverTacticalGoal extends Goal {
             moveControl.moveTo(standingPos, POSITIONING_TOLERANCE,
                 activeSuppressionRouteMovement == RouteMovement.CRAWL ? CRAWL_ROUTE_SPEED : POSITIONING_SPEED,
                 "tickRepositioning", "recenter to target cover");
+            logMachineGunnerState("controller-handoff", targetCover.getPosition());
             return;
         }
         
@@ -1503,6 +1394,7 @@ public class CoverTacticalGoal extends Goal {
                     StevesArmyMod.LOGGER.info("[CoverNav] Soldier {} retrying cover path after it ended before arrival: target={}",
                         soldier.getId(), targetCover.getPosition());
                 }
+                logMachineGunnerState("retry", targetCover.getPosition());
                 moveToCover(targetCover);
                 stuckTicks = 0;
                 return;
@@ -1513,7 +1405,7 @@ public class CoverTacticalGoal extends Goal {
             if (stuckTicks > MAX_STUCK_TICKS) {
                 if (targetCover != null) {
                     blacklistCover(targetCover.getPosition(), BlacklistReason.STUCK_REPOSITIONING);
-                    failActiveFiringPositionForFallback(targetCover.getPosition());
+                    logMachineGunnerState("stuck-timeout", targetCover.getPosition());
                 }
                 getCoverManager().clearTargetCover();
                 if (currentCover != null) {
@@ -1536,6 +1428,7 @@ public class CoverTacticalGoal extends Goal {
                                 soldier.getId(), noProgressTicks, String.format("%.2f", moved));
                         }
                         navigation.stop();
+                        logMachineGunnerState("no-progress-retry", targetCover.getPosition());
                         moveToCover(targetCover);
                         noProgressTicks = 0;
                         lastSeekingPosition = currentPos;
@@ -1563,7 +1456,6 @@ public class CoverTacticalGoal extends Goal {
         }
         if (navigation.isDone()) {
             proneFiringController.cancel("path_failed");
-            failActiveFiringPositionForFallback(proneFiringDestination);
             proneFiringDestination = null;
             getCoverManager().setState(CoverBehaviorManager.CoverState.SEEKING_COVER);
         }
@@ -1577,11 +1469,6 @@ public class CoverTacticalGoal extends Goal {
     
     private void tickInCover() {
         CoverPoint currentCover = getCoverManager().getCurrentCover();
-        if (pendingFiringPosition != null && !getCoverManager().isSuppressed()) {
-            getCoverManager().setState(CoverBehaviorManager.CoverState.REPOSITIONING);
-            findAndMoveToCover();
-            return;
-        }
         if (soldier.isPreparingOrReloading()) {
             holdForReload(currentCover);
             return;
@@ -1659,7 +1546,7 @@ public class CoverTacticalGoal extends Goal {
         }
 
 // Flank detection (skip during ATTACK — attack phase owns movement decisions)
-        if (!soldier.hasValidAttackTarget() && !shouldDeferNormalCoverEvaluation()) {
+        if (!soldier.hasValidAttackTarget()) {
             Optional<CoverPoint> flankCover = shouldRepositionForFlank();
             if (flankCover.isPresent()) {
                 if (DiagnosticLogManager.isCoverLoggingEnabled()) {
@@ -1863,12 +1750,7 @@ public class CoverTacticalGoal extends Goal {
             && currentCover.getType() == CoverType.HALF;
     }
 
-    /**
-     * Repairs the logical cover state when movement has reached a known cover
-     * destination but a dedicated firing-lane branch skipped the normal arrival
-     * checks. This is intentionally destination-matched; it must not infer cover
-     * from an arbitrary nearby wall.
-     */
+    /** Repairs the logical cover state when movement reaches a known destination. */
     private boolean reconcileOccupiedCover() {
         CoverBehaviorManager.CoverState state = getCoverManager().getState();
         if (state == CoverBehaviorManager.CoverState.IN_COVER
@@ -1881,27 +1763,10 @@ public class CoverTacticalGoal extends Goal {
             return false;
         }
 
-        FiringPosition dedicatedLane = activeFiringPosition != null
-            ? activeFiringPosition : pendingFiringPosition;
-        if (dedicatedLane != null && dedicatedLane.posture() == FiringPosition.FiringPosture.OPEN_PRONE) {
-            return false;
-        }
-
         CoverPoint currentCover = getCoverManager().getCurrentCover();
         CoverPoint targetCover = getCoverManager().getTargetCover();
-        BlockPos dedicatedDestination = dedicatedLane != null ? dedicatedLane.destination() : null;
-
         CoverPoint candidate = null;
-        boolean dedicatedMatch = dedicatedDestination != null;
-        if (dedicatedMatch) {
-            if (targetCover != null && targetCover.getPosition().equals(dedicatedDestination)) {
-                candidate = targetCover;
-            } else if (currentCover != null && currentCover.getPosition().equals(dedicatedDestination)) {
-                candidate = currentCover;
-            } else {
-                candidate = new CoverFinder(soldier.level()).evaluatePosition(dedicatedDestination, null);
-            }
-        } else if (targetCover == null && currentCover != null) {
+        if (targetCover == null && currentCover != null) {
             // A stale state may have lost its target after reaching the selected
             // cover, but an unrelated target must retain repositioning ownership.
             candidate = currentCover;
@@ -1928,11 +1793,10 @@ public class CoverTacticalGoal extends Goal {
 
         if (DiagnosticLogManager.isCoverLoggingEnabled()) {
             StevesArmyMod.LOGGER.info(
-                "[CoverReconcile] Soldier {} state={} current={} target={} dedicated={} dist={} reserved={} suppressed={} pinned={} lowCrouch={} peek={}",
+                "[CoverReconcile] Soldier {} state={} current={} target={} dist={} reserved={} suppressed={} pinned={} lowCrouch={} peek={}",
                 soldier.getId(), state,
                 currentCover != null ? currentCover.getPosition() : "null",
                 targetCover != null ? targetCover.getPosition() : "null",
-                dedicatedDestination != null ? dedicatedDestination : "null",
                 String.format(java.util.Locale.ROOT, "%.2f", horizontalDistance),
                 reservedBySoldier, getCoverManager().isSuppressed(), getCoverManager().isPinned(),
                 soldier.isLowCrouching(), peekController.getState());
@@ -1942,11 +1806,9 @@ public class CoverTacticalGoal extends Goal {
             return false;
         }
 
-        if (dedicatedLane != null && dedicatedLane.destination().equals(candidate.getPosition())) {
-            pendingFiringPosition = null;
-        }
         if (targetCover == null || !targetCover.getPosition().equals(candidate.getPosition())) {
             getCoverManager().setTargetCover(candidate);
+            logMachineGunnerState("cover-target-accepted", candidate.getPosition());
         }
         onCoverReached(candidate);
         return true;
@@ -2198,9 +2060,6 @@ public class CoverTacticalGoal extends Goal {
     }
     
     private void evaluateCoverState() {
-        if (shouldDeferNormalCoverEvaluation()) {
-            return;
-        }
         CoverPoint currentCover = getCoverManager().getCurrentCover();
         if (currentCover == null) {
             getCoverManager().setState(CoverBehaviorManager.CoverState.SEEKING_COVER);
@@ -2349,6 +2208,7 @@ private boolean shouldExitCoverForFollow() {
                 getCoverManager().setLastCover(currentCover);
             }
             getCoverManager().setTargetCover(newCover);
+            logMachineGunnerState("cover-target-accepted", newCover.getPosition());
             getCoverManager().setState(CoverBehaviorManager.CoverState.REPOSITIONING);
             moveToCover(newCover);
             return true;
@@ -2356,99 +2216,14 @@ private boolean shouldExitCoverForFollow() {
         return false;
     }
 
-    /**
-     * Executes the machine gunner's dedicated firing position. OPEN_PRONE builds
-     * a non-reservable prone candidate (so re-seeks never restart navigation);
-     * COVER_PEEK reserves the exact cover and keeps it pending so re-seeks retry
-     * the same position. Returns NO_ELIGIBLE_COVER when the position cannot be
-     * honored, allowing the caller to fall back.
-     */
-    private CoverMoveResult executeFiringPosition(CoverFinder finder) {
-        FiringPosition fp = pendingFiringPosition;
-        if (fp == null) {
-            return CoverMoveResult.NO_ELIGIBLE_COVER;
-        }
-
-        if (fp.posture() == FiringPosition.FiringPosture.OPEN_PRONE) {
-            if (!CoverReservationManager.reserveProne(fp.destination(), soldier)) {
-                pendingFiringPosition = null;
-                firingPositionActive = false;
-                onFiringPositionExecutionFailed(fp);
-                return CoverMoveResult.NO_ELIGIBLE_COVER;
-            }
-            DefensivePositionCandidate.ProneFiringCandidate candidate =
-                new DefensivePositionCandidate.ProneFiringCandidate(fp.destination(), fp.firingAccess(),
-                    fp.protection(), 0.0f,
-                    (float) Math.sqrt(fp.destination().distSqr(soldier.blockPosition())) / 5.0f,
-                    "mg-firing-position");
-            pendingFiringPosition = null;
-            if (startProneFiringMovement(candidate)) {
-                // A rejected path leaves the old cover usable; clear it only
-                // after movement to the new prone lane has been accepted.
-                if (getCoverManager().getCurrentCover() != null) {
-                    getCoverManager().clearCover();
-                    getCoverManager().setState(CoverBehaviorManager.CoverState.SEEKING_COVER);
-                }
-                if (DiagnosticLogManager.isCoverLoggingEnabled()) {
-                    StevesArmyMod.LOGGER.info("[FiringPosition] Soldier {} open prone firing lane {} access={} protection={} score={}",
-                        soldier.getId(), candidate.destination(), String.format("%.2f", fp.firingAccess()),
-                        String.format("%.2f", fp.protection()), String.format("%.2f", fp.score()));
-                }
-                return CoverMoveResult.COVER_STARTED;
-            }
-            firingPositionActive = false;
-            onFiringPositionExecutionFailed(fp);
-            return CoverMoveResult.NO_ELIGIBLE_COVER;
-        }
-
-        CoverPoint cover = finder.evaluatePosition(fp.destination(), null);
-        if (cover == null || cover.getType() == CoverType.NONE
-            || failedCoverPositions.contains(fp.destination())) {
-            pendingFiringPosition = null;
-            firingPositionActive = false;
-            onFiringPositionExecutionFailed(fp);
-            return CoverMoveResult.NO_ELIGIBLE_COVER;
-        }
-        // Promote an already reached dedicated cover instead of letting the
-        // normal cover state machine keep an unrelated target alive.
-        if (fp.destination().distSqr(soldier.blockPosition()) <= COVER_REACHED_DISTANCE * COVER_REACHED_DISTANCE) {
-            pendingFiringPosition = null;
-            if (CoverReservationManager.reserve(cover.getPosition(), soldier)) {
-                getCoverManager().setTargetCover(cover);
-                onCoverReached(cover);
-                return CoverMoveResult.COVER_STARTED;
-            }
-            firingPositionActive = false;
-            onFiringPositionExecutionFailed(fp);
-            return CoverMoveResult.NO_ELIGIBLE_COVER;
-        }
-        if (!isDistantRelocationCover(cover) && !isExactCoverPathReachable(cover)) {
-            pendingFiringPosition = null;
-            firingPositionActive = false;
-            onFiringPositionExecutionFailed(fp);
-            return CoverMoveResult.NO_ELIGIBLE_COVER;
-        }
-        if (CoverReservationManager.reserve(cover.getPosition(), soldier)) {
-            getCoverManager().clearCoverQualityPenalty();
-            getCoverManager().setTargetCover(cover);
-            if (DiagnosticLogManager.isCoverLoggingEnabled()) {
-                StevesArmyMod.LOGGER.info("[FiringPosition] Soldier {} firing cover {} access={} protection={} score={}",
-                    soldier.getId(), cover.getPosition(), String.format("%.2f", fp.firingAccess()),
-                    String.format("%.2f", fp.protection()), String.format("%.2f", fp.score()));
-            }
-            moveToCover(cover);
-            return CoverMoveResult.COVER_STARTED;
-        }
-        pendingFiringPosition = null;
-        firingPositionActive = false;
-        onFiringPositionExecutionFailed(fp);
-        return CoverMoveResult.NO_ELIGIBLE_COVER;
-    }
-
     private CoverMoveResult findAndMoveToCover() {
         long searchStarted = System.nanoTime();
         Level level = soldier.level();
         CoverFinder finder = new CoverFinder(level);
+
+        if (getCoverManager().getTargetCover() == null) {
+            logMachineGunnerState("replan", null);
+        }
 
         long now = System.currentTimeMillis();
         if (now - lastBlacklistClearTime > BLACKLIST_CLEAR_INTERVAL_MS) {
@@ -2465,25 +2240,6 @@ private boolean shouldExitCoverForFollow() {
         SquadCoverContext squadCtx = buildSquadCoverContext();
 
         if (relocationType != RelocationType.NONE && relocationCenter != null) {
-            // Dedicated machine gunner firing position outranks the rifleman
-            // cover re-score. Consume it once to issue movement; while active,
-            // never fall back to a blind cover.
-            if (pendingFiringPosition != null) {
-                CoverMoveResult firingResult = executeFiringPosition(finder);
-                if (firingResult != CoverMoveResult.NO_ELIGIBLE_COVER) {
-                    logCoverSearchPerformance(finder, searchStarted, firingResult, "firing-position");
-                    return firingResult;
-                }
-            }
-            if (firingPositionActive) {
-                // The dedicated lane remains authoritative while it is being
-                // approached as well as after occupation. executeFiringPosition
-                // clears it before reaching this point when the lane fails.
-                logCoverSearchPerformance(finder, searchStarted, CoverMoveResult.NO_COVER_FOUND,
-                    "firing-position-active");
-                return CoverMoveResult.NO_COVER_FOUND;
-            }
-
             debugSearchCenter = relocationCenter;
             List<CoverFinder.ScoredCover> relocationCovers = finder.evaluateAndScoreAllFromCenter(
                 relocationCenter, soldier, threatDirection, threats,
@@ -2503,6 +2259,7 @@ private boolean shouldExitCoverForFollow() {
                 if (CoverReservationManager.reserve(cover.getPosition(), soldier)) {
                     getCoverManager().clearCoverQualityPenalty();
                     getCoverManager().setTargetCover(cover);
+                    logMachineGunnerState("cover-target-accepted", cover.getPosition());
                     if (DiagnosticLogManager.isCoverLoggingEnabled()) {
                         StevesArmyMod.LOGGER.info("[CoverRelocation] Soldier {} selected {} cover={} score={} distance={} pathMode={}",
                             soldier.getId(), relocationType, cover.getPosition(), String.format("%.2f", scoredCover.score),
@@ -2562,6 +2319,7 @@ private boolean shouldExitCoverForFollow() {
         this.debugSearchCenter = searchCenter;
         
         Optional<CoverPoint> bestCover = Optional.empty();
+        Optional<CoverPoint> roleSpecificCover = Optional.empty();
         List<CoverFinder.ScoredCover> reusableScored = null;
 
         if (suppressionRouteSearchActive && !soldier.hasValidAttackTarget()) {
@@ -2664,7 +2422,11 @@ private boolean shouldExitCoverForFollow() {
         } else {
             reusableScored = finder.evaluateAndScoreAll(
                 soldier, threatDirection, threats, searchRadius, true, squadCtx);
-            bestCover = selectBestAvailableCover(reusableScored, threatDirection);
+            roleSpecificCover = selectRoleSpecificCover(
+                finder, searchCenter, searchRadius, threatDirection, threats, squadCtx, reusableScored);
+            bestCover = roleSpecificCover.isPresent()
+                ? roleSpecificCover
+                : selectBestAvailableCover(reusableScored, threatDirection);
 
             if (bestCover.isEmpty()) {
                 bestCover = finder.findBestCover(
@@ -2697,7 +2459,8 @@ private boolean shouldExitCoverForFollow() {
                 .collect(java.util.stream.Collectors.toList());
             Optional<DefensivePositionCandidate.ProneFiringCandidate> prone =
                 DefensivePositionSelector.selectProne(soldier, soldier.getTarget(), getThreats(), tacticalCovers, squadCtx);
-            if (prone.isPresent() && relocationType == RelocationType.NONE) {
+            if (prone.isPresent() && relocationType == RelocationType.NONE
+                && roleSpecificCover.isEmpty()) {
                 startProneFiringMovement(prone.get());
                 logCoverSearchPerformance(finder, searchStarted, CoverMoveResult.COVER_STARTED, "prone-lane");
                 return CoverMoveResult.COVER_STARTED;
@@ -2768,6 +2531,7 @@ private boolean shouldExitCoverForFollow() {
             
             if (CoverReservationManager.reserve(cover.getPosition(), soldier)) {
                 getCoverManager().setTargetCover(cover);
+                logMachineGunnerState("cover-target-accepted", cover.getPosition());
                 if (soldier.hasValidAttackTarget()) {
                     attackExpectedCover = cover.getPosition();
                 }
@@ -2950,6 +2714,7 @@ private Optional<CoverPoint> findBetterCover() {
     }
 
     private void populateCoverDebugData() {
+        syncMachineGunnerDebug();
         CoverPoint currentCover = getCoverManager().getCurrentCover();
         CoverPoint targetCover = getCoverManager().getTargetCover();
         
@@ -3703,11 +3468,15 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
             && horizontalDistanceToCover(cover) > RELOCATION_EXACT_PATH_DISTANCE;
     }
 
-    private boolean isExactCoverPathReachable(CoverPoint cover) {
+    protected boolean isExactCoverPathReachable(CoverPoint cover) {
         Vec3 standingPos = getCoverStandingPosition(cover.getPosition());
         Path path = navigation.createPath(standingPos.x, standingPos.y, standingPos.z, 0);
         return path != null && path.canReach() && path.getNodeCount() > 0
             && path.getNode(path.getNodeCount() - 1).asBlockPos().equals(cover.getPosition());
+    }
+
+    protected boolean isCoverBlacklisted(BlockPos position) {
+        return failedCoverPositions.contains(position);
     }
 
     /**
@@ -3826,11 +3595,14 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
     protected boolean moveToCover(CoverPoint cover) {
         if (!CoverReservationManager.isReservedBy(cover.getPosition(), soldier)
             && !CoverReservationManager.reserve(cover.getPosition(), soldier)) {
+            logMachineGunnerState("cover-reservation-failed", cover.getPosition());
             return false;
         }
         // A concrete physical-cover destination always outranks prone firing.
         cancelProneFiringPlan();
-        return startCoverPath(cover);
+        boolean started = startCoverPath(cover);
+        logMachineGunnerState(started ? "cover-path-started" : "cover-path-failed", cover.getPosition());
+        return started;
     }
 
     /** Starts navigation without re-entering tactical-bound admission. */
@@ -4020,10 +3792,6 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
                 StevesArmyMod.LOGGER.info("[CoverReservation] Soldier {} arrived at unowned cover {}, refusing occupancy",
                     soldier.getId(), cover.getPosition());
             }
-            if (firingPositionActive && activeFiringPosition != null
-                && activeFiringPosition.destination().equals(cover.getPosition())) {
-                onFiringPositionExecutionFailed(activeFiringPosition);
-            }
             getCoverManager().clearTargetCover();
             getCoverManager().setState(CoverBehaviorManager.CoverState.SEEKING_COVER);
             return;
@@ -4079,12 +3847,12 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
         if (cover.getType() == CoverType.HALF && !getCoverManager().isSuppressed()) {
             getPeekController().enterStandingInHalfCover(soldier, "cover-arrival");
         }
+        logMachineGunnerState("arrival-promoted", cover.getPosition());
 
         if (relocationType == RelocationType.GO_TO) {
             soldier.completeGoToIfGeneration(relocationCommandGeneration);
         }
-        if (relocationType != RelocationType.NONE
-            && !(relocationType == RelocationType.SUPPORT && firingPositionActive)) {
+        if (relocationType != RelocationType.NONE) {
             relocationType = RelocationType.NONE;
             relocationCenter = null;
             relocationCommandGeneration = -1;
@@ -4108,6 +3876,7 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
         failedCoverPositions.add(pos);
         lastFailedCover = pos;
         blacklistReasons.put(pos, new BlacklistEntry(reason, System.currentTimeMillis()));
+        logMachineGunnerState("blacklist", pos);
         // Release the old target cover reservation explicitly (clearTargetCover no longer releases)
         CoverPoint oldTarget = getCoverManager().getTargetCover();
         if (oldTarget != null) {
