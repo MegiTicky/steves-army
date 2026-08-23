@@ -57,6 +57,18 @@ public final class PerformanceMetrics {
     private static final LongAdder threatSortSelectionPasses = new LongAdder();
     private static final LongAdder squadMemberFilterPasses = new LongAdder();
     private static final LongAdder temporaryCollectionsAvoided = new LongAdder();
+    private static final LongAdder asyncCoverSnapshotRequests = new LongAdder();
+    private static final LongAdder asyncCoverSnapshotNanos = new LongAdder();
+    private static final LongAdder asyncCoverWorkerRequests = new LongAdder();
+    private static final LongAdder asyncCoverWorkerCompleted = new LongAdder();
+    private static final LongAdder asyncCoverWorkerFailures = new LongAdder();
+    private static final LongAdder asyncCoverWorkerCancelled = new LongAdder();
+    private static final LongAdder asyncCoverQueueSkips = new LongAdder();
+    private static final LongAdder asyncCoverCoalescedRequests = new LongAdder();
+    private static final LongAdder asyncCoverStaleResults = new LongAdder();
+    private static final LongAdder asyncCoverValidationRejects = new LongAdder();
+    private static final LongAdder asyncCoverWorkerNanos = new LongAdder();
+    private static final LongAdder asyncCoverApplyNanos = new LongAdder();
     private static final Map<String, LongAdder> coverInvalidationReasons = new ConcurrentHashMap<>();
     private static final Map<String, LongAdder> passiveMaintenanceRunsByState = new ConcurrentHashMap<>();
     private static final Map<String, LongAdder> passiveMaintenanceSkipsByState = new ConcurrentHashMap<>();
@@ -66,6 +78,21 @@ public final class PerformanceMetrics {
     private static final LongAdder coverInCoverNanos = new LongAdder();
     private static final LongAdder coverSuppressedNanos = new LongAdder();
     private static final LongAdder suppressionPreemptionNanos = new LongAdder();
+    private static final LongAdder riflemanCombatTicks = new LongAdder();
+    private static final LongAdder machineGunnerCombatTicks = new LongAdder();
+    private static final LongAdder riflemanDetectionTicks = new LongAdder();
+    private static final LongAdder machineGunnerDetectionTicks = new LongAdder();
+    private static final LongAdder riflemanCoverTicks = new LongAdder();
+    private static final LongAdder machineGunnerCoverTicks = new LongAdder();
+    private static final LongAdder riflemanCoverSearches = new LongAdder();
+    private static final LongAdder machineGunnerCoverSearches = new LongAdder();
+    private static final LongAdder riflemanPathRequests = new LongAdder();
+    private static final LongAdder machineGunnerPathRequests = new LongAdder();
+    private static final LongAdder riflemanPathRetries = new LongAdder();
+    private static final LongAdder machineGunnerPathRetries = new LongAdder();
+    private static final LongAdder riflemanPathFailures = new LongAdder();
+    private static final LongAdder machineGunnerPathFailures = new LongAdder();
+    private static final LongAdder machineGunnerAsyncRequests = new LongAdder();
 
     private PerformanceMetrics() {}
 
@@ -125,6 +152,18 @@ public final class PerformanceMetrics {
         threatSortSelectionPasses.reset();
         squadMemberFilterPasses.reset();
         temporaryCollectionsAvoided.reset();
+        asyncCoverSnapshotRequests.reset();
+        asyncCoverSnapshotNanos.reset();
+        asyncCoverWorkerRequests.reset();
+        asyncCoverWorkerCompleted.reset();
+        asyncCoverWorkerFailures.reset();
+        asyncCoverWorkerCancelled.reset();
+        asyncCoverQueueSkips.reset();
+        asyncCoverCoalescedRequests.reset();
+        asyncCoverStaleResults.reset();
+        asyncCoverValidationRejects.reset();
+        asyncCoverWorkerNanos.reset();
+        asyncCoverApplyNanos.reset();
         coverInvalidationReasons.clear();
         passiveMaintenanceRunsByState.clear();
         passiveMaintenanceSkipsByState.clear();
@@ -134,6 +173,21 @@ public final class PerformanceMetrics {
         coverInCoverNanos.reset();
         coverSuppressedNanos.reset();
         suppressionPreemptionNanos.reset();
+        riflemanCombatTicks.reset();
+        machineGunnerCombatTicks.reset();
+        riflemanDetectionTicks.reset();
+        machineGunnerDetectionTicks.reset();
+        riflemanCoverTicks.reset();
+        machineGunnerCoverTicks.reset();
+        riflemanCoverSearches.reset();
+        machineGunnerCoverSearches.reset();
+        riflemanPathRequests.reset();
+        machineGunnerPathRequests.reset();
+        riflemanPathRetries.reset();
+        machineGunnerPathRetries.reset();
+        riflemanPathFailures.reset();
+        machineGunnerPathFailures.reset();
+        machineGunnerAsyncRequests.reset();
     }
 
     public static void recordVisibilityCacheHit() {
@@ -223,6 +277,54 @@ public final class PerformanceMetrics {
         }
     }
 
+    public static void recordCombatTick(boolean machineGunner) {
+        if (!enabled) return;
+        if (machineGunner) machineGunnerCombatTicks.increment();
+        else riflemanCombatTicks.increment();
+    }
+
+    public static void recordDetectionTick(int candidates, boolean machineGunner) {
+        recordDetectionTick(candidates);
+        if (!enabled) return;
+        if (machineGunner) machineGunnerDetectionTicks.increment();
+        else riflemanDetectionTicks.increment();
+    }
+
+    public static void recordCoverTick(String state, boolean machineGunner) {
+        recordCoverTick(state);
+        if (!enabled) return;
+        if (machineGunner) machineGunnerCoverTicks.increment();
+        else riflemanCoverTicks.increment();
+    }
+
+    public static void recordRoleCoverSearch(boolean machineGunner) {
+        if (!enabled) return;
+        if (machineGunner) machineGunnerCoverSearches.increment();
+        else riflemanCoverSearches.increment();
+    }
+
+    public static void recordRolePathRequest(boolean machineGunner) {
+        if (!enabled) return;
+        if (machineGunner) machineGunnerPathRequests.increment();
+        else riflemanPathRequests.increment();
+    }
+
+    public static void recordRolePathRetry(boolean machineGunner) {
+        if (!enabled) return;
+        if (machineGunner) machineGunnerPathRetries.increment();
+        else riflemanPathRetries.increment();
+    }
+
+    public static void recordRolePathFailure(boolean machineGunner) {
+        if (!enabled) return;
+        if (machineGunner) machineGunnerPathFailures.increment();
+        else riflemanPathFailures.increment();
+    }
+
+    public static void recordMachineGunnerAsyncRequest() {
+        if (enabled) machineGunnerAsyncRequests.increment();
+    }
+
     public static void recordCoverPathRequest() {
         if (enabled) coverPathRequests.increment();
     }
@@ -299,6 +401,56 @@ public final class PerformanceMetrics {
         if (enabled) temporaryCollectionsAvoided.increment();
     }
 
+    public static void recordAsyncCoverSnapshot(long nanos) {
+        if (!enabled) return;
+        asyncCoverSnapshotRequests.increment();
+        asyncCoverSnapshotNanos.add(nanos);
+    }
+
+    public static void recordAsyncCoverWorkerRequest() {
+        if (enabled) {
+            asyncCoverWorkerRequests.increment();
+            machineGunnerAsyncRequests.increment();
+        }
+    }
+
+    public static void recordAsyncCoverWorkerCompleted() {
+        if (!enabled) return;
+        asyncCoverWorkerCompleted.increment();
+    }
+
+    public static void recordAsyncCoverWorkerTime(long nanos) {
+        if (enabled) asyncCoverWorkerNanos.add(nanos);
+    }
+
+    public static void recordAsyncCoverWorkerFailure() {
+        if (enabled) asyncCoverWorkerFailures.increment();
+    }
+
+    public static void recordAsyncCoverWorkerCancelled() {
+        if (enabled) asyncCoverWorkerCancelled.increment();
+    }
+
+    public static void recordAsyncCoverQueueSkip() {
+        if (enabled) asyncCoverQueueSkips.increment();
+    }
+
+    public static void recordAsyncCoverCoalescedRequest() {
+        if (enabled) asyncCoverCoalescedRequests.increment();
+    }
+
+    public static void recordAsyncCoverStaleResult() {
+        if (enabled) asyncCoverStaleResults.increment();
+    }
+
+    public static void recordAsyncCoverValidationReject() {
+        if (enabled) asyncCoverValidationRejects.increment();
+    }
+
+    public static void recordAsyncCoverApply(long nanos) {
+        if (enabled) asyncCoverApplyNanos.add(nanos);
+    }
+
     public static void recordCoverStateTime(String state, long nanos) {
         if (!enabled) return;
         coverStateNanos.add(nanos);
@@ -371,6 +523,18 @@ public final class PerformanceMetrics {
             + threatSortSelectionPasses.sum() + " sort/selection passes, "
             + squadMemberFilterPasses.sum() + " member filter passes, "
             + temporaryCollectionsAvoided.sum() + " temporary collections avoided\n"
+            + "  Async cover: " + asyncCoverSnapshotRequests.sum() + " snapshots ("
+            + formatMillis(asyncCoverSnapshotNanos.sum()) + " ms), "
+            + asyncCoverWorkerRequests.sum() + " requests, "
+            + asyncCoverWorkerCompleted.sum() + " completed, "
+            + asyncCoverWorkerFailures.sum() + " failures, "
+            + asyncCoverWorkerCancelled.sum() + " cancelled\n"
+            + "  Async cover queue: " + asyncCoverQueueSkips.sum() + " skips, "
+            + asyncCoverCoalescedRequests.sum() + " coalesced, "
+            + asyncCoverStaleResults.sum() + " stale, "
+            + asyncCoverValidationRejects.sum() + " validation rejects, "
+            + formatMillis(asyncCoverWorkerNanos.sum()) + " ms worker, "
+            + formatMillis(asyncCoverApplyNanos.sum()) + " ms apply\n"
             + "  Detection ticks: " + detectionTicks.sum() + "\n"
             + "  Detection candidates: " + detectionCandidates.sum() + "\n"
             + "  Target refreshes: " + targetRefreshes.sum() + "\n"
@@ -402,6 +566,21 @@ public final class PerformanceMetrics {
             + ", in-cover=" + formatMillis(coverInCoverNanos.sum())
             + ", suppressed=" + formatMillis(coverSuppressedNanos.sum()) + ")\n"
             + "  Suppression preemption time: " + formatMillis(suppressionPreemptionNanos.sum()) + " ms\n"
+            + "  Role combat ticks: rifleman=" + riflemanCombatTicks.sum()
+            + ", machine-gunner=" + machineGunnerCombatTicks.sum() + "\n"
+            + "  Role detection ticks: rifleman=" + riflemanDetectionTicks.sum()
+            + ", machine-gunner=" + machineGunnerDetectionTicks.sum() + "\n"
+            + "  Role cover ticks: rifleman=" + riflemanCoverTicks.sum()
+            + ", machine-gunner=" + machineGunnerCoverTicks.sum() + "\n"
+            + "  Role cover searches: rifleman=" + riflemanCoverSearches.sum()
+            + ", machine-gunner=" + machineGunnerCoverSearches.sum() + "\n"
+            + "  Role path requests: rifleman=" + riflemanPathRequests.sum()
+            + ", machine-gunner=" + machineGunnerPathRequests.sum() + "\n"
+            + "  Role path retries: rifleman=" + riflemanPathRetries.sum()
+            + ", machine-gunner=" + machineGunnerPathRetries.sum() + "\n"
+            + "  Role path failures: rifleman=" + riflemanPathFailures.sum()
+            + ", machine-gunner=" + machineGunnerPathFailures.sum() + "\n"
+            + "  Machine-gunner async requests: " + machineGunnerAsyncRequests.sum() + "\n"
             + "  Cover search time: " + formatMillis(coverSearchNanos.sum())
             + " ms total, " + formatMillis(searches == 0 ? 0 : coverSearchNanos.sum() / (double) searches)
             + " ms/search";

@@ -70,6 +70,7 @@ public class StevesArmyConfig {
     public static final ForgeConfigSpec.IntValue VS2_MAX_TRANSPORTED_SOLDIERS;
 
     public static final ForgeConfigSpec.IntValue OPTIMIZATION_LEVEL;
+    public static final ForgeConfigSpec.BooleanValue ASYNC_COVER_EVALUATION;
 
     static {
         BUILDER.push("aim_quality");
@@ -265,6 +266,11 @@ BUILDER.pop();
                      "Default: conservative")
             .defineInRange("optimizationLevel", 1, 0, 3);
 
+        ASYNC_COVER_EVALUATION = BUILDER
+            .comment("Enable immutable-snapshot worker evaluation for machine-gunner cover selection.",
+                     "Only applies to the aggressive optimization profile; disabled by default.")
+            .define("asyncCoverEvaluation", false);
+
         BUILDER.pop();
 
         SPEC = BUILDER.build();
@@ -364,6 +370,11 @@ BUILDER.pop();
 
     public static OptimizationProfile getOptimizationProfile() {
         return OptimizationProfile.fromLevel(getOptimizationLevel());
+    }
+
+    public static boolean useAsyncCoverEvaluation() {
+        return getOptimizationProfile() == OptimizationProfile.AGGRESSIVE
+            && ASYNC_COVER_EVALUATION.get();
     }
 
     /** Number of ticks a soldier reuses its nearby-target snapshot. */

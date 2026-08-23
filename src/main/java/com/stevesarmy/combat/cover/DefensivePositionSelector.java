@@ -5,8 +5,7 @@ import com.stevesarmy.combat.VisibilityRay;
 import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.debug.DiagnosticLogManager;
 import com.stevesarmy.entity.SoldierEntity;
-import com.stevesarmy.entity.MachineGunnerEntity;
-import com.stevesarmy.entity.ai.SoldierCombatGoal;
+import com.stevesarmy.entity.ai.CombatGoalController;
 import com.stevesarmy.squad.SquadCoverContext;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.entity.LivingEntity;
@@ -30,7 +29,7 @@ public final class DefensivePositionSelector {
     public static Optional<DefensivePositionCandidate.ProneFiringCandidate> selectProne(
         SoldierEntity soldier, @Nullable LivingEntity target, ThreatAwareness threats,
         List<CoverFinder.ScoredCover> covers, SquadCoverContext squadCtx) {
-        SoldierCombatGoal combatGoal = soldier.getCombatGoal();
+        CombatGoalController combatGoal = soldier.getCombatGoal();
         if (combatGoal == null) {
             trace(soldier, "no_combat_goal", "none", 0, 0, 0, 0, false, 0, -1.0D, false);
             return Optional.empty();
@@ -63,7 +62,7 @@ public final class DefensivePositionSelector {
 
     @Nullable
     private static String getSafetyGateReason(SoldierEntity soldier, @Nullable LivingEntity target,
-                                               SoldierCombatGoal combatGoal) {
+                                               CombatGoalController combatGoal) {
         if (soldier.hasValidPingMoveTarget()) return "movement_command";
         if (target != null && target.isAlive() && soldier.distanceTo(target) <= 10.0) return "close_target";
         for (LivingEntity other : combatGoal.getPotentialTargets()) {
@@ -75,7 +74,7 @@ public final class DefensivePositionSelector {
 
     @Nullable
     private static AimSource resolveAimSource(@Nullable LivingEntity target, ThreatAwareness threats,
-                                              SoldierCombatGoal combatGoal) {
+                                              CombatGoalController combatGoal) {
         if (target != null && target.isAlive()) {
             return new AimSource(combatGoal.getProneFiringAimPoint(target), "target");
         }
@@ -100,9 +99,7 @@ public final class DefensivePositionSelector {
             terrainValid++;
             Vec3 eye = new Vec3(pos.getX() + .5, pos.getY() + .45, pos.getZ() + .5);
             VisibilityRay.Result visibility = VisibilityRay.trace(level, eye, aimPoint, soldier);
-            boolean firingLaneAccepted = soldier instanceof MachineGunnerEntity
-                ? visibility.firingLaneQuality() >= CoverFinder.MIN_RELIABLE_FIRING_LANE
-                : visibility.hasContact();
+            boolean firingLaneAccepted = visibility.hasContact();
             if (!firingLaneAccepted) continue;
             proneLos++;
             boolean currentPosition = pos.equals(origin);

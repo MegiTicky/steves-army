@@ -122,7 +122,7 @@ final class ProneFiringController {
         if (!TargetAcquisition.hasLineOfSight(soldier, target)) return "no_direct_los";
 
         if (soldier.distanceTo(target) <= CLOSE_THREAT_RANGE || soldier.distanceTo(target) < MIN_RANGE) return "close_target";
-        SoldierCombatGoal combatGoal = soldier.getCombatGoal();
+        CombatGoalController combatGoal = soldier.getCombatGoal();
         if (combatGoal != null) {
             for (LivingEntity other : combatGoal.getPotentialTargets()) {
                 if (other != target && other.isAlive() && !soldier.isFriendlyTo(other)
@@ -145,7 +145,7 @@ final class ProneFiringController {
 
     private boolean isProneAimVisible(LivingEntity target) {
         Vec3 aimPoint = target.getEyePosition();
-        SoldierCombatGoal combatGoal = soldier.getCombatGoal();
+        CombatGoalController combatGoal = soldier.getCombatGoal();
         if (combatGoal != null) {
             aimPoint = combatGoal.getProneFiringAimPoint(target);
         }

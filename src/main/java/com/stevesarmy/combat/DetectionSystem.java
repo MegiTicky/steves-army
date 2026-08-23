@@ -9,6 +9,7 @@ public class DetectionSystem {
     
     private final Map<UUID, DetectionState> detectionStates = new HashMap<>();
     private final UUID soldierId;
+    private final boolean machineGunnerPipeline;
     private final Set<UUID> seenThisTick = new HashSet<>();
     private long lastScanTick = Long.MIN_VALUE;
     
@@ -27,13 +28,18 @@ public class DetectionSystem {
     public static final double SHARED_INTEL_POSITION_RADIUS = 2.0;
     
     public DetectionSystem(UUID soldierId) {
+        this(soldierId, false);
+    }
+
+    public DetectionSystem(UUID soldierId, boolean machineGunnerPipeline) {
         this.soldierId = soldierId;
+        this.machineGunnerPipeline = machineGunnerPipeline;
     }
     
     public void tick(LivingEntity soldier, List<LivingEntity> potentialTargets,
                      SquadThreatIntel squadIntel) {
         long currentTime = soldier.level().getGameTime();
-        PerformanceMetrics.recordDetectionTick(potentialTargets.size());
+        PerformanceMetrics.recordDetectionTick(potentialTargets.size(), machineGunnerPipeline);
         
         seenThisTick.clear();
         

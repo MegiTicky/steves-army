@@ -1,45 +1,55 @@
 package com.stevesarmy.entity.ai;
 
+import com.stevesarmy.StevesArmyConfig;
 import com.stevesarmy.StevesArmyMod;
+import com.stevesarmy.combat.cover.AsyncCoverEvaluationManager;
+import com.stevesarmy.combat.cover.CoverBehaviorManager;
 import com.stevesarmy.combat.cover.CoverFinder;
 import com.stevesarmy.combat.cover.CoverPoint;
 import com.stevesarmy.combat.cover.CoverReservationManager;
-import com.stevesarmy.combat.cover.DefensivePositionCandidate;
 import com.stevesarmy.combat.cover.FiringPosition;
 import com.stevesarmy.combat.cover.FiringPositionFinder;
 import com.stevesarmy.debug.DiagnosticLogManager;
+import com.stevesarmy.debug.PerformanceMetrics;
 import com.stevesarmy.entity.MachineGunnerEntity;
 import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.network.MachineGunnerEvaluationPacket;
 import com.stevesarmy.network.NetworkHandler;
-import com.stevesarmy.squad.SquadCoverContext;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.ai.goal.Goal;
 import net.minecraft.world.phys.Vec3;
 
 import javax.annotation.Nullable;
-import java.util.Comparator;
-import java.util.HashSet;
-import java.util.HashMap;
 import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.EnumSet;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
-import java.util.Optional;
 import java.util.Set;
 
 /**
- * Machine-gunner cover selection policy.
- *
- * The base CoverTacticalGoal remains the only movement/state owner. This class
- * only ranks ordinary cover candidates around the adaptive support anchor and
- * leaves reservation, navigation, controller handoff, retries, and arrival to
- * the inherited cover pipeline.
+ * Standalone machine-gunner support goal. Generic cover movement is delegated
+ * to a role-neutral controller instance; MG support positioning and firing-lane
+ * evaluation never enter the rifleman goal selector or rifleman hot path.
  */
-public class MachineGunnerSupportGoal extends CoverTacticalGoal {
+public final class MachineGunnerSupportGoal extends Goal implements CoverGoalController {
     private static final double ACCESS_WEIGHT = 2.5;
     private static final double ANCHOR_DISTANCE_WEIGHT = 0.05;
     private static final double SELECTED_LANE_BONUS = 1.0;
+    private static final int SEARCH_RADIUS = 12;
+    private static final int SELECTION_RETRY_TICKS = 20;
+
+    private final MachineGunnerEntity soldier;
+    private final CoverTacticalGoal coverController;
+    private int selectionRetryTicks;
+    private long lastSelectionRevision = Long.MIN_VALUE;
+    private long lastSelectionSuppressionSequence = Long.MIN_VALUE;
+    private long lastSelectionSectorGeneration = Long.MIN_VALUE;
+    private BlockPos lastSelectionCenter;
+    private BlockPos lastSelectionAnchor;
 
     @Nullable
     private FiringPositionFinder.EvaluationReport latestEvaluationReport;
@@ -47,327 +57,281 @@ public class MachineGunnerSupportGoal extends CoverTacticalGoal {
     private BlockPos latestEvaluationCenter;
     @Nullable
     private BlockPos latestEvaluationAnchor;
+    private long latestEvaluationRevision = Long.MIN_VALUE;
+    private long latestEvaluationSuppressionSequence = Long.MIN_VALUE;
+    private long latestEvaluationSectorGeneration = Long.MIN_VALUE;
+    private boolean evaluationPending;
 
     public MachineGunnerSupportGoal(SoldierEntity soldier) {
-        super(soldier);
-    }
-
-    @Override
-    protected boolean isRoleSpecificSupportOrderActive() {
-        return soldier instanceof MachineGunnerEntity mg && mg.isAttackSupportActive();
-    }
-
-    @Override
-    @Nullable
-    protected BlockPos getRoleSpecificSuppressionCenter() {
-        return soldier instanceof MachineGunnerEntity mg ? mg.getSuppressionCenter() : null;
-    }
-
-    @Override
-    protected boolean isRoleSpecificPositionPolicyActive() {
-        return soldier instanceof MachineGunnerEntity mg && mg.getSuppressionCenter() != null;
-    }
-
-    @Override
-    protected boolean isRoleSpecificCoverAllowed(CoverFinder finder, CoverPoint cover,
-                                                 @Nullable Vec3 threatDirection) {
-        if (!(soldier instanceof MachineGunnerEntity mg)) {
-            return true;
+        if (!(soldier instanceof MachineGunnerEntity machineGunner)) {
+            throw new IllegalArgumentException("MachineGunnerSupportGoal requires a machine gunner");
         }
-        BlockPos suppressionCenter = mg.getSuppressionCenter();
-        if (suppressionCenter == null) {
-            return true;
-        }
-        Vec3 suppressionDirection = directionToSuppression(cover, suppressionCenter);
-        if (!finder.isDirectionProtected(cover, suppressionDirection)) {
+        this.soldier = machineGunner;
+        this.coverController = new CoverTacticalGoal(soldier, true);
+        this.setFlags(EnumSet.of(Flag.MOVE, Flag.LOOK));
+    }
+
+    @Override
+    public boolean canUse() {
+        if (soldier.isHealing()) {
             return false;
         }
-        return FiringPositionFinder.evaluateFiringAccess(
-            mg, suppressionCenter, cover.getPosition(), FiringPosition.FiringPosture.COVER_PEEK)
-            >= FiringPositionFinder.MIN_FIRING_ACCESS;
+        prepareSupportSelection();
+        return coverController.canUse();
     }
 
     @Override
-    protected Optional<CoverPoint> selectRoleSpecificCover(
-        CoverFinder finder, BlockPos searchCenter, int searchRadius,
-        Vec3 threatDirection, List<LivingEntity> threats,
-        SquadCoverContext squadCtx, List<CoverFinder.ScoredCover> baseCandidates) {
-        if (!(soldier instanceof MachineGunnerEntity mg)
-            || soldier.isHealing() || soldier.isPreparingOrReloading() || soldier.isRecalling()) {
-            return Optional.empty();
-        }
-
-        BlockPos suppressionCenter = mg.getSuppressionCenter();
-        BlockPos supportAnchor = SupportPositionFinder.findSupportPosition(mg);
-        if (suppressionCenter == null || supportAnchor == null) {
-            clearLatestEvaluationDebug(mg, suppressionCenter == null
-                ? "suppression center unavailable" : "support anchor unavailable");
-            return Optional.empty();
-        }
-
-        FiringPositionFinder.EvaluationReport evaluation = evaluateSupport(mg, suppressionCenter, supportAnchor);
-        FiringPosition selectedLane = evaluation.selected();
-        if (selectedLane != null && selectedLane.posture() == FiringPosition.FiringPosture.OPEN_PRONE) {
-            if (DiagnosticLogManager.isCoverLoggingEnabled()) {
-                StevesArmyMod.LOGGER.info(
-                    "[MGState] soldier={} event=role-cover-skipped reason=open-prone-scored-higher target={} center={} anchor={}",
-                    soldier.getId(), selectedLane.destination(), suppressionCenter, supportAnchor);
-            }
-            return Optional.empty();
-        }
-
-        List<CoverFinder.ScoredCover> candidates = finder.evaluateAndScoreAllFromCenter(
-            supportAnchor, soldier, threatDirection, threats,
-            Math.max(searchRadius, FiringPositionFinder.SEARCH_RADIUS), squadCtx);
-        CoverPoint currentCover = soldier.getCoverBehaviorManager().getCurrentCover();
-        Set<BlockPos> noPhysicalPath = new HashSet<>();
-        latestEvaluationReport.pathChecks().stream()
-            .filter(check -> !check.pathExists())
-            .map(check -> check.position().destination())
-            .forEach(noPhysicalPath::add);
-
-        Map<BlockPos, FiringPosition> validFiringPositions = new HashMap<>();
-        latestEvaluationReport.pathChecks().stream()
-            .filter(check -> check.position().posture() == FiringPosition.FiringPosture.COVER_PEEK)
-            .filter(check -> check.pathExists() && check.canReach())
-            .forEach(check -> validFiringPositions.put(check.position().destination(), check.position()));
-
-        List<CoverFinder.ScoredCover> protectedCandidates = new ArrayList<>();
-        candidates.stream()
-            .filter(sc -> validFiringPositions.containsKey(sc.cover.getPosition()))
-            .filter(sc -> !noPhysicalPath.contains(sc.cover.getPosition()))
-            .filter(sc -> !isCoverBlacklisted(sc.cover.getPosition()))
-            .filter(sc -> CoverReservationManager.isAvailableFor(sc.cover.getPosition(), soldier))
-            .filter(sc -> currentCover == null
-                || !currentCover.getPosition().equals(sc.cover.getPosition()))
-            .filter(sc -> isExactCoverPathReachable(sc.cover))
-            .filter(sc -> finder.isDirectionProtected(sc.cover,
-                directionToSuppression(sc.cover, suppressionCenter)))
-            .forEach(protectedCandidates::add);
-        baseCandidates.stream()
-            .filter(sc -> validFiringPositions.containsKey(sc.cover.getPosition()))
-            .filter(sc -> !noPhysicalPath.contains(sc.cover.getPosition()))
-            .filter(sc -> !isCoverBlacklisted(sc.cover.getPosition()))
-            .filter(sc -> CoverReservationManager.isAvailableFor(sc.cover.getPosition(), soldier))
-            .filter(sc -> currentCover == null
-                || !currentCover.getPosition().equals(sc.cover.getPosition()))
-            .filter(sc -> isExactCoverPathReachable(sc.cover))
-            .filter(sc -> finder.isDirectionProtected(sc.cover,
-                directionToSuppression(sc.cover, suppressionCenter)))
-            .forEach(protectedCandidates::add);
-
-        Optional<CoverFinder.ScoredCover> selected = protectedCandidates.stream()
-            .max(Comparator.comparingDouble(sc -> supportScore(
-                sc, validFiringPositions.get(sc.cover.getPosition()), selectedLane,
-                suppressionCenter, supportAnchor)));
-
-        if (selected.isEmpty()) {
-            if (DiagnosticLogManager.isCoverLoggingEnabled()) {
-                StevesArmyMod.LOGGER.info(
-                    "[MGState] soldier={} event=role-cover-no-valid-firing-position center={} anchor={} evaluated={} protected={}",
-                    soldier.getId(), suppressionCenter, supportAnchor,
-                    validFiringPositions.size(), protectedCandidates.size());
-            }
-            return Optional.empty();
-        }
-
-        CoverFinder.ScoredCover result = selected.get();
-        if (DiagnosticLogManager.isCoverLoggingEnabled()) {
-            StevesArmyMod.LOGGER.info(
-                "[MGState] soldier={} event=role-cover-selected target={} center={} anchor={} score={} baseScore={} lane={}",
-                soldier.getId(), result.cover.getPosition(), suppressionCenter, supportAnchor,
-                format(supportScore(result, validFiringPositions.get(result.cover.getPosition()),
-                    selectedLane, suppressionCenter, supportAnchor)),
-                format(result.score), selectedLane != null ? selectedLane.destination() : "none");
-        }
-        return Optional.of(result.cover);
+    public boolean canContinueToUse() {
+        return !soldier.isHealing() && coverController.canContinueToUse();
     }
 
     @Override
-    protected Optional<DefensivePositionCandidate.ProneFiringCandidate> selectRoleSpecificProne(
-        CoverFinder finder, BlockPos searchCenter, int searchRadius,
-        Vec3 threatDirection, List<LivingEntity> threats,
-        SquadCoverContext squadCtx, List<CoverFinder.ScoredCover> baseCandidates) {
-        if (!(soldier instanceof MachineGunnerEntity mg)
-            || soldier.isHealing() || soldier.isPreparingOrReloading() || soldier.isRecalling()) {
-            return Optional.empty();
+    public void start() {
+        prepareSupportSelection();
+        coverController.start();
+    }
+
+    @Override
+    public void stop() {
+        coverController.stop();
+        evaluationPending = false;
+        selectionRetryTicks = 0;
+    }
+
+    @Override
+    public void tick() {
+        CoverBehaviorManager manager = soldier.getCoverBehaviorManager();
+        if (manager.getTargetCover() == null && manager.isSeekingCover()) {
+            prepareSupportSelection();
+        }
+        coverController.tick();
+        syncDebugState();
+    }
+
+    private void prepareSupportSelection() {
+        if (selectionRetryTicks > 0) {
+            selectionRetryTicks--;
         }
 
-        BlockPos suppressionCenter = mg.getSuppressionCenter();
-        BlockPos supportAnchor = SupportPositionFinder.findSupportPosition(mg);
+        CoverBehaviorManager manager = soldier.getCoverBehaviorManager();
+        if (manager.getCurrentCover() != null && manager.getTargetCover() != null) {
+            return;
+        }
+
+        BlockPos suppressionCenter = soldier.getSuppressionCenter();
+        BlockPos supportAnchor = SupportPositionFinder.findSupportPosition(soldier);
         if (suppressionCenter == null || supportAnchor == null) {
-            return Optional.empty();
+            return;
         }
 
-        FiringPositionFinder.EvaluationReport evaluation = evaluateSupport(mg, suppressionCenter, supportAnchor);
+        long revision = manager.getTacticalRevision();
+        long suppressionSequence = manager.getSuppressionTracker().getSuppressionEventSequence();
+        long sectorGeneration = soldier.getSuppressionSectorGeneration();
+        boolean contextChanged = lastSelectionCenter == null
+            || !lastSelectionCenter.equals(suppressionCenter)
+            || lastSelectionAnchor == null || !lastSelectionAnchor.equals(supportAnchor)
+            || lastSelectionRevision != revision
+            || lastSelectionSuppressionSequence != suppressionSequence
+            || lastSelectionSectorGeneration != sectorGeneration;
+        if (!contextChanged && selectionRetryTicks > 0) {
+            return;
+        }
+
+        lastSelectionCenter = suppressionCenter.immutable();
+        lastSelectionAnchor = supportAnchor.immutable();
+        lastSelectionRevision = revision;
+        lastSelectionSuppressionSequence = suppressionSequence;
+        lastSelectionSectorGeneration = sectorGeneration;
+
+        FiringPositionFinder.EvaluationReport evaluation = evaluateSupport(
+            suppressionCenter, supportAnchor, revision, suppressionSequence, sectorGeneration);
         if (evaluation.selected() == null
-            || evaluation.selected().posture() != FiringPosition.FiringPosture.OPEN_PRONE) {
-            return Optional.empty();
+            || evaluation.selected().posture() != FiringPosition.FiringPosture.COVER_PEEK) {
+            selectionRetryTicks = SELECTION_RETRY_TICKS;
+            return;
         }
-        Optional<DefensivePositionCandidate.ProneFiringCandidate> prone = evaluation.candidates().stream()
-            .filter(candidate -> candidate.posture() == FiringPosition.FiringPosture.OPEN_PRONE)
-            .filter(candidate -> evaluation.pathChecks().stream().anyMatch(check ->
-                check.position().equals(candidate) && check.pathExists() && check.canReach()))
-            .max(Comparator.comparingDouble(FiringPosition::score))
-            .map(candidate -> new DefensivePositionCandidate.ProneFiringCandidate(
-                candidate.destination(), candidate.firingAccess(), candidate.protection(),
-                0.0f, (float) Math.sqrt(candidate.destination().distSqr(soldier.blockPosition())),
-                "mg-open-prone-evaluator"));
-        if (prone.isPresent() && DiagnosticLogManager.isCoverLoggingEnabled()) {
-            StevesArmyMod.LOGGER.info(
-                "[MGState] soldier={} event=role-prone-candidate target={} center={} anchor={} access={} protection={}",
-                soldier.getId(), prone.get().destination(), suppressionCenter, supportAnchor,
-                String.format(Locale.ROOT, "%.2f", prone.get().firingAccess()),
-                String.format(Locale.ROOT, "%.2f", prone.get().protection()));
+
+        CoverPoint selected = selectPhysicalSupportCover(
+            suppressionCenter, supportAnchor, evaluation);
+        if (selected != null && (manager.getCurrentCover() == null
+            || !manager.getCurrentCover().getPosition().equals(selected.getPosition()))) {
+            manager.setTargetCover(selected);
+            if (!manager.isInCover()) {
+                manager.setState(CoverBehaviorManager.CoverState.SEEKING_COVER);
+            }
+        } else {
+            selectionRetryTicks = SELECTION_RETRY_TICKS;
         }
-        return prone;
     }
 
-    private static Vec3 directionToSuppression(CoverPoint cover, BlockPos suppressionCenter) {
-        BlockPos position = cover.getPosition();
-        return new Vec3(
-            suppressionCenter.getX() + 0.5 - (position.getX() + 0.5),
-            0.0,
-            suppressionCenter.getZ() + 0.5 - (position.getZ() + 0.5));
-    }
-
-    private FiringPositionFinder.EvaluationReport evaluateSupport(
-        MachineGunnerEntity mg, BlockPos suppressionCenter, BlockPos supportAnchor) {
-        if (latestEvaluationReport == null
-            || latestEvaluationCenter == null || !latestEvaluationCenter.equals(suppressionCenter)
-            || latestEvaluationAnchor == null || !latestEvaluationAnchor.equals(supportAnchor)) {
-            latestEvaluationReport = FiringPositionFinder.evaluate(mg, suppressionCenter, supportAnchor);
-            latestEvaluationCenter = suppressionCenter.immutable();
-            latestEvaluationAnchor = supportAnchor.immutable();
-            sendLatestEvaluationDebug(mg);
+    @Nullable
+    private CoverPoint selectPhysicalSupportCover(BlockPos suppressionCenter,
+                                                  BlockPos supportAnchor,
+                                                  FiringPositionFinder.EvaluationReport evaluation) {
+        Vec3 threatDirection = directionBetween(supportAnchor, suppressionCenter);
+        List<LivingEntity> threats = new ArrayList<>(soldier.getCombatGoal().getPotentialTargets());
+        LivingEntity target = soldier.getTarget();
+        if (target != null && target.isAlive() && !threats.contains(target)) {
+            threats.add(0, target);
         }
-        return latestEvaluationReport;
+
+        Set<BlockPos> reachablePositions = new HashSet<>();
+        Map<BlockPos, FiringPosition> firingPositions = new HashMap<>();
+        for (FiringPositionFinder.CandidateDiagnostic check : evaluation.pathChecks()) {
+            if (check.position().posture() == FiringPosition.FiringPosture.COVER_PEEK
+                && check.pathExists() && check.canReach()) {
+                reachablePositions.add(check.position().destination());
+                firingPositions.put(check.position().destination(), check.position());
+            }
+        }
+        if (reachablePositions.isEmpty()) {
+            return null;
+        }
+
+        CoverFinder finder = new CoverFinder(soldier.level());
+        PerformanceMetrics.recordRoleCoverSearch(true);
+        List<CoverFinder.ScoredCover> candidates = finder.findTopCovers(
+            soldier, threatDirection, threats, Math.max(SEARCH_RADIUS, FiringPositionFinder.SEARCH_RADIUS), 12, true);
+        CoverPoint current = soldier.getCoverBehaviorManager().getCurrentCover();
+        CoverFinder.ScoredCover best = candidates.stream()
+            .filter(candidate -> reachablePositions.contains(candidate.cover.getPosition()))
+            .filter(candidate -> current == null
+                || !current.getPosition().equals(candidate.cover.getPosition()))
+            .filter(candidate -> CoverReservationManager.isAvailableFor(candidate.cover.getPosition(), soldier))
+            .filter(candidate -> finder.isDirectionProtected(candidate.cover,
+                directionBetween(candidate.cover.getPosition(), suppressionCenter)))
+            .max(Comparator.comparingDouble(candidate -> supportScore(
+                candidate, firingPositions.get(candidate.cover.getPosition()), evaluation.selected(), supportAnchor)))
+            .orElse(null);
+        return best != null ? best.cover : null;
     }
 
     private double supportScore(CoverFinder.ScoredCover candidate,
                                 @Nullable FiringPosition firingPosition,
                                 @Nullable FiringPosition selectedLane,
-                                BlockPos suppressionCenter,
                                 BlockPos supportAnchor) {
         BlockPos destination = candidate.cover.getPosition();
-        double access = 0.0;
-        FiringPositionFinder.ConfirmedFiringAccess confirmed =
-            FiringPositionFinder.evaluateConfirmedFiringAccess(
-                soldier, suppressionCenter, destination, FiringPosition.FiringPosture.COVER_PEEK);
-        if (confirmed.hasConfirmedTargets()) {
-            access = confirmed.access();
-        }
+        double confirmedAccess = FiringPositionFinder.evaluateConfirmedFiringAccess(
+            soldier, soldier.getSuppressionCenter(), destination,
+            FiringPosition.FiringPosture.COVER_PEEK).access();
         double laneBonus = selectedLane != null && destination.equals(selectedLane.destination())
             ? SELECTED_LANE_BONUS : 0.0;
         double distance = Math.sqrt(destination.distSqr(supportAnchor));
         double firingScore = firingPosition != null ? firingPosition.score() : candidate.score;
-        return firingScore + ACCESS_WEIGHT * access + laneBonus
+        return firingScore + ACCESS_WEIGHT * confirmedAccess + laneBonus
             - ANCHOR_DISTANCE_WEIGHT * distance;
     }
 
-    /** Forces a read-only evaluation for the existing debug command. */
-    public FiringPositionFinder.EvaluationReport forceEvaluateSupportPosition() {
-        if (!(soldier instanceof MachineGunnerEntity mg)) {
-            return FiringPositionFinder.evaluate(null, null, null);
+    private FiringPositionFinder.EvaluationReport evaluateSupport(
+        BlockPos suppressionCenter, BlockPos supportAnchor, long revision,
+        long suppressionSequence, long sectorGeneration) {
+        if (latestEvaluationReport != null
+            && suppressionCenter.equals(latestEvaluationCenter)
+            && supportAnchor.equals(latestEvaluationAnchor)
+            && revision == latestEvaluationRevision
+            && suppressionSequence == latestEvaluationSuppressionSequence
+            && sectorGeneration == latestEvaluationSectorGeneration) {
+            return latestEvaluationReport;
         }
-        BlockPos suppressionCenter = mg.getSuppressionCenter();
-        BlockPos supportAnchor = SupportPositionFinder.findSupportPosition(mg);
-        latestEvaluationReport = FiringPositionFinder.evaluate(mg, suppressionCenter, supportAnchor);
-        latestEvaluationCenter = suppressionCenter != null ? suppressionCenter.immutable() : null;
-        latestEvaluationAnchor = supportAnchor != null ? supportAnchor.immutable() : null;
-        sendLatestEvaluationDebug(mg, latestEvaluationReport.selected() != null
-            ? "role cover evaluation" : "no firing lane");
+
+        if (StevesArmyConfig.useAsyncCoverEvaluation()) {
+            if (!evaluationPending) {
+                evaluationPending = true;
+                AsyncCoverEvaluationManager.request(soldier, suppressionCenter, supportAnchor,
+                    revision, suppressionSequence, sectorGeneration, (snapshot, report) -> {
+                        evaluationPending = false;
+                        latestEvaluationReport = report;
+                        latestEvaluationCenter = snapshot.suppressionCenter();
+                        latestEvaluationAnchor = snapshot.supportAnchor();
+                        latestEvaluationRevision = snapshot.tacticalRevision();
+                        latestEvaluationSuppressionSequence = snapshot.suppressionSequence();
+                        latestEvaluationSectorGeneration = snapshot.sectorGeneration();
+                        sendLatestEvaluationDebug(report);
+                    });
+            }
+            return FiringPositionFinder.emptyEvaluationReport();
+        }
+
+        latestEvaluationReport = FiringPositionFinder.evaluate(soldier, suppressionCenter, supportAnchor);
+        latestEvaluationCenter = suppressionCenter.immutable();
+        latestEvaluationAnchor = supportAnchor.immutable();
+        latestEvaluationRevision = revision;
+        latestEvaluationSuppressionSequence = suppressionSequence;
+        latestEvaluationSectorGeneration = sectorGeneration;
+        sendLatestEvaluationDebug(latestEvaluationReport);
         return latestEvaluationReport;
     }
 
-    private void sendLatestEvaluationDebug(MachineGunnerEntity mg) {
-        sendLatestEvaluationDebug(mg, latestEvaluationReport != null && latestEvaluationReport.selected() != null
-            ? "role cover evaluation" : "no firing lane");
-    }
-
-    private void clearLatestEvaluationDebug(MachineGunnerEntity mg, String reason) {
-        latestEvaluationReport = FiringPositionFinder.evaluate(mg, null, null);
-        latestEvaluationCenter = null;
-        latestEvaluationAnchor = null;
-        sendLatestEvaluationDebug(mg, reason);
-    }
-
-    private void sendLatestEvaluationDebug(MachineGunnerEntity mg, String failure) {
-        if (latestEvaluationReport == null) {
+    private void sendLatestEvaluationDebug(FiringPositionFinder.EvaluationReport report) {
+        if (!DiagnosticLogManager.isCoverLoggingEnabled()) {
             return;
         }
-        NetworkHandler.sendToTracking(mg, MachineGunnerEvaluationPacket.from(
-            mg.getId(), latestEvaluationCenter, latestEvaluationAnchor, latestEvaluationReport,
-            failure));
+        NetworkHandler.sendToTracking(soldier, MachineGunnerEvaluationPacket.from(
+            soldier.getId(), latestEvaluationCenter, latestEvaluationAnchor, report,
+            report.selected() != null ? "standalone support evaluation" : "no firing lane"));
     }
 
-    /**
-     * Preserve the MG's area-suppression facing input without giving the role
-     * any movement ownership. When threat awareness has no directional sample,
-     * ordinary cover scoring should still protect the sticky suppression sector.
-     */
-    @Override
-    @Nullable
-    protected Vec3 getCoverThreatDirection() {
-        Vec3 base = super.getCoverThreatDirection();
-        if (base != null && base.lengthSqr() > 0.001) {
-            return base;
-        }
-        if (!(soldier instanceof MachineGunnerEntity mg)) {
-            return base;
-        }
-        BlockPos center = mg.getSuppressionCenter();
-        if (center == null) {
-            return base;
-        }
+    private void syncDebugState() {
+        CoverBehaviorManager manager = soldier.getCoverBehaviorManager();
+        CoverPoint target = manager.getTargetCover();
+        CoverPoint current = manager.getCurrentCover();
+        BlockPos authoritative = target != null ? target.getPosition()
+            : current != null ? current.getPosition() : null;
+        FiringPosition lane = getLatestSelectedLane();
+        boolean laneMatches = lane != null && authoritative != null
+            && lane.posture() == FiringPosition.FiringPosture.COVER_PEEK
+            && lane.destination().equals(authoritative);
+        soldier.syncMachineGunnerDebug(
+            authoritative,
+            authoritative,
+            soldier.getSuppressionCenter(),
+            laneMatches ? lane.firingAccess() : 0.0f,
+            laneMatches ? lane.posture().ordinal() + 1 : 0,
+            laneMatches,
+            authoritative != null && !laneMatches,
+            manager.isSuppressed());
+    }
+
+    private static Vec3 directionBetween(BlockPos origin, BlockPos destination) {
         Vec3 direction = new Vec3(
-            center.getX() + 0.5 - soldier.getX(),
+            destination.getX() + 0.5 - (origin.getX() + 0.5),
             0.0,
-            center.getZ() + 0.5 - soldier.getZ());
-        return direction.lengthSqr() > 0.001 ? direction : base;
+            destination.getZ() + 0.5 - (origin.getZ() + 0.5));
+        return direction.lengthSqr() > 0.001 ? direction : new Vec3(0.0, 0.0, 1.0);
     }
 
-    @Nullable
-    @Override
-    protected Float getMachineGunnerDebugAccess() {
-        FiringPosition selected = getLatestSelectedLane();
-        return selected != null ? selected.firingAccess() : null;
-    }
-
-    @Nullable
-    @Override
-    protected FiringPosition getMachineGunnerDebugLane() {
-        return getLatestSelectedLane();
-    }
-
-    @Override
-    protected int getMachineGunnerDebugPosture() {
-        FiringPosition selected = getLatestSelectedLane();
-        return selected == null ? 0 : selected.posture().ordinal() + 1;
-    }
-
-    @Nullable
-    private FiringPosition getLatestSelectedLane() {
-        if (!(soldier instanceof MachineGunnerEntity mg)
-            || latestEvaluationReport == null
-            || latestEvaluationCenter == null) {
-            return null;
+    public FiringPositionFinder.EvaluationReport forceEvaluateSupportPosition() {
+        BlockPos center = soldier.getSuppressionCenter();
+        BlockPos anchor = SupportPositionFinder.findSupportPosition(soldier);
+        if (center == null || anchor == null) {
+            latestEvaluationReport = FiringPositionFinder.emptyEvaluationReport();
+            return latestEvaluationReport;
         }
-        BlockPos currentCenter = mg.getSuppressionCenter();
-        BlockPos currentAnchor = SupportPositionFinder.findSupportPosition(mg);
-        if (currentCenter == null || currentAnchor == null
-            || !currentCenter.equals(latestEvaluationCenter)
-            || latestEvaluationAnchor == null
-            || !currentAnchor.equals(latestEvaluationAnchor)) {
-            clearLatestEvaluationDebug(mg, currentCenter == null
-                ? "suppression center unavailable" : currentAnchor == null
-                    ? "support anchor unavailable" : "support geometry changed");
-            return null;
-        }
-        return latestEvaluationReport.selected();
+        latestEvaluationReport = FiringPositionFinder.evaluate(soldier, center, anchor);
+        latestEvaluationCenter = center.immutable();
+        latestEvaluationAnchor = anchor.immutable();
+        sendLatestEvaluationDebug(latestEvaluationReport);
+        return latestEvaluationReport;
     }
 
-    private static String format(double value) {
-        return String.format(Locale.ROOT, "%.2f", value);
+    @Nullable
+    public FiringPosition getLatestSelectedLane() {
+        return latestEvaluationReport != null ? latestEvaluationReport.selected() : null;
+    }
+
+    @Override
+    public boolean requestGoToRelocation(BlockPos destination, int commandGeneration) {
+        return coverController.requestGoToRelocation(destination, commandGeneration);
+    }
+
+    @Override
+    public boolean isHandlingGoToRelocation(int commandGeneration) {
+        return coverController.isHandlingGoToRelocation(commandGeneration);
+    }
+
+    @Override
+    @Nullable
+    public BlockPos getProneDefensivePosition() {
+        return coverController.getProneDefensivePosition();
     }
 }

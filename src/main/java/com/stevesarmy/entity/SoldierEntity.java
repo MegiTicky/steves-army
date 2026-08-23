@@ -21,6 +21,8 @@ import com.stevesarmy.entity.ai.SoldierHealGoal;
 import com.stevesarmy.entity.ai.SoldierMoveToPingGoal;
 import com.stevesarmy.entity.ai.SoldierStrollGoal;
 import com.stevesarmy.entity.ai.CoverTacticalGoal;
+import com.stevesarmy.entity.ai.CombatGoalController;
+import com.stevesarmy.entity.ai.CoverGoalController;
 import com.stevesarmy.entity.ai.PeekController;
 import com.stevesarmy.inventory.SoldierInventory;
 import com.stevesarmy.inventory.SoldierInventoryHandler;
@@ -185,10 +187,12 @@ public class SoldierEntity extends PathfinderMob implements Container {
     private final SoldierInventoryHandler inventoryHandler;
     private final LazyOptional<IItemHandler> itemHandlerCap;
     
-    protected SoldierCombatGoal combatGoal;
+    protected CombatGoalController combatGoal;
+    protected Goal combatGoalTask;
     private CoverBehaviorManager coverBehaviorManager;
     private PeekController peekController;
-    protected CoverTacticalGoal coverTacticalGoal;
+    protected CoverGoalController coverTacticalGoal;
+    protected Goal coverTacticalGoalTask;
     private final ThreatAwareness threatAwareness;
     
     private boolean healing = false;
@@ -407,10 +411,11 @@ public class SoldierEntity extends PathfinderMob implements Container {
         this.goalSelector.addGoal(1, new OpenDoorGoal(this, true));
         this.goalSelector.addGoal(1, new SoldierHealGoal(this));
         this.goalSelector.addGoal(1, new SoldierMoveToPingGoal(this));
-        this.goalSelector.addGoal(2, initializeCoverTacticalGoal());
+        initializeCoverTacticalGoal();
+        this.goalSelector.addGoal(2, coverTacticalGoalTask);
         this.goalSelector.addGoal(3, new SoldierFollowOwnerGoal(this));
         this.goalSelector.addGoal(3, new SoldierHoldPositionGoal(this));
-        this.goalSelector.addGoal(4, combatGoal);
+        this.goalSelector.addGoal(4, combatGoalTask);
         this.goalSelector.addGoal(5, new SoldierStrollGoal(this, 0.8D));
         this.goalSelector.addGoal(6, new LookAtPlayerGoal(this, Player.class, 8.0F));
         this.goalSelector.addGoal(7, new RandomLookAroundGoal(this));
@@ -420,18 +425,22 @@ public class SoldierEntity extends PathfinderMob implements Container {
      * Stores the combat goal so cover and combat coordination use the same instance.
      * Subclasses with custom goal layouts must use this instead of constructing one directly.
      */
-    protected SoldierCombatGoal initializeCombatGoal() {
-        this.combatGoal = new SoldierCombatGoal(this);
-        return this.combatGoal;
+    protected Goal initializeCombatGoal() {
+        SoldierCombatGoal goal = new SoldierCombatGoal(this);
+        this.combatGoal = goal;
+        this.combatGoalTask = goal;
+        return goal;
     }
 
     /** Creates the shared cover goal instance used by squad cover coordination. */
-    protected CoverTacticalGoal initializeCoverTacticalGoal() {
-        this.coverTacticalGoal = new CoverTacticalGoal(this);
-        return this.coverTacticalGoal;
+    protected Goal initializeCoverTacticalGoal() {
+        CoverTacticalGoal goal = new CoverTacticalGoal(this);
+        this.coverTacticalGoal = goal;
+        this.coverTacticalGoalTask = goal;
+        return goal;
     }
 
-    /** The role is determined by the entity type, not by the equipped weapon. */
+    /** The default entity role is the rifleman pipeline. */
     public SoldierRole getRole() {
         return SoldierRole.RIFLEMAN;
     }
@@ -1367,7 +1376,7 @@ public BlockPos getPingMoveTarget() {
         );
     }
     
-    public SoldierCombatGoal getCombatGoal() {
+    public CombatGoalController getCombatGoal() {
         return combatGoal;
     }
 
@@ -1420,7 +1429,7 @@ public BlockPos getPingMoveTarget() {
         entityData.set(TACTICAL_RELOADING, tacticalReloading);
     }
 
-    public CoverTacticalGoal getCoverTacticalGoal() {
+    public CoverGoalController getCoverTacticalGoal() {
         return coverTacticalGoal;
     }
     

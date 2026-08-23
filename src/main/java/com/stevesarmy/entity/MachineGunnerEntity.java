@@ -3,14 +3,24 @@ package com.stevesarmy.entity;
 import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.entity.ai.MachineGunnerCombatGoal;
 import com.stevesarmy.entity.ai.MachineGunnerSupportGoal;
-import com.stevesarmy.entity.ai.CoverTacticalGoal;
-import com.stevesarmy.entity.ai.SoldierCombatGoal;
+import com.stevesarmy.entity.ai.SoldierFollowOwnerGoal;
+import com.stevesarmy.entity.ai.SoldierHealGoal;
+import com.stevesarmy.entity.ai.SoldierHoldPositionGoal;
+import com.stevesarmy.entity.ai.SoldierHoleRescueGoal;
+import com.stevesarmy.entity.ai.SoldierMoveToPingGoal;
+import com.stevesarmy.entity.ai.SoldierStrollGoal;
 import com.stevesarmy.ping.PingType;
 import com.stevesarmy.squad.SquadMode;
 import com.stevesarmy.squad.SquadManager;
 import com.stevesarmy.squad.SquadThreatIntel;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.ai.goal.FloatGoal;
+import net.minecraft.world.entity.ai.goal.Goal;
+import net.minecraft.world.entity.ai.goal.LookAtPlayerGoal;
+import net.minecraft.world.entity.ai.goal.OpenDoorGoal;
+import net.minecraft.world.entity.ai.goal.RandomLookAroundGoal;
+import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.Level;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.phys.Vec3;
@@ -41,6 +51,7 @@ public class MachineGunnerEntity extends SoldierEntity {
     @Nullable private SuppressionSectorSource activeSectorSource;
     private long activeSectorStartedTick;
     private long activeSectorLastConfirmedTick;
+    private long suppressionSectorGeneration;
     private long pendingSectorStartedTick;
     private boolean autonomousSuppressionActive;
     private final SquadThreatIntel.ThreatKnowledge[] threatSelectionScratch =
@@ -48,6 +59,7 @@ public class MachineGunnerEntity extends SoldierEntity {
 
     public MachineGunnerEntity(EntityType<? extends SoldierEntity> type, Level level) {
         super(type, level);
+        getCoverBehaviorManager().setProtectedMachineGunnerPolicy(true);
     }
 
     /** Reusable bounded-selection buffer for firing-position threat samples. */
@@ -61,15 +73,38 @@ public class MachineGunnerEntity extends SoldierEntity {
     }
 
     @Override
-    protected SoldierCombatGoal initializeCombatGoal() {
-        this.combatGoal = new MachineGunnerCombatGoal(this);
-        return this.combatGoal;
+    protected void registerGoals() {
+        initializeCombatGoal();
+        initializeCoverTacticalGoal();
+
+        this.goalSelector.addGoal(0, new SoldierHoleRescueGoal(this));
+        this.goalSelector.addGoal(0, new FloatGoal(this));
+        this.goalSelector.addGoal(1, new OpenDoorGoal(this, true));
+        this.goalSelector.addGoal(1, new SoldierHealGoal(this));
+        this.goalSelector.addGoal(1, new SoldierMoveToPingGoal(this));
+        this.goalSelector.addGoal(2, coverTacticalGoalTask);
+        this.goalSelector.addGoal(3, new SoldierFollowOwnerGoal(this));
+        this.goalSelector.addGoal(3, new SoldierHoldPositionGoal(this));
+        this.goalSelector.addGoal(4, combatGoalTask);
+        this.goalSelector.addGoal(5, new SoldierStrollGoal(this, 0.8D));
+        this.goalSelector.addGoal(6, new LookAtPlayerGoal(this, Player.class, 8.0F));
+        this.goalSelector.addGoal(7, new RandomLookAroundGoal(this));
     }
 
     @Override
-    protected CoverTacticalGoal initializeCoverTacticalGoal() {
-        this.coverTacticalGoal = new MachineGunnerSupportGoal(this);
-        return this.coverTacticalGoal;
+    protected Goal initializeCombatGoal() {
+        MachineGunnerCombatGoal goal = new MachineGunnerCombatGoal(this);
+        this.combatGoal = goal;
+        this.combatGoalTask = goal;
+        return goal;
+    }
+
+    @Override
+    protected Goal initializeCoverTacticalGoal() {
+        MachineGunnerSupportGoal goal = new MachineGunnerSupportGoal(this);
+        this.coverTacticalGoal = goal;
+        this.coverTacticalGoalTask = goal;
+        return goal;
     }
 
     /**
@@ -179,6 +214,10 @@ public class MachineGunnerEntity extends SoldierEntity {
         return resolveSuppressionSector(candidate, source);
     }
 
+    public long getSuppressionSectorGeneration() {
+        return suppressionSectorGeneration;
+    }
+
     @Nullable
     private BlockPos getBestSquadThreatPosition() {
         if (!(level() instanceof ServerLevel serverLevel) || getSquadId() == null) {
@@ -263,6 +302,7 @@ public class MachineGunnerEntity extends SoldierEntity {
             return;
         }
         activeSuppressionCenter = center.immutable();
+        suppressionSectorGeneration++;
         activeSectorSource = source;
         activeSectorStartedTick = now;
         activeSectorLastConfirmedTick = now;
@@ -272,6 +312,7 @@ public class MachineGunnerEntity extends SoldierEntity {
 
     private void clearSuppressionSector() {
         activeSuppressionCenter = null;
+        suppressionSectorGeneration++;
         activeSectorSource = null;
         pendingSuppressionCenter = null;
         activeSectorStartedTick = 0;

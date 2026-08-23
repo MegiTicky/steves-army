@@ -1,49 +1,79 @@
 package com.stevesarmy.entity.ai;
 
+import com.stevesarmy.combat.DetectionSystem;
 import com.stevesarmy.combat.GunIntegration;
 import com.stevesarmy.combat.TargetAcquisition;
+import com.stevesarmy.combat.cover.CoverProtectionContext;
 import com.stevesarmy.combat.cover.FiringPositionFinder;
 import com.stevesarmy.entity.MachineGunnerEntity;
 import com.stevesarmy.entity.SoldierEntity;
 import net.minecraft.core.BlockPos;
+import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.ai.goal.Goal;
 import net.minecraft.world.phys.Vec3;
 
+import javax.annotation.Nullable;
 import java.util.ArrayList;
+import java.util.EnumSet;
 import java.util.List;
+import java.util.UUID;
 
 /**
- * Machine gunner combat behavior. Tier 1 (active visible target) is handled by
- * the base goal. This adds tier 2 (last-known threat position) and tier 3
- * (likely peek positions) auto-suppression by feeding the proven ping-suppression
- * machinery a suppression center when no live target is available.
+ * Standalone machine-gunner combat goal. The rifleman goal is used only as a
+ * private role-neutral combat controller; it is never installed in the
+ * machine-gunner goal selector and therefore cannot add work to riflemen.
  */
-public class MachineGunnerCombatGoal extends SoldierCombatGoal {
+public final class MachineGunnerCombatGoal extends Goal implements CombatGoalController {
     private static final int AUTO_SUPPRESS_EVALUATION_INTERVAL = 20;
     private static final double AUTO_SUPPRESS_CENTER_SWITCH_DISTANCE = 4.0;
     private static final double AUTO_SUPPRESS_POINT_CHANGE_DISTANCE_SQ = 0.75 * 0.75;
-    private int autoSuppressCooldown = 0;
+
+    private final MachineGunnerEntity soldier;
+    private final SoldierCombatGoal combatController;
+    private int autoSuppressCooldown;
 
     public MachineGunnerCombatGoal(SoldierEntity soldier) {
-        super(soldier);
+        if (!(soldier instanceof MachineGunnerEntity machineGunner)) {
+            throw new IllegalArgumentException("MachineGunnerCombatGoal requires a machine gunner");
+        }
+        this.soldier = machineGunner;
+        this.combatController = new SoldierCombatGoal(soldier, true);
+        this.setFlags(EnumSet.of(Flag.MOVE, Flag.LOOK));
     }
 
     @Override
     public boolean canUse() {
-        if (super.canUse()) {
+        if (combatController.canUse()) {
             return true;
-        }
-        if (!(soldier instanceof MachineGunnerEntity mg)) {
-            return false;
         }
         if (soldier.isHealing() || soldier.isPreparingOrReloading() || soldier.isRecalling()) {
             return false;
         }
-        return mg.getSuppressionCenter() != null;
+        return soldier.getSuppressionCenter() != null;
+    }
+
+    @Override
+    public boolean canContinueToUse() {
+        return combatController.canContinueToUse()
+            || (!soldier.isHealing() && !soldier.isPreparingOrReloading()
+                && !soldier.isRecalling() && soldier.getSuppressionCenter() != null);
+    }
+
+    @Override
+    public void start() {
+        combatController.start();
+        autoSuppressCooldown = 0;
+    }
+
+    @Override
+    public void stop() {
+        combatController.stop();
+        autoSuppressCooldown = 0;
     }
 
     @Override
     public void tick() {
-        super.tick();
+        combatController.tick();
         if (--autoSuppressCooldown > 0) {
             return;
         }
@@ -52,17 +82,15 @@ public class MachineGunnerCombatGoal extends SoldierCombatGoal {
     }
 
     private void maybeAutoSuppress() {
-        if (!(soldier instanceof MachineGunnerEntity mg)) {
-            return;
-        }
         if (soldier.isHealing() || soldier.isPreparingOrReloading() || soldier.isRecalling()) {
             return;
         }
-        if (soldier.getTarget() != null && soldier.getTarget().isAlive()) {
+        LivingEntity target = soldier.getTarget();
+        if (target != null && target.isAlive()) {
             return;
         }
-        if (mg.isAutonomousSuppressionActive() && soldier.hasValidPingSuppressPos()) {
-            refreshAutonomousSuppression(mg);
+        if (soldier.isAutonomousSuppressionActive() && soldier.hasValidPingSuppressPos()) {
+            refreshAutonomousSuppression();
             return;
         }
         if (isSuppressing() || soldier.hasValidPingSuppressPos()) {
@@ -72,28 +100,28 @@ public class MachineGunnerCombatGoal extends SoldierCombatGoal {
             return;
         }
 
-        BlockPos center = mg.getSuppressionCenter();
+        BlockPos center = soldier.getSuppressionCenter();
         if (center == null) {
             return;
         }
 
-        mg.beginAutonomousSuppression();
+        soldier.beginAutonomousSuppression();
         soldier.setPingSuppressPos(center);
-        refreshAutonomousSuppression(mg);
-        soldier.getCombatGoal().forceRestartPingSuppression();
+        refreshAutonomousSuppression();
+        forceRestartPingSuppression();
     }
 
-    private void refreshAutonomousSuppression(MachineGunnerEntity mg) {
-        BlockPos center = mg.getSuppressionCenter();
+    private void refreshAutonomousSuppression() {
+        BlockPos center = soldier.getSuppressionCenter();
         if (center == null) {
-            mg.clearAutonomousSuppression();
+            soldier.clearAutonomousSuppression();
             soldier.clearPingSuppressPos();
             return;
         }
 
         BlockPos current = soldier.getPingSuppressPos();
-        if (current == null
-            || current.distSqr(center) > AUTO_SUPPRESS_CENTER_SWITCH_DISTANCE * AUTO_SUPPRESS_CENTER_SWITCH_DISTANCE) {
+        if (current == null || current.distSqr(center)
+            > AUTO_SUPPRESS_CENTER_SWITCH_DISTANCE * AUTO_SUPPRESS_CENTER_SWITCH_DISTANCE) {
             soldier.setPingSuppressPos(center);
             forceRestartPingSuppression();
         }
@@ -140,5 +168,86 @@ public class MachineGunnerCombatGoal extends SoldierCombatGoal {
             }
         }
         return false;
+    }
+
+    @Override
+    public Vec3 getProneFiringAimPoint(LivingEntity target) {
+        return combatController.getProneFiringAimPoint(target);
+    }
+
+    @Override
+    public void setFiringPronePositionAuthorized(boolean authorized) {
+        combatController.setFiringPronePositionAuthorized(authorized);
+    }
+
+    @Override
+    public boolean isFiringPronePositionAuthorized() {
+        return combatController.isFiringPronePositionAuthorized();
+    }
+
+    @Override
+    public void tickFiringPronePositionFromCover() {
+        combatController.tickFiringPronePositionFromCover();
+    }
+
+    @Override
+    public List<LivingEntity> getPotentialTargets() {
+        return combatController.getPotentialTargets();
+    }
+
+    @Override
+    public boolean hasDetectedTargets() {
+        return combatController.hasDetectedTargets();
+    }
+
+    @Override
+    @Nullable
+    public LivingEntity getCurrentTarget() {
+        return combatController.getCurrentTarget();
+    }
+
+    @Override
+    public DetectionSystem getDetectionSystem() {
+        return combatController.getDetectionSystem();
+    }
+
+    @Override
+    public void onEnemyGunshot(LivingEntity shooter, GunIntegration.GunshotSignature signature) {
+        combatController.onEnemyGunshot(shooter, signature);
+    }
+
+    @Override
+    public void setTarget(@Nullable LivingEntity target) {
+        combatController.setTarget(target);
+    }
+
+    @Override
+    public CoverProtectionContext resolveCoverProtectionContext() {
+        return combatController.resolveCoverProtectionContext();
+    }
+
+    @Override
+    public void onTargetKilledByTeammate(UUID killedThreatId) {
+        combatController.onTargetKilledByTeammate(killedThreatId);
+    }
+
+    @Override
+    public boolean isSuppressing() {
+        return combatController.isSuppressing();
+    }
+
+    @Override
+    public boolean canShootPrimaryTarget() {
+        return combatController.canShootPrimaryTarget();
+    }
+
+    @Override
+    public int getTotalAmmo() {
+        return combatController.getTotalAmmo();
+    }
+
+    @Override
+    public void forceRestartPingSuppression() {
+        combatController.forceRestartPingSuppression();
     }
 }

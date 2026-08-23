@@ -16,15 +16,21 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.level.pathfinder.Path;
 import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
+import net.minecraft.world.phys.shapes.VoxelShape;
 
 import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
 
 /**
  * Dedicated firing-position evaluator for the machine gunner. Unlike the
@@ -121,6 +127,39 @@ public final class FiringPositionFinder {
 
     private record CoarseCandidate(CandidateGeometry geometry, float access) {}
 
+    /** Immutable static geometry copied on the server thread for worker evaluation. */
+    public record SnapshotBox(double minX, double minY, double minZ,
+                              double maxX, double maxY, double maxZ) {}
+
+    public record SnapshotCell(boolean loaded, List<SnapshotBox> collision,
+                                List<SnapshotBox> outline, float concealment) {}
+
+    public record TerrainSnapshot(Map<BlockPos, SnapshotCell> cells) {}
+
+    public record AsyncCandidateGeometry(BlockPos position, FiringPosition.FiringPosture posture,
+                                         float protection, boolean directionallyProtected) {}
+
+    public record AsyncEvaluationSnapshot(
+        UUID soldierId, long sourceTick, long tacticalRevision,
+        long suppressionSequence, long sectorGeneration,
+        BlockPos soldierBlockPosition, Vec3 observerEye,
+        BlockPos suppressionCenter, BlockPos supportAnchor,
+        List<TargetSample> targets, List<AsyncCandidateGeometry> geometries,
+        TerrainSnapshot terrain, int coverTargetCount, boolean usedGridFallback,
+        int activeTargetCount, int lastSeenCount, int peekTargetCount,
+        int coverPositionsChecked, int pronePositionsChecked) {}
+
+    public record AsyncEvaluationResult(
+        List<FiringPosition> candidates, List<ProtectionDiagnostic> protectionDiagnostics,
+        int rejectedForAccess, int rejectedForProtection) {}
+
+    private record AsyncGeometryCollection(List<AsyncCandidateGeometry> geometries,
+                                           int positionsChecked) {}
+
+    private record AsyncScoredCandidate(AsyncCandidateGeometry geometry, float access) {}
+
+    private record SnapshotVisibility(boolean clear, double concealment) {}
+
     /**
      * Evaluates cover and open-prone candidates around the support anchor and
      * returns the best firing position, or null when nothing can actually fire
@@ -207,6 +246,363 @@ public final class FiringPositionFinder {
             targetGeneration.peekTargetCount(), coverCandidates.rejectedForProtection()
             + proneCandidates.rejectedForProtection(), candidates, pathChecks,
             mergeProtectionDiagnostics(coverCandidates, proneCandidates), best);
+    }
+
+    /** Captures all data needed by the pure worker evaluator on the server thread. */
+    public static AsyncEvaluationSnapshot captureAsyncSnapshot(
+        MachineGunnerEntity mg, BlockPos suppressionCenter, BlockPos supportAnchor,
+        long tacticalRevision, long suppressionSequence, long sectorGeneration) {
+        long started = System.nanoTime();
+        try {
+            Level level = mg.level();
+            CoverFinder finder = new CoverFinder(level);
+            TargetGeneration targetGeneration = generateSuppressionTargets(
+                mg, level, finder, suppressionCenter, SoldierEntity.SUPPRESSION_ZONE_RADIUS);
+            List<TargetSample> targets = List.copyOf(targetGeneration.targets());
+
+            AsyncGeometryCollection cover = collectAsyncCoverGeometries(
+                level, finder, mg, supportAnchor, targets);
+            AsyncGeometryCollection prone = collectAsyncProneGeometries(
+                level, mg, supportAnchor, targets);
+            List<AsyncCandidateGeometry> geometries = new ArrayList<>(
+                cover.geometries().size() + prone.geometries().size());
+            geometries.addAll(cover.geometries());
+            geometries.addAll(prone.geometries());
+
+            TerrainSnapshot terrain = captureTerrainSnapshot(level, targets, geometries);
+            return new AsyncEvaluationSnapshot(
+                mg.getUUID(), level.getGameTime(), tacticalRevision, suppressionSequence,
+                sectorGeneration, mg.blockPosition().immutable(), mg.getEyePosition(),
+                suppressionCenter.immutable(), supportAnchor.immutable(), targets,
+                List.copyOf(geometries), terrain, targetGeneration.coverTargetCount(),
+                targetGeneration.usedGridFallback(), targetGeneration.activeTargetCount(),
+                targetGeneration.lastSeenCount(), targetGeneration.peekTargetCount(),
+                cover.positionsChecked(), prone.positionsChecked());
+        } finally {
+            com.stevesarmy.debug.PerformanceMetrics.recordAsyncCoverSnapshot(
+                System.nanoTime() - started);
+        }
+    }
+
+    /** Pure worker-side ranking over immutable candidate and terrain snapshots. */
+    public static AsyncEvaluationResult evaluateAsyncSnapshot(AsyncEvaluationSnapshot snapshot) {
+        List<TargetSample> targets = snapshot.targets();
+        if (targets.isEmpty() || snapshot.geometries().isEmpty()) {
+            return new AsyncEvaluationResult(List.of(), List.of(), 0, 0);
+        }
+
+        List<TargetSample> coarseTargets = selectCoarseTargets(targets);
+        List<AsyncScoredCandidate> coarseCandidates = new ArrayList<>(snapshot.geometries().size());
+        for (AsyncCandidateGeometry geometry : snapshot.geometries()) {
+            coarseCandidates.add(new AsyncScoredCandidate(geometry,
+                evaluateSnapshotAccess(snapshot.terrain(),
+                    candidateEye(geometry.position(), geometry.posture()), coarseTargets).access()));
+        }
+        coarseCandidates.sort(Comparator.comparingDouble(AsyncScoredCandidate::access).reversed());
+
+        List<FiringPosition> candidates = new ArrayList<>();
+        List<ProtectionDiagnostic> protectionDiagnostics = new ArrayList<>();
+        int rejectedForProtection = 0;
+        int fullChecks = Math.min(MAX_FULL_ACCESS_CANDIDATES, coarseCandidates.size());
+        for (int i = 0; i < fullChecks; i++) {
+            AsyncCandidateGeometry geometry = coarseCandidates.get(i).geometry();
+            if (protectionDiagnostics.size() < MAX_PATH_CHECK_CANDIDATES * 2) {
+                protectionDiagnostics.add(new ProtectionDiagnostic(geometry.position(), geometry.posture(),
+                    geometry.protection(), geometry.directionallyProtected()));
+            }
+            if (geometry.posture() == FiringPosition.FiringPosture.COVER_PEEK
+                && !geometry.directionallyProtected()) {
+                rejectedForProtection++;
+                continue;
+            }
+            AccessDiagnostic access = evaluateSnapshotAccess(snapshot.terrain(),
+                candidateEye(geometry.position(), geometry.posture()), targets);
+            if (access.access() < MIN_FIRING_ACCESS || !access.meaningful()) {
+                continue;
+            }
+            candidates.add(new FiringPosition(geometry.position(), geometry.posture(), access.access(),
+                geometry.protection(), score(access.access(), geometry.protection(),
+                    geometry.posture() == FiringPosition.FiringPosture.OPEN_PRONE
+                        ? OPEN_PRONE_POSTURE_BONUS : COVER_POSTURE_BONUS,
+                    geometry.position(), snapshot.supportAnchor())));
+        }
+        candidates.sort(Comparator.comparingDouble(FiringPosition::score).reversed());
+        return new AsyncEvaluationResult(List.copyOf(candidates),
+            List.copyOf(protectionDiagnostics), fullChecks - candidates.size() - rejectedForProtection,
+            rejectedForProtection);
+    }
+
+    /** Main-thread finalization: exact LOS, reservations, and navigation stay here. */
+    public static EvaluationReport finalizeAsyncEvaluation(
+        MachineGunnerEntity mg, AsyncEvaluationSnapshot snapshot, AsyncEvaluationResult result) {
+        Level level = mg.level();
+        CoverFinder finder = new CoverFinder(level);
+        List<CandidateDiagnostic> pathChecks = new ArrayList<>();
+        FiringPosition best = null;
+        List<FiringPosition> candidates = result.candidates();
+        for (int candidateIndex = 0;
+             candidateIndex < candidates.size() && candidateIndex < MAX_PATH_CHECK_CANDIDATES;
+             candidateIndex++) {
+            FiringPosition candidate = candidates.get(candidateIndex);
+            boolean samePosition = candidate.destination().equals(mg.blockPosition());
+            Path path = samePosition ? null : candidate.posture() == FiringPosition.FiringPosture.OPEN_PRONE
+                ? mg.getNavigation().createPath(candidate.destination(), 0)
+                : mg.getNavigation().createPath(candidate.destination().getX() + 0.5,
+                    candidate.destination().getY(), candidate.destination().getZ() + 0.5, 0);
+            boolean pathExists = samePosition || path != null;
+            AccessDiagnostic access = evaluateAccess(level, candidateEye(candidate), snapshot.targets(), mg);
+            boolean canReach = access.meaningful() && (samePosition || isPathReachableForCandidate(
+                level, finder, candidate, path));
+            pathChecks.add(new CandidateDiagnostic(candidate, candidateIndex + 1, pathExists, canReach, access));
+            if (canReach && CoverReservationManager.isAvailableFor(candidate.destination(), mg)) {
+                best = candidate;
+                break;
+            }
+        }
+
+        return new EvaluationReport(snapshot.targets().size(), snapshot.coverTargetCount(),
+            snapshot.usedGridFallback(), snapshot.coverPositionsChecked(), snapshot.pronePositionsChecked(),
+            result.rejectedForAccess(), snapshot.targets(), snapshot.activeTargetCount(),
+            snapshot.lastSeenCount(), snapshot.peekTargetCount(), result.rejectedForProtection(),
+            candidates, pathChecks, result.protectionDiagnostics(), best);
+    }
+
+    public static EvaluationReport emptyEvaluationReport() {
+        return emptyReport();
+    }
+
+    private static AsyncGeometryCollection collectAsyncCoverGeometries(
+        Level level, CoverFinder finder, MachineGunnerEntity mg, BlockPos anchor,
+        List<TargetSample> targets) {
+        List<AsyncCandidateGeometry> geometries = new ArrayList<>();
+        int positionsChecked = 0;
+        for (CoverPoint cover : finder.findCoverPoints(anchor, SEARCH_RADIUS)) {
+            positionsChecked++;
+            BlockPos pos = cover.getPosition();
+            if (!CoverReservationManager.isAvailableFor(pos, mg)) continue;
+            float protection = directionalCoverProtection(level, cover, targets);
+            geometries.add(new AsyncCandidateGeometry(pos.immutable(),
+                FiringPosition.FiringPosture.COVER_PEEK, protection,
+                protection >= MIN_COVER_PROTECTION));
+        }
+        return new AsyncGeometryCollection(geometries, positionsChecked);
+    }
+
+    private static AsyncGeometryCollection collectAsyncProneGeometries(
+        Level level, MachineGunnerEntity mg, BlockPos anchor, List<TargetSample> targets) {
+        List<AsyncCandidateGeometry> geometries = new ArrayList<>();
+        int positionsChecked = 0;
+        for (int x = -SEARCH_RADIUS; x <= SEARCH_RADIUS; x++) {
+            for (int z = -SEARCH_RADIUS; z <= SEARCH_RADIUS; z++) {
+                if (x * x + z * z > SEARCH_RADIUS * SEARCH_RADIUS) continue;
+                BlockPos ground = level.getHeightmapPos(Heightmap.Types.WORLD_SURFACE,
+                    anchor.offset(x, 0, z));
+                BlockPos pos = ground.above();
+                if (!isProneTerrainValid(level, pos)) continue;
+                positionsChecked++;
+                if (!CoverReservationManager.isProneAvailableFor(pos, mg)) continue;
+                float protection = OPEN_PRONE_PROTECTION
+                    + (adjacentCover(level, pos) ? 0.10f : 0.0f);
+                geometries.add(new AsyncCandidateGeometry(pos.immutable(),
+                    FiringPosition.FiringPosture.OPEN_PRONE, protection, false));
+            }
+        }
+        return new AsyncGeometryCollection(geometries, positionsChecked);
+    }
+
+    private static TerrainSnapshot captureTerrainSnapshot(Level level,
+                                                           List<TargetSample> targets,
+                                                           List<AsyncCandidateGeometry> geometries) {
+        Set<BlockPos> rayCells = new HashSet<>();
+        for (AsyncCandidateGeometry geometry : geometries) {
+            Vec3 eye = candidateEye(geometry.position(), geometry.posture());
+            for (TargetSample target : targets) {
+                addRayCells(rayCells, eye, target.position());
+            }
+        }
+
+        Map<BlockPos, SnapshotCell> cells = new HashMap<>();
+        for (BlockPos pos : rayCells) {
+            BlockPos key = pos.immutable();
+            if (!level.isLoaded(key)) {
+                cells.put(key, new SnapshotCell(false, List.of(), List.of(), 0.0f));
+                continue;
+            }
+            BlockState state = level.getBlockState(key);
+            boolean leaf = state.is(net.minecraft.tags.BlockTags.LEAVES);
+            boolean transparent = state.is(com.stevesarmy.combat.ModBlockTags.TRANSPARENT_PENETRABLE);
+            boolean concealment = state.is(com.stevesarmy.combat.ModBlockTags.VISION_CONCEALMENT);
+            List<SnapshotBox> collision = !leaf && !transparent && !concealment
+                ? snapshotShape(state.getCollisionShape(level, key), key) : List.of();
+            List<SnapshotBox> outline = leaf || concealment
+                ? snapshotShape(state.getShape(level, key), key) : List.of();
+            float concealmentWeight = leaf ? 0.75f
+                : state.is(com.stevesarmy.combat.ModBlockTags.VISION_CONCEALMENT_MEDIUM)
+                    ? 0.30f : concealment ? 0.20f : 0.0f;
+            cells.put(key, new SnapshotCell(true, collision, outline, concealmentWeight));
+        }
+        return new TerrainSnapshot(Map.copyOf(cells));
+    }
+
+    private static List<SnapshotBox> snapshotShape(VoxelShape shape, BlockPos pos) {
+        if (shape.isEmpty()) return List.of();
+        List<SnapshotBox> boxes = new ArrayList<>();
+        shape.forAllBoxes((minX, minY, minZ, maxX, maxY, maxZ) -> boxes.add(
+            new SnapshotBox(pos.getX() + minX, pos.getY() + minY, pos.getZ() + minZ,
+                pos.getX() + maxX, pos.getY() + maxY, pos.getZ() + maxZ)));
+        return List.copyOf(boxes);
+    }
+
+    private static void addRayCells(Set<BlockPos> cells, Vec3 from, Vec3 to) {
+        Vec3 direction = to.subtract(from);
+        double length = direction.length();
+        if (length < 1.0e-7) {
+            cells.add(BlockPos.containing(from).immutable());
+            return;
+        }
+        Vec3 unit = direction.scale(1.0 / length);
+        int x = (int) Math.floor(from.x);
+        int y = (int) Math.floor(from.y);
+        int z = (int) Math.floor(from.z);
+        int endX = (int) Math.floor(to.x);
+        int endY = (int) Math.floor(to.y);
+        int endZ = (int) Math.floor(to.z);
+        double t = 0.0;
+        while (t <= length + 1.0e-7) {
+            cells.add(new BlockPos(x, y, z).immutable());
+            if (x == endX && y == endY && z == endZ) break;
+            double nextX = nextBoundary(from.x, unit.x, x);
+            double nextY = nextBoundary(from.y, unit.y, y);
+            double nextZ = nextBoundary(from.z, unit.z, z);
+            double next = Math.min(nextX, Math.min(nextY, nextZ));
+            if (next == Double.POSITIVE_INFINITY) break;
+            if (nextX <= next + 1.0e-7) x += step(unit.x);
+            if (nextY <= next + 1.0e-7) y += step(unit.y);
+            if (nextZ <= next + 1.0e-7) z += step(unit.z);
+            t = next;
+        }
+    }
+
+    private static AccessDiagnostic evaluateSnapshotAccess(TerrainSnapshot terrain,
+                                                            Vec3 eye,
+                                                            List<TargetSample> targets) {
+        int active = 0, lastSeen = 0, peek = 0;
+        float activeVisibleWeight = 0.0f, activeWeight = 0.0f;
+        float lastSeenVisibleWeight = 0.0f, lastSeenWeight = 0.0f;
+        float peekVisibleWeight = 0.0f, peekWeight = 0.0f;
+        for (TargetSample target : targets) {
+            SnapshotVisibility visibility = traceSnapshot(terrain, eye, target.position());
+            float laneQuality = visibility.clear
+                ? (float) Math.max(0.0, 1.0 - visibility.concealment) : 0.0f;
+            switch (target.category()) {
+                case ACTIVE_TARGET -> {
+                    activeWeight += target.weight();
+                    activeVisibleWeight += target.weight() * laneQuality;
+                    if (visibility.clear && visibility.concealment < 1.0) active++;
+                }
+                case LAST_SEEN -> {
+                    lastSeenWeight += target.weight();
+                    lastSeenVisibleWeight += target.weight() * laneQuality;
+                    if (visibility.clear && visibility.concealment < 1.0) lastSeen++;
+                }
+                case POTENTIAL_PEEK, GRID_FALLBACK -> {
+                    peekWeight += target.weight();
+                    peekVisibleWeight += target.weight() * laneQuality;
+                    if (visibility.clear && visibility.concealment < 1.0) peek++;
+                }
+            }
+        }
+        float activeCoverage = weightedCategoryCoverage(activeVisibleWeight, activeWeight);
+        float lastSeenCoverage = weightedCategoryCoverage(lastSeenVisibleWeight, lastSeenWeight);
+        float peekCoverage = weightedCategoryCoverage(peekVisibleWeight, peekWeight);
+        float categoryWeight = 0.0f, weightedCoverage = 0.0f;
+        if (countTargets(targets, TargetCategory.ACTIVE_TARGET) > 0) {
+            categoryWeight += ACTIVE_TARGET_WEIGHT;
+            weightedCoverage += activeCoverage * ACTIVE_TARGET_WEIGHT;
+        }
+        if (countTargets(targets, TargetCategory.LAST_SEEN) > 0) {
+            categoryWeight += LAST_SEEN_WEIGHT;
+            weightedCoverage += lastSeenCoverage * LAST_SEEN_WEIGHT;
+        }
+        if (countPeekTargets(targets) > 0) {
+            categoryWeight += PEEK_TARGET_WEIGHT;
+            weightedCoverage += peekCoverage * PEEK_TARGET_WEIGHT;
+        }
+        boolean meaningful = activeCoverage >= 0.25f || lastSeen > 0
+            || peekCoverage >= MIN_PEEK_COVERAGE;
+        float access = categoryWeight > 0.0f ? weightedCoverage / categoryWeight : 0.0f;
+        return new AccessDiagnostic(access, activeCoverage, lastSeenCoverage, peekCoverage,
+            active, lastSeen, peek, meaningful && access >= MIN_MEANINGFUL_ACCESS);
+    }
+
+    private static SnapshotVisibility traceSnapshot(TerrainSnapshot terrain, Vec3 from, Vec3 to) {
+        Vec3 direction = to.subtract(from);
+        double length = direction.length();
+        if (length < 1.0e-7) return new SnapshotVisibility(true, 0.0);
+        Vec3 unit = direction.scale(1.0 / length);
+        int x = (int) Math.floor(from.x), y = (int) Math.floor(from.y), z = (int) Math.floor(from.z);
+        int endX = (int) Math.floor(to.x), endY = (int) Math.floor(to.y), endZ = (int) Math.floor(to.z);
+        double concealment = 0.0, t = 0.0;
+        while (t <= length + 1.0e-7) {
+            SnapshotCell cell = terrain.cells().get(new BlockPos(x, y, z));
+            if (cell == null || !cell.loaded()) return new SnapshotVisibility(false, 1.0);
+            for (SnapshotBox box : cell.collision()) {
+                if (intersectsSegment(box, from, to)) return new SnapshotVisibility(false, concealment);
+            }
+            boolean outlineHit = false;
+            for (SnapshotBox box : cell.outline()) {
+                if (intersectsSegment(box, from, to)) {
+                    outlineHit = true;
+                    break;
+                }
+            }
+            if (outlineHit) concealment = Math.min(1.0, concealment + cell.concealment());
+            if (x == endX && y == endY && z == endZ) break;
+            double nextX = nextBoundary(from.x, unit.x, x);
+            double nextY = nextBoundary(from.y, unit.y, y);
+            double nextZ = nextBoundary(from.z, unit.z, z);
+            double next = Math.min(nextX, Math.min(nextY, nextZ));
+            if (next == Double.POSITIVE_INFINITY) break;
+            if (nextX <= next + 1.0e-7) x += step(unit.x);
+            if (nextY <= next + 1.0e-7) y += step(unit.y);
+            if (nextZ <= next + 1.0e-7) z += step(unit.z);
+            t = next;
+        }
+        return new SnapshotVisibility(true, concealment);
+    }
+
+    private static boolean intersectsSegment(SnapshotBox box, Vec3 from, Vec3 to) {
+        double tMin = 0.0, tMax = 1.0;
+        double[] origin = {from.x, from.y, from.z};
+        double[] delta = {to.x - from.x, to.y - from.y, to.z - from.z};
+        double[] min = {box.minX(), box.minY(), box.minZ()};
+        double[] max = {box.maxX(), box.maxY(), box.maxZ()};
+        for (int axis = 0; axis < 3; axis++) {
+            if (Math.abs(delta[axis]) < 1.0e-9) {
+                if (origin[axis] < min[axis] || origin[axis] > max[axis]) return false;
+                continue;
+            }
+            double inverse = 1.0 / delta[axis];
+            double near = (min[axis] - origin[axis]) * inverse;
+            double far = (max[axis] - origin[axis]) * inverse;
+            if (near > far) {
+                double swap = near; near = far; far = swap;
+            }
+            tMin = Math.max(tMin, near);
+            tMax = Math.min(tMax, far);
+            if (tMin > tMax) return false;
+        }
+        return true;
+    }
+
+    private static int step(double component) {
+        return component > 0.0 ? 1 : -1;
+    }
+
+    private static double nextBoundary(double coordinate, double direction, int block) {
+        if (Math.abs(direction) < 1.0e-7) return Double.POSITIVE_INFINITY;
+        double boundary = direction > 0.0 ? block + 1.0 : block;
+        return (boundary - coordinate) / direction;
     }
 
     private static boolean isPathReachableForCandidate(Level level, CoverFinder finder,

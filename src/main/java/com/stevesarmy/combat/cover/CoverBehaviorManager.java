@@ -4,7 +4,6 @@ import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.combat.GunIntegration;
 import com.stevesarmy.debug.PerformanceMetrics;
 import com.stevesarmy.entity.SoldierEntity;
-import com.stevesarmy.entity.MachineGunnerEntity;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.phys.Vec3;
@@ -55,6 +54,7 @@ public class CoverBehaviorManager {
     private BlockPos savedCoverPosition = null;
     private boolean repositionRequested = false;
     private long tacticalRevision = 0L;
+    private boolean protectedMachineGunnerPolicy;
     
     private float lastSyncedSuppression = -1f;
     private static final float SUPPRESSION_SYNC_THRESHOLD = 0.5f;
@@ -63,6 +63,11 @@ public class CoverBehaviorManager {
     public CoverBehaviorManager(SoldierEntity soldier) {
         this.soldier = soldier;
         this.suppressionTracker = new SuppressionTracker();
+    }
+
+    /** Set once by a role-specific entity; never inferred in the tick path. */
+    public void setProtectedMachineGunnerPolicy(boolean enabled) {
+        this.protectedMachineGunnerPolicy = enabled;
     }
     
     private void syncState() {
@@ -695,7 +700,7 @@ public class CoverBehaviorManager {
 
     /** True when recent fire came from a direction this dedicated MG's cover protects. */
     public boolean isProtectedMachineGunner() {
-        if (!(soldier instanceof MachineGunnerEntity)
+        if (!protectedMachineGunnerPolicy
             || currentCover == null
             || !isInCover()) {
             return false;

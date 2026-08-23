@@ -5,7 +5,7 @@ import com.stevesarmy.combat.EnemyContactTracker;
 import com.stevesarmy.debug.DiagnosticLogManager;
 import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.entity.ai.CoverTacticalGoal;
-import com.stevesarmy.entity.ai.SoldierCombatGoal;
+import com.stevesarmy.entity.ai.CombatGoalController;
 import com.stevesarmy.squad.SquadData;
 import com.stevesarmy.squad.SquadManager;
 import com.stevesarmy.squad.SquadThreatIntel;
@@ -242,7 +242,7 @@ public class IncomingFireHandler {
                 for (UUID memberId : squad.getMemberIds()) {
                     Entity member = serverLevel.getEntity(memberId);
                     if (member instanceof SoldierEntity soldier) {
-                        SoldierCombatGoal combatGoal = soldier.getCombatGoal();
+                        CombatGoalController combatGoal = soldier.getCombatGoal();
                         if (combatGoal != null) {
                             combatGoal.onTargetKilledByTeammate(deadEntity.getUUID());
                         }
@@ -252,7 +252,7 @@ public class IncomingFireHandler {
                 if (squad.getLeaderId() != null) {
                     Entity leader = serverLevel.getEntity(squad.getLeaderId());
                     if (leader instanceof SoldierEntity soldierLeader) {
-                        SoldierCombatGoal leaderGoal = soldierLeader.getCombatGoal();
+                        CombatGoalController leaderGoal = soldierLeader.getCombatGoal();
                         if (leaderGoal != null) {
                             leaderGoal.onTargetKilledByTeammate(deadEntity.getUUID());
                         }
