@@ -1,7 +1,6 @@
 package com.stevesarmy.entity;
 
 import com.stevesarmy.inventory.SoldierInventory;
-import com.stevesarmy.registry.ModEntities;
 import com.stevesarmy.squad.FireTeamAssignment;
 import com.stevesarmy.squad.SquadData;
 import com.stevesarmy.squad.SquadManager;
@@ -10,6 +9,7 @@ import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.Tag;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
@@ -24,8 +24,9 @@ import java.util.Set;
 public final class SoldierSpawner {
     private SoldierSpawner() {}
 
-    public static SpawnResult spawnOwned(
+    public static SpawnResult spawn(
         ServerLevel level,
+        EntityType<? extends SoldierEntity> entityType,
         Player owner,
         Vec3 position,
         float yaw,
@@ -37,9 +38,9 @@ public final class SoldierSpawner {
             return SpawnResult.failure(validation.get());
         }
 
-        SoldierEntity soldier = ModEntities.SOLDIER.get().create(level);
+        SoldierEntity soldier = entityType.create(level);
         if (soldier == null) {
-            return SpawnResult.failure("Failed to create soldier entity");
+            return SpawnResult.failure("Failed to create entity " + entityType);
         }
 
         soldier.moveTo(position.x, position.y, position.z, yaw, pitch);
@@ -47,7 +48,7 @@ public final class SoldierSpawner {
             applyLoadout(soldier, loadout);
         }
 
-        return finishSpawn(level, soldier, owner, true);
+        return finishSpawn(level, soldier, owner, owner != null);
     }
 
     /**

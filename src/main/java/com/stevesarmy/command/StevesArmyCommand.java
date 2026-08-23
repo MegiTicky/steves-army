@@ -2,11 +2,15 @@ package com.stevesarmy.command;
 
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.context.CommandContext;
+import com.mojang.brigadier.builder.ArgumentBuilder;
 import com.stevesarmy.client.CombatDebugRenderer;
 import com.stevesarmy.combat.cover.CoverDebugManager;
+import com.stevesarmy.entity.EnemySoldierEntity;
+import com.stevesarmy.entity.MachineGunnerEntity;
 import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.entity.SoldierSpawner;
 import com.stevesarmy.entity.ai.CoverTacticalGoal;
+import com.stevesarmy.registry.ModEntities;
 import com.mojang.brigadier.arguments.FloatArgumentType;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
@@ -20,8 +24,11 @@ import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.network.chat.Style;
 import net.minecraft.ChatFormatting;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.phys.Vec3;
+
+import java.util.function.Function;
 
 public class StevesArmyCommand {
 
@@ -37,8 +44,10 @@ public class StevesArmyCommand {
                 ctx.getSource().sendSuccess(() -> Component.literal(
                     "Steve's Army Commands:\n" +
                     "  /stevesarmy debug - Enable all debug (shortcut for /stevesarmy_debug all)\n" +
-                    "  /steves_army loadout save <soldier> - Copy a soldier inventory loadout\n" +
-                    "  /steves_army spawn <owner> <x> <y> <z> [yaw] [pitch] [loadout_nbt]"
+                    "  /stevesarmy loadout save <rifleman> - Copy a rifleman inventory loadout\n" +
+                    "  /stevesarmy spawn rifleman <owner> <position> [yaw] [pitch] [loadout_nbt]\n" +
+                    "  /stevesarmy spawn machine_gunner <owner> <position> [yaw] [pitch] [loadout_nbt]\n" +
+                    "  /stevesarmy spawn enemy <position> [yaw] [pitch] [loadout_nbt]"
                 ), false);
                 return 1;
             })
@@ -47,55 +56,66 @@ public class StevesArmyCommand {
             )
             .then(Commands.literal("loadout")
                 .then(Commands.literal("save")
-                    .then(Commands.argument("soldier", EntityArgument.entity())
+                    .then(Commands.argument("rifleman", EntityArgument.entity())
                         .executes(StevesArmyCommand::saveLoadout)
                     )
                 )
             )
             .then(Commands.literal("spawn")
-                .then(Commands.argument("owner", EntityArgument.player())
-                    .then(Commands.argument("position", Vec3Argument.vec3())
-                        .executes(ctx -> spawnSoldier(ctx, 0.0F, 0.0F, null))
-                        .then(Commands.argument("loadout", CompoundTagArgument.compoundTag())
-                            .executes(ctx -> spawnSoldier(ctx, 0.0F, 0.0F,
-                                CompoundTagArgument.getCompoundTag(ctx, "loadout")))
-                        )
-                        .then(Commands.argument("yaw", FloatArgumentType.floatArg())
-                            .executes(ctx -> spawnSoldier(ctx,
-                                FloatArgumentType.getFloat(ctx, "yaw"), 0.0F, null))
-                            .then(Commands.argument("pitch", FloatArgumentType.floatArg())
-                                .executes(ctx -> spawnSoldier(ctx,
-                                    FloatArgumentType.getFloat(ctx, "yaw"),
-                                    FloatArgumentType.getFloat(ctx, "pitch"), null))
-                                .then(Commands.argument("loadout", CompoundTagArgument.compoundTag())
-                                    .executes(ctx -> spawnSoldier(ctx,
-                                        FloatArgumentType.getFloat(ctx, "yaw"),
-                                        FloatArgumentType.getFloat(ctx, "pitch"),
-                                        CompoundTagArgument.getCompoundTag(ctx, "loadout")))
-                                )
-                            )
-                        )
-                    )
-                )
+                .then(createOwnedSpawnBranch("rifleman", ModEntities.SOLDIER.get()))
+                .then(createOwnedSpawnBranch("machine_gunner", ModEntities.MACHINE_GUNNER.get()))
+                .then(Commands.literal("enemy")
+                    .then(createSpawnArguments(ModEntities.ENEMY_SOLDIER.get(), false)))
             );
+    }
+
+    private static ArgumentBuilder<CommandSourceStack, ?> createOwnedSpawnBranch(
+        String name,
+        EntityType<? extends SoldierEntity> entityType
+    ) {
+        return Commands.literal(name)
+            .then(Commands.argument("owner", EntityArgument.player())
+                .then(createSpawnArguments(entityType, true)));
+    }
+
+    private static ArgumentBuilder<CommandSourceStack, ?> createSpawnArguments(
+        EntityType<? extends SoldierEntity> entityType,
+        boolean ownerRequired
+    ) {
+        Function<CommandContext<CommandSourceStack>, Integer> execute = context ->
+            spawnEntity(context, entityType, ownerRequired);
+
+        var position = Commands.argument("position", Vec3Argument.vec3())
+            .executes(execute::apply)
+            .then(Commands.argument("loadout", CompoundTagArgument.compoundTag())
+                .executes(execute::apply));
+        var yaw = Commands.argument("yaw", FloatArgumentType.floatArg())
+            .executes(execute::apply);
+        var pitch = Commands.argument("pitch", FloatArgumentType.floatArg())
+            .executes(execute::apply)
+            .then(Commands.argument("loadout", CompoundTagArgument.compoundTag())
+                .executes(execute::apply));
+        yaw.then(pitch);
+        position.then(yaw);
+        return position;
     }
 
     private static int saveLoadout(CommandContext<CommandSourceStack> context) {
         Entity target;
         try {
-            target = EntityArgument.getEntity(context, "soldier");
+            target = EntityArgument.getEntity(context, "rifleman");
         } catch (Exception e) {
-            context.getSource().sendFailure(Component.literal("Could not resolve soldier: " + e.getMessage()));
+            context.getSource().sendFailure(Component.literal("Could not resolve rifleman: " + e.getMessage()));
             return 0;
         }
 
         if (!(target instanceof SoldierEntity soldier)) {
-            context.getSource().sendFailure(Component.literal("Target must be a Steve's Army soldier"));
+            context.getSource().sendFailure(Component.literal("Target must be a Steve's Army rifleman, machine gunner, or enemy soldier"));
             return 0;
         }
 
         if (!soldier.isAlive() || soldier.isRemoved()) {
-            context.getSource().sendFailure(Component.literal("Target soldier is not active"));
+            context.getSource().sendFailure(Component.literal("Target rifleman is not active"));
             return 0;
         }
 
@@ -107,7 +127,7 @@ public class StevesArmyCommand {
                 .withClickEvent(new ClickEvent(ClickEvent.Action.COPY_TO_CLIPBOARD, snbt)));
 
         context.getSource().sendSuccess(() -> Component.literal(
-            "Loadout exported from soldier " + soldier.getUUID() + ". Click "
+            "Loadout exported from rifleman " + soldier.getUUID() + ". Click "
         ).append(copyButton), false);
         context.getSource().sendSuccess(() -> Component.literal(
             "The copied value is portable and contains the soldier inventory item NBT only."
@@ -115,24 +135,28 @@ public class StevesArmyCommand {
         return 1;
     }
 
-    private static int spawnSoldier(
+    private static int spawnEntity(
         CommandContext<CommandSourceStack> context,
-        float yaw,
-        float pitch,
-        CompoundTag loadout
+        EntityType<? extends SoldierEntity> entityType,
+        boolean ownerRequired
     ) {
         CommandSourceStack source = context.getSource();
         Player owner;
         try {
-            owner = EntityArgument.getPlayer(context, "owner");
+            owner = ownerRequired
+                ? EntityArgument.getPlayer(context, "owner")
+                : null;
         } catch (Exception e) {
             source.sendFailure(Component.literal("Could not resolve owner: " + e.getMessage()));
             return 0;
         }
 
+        float yaw = optionalFloat(context, "yaw", 0.0F);
+        float pitch = optionalFloat(context, "pitch", 0.0F);
+        CompoundTag loadout = optionalLoadout(context);
         Vec3 position = Vec3Argument.getVec3(context, "position");
-        SoldierSpawner.SpawnResult result = SoldierSpawner.spawnOwned(
-            source.getLevel(), owner, position, yaw, pitch, loadout);
+        SoldierSpawner.SpawnResult result = SoldierSpawner.spawn(
+            source.getLevel(), entityType, owner, position, yaw, pitch, loadout);
         if (!result.success()) {
             source.sendFailure(Component.literal(result.message()));
             return 0;
@@ -140,12 +164,30 @@ public class StevesArmyCommand {
 
         SoldierEntity soldier = result.soldier();
         String loadoutDescription = loadout == null ? "empty loadout" : "provided loadout";
+        String entityName = soldier instanceof MachineGunnerEntity
+            ? "machine gunner"
+            : soldier instanceof EnemySoldierEntity ? "enemy soldier" : "rifleman";
+        String ownerDescription = owner == null ? "without an owner" : "for " + owner.getName().getString();
         source.sendSuccess(() -> Component.literal(
-            "Spawned soldier " + soldier.getUUID() + " for " + owner.getName().getString()
-                + " with " + loadoutDescription + ", fire team " + soldier.getFireTeam()
-                + ", and squad " + (soldier.getSquadId() == null ? "none" : soldier.getSquadId()) + "."
-        ), false);
+            "Spawned " + entityName + " " + soldier.getUUID() + " " + ownerDescription
+                + " with " + loadoutDescription + "."), false);
         return 1;
+    }
+
+    private static float optionalFloat(CommandContext<CommandSourceStack> context, String name, float fallback) {
+        try {
+            return FloatArgumentType.getFloat(context, name);
+        } catch (IllegalArgumentException ignored) {
+            return fallback;
+        }
+    }
+
+    private static CompoundTag optionalLoadout(CommandContext<CommandSourceStack> context) {
+        try {
+            return CompoundTagArgument.getCompoundTag(context, "loadout");
+        } catch (IllegalArgumentException ignored) {
+            return null;
+        }
     }
 
     private static int enableAllDebug(CommandContext<CommandSourceStack> context) {
