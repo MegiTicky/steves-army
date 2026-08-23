@@ -53,6 +53,10 @@ public final class PerformanceMetrics {
     private static final LongAdder coverActiveMovementTicks = new LongAdder();
     private static final LongAdder coverFullSearchAttempts = new LongAdder();
     private static final LongAdder suppressedCoverDeferredSkips = new LongAdder();
+    private static final LongAdder squadThreatSnapshotRequests = new LongAdder();
+    private static final LongAdder threatSortSelectionPasses = new LongAdder();
+    private static final LongAdder squadMemberFilterPasses = new LongAdder();
+    private static final LongAdder temporaryCollectionsAvoided = new LongAdder();
     private static final Map<String, LongAdder> coverInvalidationReasons = new ConcurrentHashMap<>();
     private static final Map<String, LongAdder> passiveMaintenanceRunsByState = new ConcurrentHashMap<>();
     private static final Map<String, LongAdder> passiveMaintenanceSkipsByState = new ConcurrentHashMap<>();
@@ -117,6 +121,10 @@ public final class PerformanceMetrics {
         coverActiveMovementTicks.reset();
         coverFullSearchAttempts.reset();
         suppressedCoverDeferredSkips.reset();
+        squadThreatSnapshotRequests.reset();
+        threatSortSelectionPasses.reset();
+        squadMemberFilterPasses.reset();
+        temporaryCollectionsAvoided.reset();
         coverInvalidationReasons.clear();
         passiveMaintenanceRunsByState.clear();
         passiveMaintenanceSkipsByState.clear();
@@ -275,6 +283,22 @@ public final class PerformanceMetrics {
         if (enabled) suppressedCoverDeferredSkips.increment();
     }
 
+    public static void recordSquadThreatSnapshotRequest() {
+        if (enabled) squadThreatSnapshotRequests.increment();
+    }
+
+    public static void recordThreatSortSelectionPass() {
+        if (enabled) threatSortSelectionPasses.increment();
+    }
+
+    public static void recordSquadMemberFilterPass() {
+        if (enabled) squadMemberFilterPasses.increment();
+    }
+
+    public static void recordTemporaryCollectionAvoided() {
+        if (enabled) temporaryCollectionsAvoided.increment();
+    }
+
     public static void recordCoverStateTime(String state, long nanos) {
         if (!enabled) return;
         coverStateNanos.add(nanos);
@@ -343,6 +367,10 @@ public final class PerformanceMetrics {
             + threatReportPublished.sum() + " published, "
             + threatReportGeometryCalculations.sum() + " geometry calculations, "
             + threatReportDeduplicated.sum() + " deduplicated\n"
+            + "  Squad perception: " + squadThreatSnapshotRequests.sum() + " threat snapshots, "
+            + threatSortSelectionPasses.sum() + " sort/selection passes, "
+            + squadMemberFilterPasses.sum() + " member filter passes, "
+            + temporaryCollectionsAvoided.sum() + " temporary collections avoided\n"
             + "  Detection ticks: " + detectionTicks.sum() + "\n"
             + "  Detection candidates: " + detectionCandidates.sum() + "\n"
             + "  Target refreshes: " + targetRefreshes.sum() + "\n"

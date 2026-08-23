@@ -43,9 +43,16 @@ public class MachineGunnerEntity extends SoldierEntity {
     private long activeSectorLastConfirmedTick;
     private long pendingSectorStartedTick;
     private boolean autonomousSuppressionActive;
+    private final SquadThreatIntel.ThreatKnowledge[] threatSelectionScratch =
+        new SquadThreatIntel.ThreatKnowledge[6];
 
     public MachineGunnerEntity(EntityType<? extends SoldierEntity> type, Level level) {
         super(type, level);
+    }
+
+    /** Reusable bounded-selection buffer for firing-position threat samples. */
+    public SquadThreatIntel.ThreatKnowledge[] getThreatSelectionScratch() {
+        return threatSelectionScratch;
     }
 
     @Override
@@ -184,7 +191,7 @@ public class MachineGunnerEntity extends SoldierEntity {
                 double y = 0.0;
                 double z = 0.0;
                 double totalWeight = 0.0;
-                for (SquadThreatIntel.ThreatKnowledge threat : squad.getThreatIntel().getAllThreats()) {
+                for (SquadThreatIntel.ThreatKnowledge threat : squad.getThreatIntel().getThreatsView()) {
                     if (!threat.isAlive || threat.lastKnownPosition == null
                         || squad.getThreatIntel().isThreatStale(threat.threatEntityId, now)) {
                         continue;

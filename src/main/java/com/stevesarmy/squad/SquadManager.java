@@ -1,6 +1,7 @@
 package com.stevesarmy.squad;
 
 import com.stevesarmy.StevesArmyMod;
+import com.stevesarmy.debug.PerformanceMetrics;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.Tag;
@@ -118,30 +119,43 @@ public class SquadManager extends SavedData {
     }
 
     public List<LivingEntity> getSquadMembers(ServerLevel level, UUID squadId, UUID excludeSelf) {
-        SquadData squad = squadsById.get(squadId);
-        if (squad == null) return List.of();
-        List<UUID> ids = new ArrayList<>();
-        ids.add(squad.getLeaderId());
-        ids.addAll(squad.getMemberIds());
         List<LivingEntity> result = new ArrayList<>();
-        for (UUID id : ids) {
-            if (id.equals(excludeSelf)) continue;
-            Entity entity = level.getEntity(id);
-            if (entity instanceof LivingEntity le && le.isAlive()) {
-                result.add(le);
-            }
-        }
+        fillSquadMembers(level, squadId, excludeSelf, result);
         return result;
+    }
+
+    /** Fills a caller-owned buffer in leader-then-member order. */
+    public void fillSquadMembers(ServerLevel level, UUID squadId, UUID excludeSelf,
+                                 List<LivingEntity> result) {
+        result.clear();
+        SquadData squad = squadsById.get(squadId);
+        if (squad == null) return;
+        addLivingMember(level, squad.getLeaderId(), excludeSelf, result);
+        for (UUID memberId : squad.getMemberIds()) {
+            addLivingMember(level, memberId, excludeSelf, result);
+        }
+        PerformanceMetrics.recordSquadMemberFilterPass();
+        PerformanceMetrics.recordTemporaryCollectionAvoided();
+    }
+
+    private static void addLivingMember(ServerLevel level, UUID id, UUID excludeSelf,
+                                        List<LivingEntity> result) {
+        if (id.equals(excludeSelf)) return;
+        Entity entity = level.getEntity(id);
+        if (entity instanceof LivingEntity le && le.isAlive()) {
+            result.add(le);
+        }
     }
 
     public int getMemberIndex(UUID squadId, UUID memberId) {
         SquadData squad = squadsById.get(squadId);
         if (squad == null) return 0;
-        List<UUID> ids = new ArrayList<>();
-        ids.add(squad.getLeaderId());
-        ids.addAll(squad.getMemberIds());
-        int idx = ids.indexOf(memberId);
-        return idx >= 0 ? idx : 0;
+        if (squad.getLeaderId().equals(memberId)) return 0;
+        List<UUID> members = squad.getMemberIds();
+        for (int i = 0; i < members.size(); i++) {
+            if (members.get(i).equals(memberId)) return i + 1;
+        }
+        return 0;
     }
 
     public Collection<SquadData> getAllSquads() {

@@ -184,6 +184,7 @@ public class SoldierCombatGoal extends Goal {
 
     private long threatReportCacheTick = Long.MIN_VALUE;
     private final Map<UUID, ThreatReportSnapshot> threatReportSnapshots = new HashMap<>();
+    private final List<SquadThreatIntel.ThreatKnowledge> suppressibleThreatScratch = new ArrayList<>();
     private final Map<UUID, Long> lastThreatReportTicks = new HashMap<>();
     private final Map<UUID, BlockPos> lastThreatReportPositions = new HashMap<>();
 
@@ -2424,10 +2425,8 @@ public class SoldierCombatGoal extends Goal {
             return true;
         }
         
-        List<SquadThreatIntel.ThreatKnowledge> suppressibleThreats = intel.getAllThreats().stream()
-            .filter(threat -> threat.isAlive)
-            .sorted(Comparator.comparingDouble(threat -> -threat.accuracy))
-            .collect(Collectors.toList());
+        intel.copyAliveThreatsTo(suppressibleThreatScratch);
+        List<SquadThreatIntel.ThreatKnowledge> suppressibleThreats = suppressibleThreatScratch;
         if (suppressibleThreats.isEmpty()) {
             return false;
         }
@@ -2476,26 +2475,32 @@ public class SoldierCombatGoal extends Goal {
         if (aimPoint == null) return false;
 
         Optional<SquadData> squad = SquadManager.get(serverLevel).getSquadById(squadId);
-        return squad.isPresent() && squad.get().getMemberIds().stream()
-            .map(serverLevel::getEntity)
-            .filter(SoldierEntity.class::isInstance)
-            .map(SoldierEntity.class::cast)
-            .anyMatch(member -> member.isAlive() && GunIntegration.hasGun(member)
+        if (squad.isEmpty()) return false;
+        PerformanceMetrics.recordSquadMemberFilterPass();
+        for (UUID memberId : squad.get().getMemberIds()) {
+            if (!(serverLevel.getEntity(memberId) instanceof SoldierEntity member)) continue;
+            if (member.isAlive() && GunIntegration.hasGun(member)
                 && GunIntegration.isSuppressiveMachineGun(member)
                 && !GunIntegration.isReloading(member)
                 && !GunIntegration.isBolting(member)
                 && !GunIntegration.isDrawing(member)
                 && GunIntegration.getCurrentAmmo(member) > 0
-                && TargetAcquisition.hasNearLineOfSightToPosition(member, aimPoint, SUPPRESSION_LOS_TOLERANCE));
+                && TargetAcquisition.hasNearLineOfSightToPosition(member, aimPoint, SUPPRESSION_LOS_TOLERANCE)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private boolean hasAssignedMachineGunner(SquadThreatIntel intel, SquadThreatIntel.ThreatKnowledge threat) {
         if (!(soldier.level() instanceof ServerLevel serverLevel)) return false;
-        return threat.suppressors.stream()
-            .map(serverLevel::getEntity)
-            .filter(SoldierEntity.class::isInstance)
-            .map(SoldierEntity.class::cast)
-            .anyMatch(member -> member.isAlive() && GunIntegration.isSuppressiveMachineGun(member));
+        for (UUID suppressorId : threat.suppressors) {
+            if (serverLevel.getEntity(suppressorId) instanceof SoldierEntity member
+                && member.isAlive() && GunIntegration.isSuppressiveMachineGun(member)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private void maintainSuppressionAssignment() {

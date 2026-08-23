@@ -11,6 +11,7 @@ import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.squad.SquadCoverContext;
 import com.stevesarmy.squad.SquadManager;
 import com.stevesarmy.squad.SquadMode;
+import com.stevesarmy.squad.SquadThreatIntel;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.server.level.ServerLevel;
@@ -215,6 +216,8 @@ public class CoverTacticalGoal extends Goal {
 
     private CoverFinder.ScoredCover[] cachedTopCovers = new CoverFinder.ScoredCover[0];
     private BlockPos debugSearchCenter = null;
+    private final List<LivingEntity> squadMemberScratch = new ArrayList<>();
+    private final List<SquadThreatIntel.ThreatKnowledge> firingContactThreatScratch = new ArrayList<>();
 
     // Per-soldier rate limiters (ticks between repeated log lines)
     private static final int SNAPSHOT_INTERVAL = 20; // 1 second at 20 TPS
@@ -2134,17 +2137,21 @@ public class CoverTacticalGoal extends Goal {
         }
 
         double radiusSqr = PRESSURED_PEEK_RADIUS * PRESSURED_PEEK_RADIUS;
-        return (int) SquadManager.get(serverLevel)
-            .getSquadMembers(serverLevel, squadId, soldier.getUUID()).stream()
-            .filter(SoldierEntity.class::isInstance)
-            .map(SoldierEntity.class::cast)
-            .filter(member -> member.isAlive() && member.distanceToSqr(soldier) <= radiusSqr)
-            .filter(member -> {
-                PeekController.State state = member.getPeekController().getState();
-                return state == PeekController.State.MOVING_TO_PEEK
-                    || state == PeekController.State.EXPOSED;
-            })
-            .count();
+        SquadManager.get(serverLevel).fillSquadMembers(
+            serverLevel, squadId, soldier.getUUID(), squadMemberScratch);
+        int count = 0;
+        for (LivingEntity entity : squadMemberScratch) {
+            if (!(entity instanceof SoldierEntity member)
+                || !member.isAlive() || member.distanceToSqr(soldier) > radiusSqr) {
+                continue;
+            }
+            PeekController.State state = member.getPeekController().getState();
+            if (state == PeekController.State.MOVING_TO_PEEK
+                || state == PeekController.State.EXPOSED) {
+                count++;
+            }
+        }
+        return count;
     }
 
     /**
@@ -4630,7 +4637,7 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
 
         SquadManager mgr = SquadManager.get(serverLevel);
 
-        List<LivingEntity> members = mgr.getSquadMembers(serverLevel, squadId, soldier.getUUID());
+        mgr.fillSquadMembers(serverLevel, squadId, soldier.getUUID(), squadMemberScratch);
 
         List<BlockPos> occupiedCovers = new ArrayList<>();
         List<BlockPos> defensivePositions = new ArrayList<>();
@@ -4642,18 +4649,16 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
         if (squadData != null) {
             peekabilityCache = squadData.getCoverPeekabilityCache();
             long now = level.getGameTime();
-            squadData.getThreatIntel().getAllThreats().stream()
-                .filter(threat -> threat.isAlive && threat.lastVisibleAimPoint != null)
-                .filter(threat -> now - threat.lastSeenTime >= 0
-                    && now - threat.lastSeenTime <= SquadCoverContext.FiringContact.MAX_AGE_TICKS)
-                .sorted(java.util.Comparator.comparingLong((com.stevesarmy.squad.SquadThreatIntel.ThreatKnowledge threat)
-                    -> threat.lastSeenTime).reversed())
-                .limit(SquadCoverContext.FiringContact.MAX_CONTACTS)
-                .forEach(threat -> firingContacts.add(new SquadCoverContext.FiringContact(
-                    threat.threatEntityId, threat.lastVisibleAimPoint, threat.lastSeenTime)));
+            squadData.getThreatIntel().copyFreshVisibleThreatsByRecency(
+                firingContactThreatScratch, now, SquadCoverContext.FiringContact.MAX_AGE_TICKS,
+                SquadCoverContext.FiringContact.MAX_CONTACTS);
+            for (SquadThreatIntel.ThreatKnowledge threat : firingContactThreatScratch) {
+                firingContacts.add(new SquadCoverContext.FiringContact(
+                    threat.threatEntityId, threat.lastVisibleAimPoint, threat.lastSeenTime));
+            }
         }
 
-        for (LivingEntity member : members) {
+        for (LivingEntity member : squadMemberScratch) {
             if (member instanceof SoldierEntity ms) {
                 CoverBehaviorManager cbm = ms.getCoverBehaviorManager();
                 CoverPoint current = cbm.getCurrentCover();

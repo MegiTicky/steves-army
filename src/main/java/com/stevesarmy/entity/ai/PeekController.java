@@ -6,6 +6,7 @@ import com.stevesarmy.combat.TargetAcquisition;
 import com.stevesarmy.combat.ThreatAwareness;
 import com.stevesarmy.combat.cover.*;
 import com.stevesarmy.entity.SoldierEntity;
+import com.stevesarmy.squad.SquadData;
 import com.stevesarmy.squad.SquadManager;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -525,13 +526,9 @@ public class PeekController {
         }
 
         long now = soldier.level().getGameTime();
-        return SquadManager.get(serverLevel).getSquadById(squadId)
-            .map(squad -> (int) squad.getThreatIntel().getAllThreats().stream()
-                .filter(threat -> threat.isAlive && threat.lastVisibleAimPoint != null)
-                .filter(threat -> now - threat.lastSeenTime >= 0
-                    && now - threat.lastSeenTime <= SQUAD_CONTACT_MAX_AGE_TICKS)
-                .count())
-            .orElse(0);
+        SquadData squad = SquadManager.get(serverLevel).getSquadById(squadId).orElse(null);
+        return squad == null ? 0
+            : squad.getThreatIntel().countFreshVisibleContacts(now, SQUAD_CONTACT_MAX_AGE_TICKS);
     }
 
     private void captureSuppressionSequence(SoldierEntity soldier) {
