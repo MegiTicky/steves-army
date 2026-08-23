@@ -18,9 +18,11 @@ import net.minecraft.world.phys.Vec3;
 
 import javax.annotation.Nullable;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * Machine-gunner cover selection policy.
@@ -59,6 +61,8 @@ public class MachineGunnerSupportGoal extends CoverTacticalGoal {
         BlockPos suppressionCenter = mg.getSuppressionCenter();
         BlockPos supportAnchor = SupportPositionFinder.findSupportPosition(mg);
         if (suppressionCenter == null || supportAnchor == null) {
+            clearLatestEvaluationDebug(mg, suppressionCenter == null
+                ? "suppression center unavailable" : "support anchor unavailable");
             return Optional.empty();
         }
 
@@ -72,8 +76,14 @@ public class MachineGunnerSupportGoal extends CoverTacticalGoal {
             Math.max(searchRadius, FiringPositionFinder.SEARCH_RADIUS), squadCtx);
         CoverPoint currentCover = soldier.getCoverBehaviorManager().getCurrentCover();
         FiringPosition selectedLane = latestEvaluationReport.selected();
+        Set<BlockPos> noPhysicalPath = new HashSet<>();
+        latestEvaluationReport.pathChecks().stream()
+            .filter(check -> !check.pathExists())
+            .map(check -> check.position().destination())
+            .forEach(noPhysicalPath::add);
 
         Optional<CoverFinder.ScoredCover> selected = candidates.stream()
+            .filter(sc -> !noPhysicalPath.contains(sc.cover.getPosition()))
             .filter(sc -> !isCoverBlacklisted(sc.cover.getPosition()))
             .filter(sc -> CoverReservationManager.isAvailableFor(sc.cover.getPosition(), soldier))
             .filter(sc -> currentCover == null
@@ -81,6 +91,27 @@ public class MachineGunnerSupportGoal extends CoverTacticalGoal {
             .filter(sc -> isExactCoverPathReachable(sc.cover))
             .max(Comparator.comparingDouble(sc -> supportScore(
                 sc, selectedLane, suppressionCenter, supportAnchor)));
+
+        if (selected.isEmpty()) {
+            // The adaptive search can legitimately have no usable point. Keep
+            // the role-specific policy from blocking the normal cover flow:
+            // choose the best already-scored ordinary point that is physically
+            // reachable and not one of the evaluator's rejected destinations.
+            selected = baseCandidates.stream()
+                .filter(sc -> !noPhysicalPath.contains(sc.cover.getPosition()))
+                .filter(sc -> !isCoverBlacklisted(sc.cover.getPosition()))
+                .filter(sc -> CoverReservationManager.isAvailableFor(sc.cover.getPosition(), soldier))
+                .filter(sc -> currentCover == null
+                    || !currentCover.getPosition().equals(sc.cover.getPosition()))
+                .filter(sc -> isExactCoverPathReachable(sc.cover))
+                .max(Comparator.comparingDouble(sc -> supportScore(
+                    sc, selectedLane, suppressionCenter, supportAnchor)));
+            if (selected.isPresent() && DiagnosticLogManager.isCoverLoggingEnabled()) {
+                StevesArmyMod.LOGGER.info(
+                    "[MGState] soldier={} event=role-cover-ordinary-fallback target={} center={} anchor={}",
+                    soldier.getId(), selected.get().cover.getPosition(), suppressionCenter, supportAnchor);
+            }
+        }
 
         if (selected.isEmpty()) {
             if (DiagnosticLogManager.isCoverLoggingEnabled()) {
@@ -131,17 +162,30 @@ public class MachineGunnerSupportGoal extends CoverTacticalGoal {
         latestEvaluationReport = FiringPositionFinder.evaluate(mg, suppressionCenter, supportAnchor);
         latestEvaluationCenter = suppressionCenter != null ? suppressionCenter.immutable() : null;
         latestEvaluationAnchor = supportAnchor != null ? supportAnchor.immutable() : null;
-        sendLatestEvaluationDebug(mg);
+        sendLatestEvaluationDebug(mg, latestEvaluationReport.selected() != null
+            ? "role cover evaluation" : "no firing lane");
         return latestEvaluationReport;
     }
 
     private void sendLatestEvaluationDebug(MachineGunnerEntity mg) {
+        sendLatestEvaluationDebug(mg, latestEvaluationReport != null && latestEvaluationReport.selected() != null
+            ? "role cover evaluation" : "no firing lane");
+    }
+
+    private void clearLatestEvaluationDebug(MachineGunnerEntity mg, String reason) {
+        latestEvaluationReport = FiringPositionFinder.evaluate(mg, null, null);
+        latestEvaluationCenter = null;
+        latestEvaluationAnchor = null;
+        sendLatestEvaluationDebug(mg, reason);
+    }
+
+    private void sendLatestEvaluationDebug(MachineGunnerEntity mg, String failure) {
         if (latestEvaluationReport == null) {
             return;
         }
         NetworkHandler.sendToTracking(mg, MachineGunnerEvaluationPacket.from(
             mg.getId(), latestEvaluationCenter, latestEvaluationAnchor, latestEvaluationReport,
-            latestEvaluationReport.selected() != null ? "role cover evaluation" : "no firing lane"));
+            failure));
     }
 
     /**
@@ -197,7 +241,14 @@ public class MachineGunnerSupportGoal extends CoverTacticalGoal {
             return null;
         }
         BlockPos currentCenter = mg.getSuppressionCenter();
-        if (currentCenter == null || !currentCenter.equals(latestEvaluationCenter)) {
+        BlockPos currentAnchor = SupportPositionFinder.findSupportPosition(mg);
+        if (currentCenter == null || currentAnchor == null
+            || !currentCenter.equals(latestEvaluationCenter)
+            || latestEvaluationAnchor == null
+            || !currentAnchor.equals(latestEvaluationAnchor)) {
+            clearLatestEvaluationDebug(mg, currentCenter == null
+                ? "suppression center unavailable" : currentAnchor == null
+                    ? "support anchor unavailable" : "support geometry changed");
             return null;
         }
         return latestEvaluationReport.selected();

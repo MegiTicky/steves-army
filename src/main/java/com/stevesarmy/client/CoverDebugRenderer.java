@@ -1100,7 +1100,7 @@ private static void renderSoldierCoverLabels(PoseStack poseStack, Vec3 cameraPos
             int green = access >= 0.25f ? 220 : 70;
             int blue = mg.getMachineGunnerDebugPosture() == 2 ? 255 : 40;
 
-            if ((active || fallback) && destination != null && !destination.equals(BlockPos.ZERO)) {
+            if (destination != null && !destination.equals(BlockPos.ZERO)) {
                 // Yellow is the authoritative physical cover target. Cyan/green
                 // below is the route or controller destination currently being
                 // consumed by movement.
@@ -1109,7 +1109,7 @@ private static void renderSoldierCoverLabels(PoseStack poseStack, Vec3 cameraPos
                     destination.getCenter().add(0, mg.getMachineGunnerDebugPosture() == 2 ? 0.45 : 1.6, 0),
                     255, 255, 0, 220);
             }
-            if ((active || fallback) && movementDestination != null && !movementDestination.equals(BlockPos.ZERO)) {
+            if (movementDestination != null && !movementDestination.equals(BlockPos.ZERO)) {
                 renderCoverBlockBox(buffer, matrix, movementDestination, cameraPos, color, green, blue, 230);
                 renderDebugLine(buffer, matrix, cameraPos, mg.getEyePosition(),
                     movementDestination.getCenter().add(0, mg.getMachineGunnerDebugPosture() == 2 ? 0.45 : 1.6, 0),
@@ -1218,23 +1218,35 @@ private static void renderSoldierCoverLabels(PoseStack poseStack, Vec3 cameraPos
                 renderDebugCross(buffer, matrix, cameraPos, target,
                     targetColor, targetGreen, targetBlue, 220, 0.16f);
             }
-            boolean selectedRendered = false;
             for (CoverDebugManager.FiringPositionDebugEntry candidate : data.candidates) {
                 int r;
                 int g;
                 int b;
-                boolean selected = candidate.pathChecked && candidate.canReach && !selectedRendered;
-                if (selected) {
-                    selectedRendered = true;
-                    r = 255; g = 255; b = 0;
-                } else if (candidate.pathChecked && candidate.canReach) {
+                if (candidate.pathChecked && candidate.canReach) {
                     r = 0; g = 255; b = 0;
-                } else if (candidate.pathChecked) {
+                } else if (candidate.pathChecked && !candidate.pathExists) {
                     r = 255; g = 40; b = 40;
+                } else if (candidate.pathChecked) {
+                    r = 255; g = 150; b = 30;
                 } else {
                     r = 170; g = 80; b = 255;
                 }
                 renderCoverBlockBox(buffer, matrix, candidate.position, cameraPos, r, g, b, 210);
+            }
+
+            // Evaluator candidates are diagnostics only. Draw the shared
+            // cover goal's movement markers after them so the physical target
+            // remains unambiguous even when coordinates overlap.
+            BlockPos movement = mg.getMachineGunnerDebugMovementPosition();
+            if (movement != null && !movement.equals(BlockPos.ZERO)) {
+                renderCoverBlockBox(buffer, matrix, movement, cameraPos, 0, 220, 255, 230);
+            }
+            BlockPos authoritative = mg.getMachineGunnerDebugPosition();
+            if (authoritative != null && !authoritative.equals(BlockPos.ZERO)) {
+                renderCoverBlockBox(buffer, matrix, authoritative, cameraPos, 255, 255, 0, 245);
+                renderDebugLine(buffer, matrix, cameraPos, mg.getEyePosition(),
+                    authoritative.getCenter().add(0, mg.getMachineGunnerDebugPosture() == 2 ? 0.45 : 1.6, 0),
+                    255, 255, 0, 235);
             }
             break EntityLookup;
         }
@@ -1332,7 +1344,11 @@ private static void renderSoldierCoverLabels(PoseStack poseStack, Vec3 cameraPos
             String summary = "targets=" + data.targetCount + " active=" + data.activeTargetCount
                 + " last=" + data.lastSeenCount + " peeks=" + data.peekTargetCount
                 + " candidates=" + data.candidates.size() + " accessReject=" + data.rejectedAccess;
-            String legend = "red=active blue=last-seen orange=peek cyan=anchor purple=unchecked blocked=red reachable=green selected=yellow";
+            BlockPos authoritative = mg.getMachineGunnerDebugPosition();
+            BlockPos movement = mg.getMachineGunnerDebugMovementPosition();
+            String targetLabel = "target=" + formatDebugPosition(authoritative)
+                + " movement=" + formatDebugPosition(movement);
+            String legend = "red=no path orange=access rejected green=reachable purple=unchecked yellow=cover target cyan=movement";
             poseStack.pushPose();
             poseStack.translate(mg.getX() - cameraPos.x + 0.5, mg.getY() - cameraPos.y + 3.0,
                 mg.getZ() - cameraPos.z + 0.5);
@@ -1344,12 +1360,20 @@ private static void renderSoldierCoverLabels(PoseStack poseStack, Vec3 cameraPos
             mc.font.drawInBatch(summary, -mc.font.width(summary) / 2.0f, 10, 0xFFFFFF | 0xFF000000,
                 false, poseStack.last().pose(), bufferSource,
                 net.minecraft.client.gui.Font.DisplayMode.NORMAL, 0, 15728880);
-            mc.font.drawInBatch(legend, -mc.font.width(legend) / 2.0f, 20, 0xAAAAAA | 0xFF000000,
+            mc.font.drawInBatch(targetLabel, -mc.font.width(targetLabel) / 2.0f, 20, 0xFFFF55 | 0xFF000000,
+                false, poseStack.last().pose(), bufferSource,
+                net.minecraft.client.gui.Font.DisplayMode.NORMAL, 0, 15728880);
+            mc.font.drawInBatch(legend, -mc.font.width(legend) / 2.0f, 30, 0xAAAAAA | 0xFF000000,
                 false, poseStack.last().pose(), bufferSource,
                 net.minecraft.client.gui.Font.DisplayMode.NORMAL, 0, 15728880);
             poseStack.popPose();
             break;
         }
+    }
+
+    private static String formatDebugPosition(BlockPos position) {
+        return position == null || position.equals(BlockPos.ZERO)
+            ? "none" : position.getX() + "," + position.getY() + "," + position.getZ();
     }
 
     private static String getSuppressionStateLabel(float suppression) {
