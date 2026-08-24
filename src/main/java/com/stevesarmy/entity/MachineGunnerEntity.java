@@ -1,58 +1,24 @@
 package com.stevesarmy.entity;
 
-import com.stevesarmy.StevesArmyMod;
-import com.stevesarmy.entity.ai.MachineGunnerCombatGoal;
 import com.stevesarmy.entity.ai.MachineGunnerSupportGoal;
-import com.stevesarmy.entity.ai.SoldierFollowOwnerGoal;
-import com.stevesarmy.entity.ai.SoldierHoldPositionGoal;
-import com.stevesarmy.entity.ai.SoldierHoleRescueGoal;
-import com.stevesarmy.entity.ai.SoldierMoveToPingGoal;
-import com.stevesarmy.entity.ai.SoldierStrollGoal;
-import com.stevesarmy.ping.PingType;
-import com.stevesarmy.squad.SquadMode;
+import com.stevesarmy.entity.ai.SoldierCombatGoal;
 import com.stevesarmy.squad.SquadManager;
 import com.stevesarmy.squad.SquadThreatIntel;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.entity.EntityType;
-import net.minecraft.world.entity.ai.goal.FloatGoal;
 import net.minecraft.world.entity.ai.goal.Goal;
-import net.minecraft.world.entity.ai.goal.LookAtPlayerGoal;
-import net.minecraft.world.entity.ai.goal.OpenDoorGoal;
-import net.minecraft.world.entity.ai.goal.RandomLookAroundGoal;
-import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.Level;
 import net.minecraft.server.level.ServerLevel;
-import net.minecraft.world.phys.Vec3;
 
 import javax.annotation.Nullable;
 
 /**
- * Machine gunner role. Stays behind the squad's line and covers the engagement
- * area with suppression instead of advancing on ATTACK pings.
+ * Machine gunner role. Uses the rifleman pipeline: identical goal layout, state
+ * machine, ping handling, and movement. MG-specific behavior is layered on as
+ * small, isolated additions (e.g. cover evaluation bias) instead of a separate
+ * pipeline.
  */
 public class MachineGunnerEntity extends SoldierEntity {
-    private static final int SECTOR_MIN_HOLD_TICKS = 120;
-    private static final int SECTOR_SWITCH_CONFIRM_TICKS = 40;
-    private static final int SECTOR_CONTACT_GRACE_TICKS = 160;
-    private static final int SECTOR_SWITCH_DISTANCE_SQ = 8 * 8;
-
-    public enum SuppressionSectorSource {
-        SQUAD_THREAT,
-        LOCAL_THREAT,
-        PING_THREAT
-    }
-
-    @Nullable
-    private BlockPos supportObjectivePos = null;
-    private boolean supportAttackActive;
-    @Nullable private BlockPos activeSuppressionCenter;
-    @Nullable private BlockPos pendingSuppressionCenter;
-    @Nullable private SuppressionSectorSource activeSectorSource;
-    private long activeSectorStartedTick;
-    private long activeSectorLastConfirmedTick;
-    private long suppressionSectorGeneration;
-    private long pendingSectorStartedTick;
-    private boolean autonomousSuppressionActive;
 
     public MachineGunnerEntity(EntityType<? extends SoldierEntity> type, Level level) {
         super(type, level);
@@ -65,26 +31,8 @@ public class MachineGunnerEntity extends SoldierEntity {
     }
 
     @Override
-    protected void registerGoals() {
-        initializeCombatGoal();
-        initializeCoverTacticalGoal();
-
-        this.goalSelector.addGoal(0, new SoldierHoleRescueGoal(this));
-        this.goalSelector.addGoal(0, new FloatGoal(this));
-        this.goalSelector.addGoal(1, new OpenDoorGoal(this, true));
-        this.goalSelector.addGoal(1, new SoldierMoveToPingGoal(this));
-        this.goalSelector.addGoal(2, coverTacticalGoalTask);
-        this.goalSelector.addGoal(3, new SoldierFollowOwnerGoal(this));
-        this.goalSelector.addGoal(3, new SoldierHoldPositionGoal(this));
-        this.goalSelector.addGoal(4, combatGoalTask);
-        this.goalSelector.addGoal(5, new SoldierStrollGoal(this, 0.8D));
-        this.goalSelector.addGoal(6, new LookAtPlayerGoal(this, Player.class, 8.0F));
-        this.goalSelector.addGoal(7, new RandomLookAroundGoal(this));
-    }
-
-    @Override
     protected Goal initializeCombatGoal() {
-        MachineGunnerCombatGoal goal = new MachineGunnerCombatGoal(this);
+        SoldierCombatGoal goal = new SoldierCombatGoal(this, true);
         this.combatGoal = goal;
         this.combatGoalTask = goal;
         return goal;
@@ -99,114 +47,20 @@ public class MachineGunnerEntity extends SoldierEntity {
     }
 
     /**
-     * ATTACK pings never redirect the machine gunner's suppression sector. They
-     * hold the gunner in place while the current sticky sector continues to own
-     * firing-lane selection; other pings resume the normal command behavior.
-     */
-    @Override
-    public void receivePing(PingType type, @Nullable Vec3 position) {
-        if (type == PingType.ATTACK) {
-            handleSupportAttackPing(position);
-            return;
-        }
-        boolean wasAutonomousSuppressionActive = autonomousSuppressionActive;
-        clearAutonomousSuppression();
-        if (wasAutonomousSuppressionActive) {
-            clearPingSuppressPos();
-            if (getCombatGoal() != null) {
-                getCombatGoal().forceRestartPingSuppression();
-            }
-        }
-        clearSupportAttack();
-        clearSuppressionSector();
-        super.receivePing(type, position);
-    }
-
-    public boolean isAutonomousSuppressionActive() {
-        return autonomousSuppressionActive;
-    }
-
-    public void beginAutonomousSuppression() {
-        autonomousSuppressionActive = true;
-    }
-
-    public void clearAutonomousSuppression() {
-        autonomousSuppressionActive = false;
-    }
-
-    private void handleSupportAttackPing(@Nullable Vec3 position) {
-        if (position == null) {
-            return;
-        }
-        this.supportObjectivePos = BlockPos.containing(position).immutable();
-        this.supportAttackActive = true;
-        setSquadMode(SquadMode.HOLD);
-        setHoldPosition(blockPosition());
-        clearPingMoveTarget();
-        // The attack point is only an order-lifecycle reference. It must never
-        // replace the threat-driven suppression center or cancel an active
-        // suppression assignment.
-        StevesArmyMod.LOGGER.info("[MachineGunner] ATTACK ping -> support order at {} (holding current threat sector)",
-            this.supportObjectivePos);
-    }
-
-    public boolean hasValidSupportObjective() {
-        return supportAttackActive && this.supportObjectivePos != null;
-    }
-
-    @Nullable
-    public BlockPos getSupportObjectivePos() {
-        return hasValidSupportObjective() ? this.supportObjectivePos : null;
-    }
-
-    /** True while this MG is supporting a rifle element's active ATTACK order. */
-    public boolean isAttackSupportActive() {
-        return hasValidSupportObjective();
-    }
-
-    /**
-     * Called by SquadActivityManager once the rifle element reaches the attack
-     * objective. The MG remains in its current cover and may finish suppressing,
-     * but it no longer treats the old attack order as an active support request.
-     */
-    public void completeAttackSupport(@Nullable BlockPos objective) {
-        if (!supportAttackActive || supportObjectivePos == null
-            || (objective != null && !supportObjectivePos.equals(objective))) {
-            return;
-        }
-        BlockPos completed = supportObjectivePos;
-        clearSupportAttack();
-        StevesArmyMod.LOGGER.info("[MachineGunner] ATTACK support complete at {}", completed);
-    }
-
-    private void clearSupportAttack() {
-        supportObjectivePos = null;
-        supportAttackActive = false;
-    }
-
-    /**
-     * Resolves a sticky engagement sector for firing-lane selection. Direct fire
-     * may switch targets immediately, but a new enemy report cannot move the MG
-     * unless it remains a distinct sector long enough to justify relocation.
+     * Immediate suppression target: the weighted squad threat centroid, falling
+     * back to the local primary threat and then any ping threat. No sticky
+     * sector hysteresis.
      */
     @Nullable
     public BlockPos getSuppressionCenter() {
         BlockPos candidate = getBestSquadThreatPosition();
-        SuppressionSectorSource source = candidate != null ? SuppressionSectorSource.SQUAD_THREAT : null;
-        BlockPos threatPos = getThreatAwareness().getPrimaryThreatPosition();
-        if (candidate == null && threatPos != null) {
-            candidate = threatPos;
-            source = SuppressionSectorSource.LOCAL_THREAT;
+        if (candidate == null) {
+            candidate = getThreatAwareness().getPrimaryThreatPosition();
         }
         if (candidate == null && hasValidPingThreatPos()) {
             candidate = getPingThreatPos();
-            source = SuppressionSectorSource.PING_THREAT;
         }
-        return resolveSuppressionSector(candidate, source);
-    }
-
-    public long getSuppressionSectorGeneration() {
-        return suppressionSectorGeneration;
+        return candidate;
     }
 
     @Nullable
@@ -239,88 +93,5 @@ public class MachineGunnerEntity extends SoldierEntity {
                     : null;
             })
             .orElse(null);
-    }
-
-    @Nullable
-    private BlockPos resolveSuppressionSector(@Nullable BlockPos candidate,
-                                              @Nullable SuppressionSectorSource source) {
-        long now = level().getGameTime();
-        if (activeSuppressionCenter == null) {
-            if (candidate != null) {
-                activateSuppressionSector(candidate, source, now);
-            }
-            return activeSuppressionCenter;
-        }
-
-        if (candidate == null) {
-            if (now - activeSectorLastConfirmedTick > SECTOR_CONTACT_GRACE_TICKS) {
-                clearSuppressionSector();
-            }
-            return activeSuppressionCenter;
-        }
-
-        if (activeSuppressionCenter.distSqr(candidate) <= SECTOR_SWITCH_DISTANCE_SQ) {
-            activeSectorLastConfirmedTick = now;
-            pendingSuppressionCenter = null;
-            return activeSuppressionCenter;
-        }
-
-        if (now - activeSectorStartedTick < SECTOR_MIN_HOLD_TICKS) {
-            updatePendingSector(candidate, now);
-            return activeSuppressionCenter;
-        }
-
-        updatePendingSector(candidate, now);
-        if (now - pendingSectorStartedTick >= SECTOR_SWITCH_CONFIRM_TICKS) {
-            activateSuppressionSector(candidate, source, now);
-        }
-        return activeSuppressionCenter;
-    }
-
-    private void updatePendingSector(BlockPos candidate, long now) {
-        if (pendingSuppressionCenter == null
-            || pendingSuppressionCenter.distSqr(candidate) > SECTOR_SWITCH_DISTANCE_SQ) {
-            pendingSuppressionCenter = candidate.immutable();
-            pendingSectorStartedTick = now;
-        }
-    }
-
-    private void activateSuppressionSector(BlockPos center, @Nullable SuppressionSectorSource source, long now) {
-        if (activeSuppressionCenter != null && activeSuppressionCenter.equals(center)
-            && activeSectorSource == source) {
-            activeSectorLastConfirmedTick = now;
-            pendingSuppressionCenter = null;
-            return;
-        }
-        activeSuppressionCenter = center.immutable();
-        suppressionSectorGeneration++;
-        activeSectorSource = source;
-        activeSectorStartedTick = now;
-        activeSectorLastConfirmedTick = now;
-        pendingSuppressionCenter = null;
-        pendingSectorStartedTick = 0;
-    }
-
-    private void clearSuppressionSector() {
-        activeSuppressionCenter = null;
-        suppressionSectorGeneration++;
-        activeSectorSource = null;
-        pendingSuppressionCenter = null;
-        activeSectorStartedTick = 0;
-        activeSectorLastConfirmedTick = 0;
-        pendingSectorStartedTick = 0;
-    }
-
-    public String getSuppressionSectorDebug() {
-        long now = level().getGameTime();
-        String active = activeSuppressionCenter != null
-            ? activeSuppressionCenter.getX() + "," + activeSuppressionCenter.getY() + "," + activeSuppressionCenter.getZ()
-            : "none";
-        String pending = pendingSuppressionCenter != null
-            ? pendingSuppressionCenter.getX() + "," + pendingSuppressionCenter.getY() + "," + pendingSuppressionCenter.getZ()
-            : "none";
-        return "active=" + active + " source=" + (activeSectorSource != null ? activeSectorSource : "none")
-            + " held=" + (activeSuppressionCenter != null ? now - activeSectorStartedTick : 0) + "t"
-            + " pending=" + pending;
     }
 }

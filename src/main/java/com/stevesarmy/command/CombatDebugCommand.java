@@ -999,17 +999,17 @@ public class CombatDebugCommand {
             "Action: forced read-only MG cover/firing evaluation"), false);
         source.sendSuccess(() -> Component.literal("Support anchor: " + formatNullablePos(anchor)), false);
 
-        String targetSource = center == null ? "none"
-            : mg.getSupportObjectivePos() != null ? "attack objective"
-            : mg.getThreatAwareness().getPrimaryThreatPosition() != null ? "tracked threat"
-            : mg.hasValidPingThreatPos() ? "ping threat" : "unknown";
+        String targetSource = center == null ? "none" : "suppression center";
         source.sendSuccess(() -> Component.literal(
             "Objective source: " + targetSource
                 + " | Healing=" + mg.isHealing()
                 + " | Reloading=" + mg.isPreparingOrReloading()
                 + " | Recalling=" + mg.isRecalling()), false);
+        BlockPos mgCurrentCover = mg.getCoverBehaviorManager().getCurrentCover() != null
+            ? mg.getCoverBehaviorManager().getCurrentCover().getPosition() : null;
         source.sendSuccess(() -> Component.literal(
-            "Suppression sector: " + mg.getSuppressionSectorDebug()), false);
+            "Cover: " + formatNullablePos(mgCurrentCover)
+                + " | Suppressed=" + mg.getCoverBehaviorManager().isSuppressed()), false);
 
         source.sendSuccess(() -> Component.literal(
             "Targets: total=" + report.suppressionTargetCount()

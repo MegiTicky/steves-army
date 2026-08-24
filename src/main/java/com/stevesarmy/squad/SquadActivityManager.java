@@ -1,7 +1,6 @@
 package com.stevesarmy.squad;
 
 import com.stevesarmy.StevesArmyMod;
-import com.stevesarmy.entity.MachineGunnerEntity;
 import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.network.NetworkHandler;
 import com.stevesarmy.network.SquadActivitySyncPacket;
@@ -64,8 +63,7 @@ public final class SquadActivityManager {
                 recipientIds.add(soldier.getUUID());
             }
             getOwnerActivities(ownerId).put(FireTeam.ALL,
-                new Activity(FireTeam.ALL, activityType, objective.immutable(), dimension, recipientIds, generation,
-                    recipients.stream().anyMatch(soldier -> !(soldier instanceof MachineGunnerEntity))));
+                new Activity(FireTeam.ALL, activityType, objective.immutable(), dimension, recipientIds, generation));
             sync(owner);
             return;
         }
@@ -91,8 +89,7 @@ public final class SquadActivityManager {
                 recipientIds.add(soldier.getUUID());
             }
             getOwnerActivities(ownerId).put(team,
-                new Activity(team, activityType, objective.immutable(), dimension, recipientIds, generation,
-                    teamRecipients.stream().anyMatch(soldier -> !(soldier instanceof MachineGunnerEntity))));
+                new Activity(team, activityType, objective.immutable(), dimension, recipientIds, generation));
         }
 
         sync(owner);
@@ -133,9 +130,6 @@ public final class SquadActivityManager {
                         transitioned.put(activityEntry.getKey(), activity.asHold(centerOf(livingRecipients)));
                     }
                 } else if (activity.type != SquadActivityType.GO_TO && isComplete(server, activity)) {
-                    if (activity.type == SquadActivityType.ATTACK) {
-                        completeMachineGunnerSupport(server, activity);
-                    }
                     completed.add(activityEntry.getKey());
                 }
             }
@@ -221,33 +215,16 @@ public final class SquadActivityManager {
     }
 
     private static boolean isAttackComplete(MinecraftServer server, Activity activity) {
-        // An MG-only ATTACK has no rifle advance to follow and remains active
-        // until a replacement command clears it.
-        if (!activity.hasRifleRecipients) {
-            return false;
-        }
-
         for (UUID recipientId : activity.recipientIds) {
             SoldierEntity soldier = findSoldier(server, recipientId);
-            if (soldier == null || !soldier.isAlive() || soldier instanceof MachineGunnerEntity) {
+            if (soldier == null || !soldier.isAlive()) {
                 continue;
             }
             if (distanceToObjectiveSqr(soldier, activity.objective) > 16.0) {
                 return false;
             }
         }
-        // If the rifle element died or unloaded, there is no remaining advance
-        // for the MG to support, so release the support order as well.
         return true;
-    }
-
-    private static void completeMachineGunnerSupport(MinecraftServer server, Activity activity) {
-        for (UUID recipientId : activity.recipientIds) {
-            SoldierEntity soldier = findSoldier(server, recipientId);
-            if (soldier instanceof MachineGunnerEntity mg) {
-                mg.completeAttackSupport(activity.objective);
-            }
-        }
     }
 
     private static boolean isGoToComplete(MinecraftServer server, Activity activity) {
@@ -346,22 +323,20 @@ public final class SquadActivityManager {
         private final int dimension;
         private final Set<UUID> recipientIds;
         private final long generation;
-        private final boolean hasRifleRecipients;
 
         private Activity(FireTeam fireTeam, SquadActivityType type, BlockPos objective, int dimension,
-                         Set<UUID> recipientIds, long generation, boolean hasRifleRecipients) {
+                         Set<UUID> recipientIds, long generation) {
             this.fireTeam = fireTeam;
             this.type = type;
             this.objective = objective;
             this.dimension = dimension;
             this.recipientIds = recipientIds;
             this.generation = generation;
-            this.hasRifleRecipients = hasRifleRecipients;
         }
 
         private Activity asHold(BlockPos holdObjective) {
             return new Activity(fireTeam, SquadActivityType.HOLD, holdObjective.immutable(), dimension,
-                new HashSet<>(recipientIds), generation, hasRifleRecipients);
+                new HashSet<>(recipientIds), generation);
         }
     }
 }
