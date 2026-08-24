@@ -10,6 +10,7 @@ import com.stevesarmy.entity.MachineGunnerEntity;
 import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.entity.SoldierSpawner;
 import com.stevesarmy.entity.ai.CoverTacticalGoal;
+import com.stevesarmy.entity.ai.GrenadeTacticalController;
 import com.stevesarmy.registry.ModEntities;
 import com.mojang.brigadier.arguments.FloatArgumentType;
 import net.minecraft.commands.CommandSourceStack;
@@ -25,6 +26,7 @@ import net.minecraft.network.chat.Style;
 import net.minecraft.ChatFormatting;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.phys.Vec3;
 
@@ -44,6 +46,7 @@ public class StevesArmyCommand {
                 ctx.getSource().sendSuccess(() -> Component.literal(
                     "Steve's Army Commands:\n" +
                     "  /stevesarmy debug - Enable all debug (shortcut for /stevesarmy_debug all)\n" +
+                    "  /stevesarmy grenade <soldier> <target> - Force a safe grenade throw and report the reason if blocked\n" +
                     "  /stevesarmy loadout save <rifleman> - Copy a rifleman inventory loadout\n" +
                     "  /stevesarmy spawn rifleman <owner> <position> [yaw] [pitch] [loadout_nbt]\n" +
                     "  /stevesarmy spawn machine_gunner <owner> <position> [yaw] [pitch] [loadout_nbt]\n" +
@@ -53,6 +56,13 @@ public class StevesArmyCommand {
             })
             .then(Commands.literal("debug")
                 .executes(StevesArmyCommand::enableAllDebug)
+            )
+            .then(Commands.literal("grenade")
+                .then(Commands.argument("soldier", EntityArgument.entity())
+                    .then(Commands.argument("target", EntityArgument.entity())
+                        .executes(StevesArmyCommand::forceGrenadeThrow)
+                    )
+                )
             )
             .then(Commands.literal("loadout")
                 .then(Commands.literal("save")
@@ -67,6 +77,37 @@ public class StevesArmyCommand {
                 .then(Commands.literal("enemy")
                     .then(createSpawnArguments(ModEntities.ENEMY_SOLDIER.get(), false)))
             );
+    }
+
+    private static int forceGrenadeThrow(CommandContext<CommandSourceStack> context) {
+        Entity soldierEntity;
+        Entity targetEntity;
+        try {
+            soldierEntity = EntityArgument.getEntity(context, "soldier");
+            targetEntity = EntityArgument.getEntity(context, "target");
+        } catch (Exception exception) {
+            context.getSource().sendFailure(Component.literal("Could not resolve grenade command entities: "
+                + exception.getMessage()));
+            return 0;
+        }
+        if (!(soldierEntity instanceof SoldierEntity soldier)) {
+            context.getSource().sendFailure(Component.literal("Soldier argument must be a Steve's Army soldier"));
+            return 0;
+        }
+        if (!(targetEntity instanceof LivingEntity target)) {
+            context.getSource().sendFailure(Component.literal("Target argument must be a living entity"));
+            return 0;
+        }
+
+        GrenadeTacticalController.ForceThrowResult result =
+            new GrenadeTacticalController(soldier).forceThrow(target);
+        Component message = Component.literal("[Grenade] " + result.message());
+        if (result.success()) {
+            context.getSource().sendSuccess(() -> message, true);
+            return 1;
+        }
+        context.getSource().sendFailure(message);
+        return 0;
     }
 
     private static ArgumentBuilder<CommandSourceStack, ?> createOwnedSpawnBranch(

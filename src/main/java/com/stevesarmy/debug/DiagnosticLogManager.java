@@ -8,6 +8,7 @@ public final class DiagnosticLogManager {
     private static boolean coverScoreLoggingEnabled;
     private static boolean coverPerformanceLoggingEnabled;
     private static boolean attackLoggingEnabled;
+    private static boolean grenadeLoggingEnabled;
     private static boolean damageLoggingEnabled;
     private static boolean suppressionLoggingEnabled;
     private static boolean spacingLoggingEnabled;
@@ -32,6 +33,10 @@ public final class DiagnosticLogManager {
     // Attack
     public static boolean isAttackLoggingEnabled() { return attackLoggingEnabled; }
     public static void setAttackLoggingEnabled(boolean v) { attackLoggingEnabled = v; }
+
+    // Grenade planning and rejection diagnostics. Kept separate from general attack logging.
+    public static boolean isGrenadeLoggingEnabled() { return grenadeLoggingEnabled; }
+    public static void setGrenadeLoggingEnabled(boolean v) { grenadeLoggingEnabled = v; }
 
     // Damage and gun integration
     public static boolean isDamageLoggingEnabled() { return damageLoggingEnabled; }
@@ -70,6 +75,7 @@ public final class DiagnosticLogManager {
     public static void enableAll() {
         coverLoggingEnabled = true;
         attackLoggingEnabled = true;
+        grenadeLoggingEnabled = true;
         damageLoggingEnabled = true;
         suppressionLoggingEnabled = true;
         spacingLoggingEnabled = true;
@@ -82,6 +88,7 @@ public final class DiagnosticLogManager {
         coverScoreLoggingEnabled = false;
         coverPerformanceLoggingEnabled = false;
         attackLoggingEnabled = false;
+        grenadeLoggingEnabled = false;
         damageLoggingEnabled = false;
         suppressionLoggingEnabled = false;
         spacingLoggingEnabled = false;

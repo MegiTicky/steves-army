@@ -178,6 +178,7 @@ public class SoldierEntity extends PathfinderMob implements Container {
 
     @Nullable
     private UUID squadId;
+    private long grenadeCooldownUntilTick;
     private SquadFormation squadFormation = SquadFormation.NONE;
     @Nullable
     private BlockPos formationOffset;
@@ -460,6 +461,7 @@ public class SoldierEntity extends PathfinderMob implements Container {
         tag.put("Inventory", inventory.save());
         tag.putInt("FireDiscipline", getFireDiscipline().ordinal());
         tag.putInt("FireTeam", getFireTeam().ordinal());
+        tag.putLong("GrenadeCooldownUntil", grenadeCooldownUntilTick);
     }
 
     @Override
@@ -484,6 +486,7 @@ public class SoldierEntity extends PathfinderMob implements Container {
         if (tag.contains("FireTeam")) {
             setFireTeam(FireTeam.values()[tag.getInt("FireTeam") % FireTeam.values().length]);
         }
+        grenadeCooldownUntilTick = tag.getLong("GrenadeCooldownUntil");
     }
 
     @Override
@@ -815,6 +818,18 @@ public class SoldierEntity extends PathfinderMob implements Container {
 
     public SoldierInventory getSoldierInventory() {
         return inventory;
+    }
+
+    public boolean canUseGrenade(long gameTime) {
+        return gameTime >= grenadeCooldownUntilTick;
+    }
+
+    public long getGrenadeCooldownUntilTick() {
+        return grenadeCooldownUntilTick;
+    }
+
+    public void markGrenadeUsed(long gameTime) {
+        grenadeCooldownUntilTick = gameTime + com.stevesarmy.StevesArmyConfig.getGrenadePersonalCooldownTicks();
     }
 
     @Override

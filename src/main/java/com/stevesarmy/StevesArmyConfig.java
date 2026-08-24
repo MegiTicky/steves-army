@@ -65,6 +65,14 @@ public class StevesArmyConfig {
     public static final ForgeConfigSpec.IntValue EXPLOSION_BURST_WINDOW_MS;
     public static final ForgeConfigSpec.DoubleValue EXPLOSION_BURST_MULTIPLIER;
 
+    public static final ForgeConfigSpec.BooleanValue GRENADES_ENABLED;
+    public static final ForgeConfigSpec.IntValue GRENADE_PERSONAL_COOLDOWN_TICKS;
+    public static final ForgeConfigSpec.IntValue GRENADE_SQUAD_INTERVAL_TICKS;
+    public static final ForgeConfigSpec.DoubleValue GRENADE_MIN_RANGE;
+    public static final ForgeConfigSpec.DoubleValue GRENADE_MAX_RANGE;
+    public static final ForgeConfigSpec.DoubleValue GRENADE_SAFETY_MARGIN;
+    public static final ForgeConfigSpec.DoubleValue GRENADE_MIN_THREAT_ACCURACY;
+
     public static final ForgeConfigSpec.BooleanValue VS2_COMPAT_ENABLED;
     public static final ForgeConfigSpec.BooleanValue VS2_AUTO_TRANSPORT;
     public static final ForgeConfigSpec.IntValue VS2_MAX_TRANSPORTED_SOLDIERS;
@@ -238,6 +246,40 @@ BUILDER.pop();
 
         BUILDER.pop();
 
+        BUILDER.push("grenades");
+
+        GRENADES_ENABLED = BUILDER
+            .comment("Allow soldiers to use supported LesRaisins Tactical Equipments explosive grenades.",
+                     "Default: true")
+            .define("enabled", true);
+
+        GRENADE_PERSONAL_COOLDOWN_TICKS = BUILDER
+            .comment("Minimum ticks between grenade throws by one soldier. Default: 600 (30 seconds).")
+            .defineInRange("personalCooldownTicks", 600, 0, 12000);
+
+        GRENADE_SQUAD_INTERVAL_TICKS = BUILDER
+            .comment("Minimum ticks between grenade throws by one squad. Default: 160 (8 seconds).")
+            .defineInRange("squadIntervalTicks", 160, 0, 12000);
+
+        GRENADE_MIN_RANGE = BUILDER
+            .comment("Minimum distance for an autonomous grenade throw. Default: 6 blocks.")
+            .defineInRange("minRange", 6.0, 1.0, 64.0);
+
+        GRENADE_MAX_RANGE = BUILDER
+            .comment("Maximum distance for an autonomous grenade throw. Default: 32 blocks.")
+            .defineInRange("maxRange", 32.0, 4.0, 64.0);
+
+        GRENADE_SAFETY_MARGIN = BUILDER
+            .comment("Extra distance kept between grenade blast candidates and friendlies. Default: 2 blocks.")
+            .defineInRange("safetyMargin", 2.0, 0.0, 8.0);
+
+        GRENADE_MIN_THREAT_ACCURACY = BUILDER
+            .comment("Minimum remembered threat accuracy for a hidden-target grenade throw.",
+                     "Default: 0.65")
+            .defineInRange("minThreatAccuracy", 0.65f, 0.0f, 1.0f);
+
+        BUILDER.pop();
+
         BUILDER.push("valkyrienskies");
 
         VS2_COMPAT_ENABLED = BUILDER
@@ -362,6 +404,34 @@ BUILDER.pop();
 
     public static float getExplosionBurstMultiplier() {
         return EXPLOSION_BURST_MULTIPLIER.get().floatValue();
+    }
+
+    public static boolean areGrenadesEnabled() {
+        return GRENADES_ENABLED.get();
+    }
+
+    public static int getGrenadePersonalCooldownTicks() {
+        return GRENADE_PERSONAL_COOLDOWN_TICKS.get();
+    }
+
+    public static int getGrenadeSquadIntervalTicks() {
+        return GRENADE_SQUAD_INTERVAL_TICKS.get();
+    }
+
+    public static double getGrenadeMinRange() {
+        return GRENADE_MIN_RANGE.get();
+    }
+
+    public static double getGrenadeMaxRange() {
+        return GRENADE_MAX_RANGE.get();
+    }
+
+    public static double getGrenadeSafetyMargin() {
+        return GRENADE_SAFETY_MARGIN.get();
+    }
+
+    public static float getGrenadeMinThreatAccuracy() {
+        return GRENADE_MIN_THREAT_ACCURACY.get().floatValue();
     }
 
     public static int getOptimizationLevel() {

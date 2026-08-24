@@ -114,6 +114,13 @@ public class CombatDebugCommand {
                     .then(Commands.literal("off")
                         .executes(ctx -> toggleAttackLogging(ctx, false)))
                 )
+                .then(Commands.literal("grenade")
+                    .executes(ctx -> toggleGrenadeLogging(ctx, null))
+                    .then(Commands.literal("on")
+                        .executes(ctx -> toggleGrenadeLogging(ctx, true)))
+                    .then(Commands.literal("off")
+                        .executes(ctx -> toggleGrenadeLogging(ctx, false)))
+                )
                 .then(Commands.literal("damage")
                     .executes(ctx -> toggleDamageLogging(ctx, null))
                     .then(Commands.literal("on")
@@ -274,6 +281,7 @@ public class CombatDebugCommand {
             "  log coverscore [on|off] - Toggle verbose per-candidate cover scoring traces\n" +
             "  log coverperf [on|off] - Toggle compact cover search/path timing summaries\n" +
             "  log attack [on|off] - Toggle attack phase logging\n" +
+            "  log grenade [on|off] - Trace grenade decisions, target state, intel, safety, and throws\n" +
             "  log rotation [on|off] - Trace yaw writers for nearest soldier\n" +
             "  log peek [on|off] - Trace peek/suppression decisions for nearest soldier\n" +
             "  log attack [on|off] - Toggle attack phase logging (quiet, soldier-specific)\n" +
@@ -330,6 +338,7 @@ public class CombatDebugCommand {
             "  Verbose cover score logging: OFF (use log coverscore on)\n" +
             "  Cover performance logging: OFF (use log coverperf on)\n" +
             "  Attack phase logging: ON\n" +
+            "  Grenade decision logging: ON\n" +
             "  Damage logging: ON\n" +
             "  Suppression logging: ON\n" +
             "  Spacing logging: ON\n" +
@@ -453,6 +462,16 @@ public class CombatDebugCommand {
         DiagnosticLogManager.setHoleRescueLoggingEnabled(newState);
         context.getSource().sendSuccess(() -> Component.literal(
             "Hole rescue logging: " + (newState ? "ON" : "OFF")
+        ), true);
+        return 1;
+    }
+
+    private static int toggleGrenadeLogging(CommandContext<CommandSourceStack> context, Boolean enable) {
+        boolean newState = enable != null ? enable : !DiagnosticLogManager.isGrenadeLoggingEnabled();
+        DiagnosticLogManager.setGrenadeLoggingEnabled(newState);
+        context.getSource().sendSuccess(() -> Component.literal(
+            "Grenade decision logging: " + (newState ? "ON" : "OFF") +
+            (newState ? " (see server log entries tagged [GrenadeDebug])" : "")
         ), true);
         return 1;
     }
@@ -1467,6 +1486,7 @@ public class CombatDebugCommand {
             "  Cover score logging: " + (DiagnosticLogManager.isCoverScoreLoggingEnabled() ? "ON" : "OFF") + "\n" +
             "  Cover performance logging: " + (DiagnosticLogManager.isCoverPerformanceLoggingEnabled() ? "ON" : "OFF") + "\n" +
             "  Attack logging: " + (DiagnosticLogManager.isAttackLoggingEnabled() ? "ON" : "OFF") + "\n" +
+            "  Grenade logging: " + (DiagnosticLogManager.isGrenadeLoggingEnabled() ? "ON" : "OFF") + "\n" +
             "  Damage logging: " + (DiagnosticLogManager.isDamageLoggingEnabled() ? "ON" : "OFF") + "\n" +
             "  Suppression logging: " + (DiagnosticLogManager.isSuppressionLoggingEnabled() ? "ON" : "OFF") + "\n" +
             "  Spacing logging: " + (DiagnosticLogManager.isSpacingLoggingEnabled() ? "ON" : "OFF") + "\n" +

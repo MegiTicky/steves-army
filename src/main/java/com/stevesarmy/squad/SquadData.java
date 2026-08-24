@@ -1,5 +1,6 @@
 package com.stevesarmy.squad;
 
+import com.stevesarmy.StevesArmyConfig;
 import com.stevesarmy.StevesArmyMod;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
@@ -15,6 +16,7 @@ public class SquadData {
     private boolean cqbMode = false;
     private SquadFormation formation = SquadFormation.NONE;
     private SquadThreatIntel threatIntel = new SquadThreatIntel();
+    private long lastGrenadeTick = Long.MIN_VALUE;
     private transient SquadCoverPeekabilityCache coverPeekabilityCache = new SquadCoverPeekabilityCache();
 
     public SquadData(UUID leaderId) {
@@ -82,6 +84,19 @@ public class SquadData {
         this.formation = formation;
     }
 
+    public synchronized boolean tryClaimGrenade(long gameTime) {
+        long interval = StevesArmyConfig.getGrenadeSquadIntervalTicks();
+        if (interval > 0 && gameTime - lastGrenadeTick < interval) return false;
+        lastGrenadeTick = gameTime;
+        return true;
+    }
+
+    public synchronized void releaseGrenadeClaim(long gameTime) {
+        if (lastGrenadeTick == gameTime) {
+            lastGrenadeTick = Long.MIN_VALUE;
+        }
+    }
+
     public SquadThreatIntel getThreatIntel() {
         return threatIntel;
     }
@@ -105,6 +120,7 @@ public class SquadData {
         tag.putString("Mode", mode.name());
         tag.putBoolean("CQB", cqbMode);
         tag.putString("Formation", formation.name());
+        tag.putLong("LastGrenadeTick", lastGrenadeTick);
         
         tag.put("ThreatIntel", threatIntel.toNBT());
         
@@ -128,6 +144,9 @@ public class SquadData {
         }
         if (tag.contains("Formation")) {
             data.formation = SquadFormation.valueOf(tag.getString("Formation"));
+        }
+        if (tag.contains("LastGrenadeTick")) {
+            data.lastGrenadeTick = tag.getLong("LastGrenadeTick");
         }
         
         if (tag.contains("ThreatIntel")) {

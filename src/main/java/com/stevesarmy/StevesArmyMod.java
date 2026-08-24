@@ -6,6 +6,7 @@ import com.stevesarmy.command.StevesArmyCommand;
 import com.stevesarmy.command.TransportCommand;
 import com.stevesarmy.client.StevesArmyClientConfig;
 import com.stevesarmy.combat.GunIntegration;
+import com.stevesarmy.combat.GrenadeIntegration;
 import com.stevesarmy.network.NetworkHandler;
 import com.stevesarmy.registry.ModEntities;
 import com.stevesarmy.registry.ModItems;
@@ -51,6 +52,7 @@ public class StevesArmyMod {
     private void commonSetup(final FMLCommonSetupEvent event) {
         NetworkHandler.register();
         GunIntegration.init();
+        GrenadeIntegration.init();
         ForgeChunkManager.setForcedChunkLoadingCallback(MODID, (level, helper) -> {
             // Recall tickets are intentionally transient and are never resumed
             // after a server restart.
