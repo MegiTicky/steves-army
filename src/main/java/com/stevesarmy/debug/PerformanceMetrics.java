@@ -2,8 +2,6 @@ package com.stevesarmy.debug;
 
 import com.stevesarmy.StevesArmyConfig;
 import java.util.Locale;
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.LongAdder;
 
 /** Opt-in counters for diagnosing server-thread performance in live tests. */
@@ -552,14 +550,6 @@ public final class PerformanceMetrics {
             + "  Cover search cooldown skips: " + coverSearchCooldownSkips.sum() + "\n"
             + "  Cover maintenance: " + coverMaintenanceRuns.sum() + " runs, "
             + coverMaintenanceSkips.sum() + " skips\n"
-            + "  Cover validation: " + coverValidationRuns.sum() + " runs, "
-            + coverValidationSkips.sum() + " skips\n"
-            + "  Cover invalidations: " + formatCounters(coverInvalidationReasons) + "\n"
-            + "  Passive maintenance runs by state: " + formatCounters(passiveMaintenanceRunsByState) + "\n"
-            + "  Passive maintenance skips by state: " + formatCounters(passiveMaintenanceSkipsByState) + "\n"
-            + "  Cover movement: " + coverActiveMovementTicks.sum() + " active ticks, "
-            + coverFullSearchAttempts.sum() + " full-search attempts\n"
-            + "  Suppressed-cover deferred skips: " + suppressedCoverDeferredSkips.sum() + "\n"
             + "  Cover state time: " + formatMillis(coverStateNanos.sum()) + " ms total"
             + " (seeking=" + formatMillis(coverSeekingNanos.sum())
             + ", repositioning=" + formatMillis(coverRepositioningNanos.sum())
@@ -588,15 +578,5 @@ public final class PerformanceMetrics {
 
     private static String formatMillis(double nanos) {
         return String.format(Locale.ROOT, "%.2f", nanos / 1_000_000.0);
-    }
-
-    private static String formatCounters(Map<String, LongAdder> counters) {
-        if (counters.isEmpty()) return "none";
-        StringBuilder result = new StringBuilder();
-        counters.entrySet().stream().sorted(Map.Entry.comparingByKey()).forEach(entry -> {
-            if (result.length() > 0) result.append(", ");
-            result.append(entry.getKey()).append('=').append(entry.getValue().sum());
-        });
-        return result.toString();
     }
 }

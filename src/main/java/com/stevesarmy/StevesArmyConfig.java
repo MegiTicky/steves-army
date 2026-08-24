@@ -492,8 +492,8 @@ BUILDER.pop();
     /** Number of ticks between non-urgent in-cover maintenance passes. */
     public static int getCoverMaintenanceIntervalTicks() {
         return switch (getOptimizationProfile()) {
-            case BALANCED -> 20;
-            case AGGRESSIVE -> 30;
+            case BALANCED -> 2;
+            case AGGRESSIVE -> 3;
             default -> 1;
         };
     }

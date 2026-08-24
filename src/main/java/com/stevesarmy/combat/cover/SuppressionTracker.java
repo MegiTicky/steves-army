@@ -47,19 +47,14 @@ public class SuppressionTracker {
     private static final float MACHINE_GUN_SUPPRESSION_MULTIPLIER = 1.6f;
 
     public void onNearMiss(Vec3 bulletPath, LivingEntity soldier) {
-        onNearMiss(bulletPath, soldier, 1.0f, null, 1.0f);
+        onNearMiss(bulletPath, soldier, 1.0f);
     }
 
     public void onNearMiss(Vec3 bulletPath, LivingEntity soldier, float bulletSpeed) {
-        onNearMiss(bulletPath, soldier, bulletSpeed, null, 1.0f);
+        onNearMiss(bulletPath, soldier, bulletSpeed, null);
     }
 
     public void onNearMiss(Vec3 bulletPath, LivingEntity soldier, float bulletSpeed, LivingEntity shooter) {
-        onNearMiss(bulletPath, soldier, bulletSpeed, shooter, 1.0f);
-    }
-
-    public void onNearMiss(Vec3 bulletPath, LivingEntity soldier, float bulletSpeed,
-                           LivingEntity shooter, float suppressionMultiplier) {
         double distance = soldier.position().distanceTo(bulletPath);
         if (distance >= NEAR_MISS_THRESHOLD) return;
 
@@ -77,8 +72,7 @@ public class SuppressionTracker {
 
         float weaponMultiplier = shooter != null && GunIntegration.isMachineGun(shooter)
             ? MACHINE_GUN_SUPPRESSION_MULTIPLIER : 1.0f;
-        float add = distanceFactor * NEAR_MISS_SUPPRESSION * speedMultiplier * burstMultiplier
-            * weaponMultiplier * suppressionMultiplier;
+        float add = distanceFactor * NEAR_MISS_SUPPRESSION * speedMultiplier * burstMultiplier * weaponMultiplier;
         recordSuppressionEvent(add, now);
         nearMissCount++;
         traceSuppressionEvent(soldier, "near-miss", add);
@@ -110,13 +104,9 @@ public class SuppressionTracker {
     }
 
     public void onIncomingFire(LivingEntity shooter, float bulletSpeed) {
-        onIncomingFire(shooter, bulletSpeed, 1.0f);
-    }
-
-    public void onIncomingFire(LivingEntity shooter, float bulletSpeed, float suppressionMultiplier) {
         float speedMultiplier = Mth.clamp(bulletSpeed / BASE_SPEED, MIN_SPEED_MULTIPLIER, MAX_SPEED_MULTIPLIER);
         float weaponMultiplier = GunIntegration.isMachineGun(shooter) ? MACHINE_GUN_SUPPRESSION_MULTIPLIER : 1.0f;
-        float add = DIRECT_FIRE_SUPPRESSION * speedMultiplier * weaponMultiplier * suppressionMultiplier;
+        float add = DIRECT_FIRE_SUPPRESSION * speedMultiplier * weaponMultiplier;
         recordSuppressionEvent(add, System.currentTimeMillis());
 
         if (debugLog()) {
@@ -186,16 +176,12 @@ public class SuppressionTracker {
     }
 
     public void tick(boolean inCover) {
-        tick(inCover, 1.0f, 1.0f);
-    }
-
-    public void tick(boolean inCover, float recoveryMultiplier, float protectedPeakSlowdown) {
         float oldLevel = suppressionLevel;
-        float decayMultiplier = inCover ? 2.0f * recoveryMultiplier : 1.0f;
+        float decayMultiplier = inCover ? 2.0f : 1.0f;
         float decayAmount = DECAY_RATE * decayMultiplier * 0.05f;
 
         // Higher peak suppression means slower decay — peak of 1.0 reduces decay to ~50%
-        float peakSlowdown = (0.5f + (1.0f - peakSuppression) * 0.5f) * protectedPeakSlowdown;
+        float peakSlowdown = 0.5f + (1.0f - peakSuppression) * 0.5f;
 
         suppressionLevel = Math.max(0.0f, suppressionLevel - decayAmount * peakSlowdown);
 
