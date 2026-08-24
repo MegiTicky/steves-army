@@ -269,8 +269,8 @@ BUILDER.pop();
 
         OPTIMIZATION_LEVEL = BUILDER
             .comment("Performance optimization profile: 0=compatibility, 1=conservative, 2=balanced, 3=aggressive.",
-                     "Higher profiles reuse perception data for longer and share nearby target queries.",
-                     "Level 0 keeps the existing target-query behavior; final firing validation is always exact.",
+                     "Retained for config-file compatibility; soldier perception uses the compatibility cadence.",
+                     "The isolated machine-gunner pipeline remains enabled independently of this setting.",
                      "Default: 1")
             .defineInRange("optimizationLevel", 1, 0, 3);
 
@@ -399,45 +399,27 @@ BUILDER.pop();
         return OPTIMIZATION_LEVEL.get();
     }
 
-    /** Number of ticks a soldier reuses its nearby-target snapshot. */
+    /** Legacy compatibility hook; nearby-target snapshots are disabled. */
     public static int getTargetCandidateCacheTicks() {
-        return switch (getOptimizationLevel()) {
-            case 2 -> 8;
-            case 3 -> 12;
-            default -> 5;
-        };
+        return 0;
     }
 
-    /** Number of ticks exact positional visibility results may be reused. */
+    /** Legacy compatibility hook; positional visibility caching is disabled. */
     public static int getPositionVisibilityCacheTicks() {
-        return switch (getOptimizationLevel()) {
-            case 0 -> 0;
-            case 2 -> 2;
-            case 3 -> 4;
-            default -> 1;
-        };
+        return 0;
     }
 
-    /** Number of ticks exact aim-point results may be reused. */
+    /** Legacy compatibility hook; aim-point caching is disabled. */
     public static int getAimPointCacheTicks() {
-        return switch (getOptimizationLevel()) {
-            case 0 -> 1;
-            case 2 -> 2;
-            case 3 -> 4;
-            default -> 1;
-        };
+        return 0;
     }
 
-    /** Number of ticks exact exposure results may be reused. */
+    /** Legacy compatibility hook; exposure caching is disabled. */
     public static int getExposureCacheTicks() {
-        return switch (getOptimizationLevel()) {
-            case 2 -> 2;
-            case 3 -> 4;
-            default -> 1;
-        };
+        return 0;
     }
 
     public static boolean useSharedTargetQueryCache() {
-        return getOptimizationLevel() >= 1;
+        return false;
     }
 }

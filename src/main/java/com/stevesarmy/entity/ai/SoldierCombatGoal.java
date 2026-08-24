@@ -1674,17 +1674,7 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
     }
 
     private boolean shouldRefreshDetection() {
-        int level = StevesArmyConfig.getOptimizationLevel();
-        if (level <= 1) return true;
-
-        long currentTick = soldier.level().getGameTime();
-        int interval = level == 2 ? 2 : 3;
-        int phase = Math.floorMod(soldier.getUUID().hashCode(), interval);
-        if (lastDetectionTick == Long.MIN_VALUE) {
-            return Math.floorMod((int) currentTick + phase, interval) == 0;
-        }
-        return Math.floorMod((int) currentTick + phase, interval) == 0
-            || currentTick - lastDetectionTick >= interval * 4L;
+        return true;
     }
     
     private List<LivingEntity> computePotentialTargets() {
