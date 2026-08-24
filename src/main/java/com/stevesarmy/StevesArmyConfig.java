@@ -46,7 +46,6 @@ public class StevesArmyConfig {
     public static final ForgeConfigSpec.IntValue VS2_MAX_TRANSPORTED_SOLDIERS;
 
     public static final ForgeConfigSpec.IntValue OPTIMIZATION_LEVEL;
-    public static final ForgeConfigSpec.BooleanValue ASYNC_COVER_EVALUATION;
 
     static {
         BUILDER.push("aim_quality");
@@ -274,11 +273,6 @@ BUILDER.pop();
                      "Level 0 keeps the existing target-query behavior; final firing validation is always exact.",
                      "Default: 1")
             .defineInRange("optimizationLevel", 1, 0, 3);
-
-        ASYNC_COVER_EVALUATION = BUILDER
-            .comment("Enable immutable-snapshot worker evaluation for machine-gunner cover selection.",
-                     "Only applies to the aggressive optimization profile; disabled by default.")
-            .define("asyncCoverEvaluation", false);
 
         BUILDER.pop();
 

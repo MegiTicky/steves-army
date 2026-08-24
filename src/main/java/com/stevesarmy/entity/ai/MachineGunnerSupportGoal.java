@@ -1,8 +1,6 @@
 package com.stevesarmy.entity.ai;
 
-import com.stevesarmy.StevesArmyConfig;
 import com.stevesarmy.StevesArmyMod;
-import com.stevesarmy.combat.cover.AsyncCoverEvaluationManager;
 import com.stevesarmy.combat.cover.CoverBehaviorManager;
 import com.stevesarmy.combat.cover.CoverFinder;
 import com.stevesarmy.combat.cover.CoverPoint;
@@ -60,7 +58,6 @@ public final class MachineGunnerSupportGoal extends Goal implements CoverGoalCon
     private long latestEvaluationRevision = Long.MIN_VALUE;
     private long latestEvaluationSuppressionSequence = Long.MIN_VALUE;
     private long latestEvaluationSectorGeneration = Long.MIN_VALUE;
-    private boolean evaluationPending;
 
     public MachineGunnerSupportGoal(SoldierEntity soldier) {
         if (!(soldier instanceof MachineGunnerEntity machineGunner)) {
@@ -94,7 +91,6 @@ public final class MachineGunnerSupportGoal extends Goal implements CoverGoalCon
     @Override
     public void stop() {
         coverController.stop();
-        evaluationPending = false;
         selectionRetryTicks = 0;
     }
 
@@ -232,24 +228,6 @@ public final class MachineGunnerSupportGoal extends Goal implements CoverGoalCon
             && suppressionSequence == latestEvaluationSuppressionSequence
             && sectorGeneration == latestEvaluationSectorGeneration) {
             return latestEvaluationReport;
-        }
-
-        if (StevesArmyConfig.useAsyncCoverEvaluation()) {
-            if (!evaluationPending) {
-                evaluationPending = true;
-                AsyncCoverEvaluationManager.request(soldier, suppressionCenter, supportAnchor,
-                    revision, suppressionSequence, sectorGeneration, (snapshot, report) -> {
-                        evaluationPending = false;
-                        latestEvaluationReport = report;
-                        latestEvaluationCenter = snapshot.suppressionCenter();
-                        latestEvaluationAnchor = snapshot.supportAnchor();
-                        latestEvaluationRevision = snapshot.tacticalRevision();
-                        latestEvaluationSuppressionSequence = snapshot.suppressionSequence();
-                        latestEvaluationSectorGeneration = snapshot.sectorGeneration();
-                        sendLatestEvaluationDebug(report);
-                    });
-            }
-            return FiringPositionFinder.emptyEvaluationReport();
         }
 
         latestEvaluationReport = FiringPositionFinder.evaluate(soldier, suppressionCenter, supportAnchor);

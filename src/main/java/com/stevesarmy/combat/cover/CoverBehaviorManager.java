@@ -127,6 +127,11 @@ public class CoverBehaviorManager {
     public CoverState getState() {
         return state;
     }
+
+    /** Revision used by the isolated machine-gunner support evaluator. */
+    public long getTacticalRevision() {
+        return tacticalRevision;
+    }
     
     public void setState(CoverState state) {
         CoverState oldState = this.state;
