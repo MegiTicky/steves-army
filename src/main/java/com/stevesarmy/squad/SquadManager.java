@@ -162,6 +162,24 @@ public class SquadManager extends SavedData {
         return squadsById.values();
     }
 
+    /** Commits a successful autonomous grenade throw and persists its cooldown. */
+    public SquadData.GrenadeThrowResult completeGrenadeThrow(SquadData squad,
+                                                               UUID soldierId,
+                                                               long gameTime,
+                                                               boolean nativeThrowSucceeded) {
+        if (squad == null || squadsById.get(squad.getSquadId()) != squad) {
+            return new SquadData.GrenadeThrowResult(false, false,
+                "squad no longer exists");
+        }
+
+        SquadData.GrenadeThrowResult result = squad.completeGrenadeThrow(
+            soldierId, gameTime, nativeThrowSucceeded);
+        if (result.committed()) {
+            setDirty();
+        }
+        return result;
+    }
+
     public static SquadManager get(ServerLevel level) {
         DimensionDataStorage storage = level.getDataStorage();
         return storage.computeIfAbsent(

@@ -100,7 +100,7 @@ public class StevesArmyCommand {
         }
 
         GrenadeTacticalController.ForceThrowResult result =
-            new GrenadeTacticalController(soldier).forceThrow(target);
+            soldier.getGrenadeTacticalController().forceThrow(target);
         Component message = Component.literal("[Grenade] " + result.message());
         if (result.success()) {
             context.getSource().sendSuccess(() -> message, true);

@@ -6,9 +6,12 @@ import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.Tag;
 
+import javax.annotation.Nullable;
 import java.util.*;
 
 public class SquadData {
+    private static final long NO_GRENADE_THROW = Long.MIN_VALUE;
+
     private UUID squadId;
     private UUID leaderId;
     private final List<UUID> memberIds = new ArrayList<>();
@@ -16,7 +19,10 @@ public class SquadData {
     private boolean cqbMode = false;
     private SquadFormation formation = SquadFormation.NONE;
     private SquadThreatIntel threatIntel = new SquadThreatIntel();
-    private long lastGrenadeTick = Long.MIN_VALUE;
+    private long lastGrenadeTick = NO_GRENADE_THROW;
+    @Nullable
+    private UUID grenadeReservationOwner;
+    private long grenadeReservationUntilTick = NO_GRENADE_THROW;
     private transient SquadCoverPeekabilityCache coverPeekabilityCache = new SquadCoverPeekabilityCache();
 
     public SquadData(UUID leaderId) {
@@ -84,17 +90,108 @@ public class SquadData {
         this.formation = formation;
     }
 
-    public synchronized boolean tryClaimGrenade(long gameTime) {
-        long interval = StevesArmyConfig.getGrenadeSquadIntervalTicks();
-        if (interval > 0 && gameTime - lastGrenadeTick < interval) return false;
-        lastGrenadeTick = gameTime;
-        return true;
+    public record GrenadeReservation(UUID owner, long expiresAtTick, long remainingTicks) {}
+
+    public record GrenadeReservationResult(boolean acquired, String reason,
+                                           @Nullable UUID owner, long remainingTicks,
+                                           long expiresAtTick) {}
+
+    public record GrenadeThrowResult(boolean committed, boolean reservationReleased,
+                                     String reason) {}
+
+    public synchronized GrenadeReservationResult tryReserveGrenade(UUID soldierId,
+                                                                     long gameTime,
+                                                                     long leaseTicks) {
+        clearExpiredGrenadeReservation(gameTime);
+
+        long cooldownRemaining = getGrenadeCooldownRemaining(gameTime);
+        if (cooldownRemaining > 0) {
+            return new GrenadeReservationResult(false, "squad cooldown", null,
+                cooldownRemaining, NO_GRENADE_THROW);
+        }
+
+        if (grenadeReservationOwner != null) {
+            if (grenadeReservationOwner.equals(soldierId)) {
+                return new GrenadeReservationResult(true, "reservation already owned",
+                    soldierId, grenadeReservationUntilTick - gameTime,
+                    grenadeReservationUntilTick);
+            }
+            return new GrenadeReservationResult(false, "another reservation is active",
+                grenadeReservationOwner, grenadeReservationUntilTick - gameTime,
+                grenadeReservationUntilTick);
+        }
+
+        long safeLease = Math.max(1L, leaseTicks);
+        long expiresAt = gameTime > Long.MAX_VALUE - safeLease
+            ? Long.MAX_VALUE : gameTime + safeLease;
+        grenadeReservationOwner = soldierId;
+        grenadeReservationUntilTick = expiresAt;
+        return new GrenadeReservationResult(true, "reservation acquired", soldierId,
+            expiresAt - gameTime, expiresAt);
     }
 
-    public synchronized void releaseGrenadeClaim(long gameTime) {
-        if (lastGrenadeTick == gameTime) {
-            lastGrenadeTick = Long.MIN_VALUE;
+    public synchronized boolean isGrenadeReservationOwner(UUID soldierId, long gameTime) {
+        clearExpiredGrenadeReservation(gameTime);
+        return grenadeReservationOwner != null && grenadeReservationOwner.equals(soldierId);
+    }
+
+    public synchronized void releaseGrenadeReservation(UUID soldierId) {
+        if (grenadeReservationOwner != null && grenadeReservationOwner.equals(soldierId)) {
+            clearGrenadeReservation();
         }
+    }
+
+    public synchronized GrenadeThrowResult completeGrenadeThrow(UUID soldierId,
+                                                                  long gameTime,
+                                                                  boolean nativeThrowSucceeded) {
+        boolean ownsReservation = grenadeReservationOwner != null
+            && grenadeReservationOwner.equals(soldierId)
+            && gameTime < grenadeReservationUntilTick;
+        if (!ownsReservation) {
+            return new GrenadeThrowResult(false, false,
+                "grenade reservation is no longer owned");
+        }
+
+        clearGrenadeReservation();
+        if (!nativeThrowSucceeded) {
+            return new GrenadeThrowResult(false, true,
+                "native grenade throw failed");
+        }
+
+        lastGrenadeTick = gameTime;
+        return new GrenadeThrowResult(true, true, "grenade throw committed");
+    }
+
+    public synchronized long getGrenadeCooldownRemaining(long gameTime) {
+        long interval = StevesArmyConfig.getGrenadeSquadIntervalTicks();
+        if (interval <= 0 || lastGrenadeTick == NO_GRENADE_THROW) return 0L;
+
+        long elapsed = gameTime - lastGrenadeTick;
+        if (elapsed < 0 || elapsed >= interval) return 0L;
+        return interval - elapsed;
+    }
+
+    public synchronized long getLastGrenadeTick() {
+        return lastGrenadeTick;
+    }
+
+    @Nullable
+    public synchronized GrenadeReservation getGrenadeReservation(long gameTime) {
+        clearExpiredGrenadeReservation(gameTime);
+        if (grenadeReservationOwner == null) return null;
+        return new GrenadeReservation(grenadeReservationOwner, grenadeReservationUntilTick,
+            grenadeReservationUntilTick - gameTime);
+    }
+
+    private void clearExpiredGrenadeReservation(long gameTime) {
+        if (grenadeReservationOwner != null && gameTime >= grenadeReservationUntilTick) {
+            clearGrenadeReservation();
+        }
+    }
+
+    private void clearGrenadeReservation() {
+        grenadeReservationOwner = null;
+        grenadeReservationUntilTick = NO_GRENADE_THROW;
     }
 
     public SquadThreatIntel getThreatIntel() {

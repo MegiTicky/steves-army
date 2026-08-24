@@ -4,6 +4,7 @@ import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.compat.VS2Compat;
 import com.stevesarmy.combat.CombatDebugData;
 import com.stevesarmy.combat.DetectionSystem;
+import com.stevesarmy.combat.GrenadeIntegration;
 import com.stevesarmy.combat.GunIntegration;
 import com.stevesarmy.combat.ThreatAwareness;
 import com.stevesarmy.combat.cover.CoverBehaviorManager;
@@ -24,6 +25,7 @@ import com.stevesarmy.entity.ai.CoverTacticalGoal;
 import com.stevesarmy.entity.ai.CombatGoalController;
 import com.stevesarmy.entity.ai.CoverGoalController;
 import com.stevesarmy.entity.ai.PeekController;
+import com.stevesarmy.entity.ai.GrenadeTacticalController;
 import com.stevesarmy.inventory.SoldierInventory;
 import com.stevesarmy.inventory.SoldierInventoryHandler;
 import com.stevesarmy.network.NetworkHandler;
@@ -32,6 +34,7 @@ import com.stevesarmy.squad.FireDiscipline;
 import com.stevesarmy.squad.FireTeam;
 import com.stevesarmy.squad.FireTeamAssignment;
 import com.stevesarmy.squad.SquadManager;
+import com.stevesarmy.squad.SquadThreatIntel;
 import com.stevesarmy.squad.SquadMode;
 import com.stevesarmy.squad.SquadFormation;
 import com.stevesarmy.squad.TeamManager;
@@ -195,6 +198,7 @@ public class SoldierEntity extends PathfinderMob implements Container {
     protected CoverGoalController coverTacticalGoal;
     protected Goal coverTacticalGoalTask;
     private final ThreatAwareness threatAwareness;
+    private final GrenadeTacticalController grenadeTacticalController;
     
     private boolean healing = false;
     private int navigationTraversalLockUntilTick = -1;
@@ -332,6 +336,7 @@ public class SoldierEntity extends PathfinderMob implements Container {
         this.coverBehaviorManager = new CoverBehaviorManager(this);
         this.peekController = new PeekController();
         this.threatAwareness = new ThreatAwareness();
+        this.grenadeTacticalController = new GrenadeTacticalController(this);
         this.inventory.setMainHandChangedCallback(stack -> {
             if (!this.level().isClientSide) {
                 if (inventorySyncingFromEntity) return;
@@ -820,6 +825,27 @@ public class SoldierEntity extends PathfinderMob implements Container {
         return inventory;
     }
 
+    public GrenadeTacticalController getGrenadeTacticalController() {
+        return grenadeTacticalController;
+    }
+
+    @Nullable
+    public SquadThreatIntel getGrenadeSquadIntel() {
+        if (squadId == null || !(level() instanceof ServerLevel serverLevel)) return null;
+        return SquadManager.get(serverLevel).getSquadById(squadId)
+            .map(com.stevesarmy.squad.SquadData::getThreatIntel).orElse(null);
+    }
+
+    private boolean shouldTickGrenadeController() {
+        if (grenadeTacticalController.isActive()
+            || DiagnosticLogManager.isAttackLoggingEnabled()
+            || DiagnosticLogManager.isGrenadeLoggingEnabled()) {
+            return true;
+        }
+        if (tickCount % 10 != 0) return false;
+        return GrenadeIntegration.findSupportedSlot(inventory) >= 0;
+    }
+
     public boolean canUseGrenade(long gameTime) {
         return gameTime >= grenadeCooldownUntilTick;
     }
@@ -972,9 +998,16 @@ public class SoldierEntity extends PathfinderMob implements Container {
     @Override
     protected void customServerAiStep() {
         if (VS2Compat.prepareSoldierAi(this)) {
+            if (grenadeTacticalController.isActive()) {
+                grenadeTacticalController.tick(getTarget(), getGrenadeSquadIntel());
+            }
             return;
         }
         updateNavigationTraversalLock();
+        if (shouldTickGrenadeController()
+            && grenadeTacticalController.tick(getTarget(), getGrenadeSquadIntel())) {
+            return;
+        }
         super.customServerAiStep();
     }
     

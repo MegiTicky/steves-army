@@ -7,6 +7,7 @@ import com.stevesarmy.combat.GunIntegration;
 import com.stevesarmy.combat.TargetAcquisition;
 import com.stevesarmy.combat.VisibilityRay;
 import com.stevesarmy.entity.SoldierEntity;
+import com.stevesarmy.entity.EnemySoldierEntity;
 import com.stevesarmy.inventory.SoldierInventory;
 import com.stevesarmy.squad.SquadData;
 import com.stevesarmy.squad.SquadManager;
@@ -29,6 +30,7 @@ import java.util.UUID;
 public final class GrenadeTacticalController {
     private static final int EVALUATION_INTERVAL = 10;
     private static final int PREPARE_TICKS = 10;
+    private static final int RESERVATION_LEASE_TICKS = PREPARE_TICKS + 20;
     private static final int MAX_SIMULATION_TICKS = 75;
     private static final double THROW_SPEED = 1.1;
     private static final double THROW_GRAVITY = 0.07;
@@ -43,6 +45,7 @@ public final class GrenadeTacticalController {
     private float savedPitch;
     private float savedHeadYaw;
     private float savedBodyYaw;
+    private boolean grenadeReservationHeld;
     private String lastDecisionReason;
     private long lastDecisionLogTick = Long.MIN_VALUE;
     private boolean lastArcSawFriendlyPathBlock;
@@ -86,9 +89,17 @@ public final class GrenadeTacticalController {
         return state != State.IDLE;
     }
 
+    /** Returns the candidate score used by the shared squad arbitration pass. */
+    public int evaluateArbitrationScore(@Nullable LivingEntity target,
+                                        @Nullable SquadThreatIntel intel,
+                                        long gameTime) {
+        Decision decision = evaluate(target, intel, gameTime);
+        return decision.plan == null ? Integer.MIN_VALUE : decision.plan.candidate.score;
+    }
+
     /** Attempts a safe administrator/debug throw while bypassing tactical selection and cooldowns. */
     public ForceThrowResult forceThrow(@Nullable LivingEntity target) {
-        cancel();
+        cancel("force throw takeover");
         if (soldier.level().isClientSide) {
             return ForceThrowResult.failure("must be executed on the server");
         }
@@ -176,7 +187,7 @@ public final class GrenadeTacticalController {
     public boolean tick(@Nullable LivingEntity target, @Nullable SquadThreatIntel intel) {
         if (soldier.level().isClientSide || !GrenadeIntegration.isAvailable()) {
             logDebug("tick unavailable: client-side or LesRaisins integration unavailable", target, intel);
-            cancel();
+            cancel("grenade tick unavailable");
             return false;
         }
 
@@ -184,7 +195,7 @@ public final class GrenadeTacticalController {
             String invalidationReason = preparationInvalidationReason(target, intel);
             if (invalidationReason != null) {
                 logDecision("preparation invalidated: " + invalidationReason, target, intel);
-                cancel();
+                cancel("preparation invalidated: " + invalidationReason);
                 return false;
             }
             if (prepareTicks > 0) {
@@ -209,6 +220,24 @@ public final class GrenadeTacticalController {
             logDecision("squad arbitration selected soldier " + blocker.soldierId()
                 + " (score=" + blocker.score() + ") over this candidate", target, intel);
             return false;
+        }
+
+        if (plan.squad != null) {
+            SquadData.GrenadeReservationResult reservation = plan.squad.tryReserveGrenade(
+                soldier.getUUID(), gameTime, RESERVATION_LEASE_TICKS);
+            if (!reservation.acquired()) {
+                if ("squad cooldown".equals(reservation.reason())) {
+                    logDecision("squad cooldown active remaining=" + reservation.remainingTicks()
+                        + " lastThrow=" + plan.squad.getLastGrenadeTick(), target, intel);
+                } else {
+                    logDecision("squad reservation denied owner=" + reservation.owner()
+                        + " remaining=" + reservation.remainingTicks(), target, intel);
+                }
+                return false;
+            }
+            grenadeReservationHeld = true;
+            logDecision("squad reservation acquired owner=" + soldier.getUUID()
+                + " expires=" + reservation.expiresAtTick(), target, intel);
         }
 
         logDecision("grenade plan began slot=" + plan.slot
@@ -448,7 +477,8 @@ public final class GrenadeTacticalController {
         if (!message.equals(lastDecisionReason) || gameTime - lastDecisionLogTick >= 40) {
             lastDecisionReason = message;
             lastDecisionLogTick = gameTime;
-            StevesArmyMod.LOGGER.info("[GrenadeDebug] soldier={} {}", soldier.getId(), message);
+            StevesArmyMod.LOGGER.info("[GrenadeDebug] soldier={} name={} side={} {}",
+                soldier.getId(), soldier.getName().getString(), debugSide(), message);
         }
     }
 
@@ -460,7 +490,8 @@ public final class GrenadeTacticalController {
         if (!message.equals(lastDecisionReason) || gameTime - lastDecisionLogTick >= 40) {
             lastDecisionReason = message;
             lastDecisionLogTick = gameTime;
-            StevesArmyMod.LOGGER.info("[GrenadeDebug] soldier={} {}", soldier.getId(), message);
+            StevesArmyMod.LOGGER.info("[GrenadeDebug] soldier={} name={} side={} {}",
+                soldier.getId(), soldier.getName().getString(), debugSide(), message);
         }
     }
 
@@ -497,10 +528,32 @@ public final class GrenadeTacticalController {
         int grenadeSlot = findGrenadeSlot();
         long cooldownRemaining = Math.max(0L,
             soldier.getGrenadeCooldownUntilTick() - soldier.level().getGameTime());
-        return String.format("state=%s,cover=%s,suppressed=%s,slot=%d,cooldown=%dt,%s,%s",
+        return String.format("state=%s,cover=%s,suppressed=%s,slot=%d,cooldown=%dt,%s,%s,%s",
             state, soldier.getCoverBehaviorManager().isInCover(),
             soldier.getCoverBehaviorManager().isSuppressed(), grenadeSlot,
-            cooldownRemaining, targetState, intelState);
+            cooldownRemaining, targetState, intelState, grenadeSquadState());
+    }
+
+    private String debugSide() {
+        return soldier instanceof EnemySoldierEntity ? "ENEMY" : "FRIENDLY";
+    }
+
+    private String grenadeSquadState() {
+        SquadData squad = pendingPlan != null && pendingPlan.squad != null
+            ? pendingPlan.squad : getSquadData();
+        if (squad == null) return "squad=none";
+
+        long gameTime = soldier.level().getGameTime();
+        long lastThrow = squad.getLastGrenadeTick();
+        String lastThrowState = lastThrow == Long.MIN_VALUE ? "never" : Long.toString(lastThrow);
+        SquadData.GrenadeReservation reservation = squad.getGrenadeReservation(gameTime);
+        if (reservation == null) {
+            return String.format("squadCooldown=%dt,lastThrow=%s,reservation=none",
+                squad.getGrenadeCooldownRemaining(gameTime), lastThrowState);
+        }
+        return String.format("squadCooldown=%dt,lastThrow=%s,reservationOwner=%s,reservationExpires=%d,reservationRemaining=%dt",
+            squad.getGrenadeCooldownRemaining(gameTime), lastThrowState,
+            reservation.owner(), reservation.expiresAtTick(), reservation.remainingTicks());
     }
 
     private String formatThreat(SquadThreatIntel.ThreatKnowledge threat) {
@@ -511,15 +564,30 @@ public final class GrenadeTacticalController {
     }
 
     public void cancel() {
+        cancel("controller cancelled");
+    }
+
+    private void cancel(String reason) {
+        releasePendingReservation(reason);
         if (state == State.PREPARING) restoreRotation();
         state = State.IDLE;
         pendingPlan = null;
         prepareTicks = 0;
     }
 
+    private void releasePendingReservation(String reason) {
+        if (!grenadeReservationHeld || pendingPlan == null || pendingPlan.squad == null) {
+            grenadeReservationHeld = false;
+            return;
+        }
+        pendingPlan.squad.releaseGrenadeReservation(soldier.getUUID());
+        grenadeReservationHeld = false;
+        logDecision("squad grenade reservation released reason=" + reason);
+    }
+
     @Nullable
     private String preparationInvalidationReason(@Nullable LivingEntity target,
-                                                 @Nullable SquadThreatIntel intel) {
+                                                  @Nullable SquadThreatIntel intel) {
         if (pendingPlan == null || soldier.isHealing() || soldier.isPassenger()
             || soldier.isNavigationTraversalLocked() || GunIntegration.isReloading(soldier)) {
             if (pendingPlan == null) return "pending plan missing";
@@ -527,6 +595,12 @@ public final class GrenadeTacticalController {
             if (soldier.isPassenger()) return "soldier became a passenger";
             if (soldier.isNavigationTraversalLocked()) return "soldier became navigation-locked";
             return "gun started reloading";
+        }
+
+        if (pendingPlan.squad != null && grenadeReservationHeld
+            && !pendingPlan.squad.isGrenadeReservationOwner(
+                soldier.getUUID(), soldier.level().getGameTime())) {
+            return "squad reservation expired or was lost";
         }
 
         Candidate candidate = pendingPlan.candidate;
@@ -600,48 +674,84 @@ public final class GrenadeTacticalController {
     private boolean throwPendingGrenade() {
         Plan plan = pendingPlan;
         if (plan == null) {
-            cancel();
+            cancel("pending plan missing");
             return false;
         }
 
         SquadData squad = plan.squad;
         long gameTime = soldier.level().getGameTime();
-        if (squad != null && !squad.tryClaimGrenade(gameTime)) {
-            logDecision("squad cooldown active or another member claimed the grenade");
-            cancel();
+        if (squad != null && grenadeReservationHeld
+            && !squad.isGrenadeReservationOwner(soldier.getUUID(), gameTime)) {
+            logDecision("preparation invalidated: squad reservation lost before throw");
+            cancel("reservation lost before throw");
             return false;
         }
 
         ItemStack stack = soldier.getSoldierInventory().getItem(plan.slot);
         GrenadeIntegration.SupportInfo support = GrenadeIntegration.inspect(stack);
         if (!support.supported() || support.count() <= 0) {
+            releasePendingReservation("throw slot invalidated");
             logDecision("throw slot invalidated: " + formatSupport(support));
-            if (squad != null) squad.releaseGrenadeClaim(gameTime);
-            cancel();
+            cancel("throw slot invalidated");
             return false;
         }
         int before = stack.getCount();
         boolean thrown = GrenadeIntegration.throwGrenade(soldier, stack);
         if (!thrown) {
-            if (squad != null) squad.releaseGrenadeClaim(gameTime);
-            logDecision("LesRaisins rejected the grenade throw: "
-                + formatSupport(GrenadeIntegration.inspect(stack)));
-            cancel();
+            completePendingSquadThrow(squad, gameTime, false);
+            logDecision("LesRaisins rejected slot=" + plan.slot
+                + " countBefore=" + before + " countAfter=" + stack.getCount()
+                + " " + formatSupport(GrenadeIntegration.inspect(stack)));
+            cancel("LesRaisins rejected the grenade throw");
             return false;
         }
 
         soldier.getSoldierInventory().setChanged();
+        SquadData.GrenadeThrowResult squadResult = completePendingSquadThrow(
+            squad, gameTime, true);
         soldier.markGrenadeUsed(gameTime);
         restoreRotation();
         state = State.IDLE;
         pendingPlan = null;
         prepareTicks = 0;
         if (DiagnosticLogEnabled()) {
-            StevesArmyMod.LOGGER.info("[GrenadeDebug] soldier={} threw target={} source={} slot={} countBefore={} countAfter={} landing={}",
-                soldier.getId(), plan.candidate.targetId, plan.candidate.source,
+            StevesArmyMod.LOGGER.info("[GrenadeDebug] soldier={} name={} side={} threw target={} source={} slot={} countBefore={} countAfter={} landing={}",
+                soldier.getId(), soldier.getName().getString(), debugSide(),
+                plan.candidate.targetId, plan.candidate.source,
                 plan.slot, before, stack.getCount(), plan.candidate.landing);
+            if (squad != null && !squadResult.committed()) {
+                StevesArmyMod.LOGGER.warn("[GrenadeDebug] soldier={} name={} side={} squad grenade commit failed after native throw: {}",
+                    soldier.getId(), soldier.getName().getString(), debugSide(), squadResult.reason());
+            }
         }
         return true;
+    }
+
+    private SquadData.GrenadeThrowResult completePendingSquadThrow(@Nullable SquadData squad,
+                                                                     long gameTime,
+                                                                     boolean nativeThrowSucceeded) {
+        if (squad == null || !grenadeReservationHeld) {
+            return new SquadData.GrenadeThrowResult(false, false,
+                "no squad grenade reservation");
+        }
+
+        SquadData.GrenadeThrowResult result;
+        if (soldier.level() instanceof ServerLevel level) {
+            result = SquadManager.get(level).completeGrenadeThrow(
+                squad, soldier.getUUID(), gameTime, nativeThrowSucceeded);
+        } else {
+            result = squad.completeGrenadeThrow(
+                soldier.getUUID(), gameTime, nativeThrowSucceeded);
+        }
+        grenadeReservationHeld = false;
+        if (!nativeThrowSucceeded && result.reservationReleased()) {
+            logDecision("squad grenade reservation released reason=native throw failed");
+        }
+        if (nativeThrowSucceeded && result.committed()) {
+            logDecision("squad grenade committed owner=" + soldier.getUUID()
+                + " throwTick=" + gameTime);
+        }
+        return result;
     }
 
     private void restoreRotation() {
@@ -786,11 +896,9 @@ public final class GrenadeTacticalController {
         // other soldier has no safe arc or has friendly fire in the blast.
         SquadData otherSquad = getSquadData(other);
         SquadThreatIntel otherIntel = otherSquad == null ? null : otherSquad.getThreatIntel();
-        Decision otherDecision = new GrenadeTacticalController(other)
-            .evaluate(other.getTarget(), otherIntel, other.level().getGameTime());
-        if (otherDecision.plan == null) return null;
-
-        int otherScore = otherDecision.plan.candidate.score;
+        int otherScore = other.getGrenadeTacticalController().evaluateArbitrationScore(
+            other.getTarget(), otherIntel, other.level().getGameTime());
+        if (otherScore == Integer.MIN_VALUE) return null;
         int otherIndex = manager.getMemberIndex(plan.squad.getSquadId(), other.getUUID());
         if (otherScore > plan.candidate.score
             || (otherScore == plan.candidate.score && otherIndex < myIndex)) {

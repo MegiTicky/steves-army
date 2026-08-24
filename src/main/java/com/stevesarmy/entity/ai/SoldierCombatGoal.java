@@ -59,7 +59,6 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
     private final SoldierEntity soldier;
     private final ThreatTracker threatTracker;
     private final DetectionSystem detectionSystem;
-    private final GrenadeTacticalController grenadeController;
     private final boolean machineGunnerPipeline;
     private LivingEntity target;
     private long lastDetectionTick = Long.MIN_VALUE;
@@ -269,7 +268,6 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
         this.machineGunnerPipeline = machineGunnerPipeline;
         this.threatTracker = new ThreatTracker();
         this.detectionSystem = new DetectionSystem(soldier.getUUID(), machineGunnerPipeline);
-        this.grenadeController = new GrenadeTacticalController(soldier);
         this.setFlags(EnumSet.noneOf(Flag.class));
     }
 
@@ -303,7 +301,7 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
             return true;
         }
 
-        if (grenadeController.isActive()) {
+        if (soldier.getGrenadeTacticalController().isActive()) {
             return true;
         }
 
@@ -350,7 +348,6 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
     @Override
     public void stop() {
         cancelAllSuppression();
-        grenadeController.cancel();
         soldier.endCqbEngagement();
         if (GunIntegration.isTaczLoaded() && GunIntegration.hasGun(soldier)) {
             GunIntegration.aim(soldier, false);
@@ -506,11 +503,6 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
                     findNewTarget();
                 }
             }
-        }
-
-        if (grenadeController.tick(target, getSquadIntel())) {
-            updateDebugSync();
-            return;
         }
 
         if (hasGun && tickReloadState()) {
