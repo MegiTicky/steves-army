@@ -186,23 +186,25 @@ public final class GrenadeTacticalController {
         float oldHeadYaw = soldier.getYHeadRot();
         float oldBodyYaw = soldier.getCrawlFacingYaw();
         applyArcRotation(arc);
-        boolean thrown;
+        GrenadeIntegration.ThrowResult throwResult;
         try {
-            thrown = GrenadeIntegration.throwGrenade(soldier, stack);
+            throwResult = GrenadeIntegration.throwGrenadeDetailed(
+                soldier, stack, arc.initialVelocity());
         } finally {
             soldier.setYRot(oldYaw);
             soldier.setXRot(oldPitch);
             soldier.setYHeadRot(oldHeadYaw);
             soldier.setYBodyRot(oldBodyYaw);
         }
-        if (!thrown) {
-            return ForceThrowResult.failure(
-                "LesRaisins rejected the throw or did not consume the grenade item");
+        if (!throwResult.success()) {
+            return ForceThrowResult.failure("LesRaisins throw failed: "
+                + throwResult.reason() + " " + formatThrowResult(throwResult));
         }
         soldier.getSoldierInventory().setChanged();
         return ForceThrowResult.success(String.format(
-            "threw grenade from slot %d toward %s (%s; cooldowns bypassed)",
-            slot, target.getName().getString(), formatArc(arc, ballistic.profile())));
+            "threw grenade from slot %d toward %s (%s; %s; cooldowns bypassed)",
+            slot, target.getName().getString(), formatArc(arc, ballistic.profile()),
+            formatThrowResult(throwResult)));
     }
 
     /** Returns true while grenade preparation owns this combat tick. */
@@ -769,16 +771,17 @@ public final class GrenadeTacticalController {
 
         int before = stack.getCount();
         applyArcRotation(finalArc);
-        boolean thrown;
+        GrenadeIntegration.ThrowResult throwResult;
         try {
-            thrown = GrenadeIntegration.throwGrenade(soldier, stack);
+            throwResult = GrenadeIntegration.throwGrenadeDetailed(
+                soldier, stack, finalArc.initialVelocity());
         } finally {
             restoreRotation();
         }
-        if (!thrown) {
+        if (!throwResult.success()) {
             completePendingSquadThrow(squad, gameTime, false);
             logDecision("LesRaisins rejected slot=" + plan.slot
-                + " countBefore=" + before + " countAfter=" + stack.getCount()
+                + " reason=" + throwResult.reason() + " " + formatThrowResult(throwResult)
                 + " " + formatSupport(GrenadeIntegration.inspect(stack))
                 + " " + formatArc(finalArc, ballistic.profile()));
             cancel("LesRaisins rejected the grenade throw");
@@ -799,7 +802,7 @@ public final class GrenadeTacticalController {
                 soldier.getId(), soldier.getName().getString(), debugSide(),
                 plan.candidate.targetId, plan.candidate.source,
                 plan.slot, before, stack.getCount(), plan.candidate.landing,
-                formatArc(finalArc, ballistic.profile()));
+                formatArc(finalArc, ballistic.profile()) + " " + formatThrowResult(throwResult));
             if (squad != null && !squadResult.committed()) {
                 StevesArmyMod.LOGGER.warn("[GrenadeDebug] soldier={} name={} side={} squad grenade commit failed after native throw: {}",
                     soldier.getId(), soldier.getName().getString(), debugSide(), squadResult.reason());
@@ -863,6 +866,15 @@ public final class GrenadeTacticalController {
             support.throwableId(), support.failureReason());
     }
 
+    private String formatThrowResult(GrenadeIntegration.ThrowResult result) {
+        return String.format("countBefore=%d,countAfter=%d,nativeSpeedBeforeCorrection=%.3f,"
+                + "appliedSpeed=%.3f,nativeSpreadCorrected=%s,velocitySyncBroadcast=%s,"
+                + "nativeVelocity=%s,appliedVelocity=%s",
+            result.countBefore(), result.countAfter(), result.nativeSpeed(), result.appliedSpeed(),
+            result.spreadCorrected(), result.velocitySyncBroadcast(),
+            result.nativeVelocity(), result.appliedVelocity());
+    }
+
     private boolean isSafeLanding(Vec3 landing) {
         double safeRadius = BLAST_RADIUS + StevesArmyConfig.getGrenadeSafetyMargin();
         AABB area = new AABB(landing, landing).inflate(safeRadius);
@@ -901,6 +913,7 @@ public final class GrenadeTacticalController {
                 -Math.sin(yawRad) * Math.cos(pitchRad) * speed,
                 -Math.sin(pitchRad) * speed,
                 Math.cos(yawRad) * Math.cos(pitchRad) * speed);
+            Vec3 initialVelocity = velocity;
             Vec3 position = origin;
             boolean safePath = true;
             Vec3 terminalPosition = null;
@@ -985,7 +998,7 @@ public final class GrenadeTacticalController {
                     && (best == null || terminalError < best.error - 0.001
                         || (Math.abs(terminalError - best.error) <= 0.001 && pitch > best.pitch))) {
                     best = new Arc(yaw, pitch, losPitch, terminalError, terminalPosition,
-                        path, profile.lifetime(), profile.shouldBounce(), origin);
+                        initialVelocity, path, profile.lifetime(), profile.shouldBounce(), origin);
                 }
             }
         }
@@ -1149,11 +1162,13 @@ public final class GrenadeTacticalController {
     }
 
     private String formatArc(Arc arc, GrenadeIntegration.BallisticProfile profile) {
-        return String.format("yaw=%.1f,pitch=%.1f,losPitch=%.1f,originY=%.2f,predictedLanding=%s,error=%.2f,flightTicks=%d,bounce=%s,pose=%s,%s",
+        return String.format("yaw=%.1f,pitch=%.1f,losPitch=%.1f,originY=%.2f,predictedLanding=%s,error=%.2f,flightTicks=%d,bounce=%s,pose=%s,configuredSpeed=%.3f,launchSpeed=%.3f,initialVelocity=%s,%s",
             arc.yaw, arc.pitch, arc.losPitch, arc.origin.y, arc.predictedLanding, arc.error, arc.flightTicks,
-            arc.bounced, soldier.getPose(), profile.describe());
+            arc.bounced, soldier.getPose(), profile.initialSpeed(), arc.initialVelocity.length(),
+            arc.initialVelocity, profile.describe());
     }
 
     private record Arc(float yaw, float pitch, float losPitch, double error, Vec3 predictedLanding,
-                       List<Vec3> path, int flightTicks, boolean bounced, Vec3 origin) {}
+                       Vec3 initialVelocity, List<Vec3> path, int flightTicks,
+                       boolean bounced, Vec3 origin) {}
 }

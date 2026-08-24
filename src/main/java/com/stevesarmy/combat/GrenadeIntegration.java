@@ -7,15 +7,20 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.Tag;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.network.protocol.game.ClientboundSetEntityMotionPacket;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.entity.projectile.Projectile;
+import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.fml.ModList;
 
 import javax.annotation.Nullable;
 import java.lang.reflect.Method;
+import java.util.HashSet;
 import java.util.Optional;
 import java.util.Set;
 
@@ -57,6 +62,24 @@ public final class GrenadeIntegration {
     public record BallisticResult(@Nullable BallisticProfile profile, String reason) {
         public boolean available() {
             return profile != null;
+        }
+    }
+
+    public record ThrowResult(boolean success, int countBefore, int countAfter,
+                              @Nullable Vec3 nativeVelocity,
+                              @Nullable Vec3 appliedVelocity,
+                              boolean velocitySyncBroadcast,
+                              String reason) {
+        public double nativeSpeed() {
+            return nativeVelocity == null ? 0.0 : nativeVelocity.length();
+        }
+
+        public double appliedSpeed() {
+            return appliedVelocity == null ? 0.0 : appliedVelocity.length();
+        }
+
+        public boolean spreadCorrected() {
+            return appliedVelocity != null && nativeVelocity != null;
         }
     }
 
@@ -204,18 +227,82 @@ public final class GrenadeIntegration {
 
     /** Uses LesRaisins' own entity factory, item consumption, and cooldown path. */
     public static boolean throwGrenade(LivingEntity owner, ItemStack stack) {
-        if (!isSupported(stack) || owner == null || owner.level().isClientSide) return false;
-        int before = stack.getCount();
+        return throwGrenadeDetailed(owner, stack, null).success();
+    }
+
+    /**
+     * Performs the native LesRaisins throw, then replaces its random launch
+     * spread with the already validated AI velocity before the next tick.
+     */
+    public static ThrowResult throwGrenadeDetailed(LivingEntity owner, ItemStack stack,
+                                                    @Nullable Vec3 appliedVelocity) {
+        int before = stack == null ? 0 : stack.getCount();
+        if (!isSupported(stack) || owner == null || owner.level().isClientSide) {
+            return new ThrowResult(false, before, before, null, appliedVelocity, false,
+                "unsupported stack, missing owner, or client-side throw");
+        }
+        Set<java.util.UUID> existingProjectiles = ownedGrenades(owner);
         try {
             Object throwable = throwableOf.invoke(null, stack);
             Object optional = getThrowableIndex.invoke(throwable, stack);
-            if (!(optional instanceof Optional<?> indexOptional) || indexOptional.isEmpty()) return false;
+            if (!(optional instanceof Optional<?> indexOptional) || indexOptional.isEmpty()) {
+                return new ThrowResult(false, before, stack.getCount(), null, appliedVelocity, false,
+                    "LesRaisins returned no ThrowableIndex");
+            }
             onThrow.invoke(throwable, owner.level(), owner, stack, indexOptional.get());
-            return stack.getCount() < before;
+            Projectile projectile = findNewGrenade(owner, existingProjectiles);
+            if (projectile == null) {
+                stack.setCount(before);
+                return new ThrowResult(false, before, stack.getCount(), null, appliedVelocity, false,
+                    "native projectile not found after LesRaisins accepted the throw");
+            }
+            Vec3 nativeVelocity = projectile.getDeltaMovement();
+            int after = stack.getCount();
+            if (after >= before) {
+                return new ThrowResult(false, before, after, nativeVelocity, appliedVelocity, false,
+                    "item consumption mismatch");
+            }
+
+            boolean velocitySyncBroadcast = false;
+            if (appliedVelocity != null) {
+                projectile.setDeltaMovement(appliedVelocity);
+                if (owner.level() instanceof ServerLevel serverLevel) {
+                    serverLevel.getChunkSource().broadcastAndSend(projectile,
+                        new ClientboundSetEntityMotionPacket(projectile));
+                    velocitySyncBroadcast = true;
+                } else {
+                    return new ThrowResult(false, before, after, nativeVelocity, appliedVelocity, false,
+                        "server level unavailable for corrected velocity synchronization");
+                }
+            }
+            return new ThrowResult(true, before, after, nativeVelocity, appliedVelocity, velocitySyncBroadcast,
+                appliedVelocity == null ? "native throw succeeded" : "native spread corrected");
         } catch (ReflectiveOperationException | RuntimeException exception) {
             logFailure(exception);
-            return false;
+            return new ThrowResult(false, before, stack.getCount(), null, appliedVelocity, false,
+                "native throw reflection failed: " + describeFailure(exception));
         }
+    }
+
+    private static Set<java.util.UUID> ownedGrenades(LivingEntity owner) {
+        Set<java.util.UUID> result = new HashSet<>();
+        for (Projectile projectile : owner.level().getEntitiesOfClass(Projectile.class,
+            owner.getBoundingBox().inflate(3.0), candidate -> candidate.getOwner() == owner
+                && isGrenadeEntity(candidate))) {
+            result.add(projectile.getUUID());
+        }
+        return result;
+    }
+
+    @Nullable
+    private static Projectile findNewGrenade(LivingEntity owner, Set<java.util.UUID> existing) {
+        AABB searchArea = owner.getBoundingBox().inflate(3.0);
+        for (Projectile projectile : owner.level().getEntitiesOfClass(Projectile.class, searchArea,
+            candidate -> candidate.getOwner() == owner && isGrenadeEntity(candidate)
+                && !existing.contains(candidate.getUUID()))) {
+            return projectile;
+        }
+        return null;
     }
 
     private static double number(Object target, String method) throws ReflectiveOperationException {
