@@ -1,5 +1,8 @@
 package com.stevesarmy.combat;
 
+import com.stevesarmy.StevesArmyConfig;
+import com.stevesarmy.entity.MachineGunnerEntity;
+import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.squad.SquadThreatIntel;
 import com.stevesarmy.debug.PerformanceMetrics;
 import net.minecraft.world.entity.LivingEntity;
@@ -12,7 +15,6 @@ public class DetectionSystem {
     private final boolean machineGunnerPipeline;
     private final Set<UUID> seenThisTick = new HashSet<>();
     
-    public static final double FOCUSED_RANGE = 96.0;
     public static final double PERIPHERAL_RANGE = 32.0;
     public static final double FOCUSED_ARC_DEGREES = 90.0;
     public static final double PERIPHERAL_ARC_DEGREES = 180.0;
@@ -33,6 +35,23 @@ public class DetectionSystem {
     public DetectionSystem(UUID soldierId, boolean machineGunnerPipeline) {
         this.soldierId = soldierId;
         this.machineGunnerPipeline = machineGunnerPipeline;
+    }
+
+    public double getFocusedRange() {
+        return machineGunnerPipeline
+            ? StevesArmyConfig.getMachineGunnerDetectionDistance()
+            : StevesArmyConfig.getBasicDetectionDistance();
+    }
+
+    public static double getFocusedRangeFor(SoldierEntity soldier) {
+        return soldier instanceof MachineGunnerEntity
+            ? StevesArmyConfig.getMachineGunnerDetectionDistance()
+            : StevesArmyConfig.getBasicDetectionDistance();
+    }
+
+    public static double getMaximumConfiguredFocusedRange() {
+        return Math.max(StevesArmyConfig.getBasicDetectionDistance(),
+            StevesArmyConfig.getMachineGunnerDetectionDistance());
     }
     
     public void tick(LivingEntity soldier, List<LivingEntity> potentialTargets,
@@ -120,13 +139,14 @@ public class DetectionSystem {
                                             DetectionState state, boolean wasInLOS, double visibilityMultiplier) {
         double baseRate;
         double maxRange;
+        double focusedRange = getFocusedRange();
         
         boolean inFocusedArc = TargetAcquisition.isInFocusedArc(soldier, target);
         boolean inPeripheralArc = TargetAcquisition.isInPeripheralArc(soldier, target);
         
-        if (inFocusedArc && distance <= FOCUSED_RANGE) {
+        if (inFocusedArc && distance <= focusedRange) {
             baseRate = BASE_FOCUSED_RATE;
-            maxRange = FOCUSED_RANGE;
+            maxRange = focusedRange;
         } else if (inPeripheralArc && distance <= PERIPHERAL_RANGE) {
             baseRate = BASE_PERIPHERAL_RATE;
             maxRange = PERIPHERAL_RANGE;

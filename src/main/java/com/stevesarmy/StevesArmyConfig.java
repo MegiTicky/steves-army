@@ -24,6 +24,8 @@ public class StevesArmyConfig {
     
     public static final ForgeConfigSpec.BooleanValue TARGET_MONSTERS;
     public static final ForgeConfigSpec.BooleanValue TARGET_TARGET_ENTITIES;
+    public static final ForgeConfigSpec.DoubleValue BASIC_DETECTION_DISTANCE;
+    public static final ForgeConfigSpec.DoubleValue MACHINE_GUNNER_DETECTION_DISTANCE;
 
     public static final ForgeConfigSpec.DoubleValue SPACING_DISTANCE;
 
@@ -166,6 +168,18 @@ public class StevesArmyConfig {
                      "Disable for better performance if not using target entities.",
                      "Default: true")
             .define("targetTargetEntities", true);
+
+        BASIC_DETECTION_DISTANCE = BUILDER
+            .comment("Focused detection distance for riflemen and enemy soldiers (blocks).",
+                     "Lower values reduce entity scanning work and limit long-range detection.",
+                     "Default: 72.0 blocks")
+            .defineInRange("basicDetectionDistance", 72.0, 1.0, 256.0);
+
+        MACHINE_GUNNER_DETECTION_DISTANCE = BUILDER
+            .comment("Focused detection distance for isolated machine gunners (blocks).",
+                     "Machine gunners retain a longer detection range for area suppression.",
+                     "Default: 96.0 blocks")
+            .defineInRange("machineGunnerDetectionDistance", 96.0, 1.0, 256.0);
         
 BUILDER.pop();
 
@@ -341,6 +355,14 @@ BUILDER.pop();
     
     public static boolean shouldTargetTargetEntities() {
         return TARGET_TARGET_ENTITIES.get();
+    }
+
+    public static double getBasicDetectionDistance() {
+        return BASIC_DETECTION_DISTANCE.get();
+    }
+
+    public static double getMachineGunnerDetectionDistance() {
+        return MACHINE_GUNNER_DETECTION_DISTANCE.get();
     }
 
     public static double getSpacingDistance() {

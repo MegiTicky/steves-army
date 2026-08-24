@@ -1680,7 +1680,7 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
     private List<LivingEntity> computePotentialTargets() {
         List<LivingEntity> potentialTargets = new ArrayList<>();
 
-        double maxRange = Math.max(DetectionSystem.FOCUSED_RANGE, DetectionSystem.PERIPHERAL_RANGE);
+        double maxRange = Math.max(detectionSystem.getFocusedRange(), DetectionSystem.PERIPHERAL_RANGE);
 
         if (!StevesArmyConfig.useSharedTargetQueryCache()) {
             if (StevesArmyConfig.shouldTargetMonsters()) {

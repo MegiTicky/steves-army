@@ -21,8 +21,10 @@ public final class GunshotDetectionHandlerTaCZ {
 
         GunIntegration.GunshotSignature signature = GunIntegration.getGunshotSignature(shooter);
         for (SoldierEntity observer : shooter.level().getEntitiesOfClass(
-                SoldierEntity.class, shooter.getBoundingBox().inflate(DetectionSystem.FOCUSED_RANGE))) {
-            if (observer.isAlive() && observer.getCombatGoal() != null) {
+                SoldierEntity.class, shooter.getBoundingBox().inflate(DetectionSystem.getMaximumConfiguredFocusedRange()))) {
+            if (observer.isAlive()
+                && observer.distanceTo(shooter) <= DetectionSystem.getFocusedRangeFor(observer)
+                && observer.getCombatGoal() != null) {
                 observer.getCombatGoal().onEnemyGunshot(shooter, signature);
             }
         }
