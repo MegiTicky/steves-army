@@ -212,7 +212,7 @@ public class CqbSteeringAdvisor {
         if (squadId != null && soldier.level() instanceof ServerLevel serverLevel) {
             SquadData squad = SquadManager.get(serverLevel).getSquadById(squadId).orElse(null);
             if (squad != null) {
-                for (SquadThreatIntel.ThreatKnowledge knowledge : squad.getThreatIntel().getThreatsView()) {
+                for (SquadThreatIntel.ThreatKnowledge knowledge : squad.getThreatIntel().getAllThreats()) {
                     if (knowledge.isAlive && knowledge.lastKnownPosition != null) {
                         positions.add(Vec3.atCenterOf(knowledge.lastKnownPosition));
                     }

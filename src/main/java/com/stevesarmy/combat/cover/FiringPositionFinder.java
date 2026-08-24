@@ -2,7 +2,6 @@ package com.stevesarmy.combat.cover;
 
 import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.combat.VisibilityRay;
-import com.stevesarmy.debug.PerformanceMetrics;
 import com.stevesarmy.debug.DiagnosticLogManager;
 import com.stevesarmy.entity.MachineGunnerEntity;
 import com.stevesarmy.entity.SoldierEntity;
@@ -774,34 +773,14 @@ public final class FiringPositionFinder {
         SquadData squad = SquadManager.get(serverLevel).getSquadById(mg.getSquadId()).orElse(null);
         if (squad == null) return;
         long now = level.getGameTime();
-        SquadThreatIntel.ThreatKnowledge[] selected = mg.getThreatSelectionScratch();
-        int selectedCount = 0;
-        for (int i = 0; i < selected.length; i++) selected[i] = null;
-        for (SquadThreatIntel.ThreatKnowledge threat : squad.getThreatIntel().getThreatsView()) {
+        List<SquadThreatIntel.ThreatKnowledge> threats = squad.getThreatIntel().getAllThreats();
+        threats.sort(Comparator.comparingDouble((SquadThreatIntel.ThreatKnowledge t) -> -t.accuracy));
+        for (SquadThreatIntel.ThreatKnowledge threat : threats) {
             if (!threat.isAlive || threat.lastKnownPosition == null
-                || squad.getThreatIntel().isThreatStale(threat.threatEntityId, now)) {
+                || squad.getThreatIntel().isThreatStale(threat.threatEntityId, now)
+                || countTargets(targets, TargetCategory.LAST_SEEN) >= MAX_LAST_SEEN_SAMPLES) {
                 continue;
             }
-            int insertion = 0;
-            while (insertion < selectedCount
-                && selected[insertion].accuracy >= threat.accuracy) {
-                insertion++;
-            }
-            if (selectedCount < MAX_LAST_SEEN_SAMPLES) {
-                for (int i = selectedCount; i > insertion; i--) {
-                    selected[i] = selected[i - 1];
-                }
-                selected[insertion] = threat;
-                selectedCount++;
-            } else if (insertion < MAX_LAST_SEEN_SAMPLES) {
-                for (int i = MAX_LAST_SEEN_SAMPLES - 1; i > insertion; i--) {
-                    selected[i] = selected[i - 1];
-                }
-                selected[insertion] = threat;
-            }
-        }
-        for (int i = 0; i < selectedCount; i++) {
-            SquadThreatIntel.ThreatKnowledge threat = selected[i];
             long age = Math.max(0L, now - threat.lastSeenTime);
             float freshness = Math.max(0.1f, 1.0f - age / 200.0f);
             Vec3 position = threat.lastVisibleHeadPoint != null
@@ -812,8 +791,6 @@ public final class FiringPositionFinder {
             addTarget(targets, position, TargetCategory.LAST_SEEN,
                 LAST_SEEN_WEIGHT * freshness, freshness);
         }
-        PerformanceMetrics.recordThreatSortSelectionPass();
-        PerformanceMetrics.recordTemporaryCollectionAvoided();
     }
 
     private static void addPotentialPeekSamples(Level level, CoverFinder finder,

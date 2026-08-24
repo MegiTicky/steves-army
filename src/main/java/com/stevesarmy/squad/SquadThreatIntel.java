@@ -1,7 +1,6 @@
 package com.stevesarmy.squad;
 
 import com.stevesarmy.StevesArmyMod;
-import com.stevesarmy.debug.PerformanceMetrics;
 import com.stevesarmy.debug.DiagnosticLogManager;
 import com.stevesarmy.entity.ai.CoverTacticalGoal;
 import net.minecraft.core.BlockPos;
@@ -14,14 +13,13 @@ import net.minecraft.world.phys.Vec3;
 
 import javax.annotation.Nullable;
 import java.util.*;
+import java.util.stream.Collectors;
 
 public class SquadThreatIntel {
 
     private final Map<UUID, ThreatKnowledge> knownThreats = new HashMap<>();
     private static final long THREAT_MEMORY_TICKS = 600;
     private static final long STALE_TIMEOUT_TICKS = 120;
-    private static final Comparator<ThreatKnowledge> ACCURACY_DESCENDING =
-        Comparator.comparingDouble((ThreatKnowledge threat) -> -threat.accuracy);
 
     public static class ThreatKnowledge {
         public final UUID threatEntityId;
@@ -141,11 +139,8 @@ public class SquadThreatIntel {
 
     public void reportThreat(UUID reporterId, LivingEntity threat, BlockPos pos,
                              @Nullable Vec3 aimPoint, @Nullable Vec3 headPoint, float accuracy) {
-        UUID threatId = threat.getUUID();
-        ThreatKnowledge knowledge = knownThreats.get(threatId);
-        if (knowledge == null) {
-            knowledge = new ThreatKnowledge(threatId);
-        }
+        ThreatKnowledge knowledge = knownThreats.getOrDefault(threat.getUUID(), 
+            new ThreatKnowledge(threat.getUUID()));
         
         knowledge.lastKnownPosition = pos;
         knowledge.lastSeenTime = threat.level().getGameTime();
@@ -157,7 +152,7 @@ public class SquadThreatIntel {
         knowledge.accuracy = Math.max(knowledge.accuracy, accuracy);
         knowledge.isAlive = true;
         
-        knownThreats.put(threatId, knowledge);
+        knownThreats.put(threat.getUUID(), knowledge);
         
         if (CoverTacticalGoal.isDebugLoggingEnabled()) {
             StevesArmyMod.LOGGER.info("[SquadThreatIntel] Threat reported: {} at {} by {}, accuracy={}",
@@ -166,10 +161,7 @@ public class SquadThreatIntel {
     }
 
     public void reportThreatPosition(UUID reporterId, UUID threatId, BlockPos pos, float accuracy, Level level) {
-        ThreatKnowledge knowledge = knownThreats.get(threatId);
-        if (knowledge == null) {
-            knowledge = new ThreatKnowledge(threatId);
-        }
+        ThreatKnowledge knowledge = knownThreats.getOrDefault(threatId, new ThreatKnowledge(threatId));
         
         knowledge.lastKnownPosition = pos;
         knowledge.lastSeenTime = level.getGameTime();
@@ -225,26 +217,6 @@ public class SquadThreatIntel {
             return true;
         }
         return false;
-    }
-
-    /** Atomically claims the highest-accuracy currently unsuppressed threat. */
-    @Nullable
-    public synchronized ThreatKnowledge tryClaimHighestAccuracyUnsuppressedThreat(
-        UUID soldierId, long currentGameTime) {
-        ThreatKnowledge best = null;
-        for (ThreatKnowledge threat : knownThreats.values()) {
-            if (threat.isAlive && !threat.isSuppressed
-                && (best == null || threat.accuracy > best.accuracy)) {
-                best = threat;
-            }
-        }
-        if (best == null) return null;
-        best.isSuppressed = true;
-        best.suppressors.add(soldierId);
-        best.suppressedBy = best.suppressors.iterator().next();
-        best.suppressionHeartbeats.put(soldierId, currentGameTime);
-        best.lastSuppressionHeartbeat = currentGameTime;
-        return best;
     }
     
     public void updateSuppressionHeartbeat(UUID threatId, long currentGameTime) {
@@ -314,129 +286,26 @@ public class SquadThreatIntel {
     }
 
     public List<ThreatKnowledge> getAllThreats() {
-        PerformanceMetrics.recordSquadThreatSnapshotRequest();
         return new ArrayList<>(knownThreats.values());
     }
 
-    /** Returns the live map view for hot loops that do not need a snapshot. */
-    public Collection<ThreatKnowledge> getThreatsView() {
-        return knownThreats.values();
-    }
-
-    /** Copies threats into a caller-owned buffer without creating a temporary snapshot. */
-    public void copyThreatsTo(List<ThreatKnowledge> output) {
-        output.clear();
-        output.addAll(knownThreats.values());
-        PerformanceMetrics.recordSquadThreatSnapshotRequest();
-        PerformanceMetrics.recordTemporaryCollectionAvoided();
-    }
-
     public List<ThreatKnowledge> getUnsuppressedThreats() {
-        List<ThreatKnowledge> result = new ArrayList<>();
-        copyUnsuppressedThreatsTo(result);
-        return result;
-    }
-
-    /** Fills a caller-owned buffer in the same stable accuracy order as the old stream. */
-    public void copyUnsuppressedThreatsTo(List<ThreatKnowledge> output) {
-        output.clear();
-        for (ThreatKnowledge threat : knownThreats.values()) {
-            if (threat.isAlive && !threat.isSuppressed) {
-                output.add(threat);
-            }
-        }
-        output.sort(ACCURACY_DESCENDING);
-        PerformanceMetrics.recordThreatSortSelectionPass();
-        PerformanceMetrics.recordTemporaryCollectionAvoided();
-    }
-
-    /** Fills a caller-owned buffer in stable descending accuracy order. */
-    public void copyAliveThreatsTo(List<ThreatKnowledge> output) {
-        output.clear();
-        for (ThreatKnowledge threat : knownThreats.values()) {
-            if (threat.isAlive) {
-                output.add(threat);
-            }
-        }
-        output.sort(ACCURACY_DESCENDING);
-        PerformanceMetrics.recordThreatSortSelectionPass();
-        PerformanceMetrics.recordTemporaryCollectionAvoided();
-    }
-
-    /** Fills a caller-owned buffer with the freshest visible contacts by recency. */
-    public void copyFreshVisibleThreatsByRecency(List<ThreatKnowledge> output,
-                                                  long currentGameTime, long maxAge,
-                                                  int maxContacts) {
-        output.clear();
-        if (maxContacts <= 0) return;
-        for (ThreatKnowledge threat : knownThreats.values()) {
-            long age = currentGameTime - threat.lastSeenTime;
-            if (!threat.isAlive || threat.lastVisibleAimPoint == null
-                || age < 0 || age > maxAge) {
-                continue;
-            }
-            int insertion = 0;
-            while (insertion < output.size()
-                && output.get(insertion).lastSeenTime >= threat.lastSeenTime) {
-                insertion++;
-            }
-            if (output.size() < maxContacts) {
-                output.add(null);
-                for (int i = output.size() - 1; i > insertion; i--) {
-                    output.set(i, output.get(i - 1));
-                }
-                output.set(insertion, threat);
-            } else if (insertion < maxContacts) {
-                for (int i = maxContacts - 1; i > insertion; i--) {
-                    output.set(i, output.get(i - 1));
-                }
-                output.set(insertion, threat);
-            }
-        }
-        PerformanceMetrics.recordThreatSortSelectionPass();
-        PerformanceMetrics.recordTemporaryCollectionAvoided();
+        return knownThreats.values().stream()
+            .filter(t -> t.isAlive && !t.isSuppressed)
+            .sorted(Comparator.comparingDouble(t -> -t.accuracy))
+            .collect(Collectors.toList());
     }
 
     public Optional<ThreatKnowledge> getHighestAccuracyUnsuppressedThreat() {
-        ThreatKnowledge best = null;
-        for (ThreatKnowledge threat : knownThreats.values()) {
-            if (threat.isAlive && !threat.isSuppressed
-                && (best == null || threat.accuracy > best.accuracy)) {
-                best = threat;
-            }
-        }
-        return Optional.ofNullable(best);
+        return knownThreats.values().stream()
+            .filter(t -> t.isAlive && !t.isSuppressed)
+            .max(Comparator.comparingDouble(t -> t.accuracy));
     }
 
     public Optional<ThreatKnowledge> getAssignedThreatForSoldier(UUID soldierId) {
-        for (ThreatKnowledge threat : knownThreats.values()) {
-            if (threat.suppressors.contains(soldierId)) {
-                return Optional.of(threat);
-            }
-        }
-        return Optional.empty();
-    }
-
-    @Nullable
-    public ThreatKnowledge findAssignedThreatForSoldier(UUID soldierId) {
-        for (ThreatKnowledge threat : knownThreats.values()) {
-            if (threat.suppressors.contains(soldierId)) {
-                return threat;
-            }
-        }
-        return null;
-    }
-
-    public int countFreshVisibleContacts(long currentGameTime, long maxAge) {
-        int count = 0;
-        for (ThreatKnowledge threat : knownThreats.values()) {
-            long age = currentGameTime - threat.lastSeenTime;
-            if (threat.isAlive && threat.lastVisibleAimPoint != null
-                && age >= 0 && age <= maxAge) {
-                count++;
-            }
-        }
-        return count;
+        return knownThreats.values().stream()
+            .filter(t -> t.suppressors.contains(soldierId))
+            .findFirst();
     }
 
     public void tickCleanup(long currentGameTime) {
@@ -504,18 +373,14 @@ public class SquadThreatIntel {
     }
 
     public int getAliveThreatCount() {
-        int count = 0;
-        for (ThreatKnowledge threat : knownThreats.values()) {
-            if (threat.isAlive) count++;
-        }
-        return count;
+        return (int) knownThreats.values().stream()
+            .filter(t -> t.isAlive)
+            .count();
     }
 
     public int getSuppressedThreatCount() {
-        int count = 0;
-        for (ThreatKnowledge threat : knownThreats.values()) {
-            if (threat.isAlive && threat.isSuppressed) count++;
-        }
-        return count;
+        return (int) knownThreats.values().stream()
+            .filter(t -> t.isAlive && t.isSuppressed)
+            .count();
     }
 }
