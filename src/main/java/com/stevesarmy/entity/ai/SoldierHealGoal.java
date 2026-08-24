@@ -40,6 +40,7 @@ public class SoldierHealGoal extends Goal {
         float healthFraction = soldier.getHealth() / soldier.getMaxHealth();
         if (healthFraction >= NORMAL_HEALTH_THRESHOLD) return false;
         if (!soldier.getCoverBehaviorManager().isInCover()) return false;
+        if (!soldier.getPeekController().isIdleInCover()) return false;
 
         sourceSlot = findHealingItem();
         return sourceSlot >= SoldierInventory.SLOT_GENERAL_START;
@@ -49,6 +50,7 @@ public class SoldierHealGoal extends Goal {
     public boolean canContinueToUse() {
         if (!soldier.isAlive() || !soldier.isHealing()) return false;
         if (soldier.isRecalling() || soldier.isInWaterOrBubble() || soldier.isOnFire() || soldier.isPassenger()) return false;
+        if (!soldier.getPeekController().isIdleInCover()) return false;
         return startedUsingItem && soldier.isUsingItem();
     }
 
