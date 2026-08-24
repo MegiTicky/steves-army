@@ -18,7 +18,7 @@ import com.stevesarmy.entity.ai.SoldierCombatGoal;
 import com.stevesarmy.entity.ai.SoldierFollowOwnerGoal;
 import com.stevesarmy.entity.ai.SoldierHoleRescueGoal;
 import com.stevesarmy.entity.ai.SoldierHoldPositionGoal;
-import com.stevesarmy.entity.ai.SoldierHealGoal;
+import com.stevesarmy.entity.ai.SoldierHealController;
 import com.stevesarmy.entity.ai.SoldierMoveToPingGoal;
 import com.stevesarmy.entity.ai.SoldierStrollGoal;
 import com.stevesarmy.entity.ai.CoverTacticalGoal;
@@ -199,6 +199,7 @@ public class SoldierEntity extends PathfinderMob implements Container {
     protected Goal coverTacticalGoalTask;
     private final ThreatAwareness threatAwareness;
     private final GrenadeTacticalController grenadeTacticalController;
+    private final SoldierHealController healController;
     
     private boolean healing = false;
     private int navigationTraversalLockUntilTick = -1;
@@ -322,6 +323,10 @@ public class SoldierEntity extends PathfinderMob implements Container {
         return healing;
     }
 
+    public SoldierHealController getHealController() {
+        return healController;
+    }
+
     public void setHealing(boolean healing) {
         this.healing = healing;
     }
@@ -337,6 +342,7 @@ public class SoldierEntity extends PathfinderMob implements Container {
         this.peekController = new PeekController();
         this.threatAwareness = new ThreatAwareness();
         this.grenadeTacticalController = new GrenadeTacticalController(this);
+        this.healController = new SoldierHealController(this);
         this.inventory.setMainHandChangedCallback(stack -> {
             if (!this.level().isClientSide) {
                 if (inventorySyncingFromEntity) return;
@@ -415,7 +421,6 @@ public class SoldierEntity extends PathfinderMob implements Container {
         this.goalSelector.addGoal(0, new SoldierHoleRescueGoal(this));
         this.goalSelector.addGoal(0, new FloatGoal(this));
         this.goalSelector.addGoal(1, new OpenDoorGoal(this, true));
-        this.goalSelector.addGoal(1, new SoldierHealGoal(this));
         this.goalSelector.addGoal(1, new SoldierMoveToPingGoal(this));
         initializeCoverTacticalGoal();
         this.goalSelector.addGoal(2, coverTacticalGoalTask);

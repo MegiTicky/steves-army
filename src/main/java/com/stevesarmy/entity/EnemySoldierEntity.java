@@ -7,7 +7,6 @@ import com.stevesarmy.combat.cover.CoverBehaviorManager;
 import com.stevesarmy.entity.ai.CoverTacticalGoal;
 import com.stevesarmy.entity.ai.EnemyDefendGoal;
 import com.stevesarmy.entity.ai.SoldierCombatGoal;
-import com.stevesarmy.entity.ai.SoldierHealGoal;
 import com.stevesarmy.squad.SquadData;
 import com.stevesarmy.squad.SquadManager;
 import com.stevesarmy.squad.SquadMode;
@@ -49,7 +48,6 @@ public class EnemySoldierEntity extends SoldierEntity {
     protected void registerGoals() {
         this.goalSelector.addGoal(0, new FloatGoal(this));
         this.goalSelector.addGoal(1, new OpenDoorGoal(this, true));
-        this.goalSelector.addGoal(1, new SoldierHealGoal(this));
         this.goalSelector.addGoal(2, initializeCoverTacticalGoal());
         this.goalSelector.addGoal(2, initializeCombatGoal());
         this.goalSelector.addGoal(3, new EnemyDefendGoal(this));

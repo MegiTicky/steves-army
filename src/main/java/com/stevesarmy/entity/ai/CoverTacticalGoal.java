@@ -176,6 +176,7 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
     private boolean isRetryAttempt = false;
     private boolean reloadHoldActive;
     private int reloadMovementLogCooldown;
+    private boolean healingPosturePending;
 
     private enum RelocationType { NONE, GO_TO, FOLLOW }
 
@@ -596,7 +597,9 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
     
     @Override
     public boolean canUse() {
-        if (soldier.isHealing()) return false;
+        if (soldier.isHealing()) {
+            return canContinueHealingInCover();
+        }
         if (!soldier.isAlive()) return false;
         
         // ATTACK mode: always try to use cover (cover-to-cover advance)
@@ -675,7 +678,10 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
     
     @Override
     public boolean canContinueToUse() {
-        if (!soldier.isAlive() || soldier.isHealing()) return false;
+        if (!soldier.isAlive()) return false;
+        if (soldier.isHealing()) {
+            return canContinueHealingInCover();
+        }
 
         if (relocationType != RelocationType.NONE && !isRelocationStillValid()) {
             navigation.stop();
@@ -738,10 +744,24 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
     
     @Override
     public void stop() {
-        if (soldier.isHealing()) {
+        boolean wasHealing = soldier.isHealing();
+        CoverBehaviorManager.CoverState state = getCoverManager().getState();
+        boolean preserveCoverForHealing = wasHealing
+            && (state == CoverBehaviorManager.CoverState.IN_COVER
+                || state == CoverBehaviorManager.CoverState.SUPPRESSED_IN_COVER)
+            && getCoverManager().getCurrentCover() != null;
+
+        if (wasHealing) {
+            soldier.getHealController().stop();
+        }
+
+        if (preserveCoverForHealing) {
+            healingPosturePending = false;
+            pendingRetryCover = null;
+            isRetryAttempt = false;
+            stuckTicks = 0;
             return;
         }
-        CoverBehaviorManager.CoverState state = getCoverManager().getState();
         
         // Don't clear cover if we're in ATTACK mode - preserve state across interruptions
         if (soldier.hasValidAttackTarget()) {
@@ -762,6 +782,7 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
         
         pendingRetryCover = null;
         isRetryAttempt = false;
+        healingPosturePending = false;
         cooldown = COOLDOWN_TICKS;
         stuckTicks = 0;
     }
@@ -772,6 +793,20 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
         CoverBehaviorManager.CoverState state = getCoverManager().getState();
         getCoverManager().tickSuppression(getCoverManager().isInCover());
         trackSuppressionEpisode();
+
+        if (soldier.isHealing()) {
+            if (canContinueHealingInCover()) {
+                soldier.getHealController().tick();
+                CoverPoint currentCover = getCoverManager().getCurrentCover();
+                if (currentCover != null) {
+                    maintainCoverAnchorIfHiding(currentCover);
+                }
+                tickProneFiringPlan();
+                populateCoverDebugData();
+                return;
+            }
+            soldier.getHealController().stop();
+        }
 
         if (relocationType != RelocationType.NONE && !isRelocationStillValid()) {
             navigation.stop();
@@ -1317,7 +1352,8 @@ private void tickRepositioning() {
         }
 
         if (currentCover != null && currentCover.getType() == CoverType.HALF
-            && soldier.isLowCrouching() && !getCoverManager().isSuppressed()) {
+            && soldier.isLowCrouching() && !getCoverManager().isSuppressed()
+            && !healingPosturePending) {
             getPeekController().recoverStandingInHalfCover(soldier, "unsuppressed-fallback");
         }
 
@@ -1436,6 +1472,9 @@ private void tickRepositioning() {
 
         // Delegate peek to PeekController
         if (currentCover != null) {
+            if (tryStartHealing(currentCover)) {
+                return;
+            }
             getPeekController().tick(soldier, currentCover, getPositionController());
             maintainCoverAnchorIfHiding(currentCover);
         }
@@ -1544,9 +1583,13 @@ private void tickRepositioning() {
 
         maintainCoverAnchorIfHiding(currentCover);
 
-// Flank detection is deferred while suppressed: the soldier will
+        // Flank detection is deferred while suppressed: the soldier will
         // evaluate flank repositioning after recovery in tickInCover()
         // (recovery transitions us from SUPPRESSED_IN_COVER back to IN_COVER)
+
+        if (currentCover != null && tryStartHealing(currentCover)) {
+            return;
+        }
 
         if (!coverManager.isPinned() && peekCtrl.isHiding()) {
             boolean allowPressuredPeek = shouldAllowPressuredPeek();
@@ -1557,6 +1600,93 @@ private void tickRepositioning() {
         } else if (!coverManager.isPinned()) {
             peekCtrl.tick(soldier, currentCover, getPositionController());
         }
+    }
+
+    private boolean canContinueHealingInCover() {
+        CoverBehaviorManager.CoverState state = getCoverManager().getState();
+        if (state != CoverBehaviorManager.CoverState.IN_COVER
+            && state != CoverBehaviorManager.CoverState.SUPPRESSED_IN_COVER) {
+            return false;
+        }
+
+        CoverPoint currentCover = getCoverManager().getCurrentCover();
+        if (currentCover == null || !getCoverManager().isInCover()) return false;
+        if (!soldier.getHealController().canContinue()) return false;
+        if (!isHealingPosture(currentCover)) return false;
+        if (relocationType != RelocationType.NONE || hasPendingCoverReposition()) return false;
+        if (!isCoverStillValid()) return false;
+        return isCoverAnchorSettled(currentCover);
+    }
+
+    private boolean tryStartHealing(CoverPoint currentCover) {
+        if (!canAttemptHealingInCover(currentCover)) {
+            healingPosturePending = false;
+            return false;
+        }
+
+        // Eligibility must be checked before changing half-cover posture. An
+        // available item alone must not keep a healthy soldier hidden forever.
+        if (!soldier.getHealController().canStart()) {
+            healingPosturePending = false;
+            return false;
+        }
+
+        PeekController peekController = getPeekController();
+        if (currentCover.getType() == CoverType.HALF && peekController.isStandingInHalfCover()) {
+            soldier.clearEmergencyEngagementPosture();
+            soldier.setLowCrouching(true);
+            peekController.enterHiding(soldier);
+            healingPosturePending = true;
+            return true;
+        }
+
+        if (!peekController.isHiding()) {
+            healingPosturePending = false;
+            return false;
+        }
+        if (currentCover.getType() == CoverType.HALF && !soldier.isLowCrouching()) {
+            soldier.setLowCrouching(true);
+            healingPosturePending = true;
+            return true;
+        }
+
+        healingPosturePending = false;
+        return soldier.getHealController().start();
+    }
+
+    private boolean canAttemptHealingInCover(CoverPoint currentCover) {
+        CoverBehaviorManager.CoverState state = getCoverManager().getState();
+        if (state != CoverBehaviorManager.CoverState.IN_COVER
+            && state != CoverBehaviorManager.CoverState.SUPPRESSED_IN_COVER) {
+            return false;
+        }
+        if (currentCover == null || !getCoverManager().isInCover()) return false;
+        if (relocationType != RelocationType.NONE || hasPendingCoverReposition()) return false;
+        if (!isCoverStillValid() || !isCoverAnchorSettled(currentCover)) return false;
+        PeekController.State peekState = getPeekController().getState();
+        return peekState == PeekController.State.HIDING
+            || (currentCover.getType() == CoverType.HALF
+                && peekState == PeekController.State.STANDING_IN_HALF_COVER);
+    }
+
+    private boolean isHealingPosture(CoverPoint currentCover) {
+        if (!getPeekController().isHiding()) return false;
+        return currentCover.getType() != CoverType.HALF || soldier.isLowCrouching();
+    }
+
+    private boolean isCoverAnchorSettled(CoverPoint currentCover) {
+        if (getPositionController().getLastResult() == CoverPositionController.MovementResult.IN_PROGRESS) {
+            return false;
+        }
+        return getPositionController().isWithinCoverAnchorDeadzone(
+            getCoverStandingPosition(currentCover.getPosition()));
+    }
+
+    private boolean hasPendingCoverReposition() {
+        CoverBehaviorManager manager = getCoverManager();
+        return manager.isRepositionRequested()
+            || manager.isShotInCoverRepositionRequested()
+            || manager.isContinuousSuppressionRepositionRequested();
     }
 
     /** Keeps defensive low-crouch authoritative without cancelling an allowed pressured peek. */

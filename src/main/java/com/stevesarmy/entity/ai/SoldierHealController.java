@@ -7,12 +7,10 @@ import com.stevesarmy.network.NetworkHandler;
 import com.stevesarmy.network.SyncSoldierInventoryPacket;
 import com.stevesarmy.registry.ModItemTags;
 import net.minecraft.world.InteractionHand;
-import net.minecraft.world.entity.ai.goal.Goal;
 import net.minecraft.world.item.ItemStack;
 
-import java.util.EnumSet;
-
-public class SoldierHealGoal extends Goal {
+/** Owns the medical item transaction while cover owns the tactical decision. */
+public final class SoldierHealController {
     private static final float NORMAL_HEALTH_THRESHOLD = 0.50F;
     private static final int RETRY_COOLDOWN_TICKS = 40;
 
@@ -21,13 +19,12 @@ public class SoldierHealGoal extends Goal {
     private int cooldownTicks;
     private boolean startedUsingItem;
 
-    public SoldierHealGoal(SoldierEntity soldier) {
+    public SoldierHealController(SoldierEntity soldier) {
         this.soldier = soldier;
-        this.setFlags(EnumSet.of(Flag.MOVE, Flag.LOOK));
     }
 
-    @Override
-    public boolean canUse() {
+    /** Checks item-use conditions without making any movement or cover decisions. */
+    public boolean canStart() {
         if (cooldownTicks > 0) {
             cooldownTicks--;
             return false;
@@ -39,34 +36,33 @@ public class SoldierHealGoal extends Goal {
 
         float healthFraction = soldier.getHealth() / soldier.getMaxHealth();
         if (healthFraction >= NORMAL_HEALTH_THRESHOLD) return false;
-        if (!soldier.getCoverBehaviorManager().isInCover()) return false;
-        if (!soldier.getPeekController().isIdleInCover()) return false;
 
         sourceSlot = findHealingItem();
         return sourceSlot >= SoldierInventory.SLOT_GENERAL_START;
     }
 
-    @Override
-    public boolean canContinueToUse() {
+    public boolean canContinue() {
         if (!soldier.isAlive() || !soldier.isHealing()) return false;
         if (soldier.isRecalling() || soldier.isInWaterOrBubble() || soldier.isOnFire() || soldier.isPassenger()) return false;
-        if (!soldier.getPeekController().isIdleInCover()) return false;
         return startedUsingItem && soldier.isUsingItem();
     }
 
-    @Override
-    public void start() {
-        ItemStack selected = soldier.getSoldierInventory().removeItem(sourceSlot, 1);
+    public boolean start() {
+        if (sourceSlot < SoldierInventory.SLOT_GENERAL_START) {
+            sourceSlot = findHealingItem();
+        }
+
+        ItemStack selected = sourceSlot >= SoldierInventory.SLOT_GENERAL_START
+            ? soldier.getSoldierInventory().removeItem(sourceSlot, 1)
+            : ItemStack.EMPTY;
         if (selected.isEmpty()) {
             cooldownTicks = RETRY_COOLDOWN_TICKS;
             sourceSlot = -1;
-            return;
+            return false;
         }
 
         soldier.setItemSlot(net.minecraft.world.entity.EquipmentSlot.OFFHAND, selected);
         soldier.setHealing(true);
-        soldier.cancelCoverMovement();
-        soldier.getNavigation().stop();
         syncInventory();
         if (GunIntegration.isTaczLoaded() && GunIntegration.hasGun(soldier)) {
             GunIntegration.aim(soldier, false);
@@ -79,14 +75,13 @@ public class SoldierHealGoal extends Goal {
             soldier.setHealing(false);
             cooldownTicks = RETRY_COOLDOWN_TICKS;
         }
+        return startedUsingItem;
     }
 
-    @Override
+    /** Item use is advanced by the entity; this hook keeps the lifecycle explicit. */
     public void tick() {
-        soldier.getNavigation().stop();
     }
 
-    @Override
     public void stop() {
         if (soldier.isUsingItem()) {
             soldier.stopUsingItem();
@@ -118,17 +113,20 @@ public class SoldierHealGoal extends Goal {
     }
 
     private void returnToInventory(ItemStack stack) {
-        ItemStack originalSlot = soldier.getSoldierInventory().getItem(sourceSlot);
-        if (originalSlot.isEmpty()) {
-            soldier.getSoldierInventory().setItem(sourceSlot, stack);
-            return;
+        if (sourceSlot >= SoldierInventory.SLOT_GENERAL_START) {
+            ItemStack originalSlot = soldier.getSoldierInventory().getItem(sourceSlot);
+            if (originalSlot.isEmpty()) {
+                soldier.getSoldierInventory().setItem(sourceSlot, stack);
+                return;
+            }
+            if (ItemStack.isSameItemSameTags(originalSlot, stack)
+                && originalSlot.getCount() + stack.getCount() <= originalSlot.getMaxStackSize()) {
+                originalSlot.grow(stack.getCount());
+                soldier.getSoldierInventory().setChanged();
+                return;
+            }
         }
-        if (ItemStack.isSameItemSameTags(originalSlot, stack)
-            && originalSlot.getCount() + stack.getCount() <= originalSlot.getMaxStackSize()) {
-            originalSlot.grow(stack.getCount());
-            soldier.getSoldierInventory().setChanged();
-            return;
-        }
+
         for (int slot = SoldierInventory.SLOT_GENERAL_START; slot < SoldierInventory.INVENTORY_SIZE; slot++) {
             if (soldier.getSoldierInventory().getItem(slot).isEmpty()) {
                 soldier.getSoldierInventory().setItem(slot, stack);

@@ -70,16 +70,15 @@ public final class MachineGunnerSupportGoal extends Goal implements CoverGoalCon
 
     @Override
     public boolean canUse() {
-        if (soldier.isHealing()) {
-            return false;
+        if (!soldier.isHealing()) {
+            prepareSupportSelection();
         }
-        prepareSupportSelection();
         return coverController.canUse();
     }
 
     @Override
     public boolean canContinueToUse() {
-        return !soldier.isHealing() && coverController.canContinueToUse();
+        return coverController.canContinueToUse();
     }
 
     @Override
@@ -97,7 +96,7 @@ public final class MachineGunnerSupportGoal extends Goal implements CoverGoalCon
     @Override
     public void tick() {
         CoverBehaviorManager manager = soldier.getCoverBehaviorManager();
-        if (manager.getTargetCover() == null && manager.isSeekingCover()) {
+        if (!soldier.isHealing() && manager.getTargetCover() == null && manager.isSeekingCover()) {
             prepareSupportSelection();
         }
         coverController.tick();

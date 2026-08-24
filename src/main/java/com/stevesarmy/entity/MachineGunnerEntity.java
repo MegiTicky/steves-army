@@ -4,7 +4,6 @@ import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.entity.ai.MachineGunnerCombatGoal;
 import com.stevesarmy.entity.ai.MachineGunnerSupportGoal;
 import com.stevesarmy.entity.ai.SoldierFollowOwnerGoal;
-import com.stevesarmy.entity.ai.SoldierHealGoal;
 import com.stevesarmy.entity.ai.SoldierHoldPositionGoal;
 import com.stevesarmy.entity.ai.SoldierHoleRescueGoal;
 import com.stevesarmy.entity.ai.SoldierMoveToPingGoal;
@@ -73,7 +72,6 @@ public class MachineGunnerEntity extends SoldierEntity {
         this.goalSelector.addGoal(0, new SoldierHoleRescueGoal(this));
         this.goalSelector.addGoal(0, new FloatGoal(this));
         this.goalSelector.addGoal(1, new OpenDoorGoal(this, true));
-        this.goalSelector.addGoal(1, new SoldierHealGoal(this));
         this.goalSelector.addGoal(1, new SoldierMoveToPingGoal(this));
         this.goalSelector.addGoal(2, coverTacticalGoalTask);
         this.goalSelector.addGoal(3, new SoldierFollowOwnerGoal(this));
