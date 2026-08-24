@@ -8,6 +8,7 @@ import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.Tag;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.network.protocol.game.ClientboundSetEntityMotionPacket;
+import net.minecraft.network.protocol.game.ClientboundTeleportEntityPacket;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
@@ -227,7 +228,7 @@ public final class GrenadeIntegration {
 
     /** Uses LesRaisins' own entity factory, item consumption, and cooldown path. */
     public static boolean throwGrenade(LivingEntity owner, ItemStack stack) {
-        return throwGrenadeDetailed(owner, stack, null).success();
+        return throwGrenadeDetailed(owner, stack, null, null).success();
     }
 
     /**
@@ -235,6 +236,13 @@ public final class GrenadeIntegration {
      * spread with the already validated AI velocity before the next tick.
      */
     public static ThrowResult throwGrenadeDetailed(LivingEntity owner, ItemStack stack,
+                                                    @Nullable Vec3 appliedVelocity) {
+        return throwGrenadeDetailed(owner, stack, null, appliedVelocity);
+    }
+
+    /** Native throw with optional AI-controlled spawn origin and velocity. */
+    public static ThrowResult throwGrenadeDetailed(LivingEntity owner, ItemStack stack,
+                                                    @Nullable Vec3 launchOrigin,
                                                     @Nullable Vec3 appliedVelocity) {
         int before = stack == null ? 0 : stack.getCount();
         if (!isSupported(stack) || owner == null || owner.level().isClientSide) {
@@ -265,8 +273,15 @@ public final class GrenadeIntegration {
 
             boolean velocitySyncBroadcast = false;
             if (appliedVelocity != null) {
+                if (launchOrigin != null) {
+                    projectile.setPos(launchOrigin.x, launchOrigin.y, launchOrigin.z);
+                }
                 projectile.setDeltaMovement(appliedVelocity);
                 if (owner.level() instanceof ServerLevel serverLevel) {
+                    if (launchOrigin != null) {
+                        serverLevel.getChunkSource().broadcastAndSend(projectile,
+                            new ClientboundTeleportEntityPacket(projectile));
+                    }
                     serverLevel.getChunkSource().broadcastAndSend(projectile,
                         new ClientboundSetEntityMotionPacket(projectile));
                     velocitySyncBroadcast = true;

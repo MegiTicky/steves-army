@@ -97,6 +97,16 @@ public final class GrenadeTacticalController {
         this.soldier = soldier;
     }
 
+    /**
+     * Uses server time as the single cadence source for both the entity gate
+     * and the controller's evaluation gate. Entity-local tickCount can have a
+     * different phase after spawning or loading, which would otherwise starve
+     * autonomous grenade evaluation when diagnostics are disabled.
+     */
+    public static boolean isEvaluationTick(long gameTime) {
+        return Math.floorMod(gameTime, EVALUATION_INTERVAL) == 0;
+    }
+
     public boolean isActive() {
         return state != State.IDLE;
     }
@@ -189,7 +199,7 @@ public final class GrenadeTacticalController {
         GrenadeIntegration.ThrowResult throwResult;
         try {
             throwResult = GrenadeIntegration.throwGrenadeDetailed(
-                soldier, stack, arc.initialVelocity());
+                soldier, stack, arc.origin(), arc.initialVelocity());
         } finally {
             soldier.setYRot(oldYaw);
             soldier.setXRot(oldPitch);
@@ -234,7 +244,7 @@ public final class GrenadeTacticalController {
         }
 
         long gameTime = soldier.level().getGameTime();
-        if (gameTime % EVALUATION_INTERVAL != 0) return false;
+        if (!isEvaluationTick(gameTime)) return false;
 
         Decision decision = evaluate(target, intel, gameTime);
         if (decision.plan == null) {
@@ -774,7 +784,7 @@ public final class GrenadeTacticalController {
         GrenadeIntegration.ThrowResult throwResult;
         try {
             throwResult = GrenadeIntegration.throwGrenadeDetailed(
-                soldier, stack, finalArc.initialVelocity());
+                soldier, stack, finalArc.origin(), finalArc.initialVelocity());
         } finally {
             restoreRotation();
         }
@@ -895,7 +905,12 @@ public final class GrenadeTacticalController {
     private Arc findArc(Vec3 target, GrenadeIntegration.BallisticProfile profile) {
         lastArcSawFriendlyPathBlock = false;
         lastArcSawThrowerCoverBlock = false;
-        Vec3 origin = new Vec3(soldier.getX(), soldier.getEyeY() - 0.1, soldier.getZ());
+        LaunchOrigin launchOrigin = resolveLaunchOrigin(target);
+        if (launchOrigin == null) {
+            lastArcSawThrowerCoverBlock = true;
+            return null;
+        }
+        Vec3 origin = launchOrigin.position();
         double dx = target.x - origin.x;
         double dz = target.z - origin.z;
         double horizontal = Math.sqrt(dx * dx + dz * dz);
@@ -998,12 +1013,39 @@ public final class GrenadeTacticalController {
                     && (best == null || terminalError < best.error - 0.001
                         || (Math.abs(terminalError - best.error) <= 0.001 && pitch > best.pitch))) {
                     best = new Arc(yaw, pitch, losPitch, terminalError, terminalPosition,
-                        initialVelocity, path, profile.lifetime(), profile.shouldBounce(), origin);
+                        initialVelocity, path, profile.lifetime(), profile.shouldBounce(), origin,
+                        launchOrigin.mode(), launchOrigin.coverTopY(), launchOrigin.clearance());
                 }
             }
         }
 
         return best;
+    }
+
+    @Nullable
+    private LaunchOrigin resolveLaunchOrigin(Vec3 target) {
+        Vec3 eyeOrigin = new Vec3(soldier.getX(), soldier.getEyeY() - 0.1, soldier.getZ());
+        CoverPoint cover = soldier.getCoverBehaviorManager().getCurrentCover();
+        boolean lowPose = soldier.getPose() == net.minecraft.world.entity.Pose.CROUCHING
+            || soldier.getPose() == net.minecraft.world.entity.Pose.SWIMMING;
+        if (cover == null || !soldier.getCoverBehaviorManager().isInCover() || !lowPose) {
+            return new LaunchOrigin(eyeOrigin, "STANDING_EYE", Double.NaN, Double.NaN);
+        }
+
+        Vec3 towardTarget = target.subtract(soldier.position());
+        Direction threatDirection = Direction.getNearest(towardTarget.x, 0.0, towardTarget.z);
+        double coverTopY = cover.getPosition().getY() + Math.max(0.0, cover.getCoverHeight(threatDirection));
+        double clearance = 0.18;
+        double minimumY = soldier.getY() + 1.6;
+        double maximumY = soldier.getY() + 2.0;
+        double originY = Math.max(minimumY, coverTopY + clearance);
+        if (originY > maximumY + 1.0e-4) return null;
+
+        Vec3 horizontal = new Vec3(towardTarget.x, 0.0, towardTarget.z);
+        if (horizontal.lengthSqr() < 1.0e-6) return null;
+        Vec3 offset = horizontal.normalize().scale(0.2);
+        Vec3 raisedOrigin = new Vec3(soldier.getX() + offset.x, originY, soldier.getZ() + offset.z);
+        return new LaunchOrigin(raisedOrigin, "RAISED_ABOVE_COVER", coverTopY, originY - coverTopY);
     }
 
     private Vec3 bounceVelocity(Vec3 velocity, Direction direction, double bounceFactor) {
@@ -1162,13 +1204,17 @@ public final class GrenadeTacticalController {
     }
 
     private String formatArc(Arc arc, GrenadeIntegration.BallisticProfile profile) {
-        return String.format("yaw=%.1f,pitch=%.1f,losPitch=%.1f,originY=%.2f,predictedLanding=%s,error=%.2f,flightTicks=%d,bounce=%s,pose=%s,configuredSpeed=%.3f,launchSpeed=%.3f,initialVelocity=%s,%s",
+        return String.format("yaw=%.1f,pitch=%.1f,losPitch=%.1f,originY=%.2f,predictedLanding=%s,error=%.2f,flightTicks=%d,bounce=%s,pose=%s,launchOrigin=%s,launchOriginMode=%s,coverTopY=%.2f,coverClearance=%.2f,configuredSpeed=%.3f,launchSpeed=%.3f,initialVelocity=%s,%s",
             arc.yaw, arc.pitch, arc.losPitch, arc.origin.y, arc.predictedLanding, arc.error, arc.flightTicks,
-            arc.bounced, soldier.getPose(), profile.initialSpeed(), arc.initialVelocity.length(),
+            arc.bounced, soldier.getPose(), arc.origin, arc.originMode, arc.coverTopY, arc.coverClearance,
+            profile.initialSpeed(), arc.initialVelocity.length(),
             arc.initialVelocity, profile.describe());
     }
 
     private record Arc(float yaw, float pitch, float losPitch, double error, Vec3 predictedLanding,
                        Vec3 initialVelocity, List<Vec3> path, int flightTicks,
-                       boolean bounced, Vec3 origin) {}
+                       boolean bounced, Vec3 origin, String originMode,
+                       double coverTopY, double coverClearance) {}
+
+    private record LaunchOrigin(Vec3 position, String mode, double coverTopY, double clearance) {}
 }

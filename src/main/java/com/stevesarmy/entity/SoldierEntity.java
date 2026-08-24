@@ -841,13 +841,13 @@ public class SoldierEntity extends PathfinderMob implements Container {
             .map(com.stevesarmy.squad.SquadData::getThreatIntel).orElse(null);
     }
 
-    private boolean shouldTickGrenadeController() {
+    private boolean shouldTickGrenadeController(long gameTime) {
         if (grenadeTacticalController.isActive()
             || DiagnosticLogManager.isAttackLoggingEnabled()
             || DiagnosticLogManager.isGrenadeLoggingEnabled()) {
             return true;
         }
-        if (tickCount % 10 != 0) return false;
+        if (!GrenadeTacticalController.isEvaluationTick(gameTime)) return false;
         return GrenadeIntegration.findSupportedSlot(inventory) >= 0;
     }
 
@@ -1002,14 +1002,15 @@ public class SoldierEntity extends PathfinderMob implements Container {
 
     @Override
     protected void customServerAiStep() {
+        long gameTime = level().getGameTime();
         if (VS2Compat.prepareSoldierAi(this)) {
-            if (grenadeTacticalController.isActive()) {
+            if (shouldTickGrenadeController(gameTime)) {
                 grenadeTacticalController.tick(getTarget(), getGrenadeSquadIntel());
             }
             return;
         }
         updateNavigationTraversalLock();
-        if (shouldTickGrenadeController()
+        if (shouldTickGrenadeController(gameTime)
             && grenadeTacticalController.tick(getTarget(), getGrenadeSquadIntel())) {
             return;
         }
