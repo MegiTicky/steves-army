@@ -1,6 +1,5 @@
 package com.stevesarmy.combat;
 
-import com.stevesarmy.debug.PerformanceMetrics;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.AABB;
@@ -28,9 +27,7 @@ public final class CombatTargetQueryCache {
     public static List<LivingEntity> getNearbyLivingEntities(Level level, Vec3 center,
                                                               double radius, int ttlTicks) {
         if (ttlTicks <= 0) {
-            List<LivingEntity> result = query(level, center, radius, 0);
-            PerformanceMetrics.recordTargetQueryCacheMiss(result.size());
-            return result;
+            return query(level, center, radius, 0);
         }
 
         long gameTime = level.getGameTime();
@@ -47,7 +44,6 @@ public final class CombatTargetQueryCache {
             cache.entries.entrySet().removeIf(entry -> entry.getValue().expiresAt < gameTime);
             Entry cached = cache.entries.get(cell);
             if (cached != null) {
-                PerformanceMetrics.recordTargetQueryCacheHit(cached.entities.size());
                 return cached.entities;
             }
 
@@ -59,7 +55,6 @@ public final class CombatTargetQueryCache {
                 query(level, center, radius, ttlTicks),
                 gameTime + Math.max(1, ttlTicks) - 1);
             cache.entries.put(cell, fresh);
-            PerformanceMetrics.recordTargetQueryCacheMiss(fresh.entities.size());
             return fresh.entities;
         }
     }

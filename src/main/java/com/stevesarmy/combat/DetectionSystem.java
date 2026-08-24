@@ -11,7 +11,6 @@ public class DetectionSystem {
     private final UUID soldierId;
     private final boolean machineGunnerPipeline;
     private final Set<UUID> seenThisTick = new HashSet<>();
-    private long lastScanTick = Long.MIN_VALUE;
     
     public static final double FOCUSED_RANGE = 96.0;
     public static final double PERIPHERAL_RANGE = 32.0;
@@ -83,7 +82,6 @@ public class DetectionSystem {
             DetectionState state = entry.getValue();
             return !seenThisTick.contains(entry.getKey()) && state.ticksSinceLastSeen > 200;
         });
-        lastScanTick = currentTime;
     }
 
     /** Applies passive decay while an optimization profile defers a scan. */
@@ -240,11 +238,6 @@ public class DetectionSystem {
     public boolean wasTargetInLOS(LivingEntity target) {
         DetectionState state = detectionStates.get(target.getUUID());
         return state != null && state.wasInLOSLastCheck;
-    }
-
-    /** Game tick for the most recent full visibility scan. */
-    public long getLastScanTick() {
-        return lastScanTick;
     }
 
     /** Adds a bounded detection impulse from a discrete cue such as a gunshot. */
