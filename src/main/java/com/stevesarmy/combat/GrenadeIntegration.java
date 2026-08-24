@@ -40,9 +40,65 @@ public final class GrenadeIntegration {
     public record SupportInfo(boolean supported, String itemId, int count,
                               @Nullable String throwableId, String failureReason) {}
 
+    public record BallisticProfile(String throwableId, double initialSpeed, double gravity,
+                                   double airDrag, double waterDrag, double crouchSpeedMultiplier,
+                                   int lifetime, boolean shouldBounce, double bounceFactor) {
+        public double launchSpeed(boolean crouching) {
+            return initialSpeed * (crouching ? crouchSpeedMultiplier : 1.0);
+        }
+
+        public String describe() {
+            return String.format("throwableId=%s,speed=%.3f,gravity=%.3f,airDrag=%.3f,waterDrag=%.3f,crouchMultiplier=%.3f,lifetime=%d,shouldBounce=%s,bounceFactor=%.3f",
+                throwableId, initialSpeed, gravity, airDrag, waterDrag,
+                crouchSpeedMultiplier, lifetime, shouldBounce, bounceFactor);
+        }
+    }
+
+    public record BallisticResult(@Nullable BallisticProfile profile, String reason) {
+        public boolean available() {
+            return profile != null;
+        }
+    }
+
     public static String supportedItemDescription() {
         return THROWABLE_ITEM_ID + " with NBT " + THROWABLE_ID_TAG
             + "=lrtactical:m67 or lrtactical:rgn";
+    }
+
+    public static BallisticResult inspectBallistics(@Nullable ItemStack stack) {
+        SupportInfo support = inspect(stack);
+        if (!support.supported()) {
+            return new BallisticResult(null, "unsupported throwable: " + support.failureReason());
+        }
+        try {
+            Object throwable = throwableOf.invoke(null, stack);
+            Object optional = getThrowableIndex.invoke(throwable, stack);
+            if (!(optional instanceof Optional<?> indexOptional) || indexOptional.isEmpty()) {
+                return new BallisticResult(null, "LesRaisins returned no ThrowableIndex");
+            }
+
+            Object index = indexOptional.get();
+            Object data = index.getClass().getMethod("getData").invoke(index);
+            Object entityData = data.getClass().getMethod("getEntityData").invoke(data);
+            double initialSpeed = number(data, "getInitialSpeed");
+            double gravity = number(entityData, "getGravity");
+            int lifetime = integer(entityData, "getLifeTime");
+            boolean shouldBounce = bool(entityData, "isShouldBounce");
+            double bounceFactor = number(entityData, "getBounceFactor");
+            double crouchSpeedMultiplier = readCrouchSpeedMultiplier();
+            if (!Double.isFinite(initialSpeed) || initialSpeed <= 0.0
+                || !Double.isFinite(gravity) || gravity < 0.0
+                || !Double.isFinite(bounceFactor) || bounceFactor < 0.0
+                || lifetime <= 0) {
+                return new BallisticResult(null, "LesRaisins returned invalid ballistic values");
+            }
+            return new BallisticResult(new BallisticProfile(
+                support.throwableId(), initialSpeed, gravity, 0.99, 0.8,
+                crouchSpeedMultiplier, lifetime, shouldBounce, bounceFactor), "resolved");
+        } catch (ReflectiveOperationException | RuntimeException exception) {
+            return new BallisticResult(null, "ballistic profile reflection failed: "
+                + describeFailure(exception));
+        }
     }
 
     public static void init() {
@@ -159,6 +215,28 @@ public final class GrenadeIntegration {
         } catch (ReflectiveOperationException | RuntimeException exception) {
             logFailure(exception);
             return false;
+        }
+    }
+
+    private static double number(Object target, String method) throws ReflectiveOperationException {
+        return ((Number) target.getClass().getMethod(method).invoke(target)).doubleValue();
+    }
+
+    private static int integer(Object target, String method) throws ReflectiveOperationException {
+        return ((Number) target.getClass().getMethod(method).invoke(target)).intValue();
+    }
+
+    private static boolean bool(Object target, String method) throws ReflectiveOperationException {
+        return (Boolean) target.getClass().getMethod(method).invoke(target);
+    }
+
+    private static double readCrouchSpeedMultiplier() throws ReflectiveOperationException {
+        try {
+            Class<?> config = Class.forName("me.xjqsh.lrtactical.config.ServerConfig");
+            Object value = config.getField("CROUCHING_INIT_SPEED_PERCENT").get(null);
+            return ((Number) value.getClass().getMethod("get").invoke(value)).doubleValue();
+        } catch (ClassNotFoundException | NoSuchFieldException exception) {
+            return 1.0;
         }
     }
 

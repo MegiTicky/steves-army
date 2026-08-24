@@ -5,7 +5,7 @@ import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.combat.GrenadeIntegration;
 import com.stevesarmy.combat.GunIntegration;
 import com.stevesarmy.combat.TargetAcquisition;
-import com.stevesarmy.combat.VisibilityRay;
+import com.stevesarmy.combat.cover.CoverPoint;
 import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.entity.EnemySoldierEntity;
 import com.stevesarmy.inventory.SoldierInventory;
@@ -13,16 +13,25 @@ import com.stevesarmy.squad.SquadData;
 import com.stevesarmy.squad.SquadManager;
 import com.stevesarmy.squad.SquadThreatIntel;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.core.particles.DustParticleOptions;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.tags.FluidTags;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.Mob;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
 
 import javax.annotation.Nullable;
+import org.joml.Vector3f;
+
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
@@ -31,11 +40,10 @@ public final class GrenadeTacticalController {
     private static final int EVALUATION_INTERVAL = 10;
     private static final int PREPARE_TICKS = 10;
     private static final int RESERVATION_LEASE_TICKS = PREPARE_TICKS + 20;
-    private static final int MAX_SIMULATION_TICKS = 75;
-    private static final double THROW_SPEED = 1.1;
-    private static final double THROW_GRAVITY = 0.07;
     private static final double BLAST_RADIUS = 5.5;
     private static final double MAX_LANDING_ERROR = 1.75;
+    private static final double THROWER_CLEARANCE_DISTANCE = 2.75;
+    private static final int THROWER_CLEARANCE_TICKS = 3;
 
     private final SoldierEntity soldier;
     private State state = State.IDLE;
@@ -46,9 +54,12 @@ public final class GrenadeTacticalController {
     private float savedHeadYaw;
     private float savedBodyYaw;
     private boolean grenadeReservationHeld;
+    private Arc pendingArc;
+    private GrenadeIntegration.BallisticProfile pendingProfile;
     private String lastDecisionReason;
     private long lastDecisionLogTick = Long.MIN_VALUE;
     private boolean lastArcSawFriendlyPathBlock;
+    private boolean lastArcSawThrowerCoverBlock;
 
     private enum State { IDLE, PREPARING }
 
@@ -62,7 +73,8 @@ public final class GrenadeTacticalController {
                              TargetSource source, @Nullable SquadThreatIntel.ThreatKnowledge knowledge,
                              int score) {}
 
-    private record Plan(ItemStack stack, int slot, Candidate candidate, float yaw, float pitch,
+    private record Plan(ItemStack stack, int slot, Candidate candidate, Arc arc,
+                        GrenadeIntegration.BallisticProfile profile,
                         @Nullable SquadData squad) {}
 
     private record CandidateResolution(@Nullable Candidate candidate, String reason) {}
@@ -150,37 +162,47 @@ public final class GrenadeTacticalController {
         if (!isSafeLanding(landing)) {
             return ForceThrowResult.failure("a friendly entity is inside the blast safety radius");
         }
-        Arc arc = findArc(landing);
+        GrenadeIntegration.BallisticResult ballistic = GrenadeIntegration.inspectBallistics(
+            soldier.getSoldierInventory().getItem(slot));
+        if (!ballistic.available()) {
+            return ForceThrowResult.failure("ballistic profile unavailable: " + ballistic.reason());
+        }
+        Arc arc = findArc(landing, ballistic.profile());
         if (arc == null) {
             if (lastArcSawFriendlyPathBlock) {
                 return ForceThrowResult.failure("a friendly entity is in the grenade path");
             }
+            if (lastArcSawThrowerCoverBlock) {
+                return ForceThrowResult.failure("thrower cover blocks every safe launch arc");
+            }
             return ForceThrowResult.failure(
                 "no safe ballistic arc reaches the target; check terrain, throw path, and target position");
         }
+        renderDebugTrajectory(arc, landing);
 
         ItemStack stack = soldier.getSoldierInventory().getItem(slot);
         float oldYaw = soldier.getYRot();
         float oldPitch = soldier.getXRot();
         float oldHeadYaw = soldier.getYHeadRot();
         float oldBodyYaw = soldier.getCrawlFacingYaw();
-        soldier.setYRot(arc.yaw);
-        soldier.setXRot(arc.pitch);
-        soldier.setYHeadRot(arc.yaw);
-        soldier.setYBodyRot(arc.yaw);
-        boolean thrown = GrenadeIntegration.throwGrenade(soldier, stack);
-        soldier.setYRot(oldYaw);
-        soldier.setXRot(oldPitch);
-        soldier.setYHeadRot(oldHeadYaw);
-        soldier.setYBodyRot(oldBodyYaw);
+        applyArcRotation(arc);
+        boolean thrown;
+        try {
+            thrown = GrenadeIntegration.throwGrenade(soldier, stack);
+        } finally {
+            soldier.setYRot(oldYaw);
+            soldier.setXRot(oldPitch);
+            soldier.setYHeadRot(oldHeadYaw);
+            soldier.setYBodyRot(oldBodyYaw);
+        }
         if (!thrown) {
             return ForceThrowResult.failure(
                 "LesRaisins rejected the throw or did not consume the grenade item");
         }
         soldier.getSoldierInventory().setChanged();
         return ForceThrowResult.success(String.format(
-            "threw grenade from slot %d toward %s (landing error %.2f blocks; cooldowns bypassed)",
-            slot, target.getName().getString(), arc.error));
+            "threw grenade from slot %d toward %s (%s; cooldowns bypassed)",
+            slot, target.getName().getString(), formatArc(arc, ballistic.profile())));
     }
 
     /** Returns true while grenade preparation owns this combat tick. */
@@ -198,6 +220,9 @@ public final class GrenadeTacticalController {
                 cancel("preparation invalidated: " + invalidationReason);
                 return false;
             }
+            // Repeat the trajectory while the soldier is preparing so the
+            // server-side particle preview remains visible to nearby players.
+            renderDebugTrajectory(pendingArc, pendingPlan.candidate.landing);
             if (prepareTicks > 0) {
                 alignToPlan();
                 prepareTicks--;
@@ -222,6 +247,8 @@ public final class GrenadeTacticalController {
             return false;
         }
 
+        renderDebugTrajectory(plan.arc, plan.candidate.landing);
+
         if (plan.squad != null) {
             SquadData.GrenadeReservationResult reservation = plan.squad.tryReserveGrenade(
                 soldier.getUUID(), gameTime, RESERVATION_LEASE_TICKS);
@@ -242,9 +269,11 @@ public final class GrenadeTacticalController {
 
         logDecision("grenade plan began slot=" + plan.slot
             + " count=" + plan.stack.getCount()
-            + " source=" + plan.candidate.source, target, intel);
+            + " source=" + plan.candidate.source + " " + formatArc(plan.arc, plan.profile), target, intel);
 
         pendingPlan = plan;
+        pendingArc = plan.arc;
+        pendingProfile = plan.profile;
         prepareTicks = PREPARE_TICKS;
         savedYaw = soldier.getYRot();
         savedPitch = soldier.getXRot();
@@ -308,18 +337,27 @@ public final class GrenadeTacticalController {
             return new Decision(null, "friendly entity in blast safety radius");
         }
 
-        Arc arc = findArc(candidate.landing);
+        ItemStack selectedStack = soldier.getSoldierInventory().getItem(slot);
+        GrenadeIntegration.BallisticResult ballistic = GrenadeIntegration.inspectBallistics(selectedStack);
+        if (!ballistic.available()) {
+            return new Decision(null, "ballistic profile unavailable: " + ballistic.reason());
+        }
+
+        Arc arc = findArc(candidate.landing, ballistic.profile());
         if (arc == null) {
             if (lastArcSawFriendlyPathBlock) {
                 return new Decision(null, "friendly entity in grenade path");
             }
-            return new Decision(null, "no safe ballistic arc reaches the target");
+            if (lastArcSawThrowerCoverBlock) {
+                return new Decision(null, "thrower cover blocks every safe launch arc");
+            }
+            return new Decision(null, "no native ballistic arc reaches the target");
         }
 
-        ItemStack selectedStack = soldier.getSoldierInventory().getItem(slot);
-        return new Decision(new Plan(selectedStack, slot, candidate,
-            arc.yaw, arc.pitch, getSquadData()),
-            "candidate=" + candidate.source + " slot=" + slot + " count=" + selectedStack.getCount());
+        return new Decision(new Plan(selectedStack, slot, candidate, arc,
+            ballistic.profile(), getSquadData()),
+            "candidate=" + candidate.source + " slot=" + slot + " count=" + selectedStack.getCount()
+                + " " + formatArc(arc, ballistic.profile()));
     }
 
     @Nullable
@@ -572,6 +610,8 @@ public final class GrenadeTacticalController {
         if (state == State.PREPARING) restoreRotation();
         state = State.IDLE;
         pendingPlan = null;
+        pendingArc = null;
+        pendingProfile = null;
         prepareTicks = 0;
     }
 
@@ -653,18 +693,29 @@ public final class GrenadeTacticalController {
             return String.format("target moved out of range (%.1f blocks)", distance);
         }
         if (!isSafeLanding(candidate.landing)) return "friendly entity entered blast safety radius";
-        if (findArc(candidate.landing) == null) {
+        GrenadeIntegration.BallisticResult ballistic = GrenadeIntegration.inspectBallistics(current);
+        if (!ballistic.available()) {
+            return "ballistic profile unavailable: " + ballistic.reason();
+        }
+        if (pendingProfile == null || !pendingProfile.equals(ballistic.profile())) {
+            return "native profile changed during preparation";
+        }
+        Arc currentArc = findArc(candidate.landing, ballistic.profile());
+        if (currentArc == null) {
             return lastArcSawFriendlyPathBlock
                 ? "friendly entity entered grenade path"
-                : "ballistic arc became unavailable";
+                : lastArcSawThrowerCoverBlock
+                ? "thrower cover blocks every safe launch arc"
+                : "no native ballistic arc reaches the target";
         }
+        pendingArc = currentArc;
         return null;
     }
 
     private void alignToPlan() {
-        if (pendingPlan == null) return;
-        float yaw = Mth.approachDegrees(soldier.getYRot(), pendingPlan.yaw, 30.0f);
-        float pitch = Mth.approachDegrees(soldier.getXRot(), pendingPlan.pitch, 20.0f);
+        if (pendingArc == null) return;
+        float yaw = Mth.approachDegrees(soldier.getYRot(), pendingArc.yaw, 30.0f);
+        float pitch = Mth.approachDegrees(soldier.getXRot(), pendingArc.pitch, 20.0f);
         soldier.setYRot(yaw);
         soldier.setXRot(pitch);
         soldier.setYHeadRot(yaw);
@@ -695,13 +746,41 @@ public final class GrenadeTacticalController {
             cancel("throw slot invalidated");
             return false;
         }
+
+        GrenadeIntegration.BallisticResult ballistic = GrenadeIntegration.inspectBallistics(stack);
+        if (!ballistic.available()) {
+            logDecision("preparation invalidated: final ballistic profile unavailable: "
+                + ballistic.reason());
+            cancel("final ballistic profile unavailable");
+            return false;
+        }
+        Arc finalArc = findArc(plan.candidate.landing, ballistic.profile());
+        if (finalArc == null) {
+            String reason = lastArcSawFriendlyPathBlock
+                ? "final trajectory blocked by friendly entity"
+                : lastArcSawThrowerCoverBlock
+                ? "final trajectory blocked by thrower cover"
+                : "final arc changed before throw or landing error exceeded tolerance";
+            logDecision("preparation invalidated: " + reason);
+            cancel(reason);
+            return false;
+        }
+        renderDebugTrajectory(finalArc, plan.candidate.landing);
+
         int before = stack.getCount();
-        boolean thrown = GrenadeIntegration.throwGrenade(soldier, stack);
+        applyArcRotation(finalArc);
+        boolean thrown;
+        try {
+            thrown = GrenadeIntegration.throwGrenade(soldier, stack);
+        } finally {
+            restoreRotation();
+        }
         if (!thrown) {
             completePendingSquadThrow(squad, gameTime, false);
             logDecision("LesRaisins rejected slot=" + plan.slot
                 + " countBefore=" + before + " countAfter=" + stack.getCount()
-                + " " + formatSupport(GrenadeIntegration.inspect(stack)));
+                + " " + formatSupport(GrenadeIntegration.inspect(stack))
+                + " " + formatArc(finalArc, ballistic.profile()));
             cancel("LesRaisins rejected the grenade throw");
             return false;
         }
@@ -710,15 +789,17 @@ public final class GrenadeTacticalController {
         SquadData.GrenadeThrowResult squadResult = completePendingSquadThrow(
             squad, gameTime, true);
         soldier.markGrenadeUsed(gameTime);
-        restoreRotation();
         state = State.IDLE;
         pendingPlan = null;
+        pendingArc = null;
+        pendingProfile = null;
         prepareTicks = 0;
         if (DiagnosticLogEnabled()) {
-            StevesArmyMod.LOGGER.info("[GrenadeDebug] soldier={} name={} side={} threw target={} source={} slot={} countBefore={} countAfter={} landing={}",
+            StevesArmyMod.LOGGER.info("[GrenadeDebug] soldier={} name={} side={} threw target={} source={} slot={} countBefore={} countAfter={} landing={} {}",
                 soldier.getId(), soldier.getName().getString(), debugSide(),
                 plan.candidate.targetId, plan.candidate.source,
-                plan.slot, before, stack.getCount(), plan.candidate.landing);
+                plan.slot, before, stack.getCount(), plan.candidate.landing,
+                formatArc(finalArc, ballistic.profile()));
             if (squad != null && !squadResult.committed()) {
                 StevesArmyMod.LOGGER.warn("[GrenadeDebug] soldier={} name={} side={} squad grenade commit failed after native throw: {}",
                     soldier.getId(), soldier.getName().getString(), debugSide(), squadResult.reason());
@@ -761,6 +842,13 @@ public final class GrenadeTacticalController {
         soldier.setYBodyRot(savedBodyYaw);
     }
 
+    private void applyArcRotation(Arc arc) {
+        soldier.setYRot(arc.yaw);
+        soldier.setXRot(arc.pitch);
+        soldier.setYHeadRot(arc.yaw);
+        soldier.setYBodyRot(arc.yaw);
+    }
+
     private int findGrenadeSlot() {
         return GrenadeIntegration.findSupportedSlot(soldier.getSoldierInventory());
     }
@@ -792,60 +880,196 @@ public final class GrenadeTacticalController {
         return soldier.isFriendlyTo(entity) || entity.isAlliedTo(soldier) || soldier.isAlliedTo(entity);
     }
 
-    private Arc findArc(Vec3 target) {
+    private Arc findArc(Vec3 target, GrenadeIntegration.BallisticProfile profile) {
         lastArcSawFriendlyPathBlock = false;
-        Vec3 origin = soldier.getEyePosition();
+        lastArcSawThrowerCoverBlock = false;
+        Vec3 origin = new Vec3(soldier.getX(), soldier.getEyeY() - 0.1, soldier.getZ());
         double dx = target.x - origin.x;
         double dz = target.z - origin.z;
         double horizontal = Math.sqrt(dx * dx + dz * dz);
         if (horizontal < 0.001) return null;
         float yaw = (float) Math.toDegrees(Math.atan2(dz, dx)) - 90.0f;
+        float losPitch = (float) -Math.toDegrees(Math.atan2(target.y - origin.y, horizontal));
         Arc best = null;
 
         for (int pitchDegrees = -80; pitchDegrees <= 20; pitchDegrees++) {
             float pitch = pitchDegrees;
             double pitchRad = Math.toRadians(pitch);
             double yawRad = Math.toRadians(yaw);
+            double speed = profile.launchSpeed(soldier.isCrouching());
             Vec3 velocity = new Vec3(
-                -Math.sin(yawRad) * Math.cos(pitchRad) * THROW_SPEED,
-                -Math.sin(pitchRad) * THROW_SPEED,
-                Math.cos(yawRad) * Math.cos(pitchRad) * THROW_SPEED);
+                -Math.sin(yawRad) * Math.cos(pitchRad) * speed,
+                -Math.sin(pitchRad) * speed,
+                Math.cos(yawRad) * Math.cos(pitchRad) * speed);
             Vec3 position = origin;
             boolean safePath = true;
-            double bestDistance = Double.MAX_VALUE;
+            Vec3 terminalPosition = null;
+            List<Vec3> path = new ArrayList<>();
+            path.add(origin);
 
-            for (int tick = 0; tick < MAX_SIMULATION_TICKS; tick++) {
-                Vec3 next = position.add(velocity);
-                if (intersectsFriendly(position, next)) {
-                    lastArcSawFriendlyPathBlock = true;
-                    safePath = false;
-                    break;
-                }
-                if (!VisibilityRay.trace(soldier.level(), position, next, soldier).clear()) {
-                    safePath = false;
-                    break;
-                }
-                double distanceToTarget = next.distanceTo(target);
-                bestDistance = Math.min(bestDistance, distanceToTarget);
-                position = next;
+            for (int tick = 0; tick < profile.lifetime(); tick++) {
+                Vec3 start = position;
+                Vec3 end = start.add(velocity);
+                boolean terminal = false;
 
-                // Once the simulated grenade reaches the target vicinity, its
-                // post-impact path is irrelevant. Continuing until the fixed
-                // lifetime makes every valid arc eventually collide with the
-                // ground and incorrectly rejects it.
-                if (distanceToTarget <= MAX_LANDING_ERROR) {
-                    break;
+                // Match ThrowableItemEntity.doMultiBounce: one native tick can
+                // resolve up to three block contacts before drag and gravity.
+                for (int bounce = 0; bounce < 3; bounce++) {
+                    BlockHitResult blockHit = soldier.level().clip(new ClipContext(
+                        start, end, ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, soldier));
+                    if (blockHit.getType() == net.minecraft.world.phys.HitResult.Type.MISS) {
+                        if (intersectsFriendly(start, end)) {
+                            lastArcSawFriendlyPathBlock = true;
+                            safePath = false;
+                        }
+                        path.add(end);
+                        break;
+                    }
+
+                    Vec3 hit = blockHit.getLocation();
+                    if (blockHit.getDirection() == Direction.UP && start.y() - hit.y() < 0.01) {
+                        hit = new Vec3(hit.x(), start.y(), hit.z());
+                    }
+                    if (isThrowerSideCoverCollision(blockHit, hit, origin, tick)) {
+                        lastArcSawThrowerCoverBlock = true;
+                        safePath = false;
+                        break;
+                    }
+                    if (intersectsFriendly(start, hit)) {
+                        lastArcSawFriendlyPathBlock = true;
+                        safePath = false;
+                        break;
+                    }
+                    path.add(hit);
+
+                    if (!profile.shouldBounce()) {
+                        // GrenadeEntity.onDeath uses the same 0.8 interpolation
+                        // from the entity position to the collision point.
+                        terminalPosition = position.lerp(hit, 0.8);
+                        path.add(terminalPosition);
+                        terminal = true;
+                        break;
+                    }
+
+                    if (bounce < 2) {
+                        start = start.lerp(hit, 0.8);
+                        Vec3 rest = end.subtract(start);
+                        end = start.add(bounceVelocity(rest, blockHit.getDirection(), profile.bounceFactor()));
+                        velocity = bounceVelocity(velocity, blockHit.getDirection(), profile.bounceFactor());
+                    } else {
+                        end = start.lerp(hit, 0.8);
+                        velocity = Vec3.ZERO;
+                    }
                 }
 
-                velocity = velocity.add(0.0, -THROW_GRAVITY, 0.0);
+                if (!safePath || terminal) break;
+
+                position = end;
+
+                double drag = soldier.level().getFluidState(BlockPos.containing(position))
+                    .is(FluidTags.WATER) ? profile.waterDrag() : profile.airDrag();
+                velocity = velocity.scale(drag);
+                velocity = velocity.add(0.0, -profile.gravity(), 0.0);
+
+                // LesRaisins detonates at the post-movement position when the
+                // configured lifetime expires. This is the terminal point for
+                // bouncing grenades, rather than the nearest airborne sample.
+                if (tick == profile.lifetime() - 1) {
+                    terminalPosition = position;
+                }
             }
 
-            if (safePath && (best == null || bestDistance < best.error)) {
-                best = new Arc(yaw, pitch, bestDistance, true);
+            if (safePath && terminalPosition != null) {
+                double terminalError = terminalPosition.distanceTo(target);
+                if (terminalError <= MAX_LANDING_ERROR
+                    && (best == null || terminalError < best.error - 0.001
+                        || (Math.abs(terminalError - best.error) <= 0.001 && pitch > best.pitch))) {
+                    best = new Arc(yaw, pitch, losPitch, terminalError, terminalPosition,
+                        path, profile.lifetime(), profile.shouldBounce(), origin);
+                }
             }
         }
 
-        return best != null && best.error <= MAX_LANDING_ERROR ? best : null;
+        return best;
+    }
+
+    private Vec3 bounceVelocity(Vec3 velocity, Direction direction, double bounceFactor) {
+        return switch (direction.getAxis()) {
+            case X -> velocity.multiply(-bounceFactor / 1.5, bounceFactor, bounceFactor);
+            case Y -> {
+                Vec3 bounced = velocity.multiply(bounceFactor, -bounceFactor / 2.5, bounceFactor);
+                if (bounced.y() < 0.07) {
+                    bounced = new Vec3(bounced.x(), 0.0, bounced.z());
+                }
+                yield bounced;
+            }
+            case Z -> velocity.multiply(bounceFactor, bounceFactor, -bounceFactor / 1.5);
+        };
+    }
+
+    private boolean isThrowerSideCoverCollision(BlockHitResult hit, Vec3 hitLocation,
+                                                 Vec3 origin, int simulationTick) {
+        if (!soldier.getCoverBehaviorManager().isInCover()
+            || simulationTick > THROWER_CLEARANCE_TICKS
+            || origin.distanceTo(hitLocation) > THROWER_CLEARANCE_DISTANCE) {
+            return false;
+        }
+
+        // A grenade that contacts terrain within the launch envelope while the
+        // soldier is in cover is a thrower-side obstruction, not a valid target
+        // landing. This deliberately rejects low arcs that would bounce back.
+        CoverPoint cover = soldier.getCoverBehaviorManager().getCurrentCover();
+        if (cover == null) return true;
+        BlockPos coverPos = cover.getPosition();
+        if (hit.getBlockPos().equals(coverPos)) return true;
+        for (Direction protectedDirection : cover.getProtectedDirections()) {
+            if (hit.getBlockPos().equals(coverPos.relative(protectedDirection))) {
+                return true;
+            }
+        }
+        return true;
+    }
+
+    private void renderDebugTrajectory(Arc arc, Vec3 target) {
+        if (!DiagnosticLogEnabled() || !(soldier.level() instanceof ServerLevel level)) return;
+
+        DustParticleOptions ballistic = new DustParticleOptions(new Vector3f(1.0f, 0.45f, 0.05f), 0.65f);
+        DustParticleOptions lineOfSight = new DustParticleOptions(new Vector3f(0.1f, 0.75f, 1.0f), 0.5f);
+        drawDebugParticleLine(level, ballistic, arc.path);
+        drawDebugParticleLine(level, lineOfSight, dashedLine(arc.origin, target, 0.35, 0.35));
+    }
+
+    private void drawDebugParticleLine(ServerLevel level, DustParticleOptions particle, List<Vec3> points) {
+        for (int i = 1; i < points.size(); i++) {
+            Vec3 from = points.get(i - 1);
+            Vec3 to = points.get(i);
+            double distance = from.distanceTo(to);
+            int samples = Math.max(1, (int) Math.ceil(distance / 0.35));
+            for (int sample = 0; sample <= samples; sample++) {
+                double progress = sample / (double) samples;
+                Vec3 point = from.lerp(to, progress);
+                for (ServerPlayer player : level.players()) {
+                    level.sendParticles(player, particle, true, point.x, point.y, point.z,
+                        1, 0, 0, 0, 0);
+                }
+            }
+        }
+    }
+
+    private List<Vec3> dashedLine(Vec3 from, Vec3 to, double segmentLength, double gapLength) {
+        List<Vec3> points = new ArrayList<>();
+        double distance = from.distanceTo(to);
+        if (distance < 0.001) return points;
+        Vec3 direction = to.subtract(from).normalize();
+        double cursor = 0.0;
+        while (cursor < distance) {
+            double start = cursor;
+            double end = Math.min(cursor + segmentLength, distance);
+            points.add(from.add(direction.scale(start)));
+            points.add(from.add(direction.scale(end)));
+            cursor += segmentLength + gapLength;
+        }
+        return points;
     }
 
     private boolean intersectsFriendly(Vec3 from, Vec3 to) {
@@ -924,5 +1148,12 @@ public final class GrenadeTacticalController {
             || com.stevesarmy.debug.DiagnosticLogManager.isGrenadeLoggingEnabled();
     }
 
-    private record Arc(float yaw, float pitch, double error, boolean safePath) {}
+    private String formatArc(Arc arc, GrenadeIntegration.BallisticProfile profile) {
+        return String.format("yaw=%.1f,pitch=%.1f,losPitch=%.1f,originY=%.2f,predictedLanding=%s,error=%.2f,flightTicks=%d,bounce=%s,pose=%s,%s",
+            arc.yaw, arc.pitch, arc.losPitch, arc.origin.y, arc.predictedLanding, arc.error, arc.flightTicks,
+            arc.bounced, soldier.getPose(), profile.describe());
+    }
+
+    private record Arc(float yaw, float pitch, float losPitch, double error, Vec3 predictedLanding,
+                       List<Vec3> path, int flightTicks, boolean bounced, Vec3 origin) {}
 }
