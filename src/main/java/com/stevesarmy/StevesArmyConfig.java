@@ -42,6 +42,7 @@ public class StevesArmyConfig {
     public static final ForgeConfigSpec.DoubleValue GRENADE_MAX_RANGE;
     public static final ForgeConfigSpec.DoubleValue GRENADE_SAFETY_MARGIN;
     public static final ForgeConfigSpec.DoubleValue GRENADE_MIN_THREAT_ACCURACY;
+    public static final ForgeConfigSpec.DoubleValue GRENADE_AIM_ERROR_SCALE;
 
     public static final ForgeConfigSpec.BooleanValue VS2_COMPAT_ENABLED;
     public static final ForgeConfigSpec.BooleanValue VS2_AUTO_TRANSPORT;
@@ -259,6 +260,11 @@ BUILDER.pop();
                      "Default: 0.65")
             .defineInRange("minThreatAccuracy", 0.65f, 0.0f, 1.0f);
 
+        GRENADE_AIM_ERROR_SCALE = BUILDER
+            .comment("Scales autonomous grenade throw inaccuracy. Default: 1.0.",
+                     "0.0 restores deterministic aim; higher values make throws less precise.")
+            .defineInRange("aimErrorScale", 1.0, 0.0, 2.0);
+
         BUILDER.pop();
 
         BUILDER.push("valkyrienskies");
@@ -415,6 +421,10 @@ BUILDER.pop();
 
     public static float getGrenadeMinThreatAccuracy() {
         return GRENADE_MIN_THREAT_ACCURACY.get().floatValue();
+    }
+
+    public static float getGrenadeAimErrorScale() {
+        return GRENADE_AIM_ERROR_SCALE.get().floatValue();
     }
 
     public static int getOptimizationLevel() {
