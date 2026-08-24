@@ -1,6 +1,5 @@
 package com.stevesarmy.debug;
 
-import com.stevesarmy.StevesArmyConfig;
 import java.util.Locale;
 import java.util.concurrent.atomic.LongAdder;
 
@@ -501,7 +500,6 @@ public final class PerformanceMetrics {
 
         return "=== PERFORMANCE METRICS ===\n"
             + "  Enabled: " + enabled + "\n"
-            + "  Optimization profile: " + StevesArmyConfig.getOptimizationProfile().displayName() + "\n"
             + "  Visibility cache: " + visibilityHits + " hits, " + visibilityMisses + " misses\n"
             + "  Visibility ray requests: " + visibilityRayRequests.sum()
             + " (" + visibilityRays.sum() + " actual traces, "

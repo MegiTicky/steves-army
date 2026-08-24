@@ -3,38 +3,6 @@ package com.stevesarmy;
 import net.minecraftforge.common.ForgeConfigSpec;
 
 public class StevesArmyConfig {
-    public enum OptimizationProfile {
-        COMPATIBILITY(0, "compatibility"),
-        CONSERVATIVE(1, "conservative"),
-        BALANCED(2, "balanced"),
-        AGGRESSIVE(3, "aggressive");
-
-        private final int level;
-        private final String displayName;
-
-        OptimizationProfile(int level, String displayName) {
-            this.level = level;
-            this.displayName = displayName;
-        }
-
-        public int level() {
-            return level;
-        }
-
-        public String displayName() {
-            return displayName;
-        }
-
-        public static OptimizationProfile fromLevel(int level) {
-            return switch (level) {
-                case 0 -> COMPATIBILITY;
-                case 2 -> BALANCED;
-                case 3 -> AGGRESSIVE;
-                default -> CONSERVATIVE;
-            };
-        }
-    }
-
     
     public static final ForgeConfigSpec.Builder BUILDER = new ForgeConfigSpec.Builder();
     public static final ForgeConfigSpec SPEC;
@@ -301,11 +269,10 @@ BUILDER.pop();
         BUILDER.push("performance");
 
         OPTIMIZATION_LEVEL = BUILDER
-            .comment("Performance optimization profile: compatibility, conservative, balanced, or aggressive.",
-                     "The existing numeric value is retained for config-file compatibility: 0, 1, 2, or 3.",
+            .comment("Performance optimization profile: 0=compatibility, 1=conservative, 2=balanced, 3=aggressive.",
                      "Higher profiles reuse perception data for longer and share nearby target queries.",
-                     "Compatibility keeps the existing target-query behavior; final firing validation is always exact.",
-                     "Default: conservative")
+                     "Level 0 keeps the existing target-query behavior; final firing validation is always exact.",
+                     "Default: 1")
             .defineInRange("optimizationLevel", 1, 0, 3);
 
         ASYNC_COVER_EVALUATION = BUILDER
@@ -438,63 +405,45 @@ BUILDER.pop();
         return OPTIMIZATION_LEVEL.get();
     }
 
-    public static OptimizationProfile getOptimizationProfile() {
-        return OptimizationProfile.fromLevel(getOptimizationLevel());
-    }
-
-    public static boolean useAsyncCoverEvaluation() {
-        return getOptimizationProfile() == OptimizationProfile.AGGRESSIVE
-            && ASYNC_COVER_EVALUATION.get();
-    }
-
     /** Number of ticks a soldier reuses its nearby-target snapshot. */
     public static int getTargetCandidateCacheTicks() {
-        return switch (getOptimizationProfile()) {
-            case BALANCED -> 8;
-            case AGGRESSIVE -> 12;
+        return switch (getOptimizationLevel()) {
+            case 2 -> 8;
+            case 3 -> 12;
             default -> 5;
         };
     }
 
     /** Number of ticks exact positional visibility results may be reused. */
     public static int getPositionVisibilityCacheTicks() {
-        return switch (getOptimizationProfile()) {
-            case COMPATIBILITY -> 0;
-            case BALANCED -> 2;
-            case AGGRESSIVE -> 4;
+        return switch (getOptimizationLevel()) {
+            case 0 -> 0;
+            case 2 -> 2;
+            case 3 -> 4;
             default -> 1;
         };
     }
 
     /** Number of ticks exact aim-point results may be reused. */
     public static int getAimPointCacheTicks() {
-        return switch (getOptimizationProfile()) {
-            case COMPATIBILITY -> 1;
-            case BALANCED -> 2;
-            case AGGRESSIVE -> 4;
+        return switch (getOptimizationLevel()) {
+            case 0 -> 1;
+            case 2 -> 2;
+            case 3 -> 4;
             default -> 1;
         };
     }
 
     /** Number of ticks exact exposure results may be reused. */
     public static int getExposureCacheTicks() {
-        return switch (getOptimizationProfile()) {
-            case BALANCED -> 2;
-            case AGGRESSIVE -> 4;
+        return switch (getOptimizationLevel()) {
+            case 2 -> 2;
+            case 3 -> 4;
             default -> 1;
         };
     }
 
     public static boolean useSharedTargetQueryCache() {
-        return getOptimizationProfile() != OptimizationProfile.COMPATIBILITY;
-    }
-
-    /** Number of ticks between non-urgent in-cover maintenance passes. */
-    public static int getCoverMaintenanceIntervalTicks() {
-        return switch (getOptimizationProfile()) {
-            case BALANCED -> 2;
-            case AGGRESSIVE -> 3;
-            default -> 1;
-        };
+        return getOptimizationLevel() >= 1;
     }
 }
