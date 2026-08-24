@@ -3,6 +3,7 @@ package com.stevesarmy.squad;
 import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.entity.EnemySoldierEntity;
 import com.stevesarmy.entity.SoldierEntity;
+import com.stevesarmy.entity.TeamGarrisonEntity;
 import com.stevesarmy.network.FireTeamScopeSyncPacket;
 import com.stevesarmy.network.NetworkHandler;
 import com.stevesarmy.util.SoldierNameGenerator;
@@ -38,6 +39,18 @@ public class TeamEventHandler {
             if (entity instanceof EnemySoldierEntity enemy) {
                 TeamManager.assignToEnemyTeam(enemy);
                 StevesArmyMod.LOGGER.info("TeamEventHandler: assigned enemy {} to enemy team", enemy.getName().getString());
+            } else if (entity instanceof TeamGarrisonEntity teamGarrison) {
+                // Team garrisons have no owner: they belong to a scoreboard team and are
+                // never registered in the owner pipeline, squad screen, or recall system.
+                String teamName = teamGarrison.getTeamName();
+                if (teamName != null) {
+                    TeamManager.assignToNamedTeam(teamGarrison, teamName);
+                }
+                teamGarrison.addEffect(new MobEffectInstance(MobEffects.GLOWING, Integer.MAX_VALUE, 0, false, false));
+                if (!teamGarrison.hasCustomName()) {
+                    teamGarrison.setCustomName(Component.literal(SoldierNameGenerator.generate(teamGarrison.getRandom())));
+                }
+                StevesArmyMod.LOGGER.info("TeamEventHandler: assigned team garrison {} to team {}", teamGarrison.getName().getString(), teamName);
             } else if (entity instanceof SoldierEntity soldier) {
                 if (OwnedSoldierRegistry.get(((ServerLevel) level).getServer()).isDismissed(soldier.getUUID())) {
                     soldier.discard();
@@ -52,10 +65,16 @@ public class TeamEventHandler {
                 soldier.addEffect(new MobEffectInstance(MobEffects.GLOWING, Integer.MAX_VALUE, 0, false, false));
 
                 if (level instanceof ServerLevel serverLevel) {
-                    FireTeamAssignment fta = FireTeamAssignment.get(serverLevel, ownerUUID);
-                    FireTeam savedTeam = fta.getTeamFor(soldier.getUUID());
-                    soldier.setFireTeam(savedTeam);
-                    fta.assignToTeam(soldier.getUUID(), savedTeam);
+                    if (soldier instanceof com.stevesarmy.entity.GarrisonEntity) {
+                        // Garrisons always keep the GARRISON fire team and are never
+                        // stored in the maneuver fire-team buckets.
+                        soldier.setFireTeam(FireTeam.GARRISON);
+                    } else {
+                        FireTeamAssignment fta = FireTeamAssignment.get(serverLevel, ownerUUID);
+                        FireTeam savedTeam = fta.getTeamFor(soldier.getUUID());
+                        soldier.setFireTeam(savedTeam);
+                        fta.assignToTeam(soldier.getUUID(), savedTeam);
+                    }
                 }
 
                 if (!soldier.hasCustomName()) {

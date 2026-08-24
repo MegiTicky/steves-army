@@ -70,6 +70,7 @@ public class FireTeamWheelRenderer {
             case BRAVO -> 0x5555FF;
             case CHARLIE -> 0x55FF55;
             case DELTA -> 0xFFFF55;
+            case GARRISON -> 0x55FFFF;
         };
     }
 

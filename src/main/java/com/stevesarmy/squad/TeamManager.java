@@ -30,6 +30,24 @@ public class TeamManager {
         addToTeam(scoreboard, entity, team);
     }
 
+    /** Assigns an entity to the named scoreboard team, creating it if missing. */
+    public static void assignToNamedTeam(Entity entity, String teamName) {
+        if (entity.level().isClientSide || teamName == null || teamName.isEmpty()) return;
+        Scoreboard scoreboard = entity.level().getScoreboard();
+        PlayerTeam team = getOrCreateTeam(scoreboard, teamName, pickTeamColor(teamName));
+        addToTeam(scoreboard, entity, team);
+    }
+
+    private static ChatFormatting pickTeamColor(String teamName) {
+        ChatFormatting[] colors = {
+            ChatFormatting.AQUA, ChatFormatting.BLUE, ChatFormatting.DARK_AQUA, ChatFormatting.DARK_BLUE,
+            ChatFormatting.DARK_GRAY, ChatFormatting.DARK_GREEN, ChatFormatting.DARK_PURPLE,
+            ChatFormatting.DARK_RED, ChatFormatting.GOLD, ChatFormatting.GREEN, ChatFormatting.LIGHT_PURPLE,
+            ChatFormatting.RED, ChatFormatting.WHITE, ChatFormatting.YELLOW
+        };
+        return colors[Math.floorMod(teamName.hashCode(), colors.length)];
+    }
+
     public static void addPlayerToFriendlyTeam(ServerPlayer player, UUID ownerUUID) {
         if (player.level().isClientSide) return;
         Scoreboard scoreboard = player.level().getScoreboard();

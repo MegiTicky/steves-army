@@ -61,9 +61,14 @@ public final class SoldierSpawner {
         }
 
         if (owner != null && soldier.isOwnedBy(owner)) {
-            FireTeamAssignment fireTeams = FireTeamAssignment.get(level, owner.getUUID());
-            soldier.setFireTeam(fireTeams.getSelectedSpawnTeam());
-            fireTeams.assignToTeam(soldier.getUUID(), soldier.getFireTeam());
+            if (soldier instanceof GarrisonEntity) {
+                // Garrisons are never part of the A/B/C/D fire-team buckets.
+                soldier.setFireTeam(com.stevesarmy.squad.FireTeam.GARRISON);
+            } else {
+                FireTeamAssignment fireTeams = FireTeamAssignment.get(level, owner.getUUID());
+                soldier.setFireTeam(fireTeams.getSelectedSpawnTeam());
+                fireTeams.assignToTeam(soldier.getUUID(), soldier.getFireTeam());
+            }
         }
 
         soldier.setPersistenceRequired();

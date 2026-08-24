@@ -38,6 +38,7 @@ import com.stevesarmy.squad.SquadThreatIntel;
 import com.stevesarmy.squad.SquadMode;
 import com.stevesarmy.squad.SquadFormation;
 import com.stevesarmy.squad.TeamManager;
+import com.stevesarmy.registry.ModItems;
 import com.stevesarmy.util.SpacingHelper;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -61,6 +62,7 @@ import net.minecraft.world.entity.ai.goal.target.HurtByTargetGoal;
 import net.minecraft.world.entity.ai.goal.target.NearestAttackableTargetGoal;
 import net.minecraft.world.entity.monster.Monster;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.LevelAccessor;
@@ -181,6 +183,8 @@ public class SoldierEntity extends PathfinderMob implements Container {
 
     @Nullable
     private UUID squadId;
+    @Nullable
+    protected BlockPos defendPosition;
     private long grenadeCooldownUntilTick;
     private SquadFormation squadFormation = SquadFormation.NONE;
     @Nullable
@@ -503,14 +507,90 @@ public class SoldierEntity extends PathfinderMob implements Container {
     public ItemStack getPickedResult(HitResult target) {
         inventory.syncFromEntity(this);
 
-        var egg = (com.stevesarmy.item.SoldierSpawnEggItem) com.stevesarmy.registry.ModItems.SOLDIER_SPAWN_EGG.get();
-        ItemStack stack = new ItemStack(egg);
+        ItemStack stack = new ItemStack(getPickBlockEggItem());
         CompoundTag tag = new CompoundTag();
         tag.put("Inventory", inventory.save());
+        tag.putInt("Role", getRole().ordinal());
+        getOwnerUUID().ifPresent(owner -> tag.putUUID("Owner", owner));
+        tag.putInt("FollowState", getFollowState());
+        tag.putInt("SquadMode", getSquadMode().ordinal());
+        UUID squadId = getSquadId();
+        if (squadId != null) {
+            tag.putBoolean("HasSquad", true);
+            tag.putUUID("SquadId", squadId);
+        }
+        BlockPos holdPos = getHoldPosition();
+        if (holdPos != null) {
+            tag.putLong("HoldPos", holdPos.asLong());
+        }
+        if (defendPosition != null) {
+            tag.putLong("DefendPosition", defendPosition.asLong());
+        }
+        tag.putInt("FireTeam", getFireTeam().ordinal());
+        tag.putInt("FireDiscipline", getFireDiscipline().ordinal());
 
         stack.getOrCreateTag().put("EntityTag", tag);
-
         return stack;
+    }
+
+    /**
+     * The spawn egg that pick-blocking this soldier yields. Subclasses may
+     * override to surface a different egg (e.g. the team garrison egg).
+     */
+    protected Item getPickBlockEggItem() {
+        return switch (getRole()) {
+            case RIFLEMAN -> ModItems.SOLDIER_SPAWN_EGG.get();
+            case MACHINE_GUNNER -> ModItems.MACHINE_GUNNER_SPAWN_EGG.get();
+            case GARRISON -> ModItems.GARRISON_SPAWN_EGG.get();
+        };
+    }
+
+    /**
+     * Restores the persistent soldier state carried by a pick-blocked spawn egg.
+     * Position is not touched; the caller places the entity.
+     */
+    public void fillFromPickBlockData(CompoundTag entityTag) {
+        if (entityTag.hasUUID("Owner")) {
+            setOwnerUUID(entityTag.getUUID("Owner"));
+        }
+        if (entityTag.contains("FollowState")) {
+            setFollowState(entityTag.getInt("FollowState"));
+        }
+        if (entityTag.contains("SquadMode")) {
+            int modeOrdinal = entityTag.getInt("SquadMode");
+            SquadMode[] modes = SquadMode.values();
+            if (modeOrdinal >= 0 && modeOrdinal < modes.length) {
+                setSquadMode(modes[modeOrdinal]);
+            }
+        }
+        if (entityTag.contains("HasSquad") && entityTag.getBoolean("HasSquad")
+            && entityTag.hasUUID("SquadId")) {
+            setSquadId(entityTag.getUUID("SquadId"));
+        }
+        if (entityTag.contains("HoldPos")) {
+            setHoldPosition(BlockPos.of(entityTag.getLong("HoldPos")));
+        }
+        if (entityTag.contains("DefendPosition")) {
+            setDefendPosition(BlockPos.of(entityTag.getLong("DefendPosition")));
+        }
+        if (entityTag.contains("FireTeam")) {
+            int ordinal = entityTag.getInt("FireTeam");
+            FireTeam[] teams = FireTeam.values();
+            if (ordinal >= 0 && ordinal < teams.length) {
+                setFireTeam(teams[ordinal]);
+            }
+        }
+        if (entityTag.contains("FireDiscipline")) {
+            int ordinal = entityTag.getInt("FireDiscipline");
+            FireDiscipline[] disciplines = FireDiscipline.values();
+            if (ordinal >= 0 && ordinal < disciplines.length) {
+                setFireDiscipline(disciplines[ordinal]);
+            }
+        }
+        if (entityTag.contains("Inventory")) {
+            inventory.load(entityTag.getCompound("Inventory"));
+            inventory.syncArmorToEntity(this);
+        }
     }
 
     @Override
@@ -653,6 +733,19 @@ public class SoldierEntity extends PathfinderMob implements Container {
     }
 
     @Nullable
+    public BlockPos getDefendPosition() {
+        return defendPosition;
+    }
+
+    public void setDefendPosition(@Nullable BlockPos pos) {
+        this.defendPosition = pos;
+    }
+
+    public double getDefendRadius() {
+        return 20.0;
+    }
+
+    @Nullable
     public UUID getSquadId() {
         return squadId;
     }
@@ -704,6 +797,7 @@ public class SoldierEntity extends PathfinderMob implements Container {
 
     @Override
     public boolean isAlliedTo(Entity other) {
+        if (other instanceof LivingEntity living && isAlliedByTeam(living)) return true;
         LivingEntity owner = getOwner();
         if (owner != null && owner.isAlliedTo(other)) return true;
         return super.isAlliedTo(other);
@@ -712,6 +806,9 @@ public class SoldierEntity extends PathfinderMob implements Container {
     @Override
     public boolean canAttack(LivingEntity target) {
         if (target instanceof SoldierEntity soldier && soldier.getOwnerUUID().equals(this.getOwnerUUID())) {
+            return false;
+        }
+        if (isAlliedByTeam(target)) {
             return false;
         }
         LivingEntity owner = getOwner();
@@ -729,9 +826,22 @@ public class SoldierEntity extends PathfinderMob implements Container {
         }
         return super.canAttack(target);
     }
+
+    /** True when the other entity shares the soldier's (or owner's) scoreboard team. */
+    private boolean isAlliedByTeam(LivingEntity other) {
+        Team otherTeam = other.getTeam();
+        if (otherTeam == null) return false;
+        Team soldierTeam = getTeam();
+        if (soldierTeam != null && soldierTeam.isAlliedTo(otherTeam)) return true;
+        LivingEntity owner = getOwner();
+        Team ownerTeam = owner != null ? owner.getTeam() : null;
+        return ownerTeam != null && ownerTeam.isAlliedTo(otherTeam);
+    }
     
     public boolean isFriendlyTo(LivingEntity other) {
         if (other == this) return false;
+        
+        if (isAlliedByTeam(other)) return true;
         
         LivingEntity owner = getOwner();
         if (other == owner) return true;
@@ -1481,6 +1591,19 @@ public BlockPos getPingMoveTarget() {
     public void setReloadStatus(boolean reloadPending, boolean tacticalReloading) {
         entityData.set(RELOAD_PENDING, reloadPending);
         entityData.set(TACTICAL_RELOADING, tacticalReloading);
+    }
+
+    /** True when the soldier's gun never runs out of reserve ammo. */
+    public boolean hasInfiniteReserveAmmo() {
+        return false;
+    }
+
+    /** Restores the virtual reserve before a reload when infinite reserve is enabled. */
+    public boolean ensureInfiniteReserveAmmo() {
+        return false;
+    }
+
+    public void configureInfiniteReserveAmmo() {
     }
 
     public CoverGoalController getCoverTacticalGoal() {

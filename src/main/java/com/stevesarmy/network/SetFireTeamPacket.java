@@ -81,17 +81,23 @@ public class SetFireTeamPacket {
                     fta.setTeamCount(teamCount);
                 }
                 case ASSIGN_SOLDIER -> {
-                    fta.assignToTeam(soldierId, targetTeam);
                     Entity entity = serverLevel.getEntity(soldierId);
+                    // Garrisons are never part of the maneuver fire-team buckets.
+                    if (entity instanceof com.stevesarmy.entity.GarrisonEntity) {
+                        break;
+                    }
+                    fta.assignToTeam(soldierId, targetTeam);
                     if (entity instanceof SoldierEntity s && s.isOwnedBy(player)) {
                         s.setFireTeam(targetTeam);
                     }
                 }
                 case REBALANCE -> {
                     // Include every loaded owned soldier, not only those near the player.
+                    // Garrisons are never rebalanced out of the GARRISON team.
                     List<SoldierEntity> ownedSoldiers = new ArrayList<>();
                     for (Entity entity : serverLevel.getEntities().getAll()) {
-                        if (entity instanceof SoldierEntity soldier && soldier.isOwnedBy(player)) {
+                        if (entity instanceof SoldierEntity soldier && soldier.isOwnedBy(player)
+                            && !(soldier instanceof com.stevesarmy.entity.GarrisonEntity)) {
                             ownedSoldiers.add(soldier);
                         }
                     }

@@ -206,7 +206,8 @@ public class PingMessage {
         List<LivingEntity> members = mgr.getSquadMembers(level, squad.getSquadId(), null);
         List<SoldierEntity> result = new ArrayList<>();
         for (LivingEntity member : members) {
-            if (member instanceof SoldierEntity s && s.isAlive() && s.isOwnedBy(sender)) {
+            if (member instanceof SoldierEntity s && s.isAlive() && s.isOwnedBy(sender)
+                && s.getFireTeam() != FireTeam.GARRISON) {
                 result.add(s);
             }
         }
@@ -215,7 +216,8 @@ public class PingMessage {
         List<SoldierEntity> nearbyFallback = level.getEntitiesOfClass(
             SoldierEntity.class,
             sender.getBoundingBox().inflate(100),
-            s -> s.isOwnedBy(sender) && !resultUuids.contains(s.getUUID())
+            s -> s.isOwnedBy(sender) && s.getFireTeam() != FireTeam.GARRISON
+                && !resultUuids.contains(s.getUUID())
         );
         result.addAll(nearbyFallback);
 

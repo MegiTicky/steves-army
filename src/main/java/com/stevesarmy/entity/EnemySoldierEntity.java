@@ -5,7 +5,7 @@ import com.stevesarmy.combat.GunIntegration;
 import com.stevesarmy.combat.ThreatAwareness;
 import com.stevesarmy.combat.cover.CoverBehaviorManager;
 import com.stevesarmy.entity.ai.CoverTacticalGoal;
-import com.stevesarmy.entity.ai.EnemyDefendGoal;
+import com.stevesarmy.entity.ai.DefendPositionGoal;
 import com.stevesarmy.entity.ai.SoldierCombatGoal;
 import com.stevesarmy.squad.SquadData;
 import com.stevesarmy.squad.SquadManager;
@@ -28,7 +28,6 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 
-import java.lang.reflect.Method;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -36,8 +35,6 @@ public class EnemySoldierEntity extends SoldierEntity {
 
     private static final double DEFEND_RADIUS = 20.0;
     private static final UUID ENEMY_SQUAD_LEADER_ID = UUID.fromString("00000000-0000-0000-0000-000000000001");
-    private static final int INFINITE_RESERVE_AMMO = 1_000_000;
-    private BlockPos defendPosition = null;
 
     public EnemySoldierEntity(EntityType<? extends SoldierEntity> type, Level level) {
         super(type, level);
@@ -50,7 +47,7 @@ public class EnemySoldierEntity extends SoldierEntity {
         this.goalSelector.addGoal(1, new OpenDoorGoal(this, true));
         this.goalSelector.addGoal(2, initializeCoverTacticalGoal());
         this.goalSelector.addGoal(2, initializeCombatGoal());
-        this.goalSelector.addGoal(3, new EnemyDefendGoal(this));
+        this.goalSelector.addGoal(3, new DefendPositionGoal(this));
         this.goalSelector.addGoal(4, new LookAtPlayerGoal(this, Player.class, 8.0F));
         this.goalSelector.addGoal(5, new RandomLookAroundGoal(this));
     }
@@ -88,14 +85,6 @@ public class EnemySoldierEntity extends SoldierEntity {
         this.setSquadId(enemySquad.getSquadId());
         
         StevesArmyMod.LOGGER.info("[EnemySquad] Enemy soldier {} joined enemy squad {}", this.getId(), enemySquad.getSquadId().toString().substring(0, 8));
-    }
-
-    public BlockPos getDefendPosition() {
-        return defendPosition;
-    }
-    
-    public void setDefendPosition(BlockPos pos) {
-        this.defendPosition = pos;
     }
 
     public double getDefendRadius() {
@@ -216,56 +205,23 @@ public class EnemySoldierEntity extends SoldierEntity {
         }
     }
 
+    @Override
     public boolean hasInfiniteReserveAmmo() {
-        if (!GunIntegration.isTaczLoaded()) return false;
-        try {
-            ItemStack gunStack = this.getMainHandItem();
-            if (!GunIntegration.isGun(gunStack)) return false;
-
-            Class<?> iGunClass = Class.forName("com.tacz.guns.api.item.IGun");
-            Method getIGunOrNull = iGunClass.getMethod("getIGunOrNull", ItemStack.class);
-            Object iGun = getIGunOrNull.invoke(null, gunStack);
-            if (iGun == null) return false;
-
-            boolean usesDummyAmmo = (boolean) iGunClass.getMethod("useDummyAmmo", ItemStack.class).invoke(iGun, gunStack);
-            int reserveAmmo = (int) iGunClass.getMethod("getDummyAmmoAmount", ItemStack.class).invoke(iGun, gunStack);
-            int maxReserveAmmo = (int) iGunClass.getMethod("getMaxDummyAmmoAmount", ItemStack.class).invoke(iGun, gunStack);
-            return usesDummyAmmo && reserveAmmo > 0 && maxReserveAmmo > 0;
-        } catch (Exception e) {
-            return false;
-        }
+        return InfiniteReserveAmmo.hasInfiniteReserveAmmo(this);
     }
 
     /** Gives the selected gun an internal TaCZ reserve without changing its magazine. */
+    @Override
     public void configureInfiniteReserveAmmo() {
-        ensureInfiniteReserveAmmo();
+        InfiniteReserveAmmo.ensureInfiniteReserveAmmo(this);
     }
 
     /**
      * Restores virtual reserve before TaCZ validates a reload. This intentionally does
      * not touch the current magazine or chamber, so each reload remains a normal TaCZ reload.
      */
+    @Override
     public boolean ensureInfiniteReserveAmmo() {
-        if (!GunIntegration.isTaczLoaded()) return false;
-        try {
-            ItemStack gunStack = getMainHandItem();
-            if (!GunIntegration.isGun(gunStack)) return false;
-
-            Class<?> iGunClass = Class.forName("com.tacz.guns.api.item.IGun");
-            Method getIGunOrNull = iGunClass.getMethod("getIGunOrNull", ItemStack.class);
-            Object iGun = getIGunOrNull.invoke(null, gunStack);
-            if (iGun == null) return false;
-
-            iGunClass.getMethod("setMaxDummyAmmoAmount", ItemStack.class, int.class)
-                .invoke(iGun, gunStack, INFINITE_RESERVE_AMMO);
-            iGunClass.getMethod("setDummyAmmoAmount", ItemStack.class, int.class)
-                .invoke(iGun, gunStack, INFINITE_RESERVE_AMMO);
-
-            return (boolean) iGunClass.getMethod("useDummyAmmo", ItemStack.class).invoke(iGun, gunStack);
-        } catch (Exception e) {
-            StevesArmyMod.LOGGER.warn("[EnemyAmmo] Failed to configure infinite reserve for enemy {} gun {}: {}",
-                this.getId(), getMainHandItem(), e.toString());
-            return false;
-        }
+        return InfiniteReserveAmmo.ensureInfiniteReserveAmmo(this);
     }
 }

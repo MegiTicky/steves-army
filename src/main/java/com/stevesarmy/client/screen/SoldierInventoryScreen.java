@@ -27,6 +27,7 @@ public class SoldierInventoryScreen extends AbstractContainerScreen<SoldierInven
 
     private Button rifleButton;
     private Button machineGunnerButton;
+    private Button garrisonButton;
 
     public SoldierInventoryScreen(SoldierInventoryMenu menu, Inventory playerInventory, Component title) {
         super(menu, playerInventory, title);
@@ -47,6 +48,10 @@ public class SoldierInventoryScreen extends AbstractContainerScreen<SoldierInven
             Component.literal("MG"), button -> switchRole(SoldierRole.MACHINE_GUNNER))
             .bounds(this.leftPos + 98, this.topPos + 4, 28, 14)
             .build());
+        this.garrisonButton = this.addRenderableWidget(Button.builder(
+            Component.literal("Garrison"), button -> switchRole(SoldierRole.GARRISON))
+            .bounds(this.leftPos + 130, this.topPos + 4, 44, 14)
+            .build());
         refreshRoleButtons();
     }
 
@@ -66,6 +71,10 @@ public class SoldierInventoryScreen extends AbstractContainerScreen<SoldierInven
         if (this.machineGunnerButton != null) {
             this.machineGunnerButton.active = role != null && role != SoldierRole.MACHINE_GUNNER;
             this.machineGunnerButton.visible = role != null;
+        }
+        if (this.garrisonButton != null) {
+            this.garrisonButton.active = role != null && role != SoldierRole.GARRISON;
+            this.garrisonButton.visible = role != null;
         }
     }
 

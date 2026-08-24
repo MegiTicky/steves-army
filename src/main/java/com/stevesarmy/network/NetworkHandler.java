@@ -104,6 +104,10 @@ public class NetworkHandler {
             SetSoldierRolePacket::encode,
             SetSoldierRolePacket::decode,
             SetSoldierRolePacket::handle);
+        INSTANCE.registerMessage(id++, BulkGarrisonPacket.class,
+            BulkGarrisonPacket::encode,
+            BulkGarrisonPacket::decode,
+            BulkGarrisonPacket::handle);
     }
 
     public static void sendTo(ServerPlayer player, Object message) {

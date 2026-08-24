@@ -2,6 +2,7 @@ package com.stevesarmy.client.screen;
 
 import com.stevesarmy.client.ClientSquadData;
 import com.stevesarmy.client.FireTeamScopeState;
+import com.stevesarmy.network.BulkGarrisonPacket;
 import com.stevesarmy.network.NetworkHandler;
 import com.stevesarmy.network.DismissSoldierPacket;
 import com.stevesarmy.network.OpenSoldierInventoryMessage;
@@ -52,6 +53,12 @@ public class SquadCommandScreen extends Screen {
     private int teamCount = 2;
     private int scrollOffset;
     private Component hoveredActionTooltip;
+    private Tab activeTab = Tab.SQUAD;
+
+    private enum Tab {
+        SQUAD,
+        GARRISON
+    }
 
     private static class SoldierRow {
         final UUID entityId;
@@ -110,6 +117,35 @@ public class SquadCommandScreen extends Screen {
         rebuildFooterButtons();
     }
 
+    private boolean matchesTab(FireTeam fireTeam) {
+        return activeTab == Tab.GARRISON ? fireTeam == FireTeam.GARRISON : fireTeam != FireTeam.GARRISON;
+    }
+
+    private void rebuildTabButtons() {
+        int tabWidth = 60;
+        int tabHeight = 14;
+        int x = width - PANEL_LEFT - tabWidth * 2 - 4;
+        int y = 6;
+
+        Button squadTab = Button.builder(Component.literal("Squad"), button -> switchTab(Tab.SQUAD))
+            .bounds(x, y, tabWidth, tabHeight).build();
+        squadTab.active = activeTab != Tab.SQUAD;
+        addRenderableWidget(squadTab);
+
+        x += tabWidth + 4;
+        Button garrisonTab = Button.builder(Component.literal("Garrison"), button -> switchTab(Tab.GARRISON))
+            .bounds(x, y, tabWidth, tabHeight).build();
+        garrisonTab.active = activeTab != Tab.GARRISON;
+        addRenderableWidget(garrisonTab);
+    }
+
+    private void switchTab(Tab tab) {
+        if (activeTab == tab) return;
+        activeTab = tab;
+        rebuildRows();
+        rebuildFooterButtons();
+    }
+
     private void rebuildFooterButtons() {
         clearWidgets();
 
@@ -153,12 +189,32 @@ public class SquadCommandScreen extends Screen {
         addRenderableWidget(Button.builder(Component.literal("Rebalance"), button ->
             NetworkHandler.INSTANCE.sendToServer(SetFireTeamPacket.rebalance()))
             .bounds(x, fireTeamRowY, 60, btnHeight).build());
+        x += 60 + 4;
+
+        FireTeam scope = FireTeamScopeState.INSTANCE.getCurrentScope();
+        boolean canGarrisonize = scope != FireTeam.ALL && scope != FireTeam.GARRISON;
+        Button toGarrison = Button.builder(Component.literal("To Garrison"), button ->
+            NetworkHandler.INSTANCE.sendToServer(new BulkGarrisonPacket(BulkGarrisonPacket.Mode.TO_GARRISON,
+                FireTeamScopeState.INSTANCE.getCurrentScope())))
+            .bounds(x, fireTeamRowY, 70, btnHeight).build();
+        toGarrison.active = canGarrisonize;
+        addRenderableWidget(toGarrison);
+        x += 70 + 4;
+        Button toSquad = Button.builder(Component.literal("To Squad"), button ->
+            NetworkHandler.INSTANCE.sendToServer(new BulkGarrisonPacket(BulkGarrisonPacket.Mode.TO_SQUAD,
+                FireTeamScopeState.INSTANCE.getCurrentScope())))
+            .bounds(x, fireTeamRowY, 70, btnHeight).build();
+        addRenderableWidget(toSquad);
+
+        rebuildTabButtons();
     }
 
     private void rebuildRows() {
         rows.clear();
         for (SquadStatusSyncPacket.SoldierStatusEntry entry : ClientSquadData.INSTANCE.getAllEntries()) {
-            rows.add(new SoldierRow(entry));
+            if (matchesTab(entry.getFireTeam())) {
+                rows.add(new SoldierRow(entry));
+            }
         }
         sortRows();
         clampScrollOffset();
@@ -173,6 +229,7 @@ public class SquadCommandScreen extends Screen {
 
         List<SoldierRow> updatedRows = new ArrayList<>(entries.size());
         for (SquadStatusSyncPacket.SoldierStatusEntry entry : entries) {
+            if (!matchesTab(entry.getFireTeam())) continue;
             SoldierRow row = existingRows.get(entry.entityId);
             if (row == null) {
                 row = new SoldierRow(entry);
@@ -331,6 +388,7 @@ public class SquadCommandScreen extends Screen {
             case BRAVO -> 0xFF5555FF;
             case CHARLIE -> 0xFF55FF55;
             case DELTA -> 0xFFFFFF55;
+            case GARRISON -> 0xFF55FFFF;
             default -> 0xFFFFFFFF;
         };
         String badge = "[" + ftLabel + "]";

@@ -88,6 +88,7 @@ public final class SquadActivityOverlayRenderer {
             case BRAVO -> 0xFFFFAA00;
             case CHARLIE -> 0xFF5555FF;
             case DELTA -> 0xFFFF5555;
+            case GARRISON -> 0xFF55FFFF;
         };
     }
 

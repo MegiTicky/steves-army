@@ -5,7 +5,6 @@ import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.inventory.SoldierInventory;
 import com.stevesarmy.squad.FireDiscipline;
 import com.stevesarmy.squad.FireTeam;
-import com.stevesarmy.squad.FireTeamAssignment;
 import com.stevesarmy.squad.OwnedSoldierRegistry;
 import com.stevesarmy.squad.SquadMode;
 import net.minecraft.network.FriendlyByteBuf;
@@ -102,11 +101,10 @@ public class SquadStatusSyncPacket {
                 }
             }
             registry.pruneDeadEntries();
-            FireTeamAssignment fireTeamAssignment = FireTeamAssignment.get(player.getServer().overworld(), player.getUUID());
             for (OwnedSoldierRegistry.Entry snapshot : registry.getOwned(player.getUUID())) {
                 SoldierEntity soldier = loadedSoldiers.get(snapshot.soldierId());
                 boolean loaded = soldier != null && soldier.isAlive();
-                int teamOrdinal = loaded ? fireTeamAssignment.getTeamFor(soldier.getUUID()).ordinal() : snapshot.fireTeam();
+                int teamOrdinal = loaded ? soldier.getFireTeam().ordinal() : snapshot.fireTeam();
                 entries.add(new SoldierStatusEntry(
                     snapshot.soldierId(),
                     loaded ? soldier.getId() : -1,

@@ -6,7 +6,8 @@ import net.minecraft.network.chat.Component;
  *  carrying a rifle still behaves as a machine gunner. */
 public enum SoldierRole {
     RIFLEMAN,
-    MACHINE_GUNNER;
+    MACHINE_GUNNER,
+    GARRISON;
 
     public Component getDisplayName() {
         return Component.translatable("role.steves_army." + name().toLowerCase());

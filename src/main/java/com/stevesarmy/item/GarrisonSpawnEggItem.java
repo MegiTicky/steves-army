@@ -1,6 +1,6 @@
 package com.stevesarmy.item;
 
-import com.stevesarmy.entity.MachineGunnerEntity;
+import com.stevesarmy.entity.GarrisonEntity;
 import com.stevesarmy.entity.SoldierSpawner;
 import com.stevesarmy.registry.ModEntities;
 import net.minecraft.core.BlockPos;
@@ -9,16 +9,17 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.context.UseOnContext;
 import net.minecraft.world.level.Level;
 import net.minecraftforge.common.ForgeSpawnEggItem;
 
 import java.util.function.Supplier;
 
-public class MachineGunnerSpawnEggItem extends ForgeSpawnEggItem {
+public class GarrisonSpawnEggItem extends ForgeSpawnEggItem {
 
-    public MachineGunnerSpawnEggItem(Supplier<? extends EntityType<? extends MachineGunnerEntity>> type,
-                                     int primaryColor, int secondaryColor, Properties props) {
+    public GarrisonSpawnEggItem(Supplier<? extends EntityType<? extends GarrisonEntity>> type,
+                                int primaryColor, int secondaryColor, Properties props) {
         super(type, primaryColor, secondaryColor, props);
     }
 
@@ -32,19 +33,19 @@ public class MachineGunnerSpawnEggItem extends ForgeSpawnEggItem {
         BlockPos pos = context.getClickedPos();
         Player player = context.getPlayer();
 
-        MachineGunnerEntity gunner = ModEntities.MACHINE_GUNNER.get().create((ServerLevel) level);
-        if (gunner == null) {
+        GarrisonEntity garrison = ModEntities.GARRISON.get().create((ServerLevel) level);
+        if (garrison == null) {
             return InteractionResult.FAIL;
         }
-        gunner.moveTo(pos.getX() + 0.5, pos.getY() + 1.0, pos.getZ() + 0.5,
+        garrison.moveTo(pos.getX() + 0.5, pos.getY() + 1.0, pos.getZ() + 0.5,
             player != null ? player.getYRot() : 0.0F, 0.0F);
 
         CompoundTag entityTag = getEntityTag(context.getItemInHand());
         if (entityTag != null) {
-            gunner.fillFromPickBlockData(entityTag);
+            garrison.fillFromPickBlockData(entityTag);
         }
 
-        SoldierSpawner.SpawnResult result = SoldierSpawner.finishSpawn((ServerLevel) level, gunner, player, false);
+        SoldierSpawner.SpawnResult result = SoldierSpawner.finishSpawn((ServerLevel) level, garrison, player, false);
         if (!result.success()) {
             return InteractionResult.FAIL;
         }
@@ -55,7 +56,7 @@ public class MachineGunnerSpawnEggItem extends ForgeSpawnEggItem {
         return InteractionResult.SUCCESS;
     }
 
-    private CompoundTag getEntityTag(net.minecraft.world.item.ItemStack stack) {
+    private CompoundTag getEntityTag(ItemStack stack) {
         if (stack.getTag() != null && stack.getTag().contains("EntityTag")) {
             return stack.getTag().getCompound("EntityTag");
         }

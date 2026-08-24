@@ -21,7 +21,6 @@ import com.stevesarmy.combat.cover.CoverType;
 import com.stevesarmy.debug.DiagnosticLogManager;
 import com.stevesarmy.debug.PerformanceMetrics;
 import com.stevesarmy.entity.SoldierEntity;
-import com.stevesarmy.entity.EnemySoldierEntity;
 import com.stevesarmy.entity.TargetEntity;
 import com.stevesarmy.inventory.SoldierInventory;
 import com.stevesarmy.network.NetworkHandler;
@@ -1059,14 +1058,11 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
     }
 
     private boolean usesInventoryAmmoWithoutReserve() {
-        return GunIntegration.useInventoryAmmo(soldier)
-            && !(soldier instanceof EnemySoldierEntity enemy && enemy.hasInfiniteReserveAmmo());
+        return GunIntegration.useInventoryAmmo(soldier) && !soldier.hasInfiniteReserveAmmo();
     }
 
     private void prepareEnemyReserveAmmo() {
-        if (soldier instanceof EnemySoldierEntity enemy) {
-            enemy.ensureInfiniteReserveAmmo();
-        }
+        soldier.ensureInfiniteReserveAmmo();
     }
 
     private boolean isDirectlyEngaging() {
@@ -2974,7 +2970,7 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
     }
     
     public int getTotalAmmo() {
-        if (soldier instanceof EnemySoldierEntity enemy && enemy.hasInfiniteReserveAmmo()) {
+        if (soldier.hasInfiniteReserveAmmo()) {
             return 1_000_000;
         }
 

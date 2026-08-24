@@ -6,13 +6,17 @@ import com.mojang.brigadier.builder.ArgumentBuilder;
 import com.stevesarmy.client.CombatDebugRenderer;
 import com.stevesarmy.combat.cover.CoverDebugManager;
 import com.stevesarmy.entity.EnemySoldierEntity;
+import com.stevesarmy.entity.GarrisonEntity;
 import com.stevesarmy.entity.MachineGunnerEntity;
 import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.entity.SoldierSpawner;
+import com.stevesarmy.entity.TeamGarrisonEntity;
 import com.stevesarmy.entity.ai.CoverTacticalGoal;
 import com.stevesarmy.entity.ai.GrenadeTacticalController;
+import com.stevesarmy.inventory.SoldierInventory;
 import com.stevesarmy.registry.ModEntities;
 import com.mojang.brigadier.arguments.FloatArgumentType;
+import com.mojang.brigadier.arguments.StringArgumentType;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.commands.arguments.CompoundTagArgument;
@@ -50,6 +54,8 @@ public class StevesArmyCommand {
                     "  /stevesarmy loadout save <rifleman> - Copy a rifleman inventory loadout\n" +
                     "  /stevesarmy spawn rifleman <owner> <position> [yaw] [pitch] [loadout_nbt]\n" +
                     "  /stevesarmy spawn machine_gunner <owner> <position> [yaw] [pitch] [loadout_nbt]\n" +
+                    "  /stevesarmy spawn garrison <owner> <position> [yaw] [pitch] [loadout_nbt]\n" +
+                    "  /stevesarmy spawn team_garrison <team> <position> [yaw] [pitch] [loadout_nbt]\n" +
                     "  /stevesarmy spawn enemy <position> [yaw] [pitch] [loadout_nbt]"
                 ), false);
                 return 1;
@@ -74,6 +80,10 @@ public class StevesArmyCommand {
             .then(Commands.literal("spawn")
                 .then(createOwnedSpawnBranch("rifleman", ModEntities.SOLDIER.get()))
                 .then(createOwnedSpawnBranch("machine_gunner", ModEntities.MACHINE_GUNNER.get()))
+                .then(createOwnedSpawnBranch("garrison", ModEntities.GARRISON.get()))
+                .then(Commands.literal("team_garrison")
+                    .then(Commands.argument("team", StringArgumentType.word())
+                        .then(createTeamGarrisonSpawnArguments())))
                 .then(Commands.literal("enemy")
                     .then(createSpawnArguments(ModEntities.ENEMY_SOLDIER.get(), false)))
             );
@@ -117,6 +127,25 @@ public class StevesArmyCommand {
         return Commands.literal(name)
             .then(Commands.argument("owner", EntityArgument.player())
                 .then(createSpawnArguments(entityType, true)));
+    }
+
+    private static ArgumentBuilder<CommandSourceStack, ?> createTeamGarrisonSpawnArguments() {
+        Function<CommandContext<CommandSourceStack>, Integer> execute = context ->
+            spawnTeamGarrison(context, StringArgumentType.getString(context, "team"));
+
+        var position = Commands.argument("position", Vec3Argument.vec3())
+            .executes(execute::apply)
+            .then(Commands.argument("loadout", CompoundTagArgument.compoundTag())
+                .executes(execute::apply));
+        var yaw = Commands.argument("yaw", FloatArgumentType.floatArg())
+            .executes(execute::apply);
+        var pitch = Commands.argument("pitch", FloatArgumentType.floatArg())
+            .executes(execute::apply)
+            .then(Commands.argument("loadout", CompoundTagArgument.compoundTag())
+                .executes(execute::apply));
+        yaw.then(pitch);
+        position.then(yaw);
+        return position;
     }
 
     private static ArgumentBuilder<CommandSourceStack, ?> createSpawnArguments(
@@ -207,11 +236,52 @@ public class StevesArmyCommand {
         String loadoutDescription = loadout == null ? "empty loadout" : "provided loadout";
         String entityName = soldier instanceof MachineGunnerEntity
             ? "machine gunner"
-            : soldier instanceof EnemySoldierEntity ? "enemy soldier" : "rifleman";
+            : soldier instanceof EnemySoldierEntity ? "enemy soldier"
+            : soldier instanceof TeamGarrisonEntity ? "team garrison"
+            : soldier instanceof GarrisonEntity ? "garrison" : "rifleman";
         String ownerDescription = owner == null ? "without an owner" : "for " + owner.getName().getString();
         source.sendSuccess(() -> Component.literal(
             "Spawned " + entityName + " " + soldier.getUUID() + " " + ownerDescription
                 + " with " + loadoutDescription + "."), false);
+        return 1;
+    }
+
+    private static int spawnTeamGarrison(CommandContext<CommandSourceStack> context, String teamName) {
+        CommandSourceStack source = context.getSource();
+        float yaw = optionalFloat(context, "yaw", 0.0F);
+        float pitch = optionalFloat(context, "pitch", 0.0F);
+        CompoundTag loadout = optionalLoadout(context);
+        Vec3 position = Vec3Argument.getVec3(context, "position");
+
+        if (loadout != null) {
+            var validation = SoldierSpawner.validateLoadout(loadout);
+            if (validation.isPresent()) {
+                source.sendFailure(Component.literal(validation.get()));
+                return 0;
+            }
+        }
+
+        TeamGarrisonEntity garrison = ModEntities.TEAM_GARRISON.get().create(source.getLevel());
+        if (garrison == null) {
+            source.sendFailure(Component.literal("Failed to create team garrison"));
+            return 0;
+        }
+        garrison.moveTo(position.x, position.y, position.z, yaw, pitch);
+        garrison.setTeamName(teamName);
+        if (loadout != null) {
+            SoldierInventory inventory = garrison.getSoldierInventory();
+            inventory.load(loadout);
+            inventory.syncArmorToEntity(garrison);
+        }
+
+        SoldierSpawner.SpawnResult result = SoldierSpawner.finishSpawn(source.getLevel(), garrison, null, false);
+        if (!result.success()) {
+            source.sendFailure(Component.literal(result.message()));
+            return 0;
+        }
+
+        source.sendSuccess(() -> Component.literal(
+            "Spawned team garrison " + garrison.getUUID() + " for team " + teamName + "."), false);
         return 1;
     }
 

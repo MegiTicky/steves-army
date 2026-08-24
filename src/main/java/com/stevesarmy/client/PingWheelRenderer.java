@@ -66,6 +66,7 @@ public class PingWheelRenderer {
             case BRAVO -> 0xFF5555FF;
             case CHARLIE -> 0xFF55FF55;
             case DELTA -> 0xFFFFFF55;
+            case GARRISON -> 0xFF55FFFF;
         };
         guiGraphics.drawCenteredString(mc.font, scopeLabel, centerX, centerY - mc.font.lineHeight / 2, scopeColor);
 

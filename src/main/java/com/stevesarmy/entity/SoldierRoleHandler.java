@@ -3,13 +3,16 @@ package com.stevesarmy.entity;
 import com.stevesarmy.inventory.SoldierInventory;
 import com.stevesarmy.registry.ModEntities;
 import com.stevesarmy.respawn.PlayerDeathHandler;
+import com.stevesarmy.squad.FireTeam;
 import com.stevesarmy.squad.FireTeamAssignment;
 import com.stevesarmy.squad.OwnedSoldierRegistry;
 import com.stevesarmy.squad.SquadManager;
+import com.stevesarmy.squad.SquadMode;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.EntityType;
 
+import javax.annotation.Nullable;
 import java.util.UUID;
 
 /** Converts a soldier between roles by swapping the entity type while preserving
@@ -21,34 +24,63 @@ public final class SoldierRoleHandler {
         return switch (role) {
             case RIFLEMAN -> ModEntities.SOLDIER.get();
             case MACHINE_GUNNER -> ModEntities.MACHINE_GUNNER.get();
+            case GARRISON -> ModEntities.GARRISON.get();
         };
     }
 
-    /** Returns true when the conversion was performed. */
-    public static boolean convertSoldier(SoldierEntity soldier, SoldierRole targetRole) {
+    /** Returns the replacement soldier when the conversion was performed. */
+    public static SoldierEntity convertSoldier(SoldierEntity soldier, SoldierRole targetRole) {
+        return convertSoldier(soldier, targetRole, null);
+    }
+
+    /**
+     * Converts a soldier to a new role. When {@code targetFireTeam} is provided the
+     * replacement is assigned to that fire team; a garrison conversion always forces
+     * the GARRISON team and is never stored in {@link FireTeamAssignment}.
+     *
+     * @return the replacement entity, or {@code null} when the conversion was refused.
+     */
+    @Nullable
+    public static SoldierEntity convertSoldier(SoldierEntity soldier, SoldierRole targetRole,
+                                               @Nullable FireTeam targetFireTeam) {
         if (soldier.level().isClientSide) {
-            return false;
+            return null;
         }
         if (soldier.getRole() == targetRole) {
-            return false;
+            return null;
         }
         if (!soldier.isAlive() || soldier.isRemoved()) {
-            return false;
+            return null;
         }
         if (soldier.getVehicle() != null || soldier.isPassenger()) {
-            return false;
+            return null;
         }
         if (soldier.isRecalling()) {
-            return false;
+            return null;
         }
         if (PlayerDeathHandler.isPendingRespawnTarget(soldier.getUUID())) {
-            return false;
+            return null;
+        }
+        if (soldier instanceof TeamGarrisonEntity) {
+            return null;
+        }
+
+        boolean sourceIsGarrison = soldier.getFireTeam() == FireTeam.GARRISON;
+        FireTeam assignedTeam = targetFireTeam;
+        if (targetRole == SoldierRole.GARRISON) {
+            assignedTeam = FireTeam.GARRISON;
+        } else if (sourceIsGarrison && assignedTeam == null) {
+            UUID ownerUuid = soldier.getOwnerUUID().orElse(null);
+            if (ownerUuid != null) {
+                assignedTeam = FireTeamAssignment.get((ServerLevel) soldier.level(), ownerUuid)
+                    .getActiveTeams().get(0);
+            }
         }
 
         ServerLevel level = (ServerLevel) soldier.level();
         SoldierEntity replacement = getEntityType(targetRole).create(level);
         if (replacement == null) {
-            return false;
+            return null;
         }
 
         // Persistent data copy. Must precede addFreshEntity: the team join
@@ -85,10 +117,29 @@ public final class SoldierRoleHandler {
         UUID squadId = soldier.getSquadId();
         replacement.setSquadId(squadId);
 
+        if (targetRole == SoldierRole.GARRISON) {
+            replacement.setFireTeam(FireTeam.GARRISON);
+            replacement.setSquadMode(SquadMode.HOLD);
+            replacement.setHoldPosition(soldier.blockPosition());
+            if (replacement instanceof GarrisonEntity garrison) {
+                garrison.setDefendPosition(soldier.blockPosition());
+            }
+        } else {
+            if (assignedTeam != null) {
+                replacement.setFireTeam(assignedTeam);
+            }
+            if (sourceIsGarrison) {
+                replacement.setSquadMode(SquadMode.FOLLOW);
+            }
+        }
+
         UUID ownerUuid = soldier.getOwnerUUID().orElse(null);
         if (ownerUuid != null) {
-            FireTeamAssignment.get(level, ownerUuid)
-                .assignToTeam(replacement.getUUID(), replacement.getFireTeam());
+            FireTeamAssignment assignment = FireTeamAssignment.get(level, ownerUuid);
+            if (replacement.getFireTeam() != FireTeam.GARRISON) {
+                assignment.assignToTeam(replacement.getUUID(), replacement.getFireTeam());
+            }
+            assignment.removeSoldier(oldUuid);
         }
 
         level.addFreshEntity(replacement);
@@ -99,11 +150,8 @@ public final class SoldierRoleHandler {
 
         OwnedSoldierRegistry registry = OwnedSoldierRegistry.get(level.getServer());
         registry.remove(oldUuid);
-        if (ownerUuid != null) {
-            FireTeamAssignment.get(level, ownerUuid).removeSoldier(oldUuid);
-        }
 
         soldier.discard();
-        return true;
+        return replacement;
     }
 }

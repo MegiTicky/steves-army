@@ -5,7 +5,8 @@ public enum FireTeam {
     ALPHA,
     BRAVO,
     CHARLIE,
-    DELTA;
+    DELTA,
+    GARRISON;
 
     public String getShortName() {
         return switch (this) {
@@ -14,6 +15,7 @@ public enum FireTeam {
             case BRAVO -> "B";
             case CHARLIE -> "C";
             case DELTA -> "D";
+            case GARRISON -> "GAR";
         };
     }
 }
