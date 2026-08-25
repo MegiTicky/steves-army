@@ -41,6 +41,12 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
         NO_ELIGIBLE_COVER
     }
 
+    private enum QueuedSearchMode {
+        NORMAL,
+        REPOSITION,
+        ATTACK_SELECTING
+    }
+
     private final SoldierEntity soldier;
     private final PathNavigation navigation;
     private final boolean machineGunnerPipeline;
@@ -196,6 +202,12 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
     private int nextFollowRelocationSearchTick = 0;
     private int followReplanCooldownTicks = 0;
 
+    private boolean coverSearchPending;
+    private QueuedSearchMode queuedSearchMode;
+    private int queuedAttackGeneration = -1;
+    private RelocationType queuedRelocationType = RelocationType.NONE;
+    private BlockPos queuedRelocationCenter;
+
     private BlockPos movementAttemptTarget = null;
     private int movementAttemptCount = 0;
 
@@ -291,6 +303,100 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
      */
     public void setCoverSelectionStrategy(@javax.annotation.Nullable CoverSelectionStrategy strategy) {
         this.coverSelectionStrategy = strategy;
+    }
+
+    /**
+     * Queues routine cover work without allowing a command burst to execute
+     * every search in the same server tick. Emergency suppression searches use
+     * their existing synchronous path until they can be integrated separately.
+     */
+    private void requestCoverSearch(QueuedSearchMode mode) {
+        if (!soldier.isAlive() || soldier.level().isClientSide) {
+            return;
+        }
+
+        if (coverSearchPending) {
+            if (searchPriority(mode) < searchPriority(queuedSearchMode)) {
+                queuedSearchMode = mode;
+                queuedAttackGeneration = soldier.getAttackGeneration();
+                queuedRelocationType = relocationType;
+                queuedRelocationCenter = relocationCenter;
+            }
+            CoverSearchScheduler.request(this, searchPriority(queuedSearchMode), soldier.tickCount);
+            return;
+        }
+
+        int priority = searchPriority(mode);
+        int stagger = priority == 2
+            ? Math.floorMod(soldier.getUUID().hashCode(), CoverSearchScheduler.ROUTINE_STAGGER_TICKS)
+            : 0;
+        coverSearchPending = true;
+        queuedSearchMode = mode;
+        queuedAttackGeneration = soldier.getAttackGeneration();
+        queuedRelocationType = relocationType;
+        queuedRelocationCenter = relocationCenter;
+        CoverSearchScheduler.request(this, priority, soldier.tickCount + stagger);
+    }
+
+    private int searchPriority(QueuedSearchMode mode) {
+        return mode == QueuedSearchMode.ATTACK_SELECTING ? 1
+            : mode == QueuedSearchMode.REPOSITION || relocationType != RelocationType.NONE ? 0 : 2;
+    }
+
+    /** Called only by CoverSearchScheduler on the server thread. */
+    void executeQueuedCoverSearch() {
+        if (!coverSearchPending) {
+            return;
+        }
+
+        QueuedSearchMode mode = queuedSearchMode;
+        coverSearchPending = false;
+        queuedSearchMode = null;
+        int expectedAttackGeneration = queuedAttackGeneration;
+        RelocationType expectedRelocationType = queuedRelocationType;
+        BlockPos expectedRelocationCenter = queuedRelocationCenter;
+        queuedAttackGeneration = -1;
+        queuedRelocationType = RelocationType.NONE;
+        queuedRelocationCenter = null;
+
+        if (!soldier.isAlive() || soldier.level().isClientSide) {
+            return;
+        }
+        if (mode == QueuedSearchMode.ATTACK_SELECTING
+            && (!soldier.hasValidAttackTarget() || expectedAttackGeneration != soldier.getAttackGeneration())) {
+            PerformanceMetrics.recordCoverSearchRequestStale();
+            return;
+        }
+        if (expectedRelocationType != RelocationType.NONE
+            && (relocationType != expectedRelocationType
+                || !Objects.equals(relocationCenter, expectedRelocationCenter)
+                || !isRelocationStillValid())) {
+            PerformanceMetrics.recordCoverSearchRequestStale();
+            return;
+        }
+
+        CoverMoveResult result = findAndMoveToCover();
+        if (mode == QueuedSearchMode.ATTACK_SELECTING && attackPhase == AttackPhase.SELECTING_COVER) {
+            handleQueuedAttackSearchResult(result);
+        } else if ((mode == QueuedSearchMode.REPOSITION || relocationType != RelocationType.NONE)
+            && getCoverManager().getTargetCover() != null) {
+            getCoverManager().setState(CoverBehaviorManager.CoverState.REPOSITIONING);
+        }
+    }
+
+    private void handleQueuedAttackSearchResult(CoverMoveResult result) {
+        if (result == CoverMoveResult.NO_COVER_FOUND || result == CoverMoveResult.NO_ELIGIBLE_COVER) {
+            startFallbackAdvance();
+            attackPhase = AttackPhase.SELECTING_COVER;
+            return;
+        }
+
+        attackPhase = AttackPhase.MOVING_TO_COVER;
+        if (getCoverManager().getCurrentCover() == null && getCoverManager().getTargetCover() != null) {
+            getCoverManager().setState(CoverBehaviorManager.CoverState.SEEKING_COVER);
+        } else if (getCoverManager().getTargetCover() != null) {
+            getCoverManager().setState(CoverBehaviorManager.CoverState.REPOSITIONING);
+        }
     }
 
     /**
@@ -792,11 +898,13 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
         
         if (state == CoverBehaviorManager.CoverState.NO_COVER) {
             getCoverManager().setState(CoverBehaviorManager.CoverState.SEEKING_COVER);
-            findAndMoveToCover();
+            requestCoverSearch(soldier.hasValidAttackTarget()
+                ? QueuedSearchMode.ATTACK_SELECTING : QueuedSearchMode.NORMAL);
         } else if (state == CoverBehaviorManager.CoverState.SEEKING_COVER || 
                    state == CoverBehaviorManager.CoverState.REPOSITIONING) {
             if (getCoverManager().getTargetCover() == null) {
-                findAndMoveToCover();
+                requestCoverSearch(soldier.hasValidAttackTarget()
+                    ? QueuedSearchMode.ATTACK_SELECTING : QueuedSearchMode.NORMAL);
             } else {
                 moveToCover(getCoverManager().getTargetCover());
             }
@@ -805,6 +913,12 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
     
     @Override
     public void stop() {
+        CoverSearchScheduler.cancel(this);
+        coverSearchPending = false;
+        queuedSearchMode = null;
+        queuedAttackGeneration = -1;
+        queuedRelocationType = RelocationType.NONE;
+        queuedRelocationCenter = null;
         boolean wasHealing = soldier.isHealing();
         CoverBehaviorManager.CoverState state = getCoverManager().getState();
         boolean preserveCoverForHealing = wasHealing
@@ -1047,7 +1161,8 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
         CoverPoint targetCover = getCoverManager().getTargetCover();
         
         if (targetCover == null) {
-            findAndMoveToCover();
+            requestCoverSearch(soldier.hasValidAttackTarget()
+                ? QueuedSearchMode.ATTACK_SELECTING : QueuedSearchMode.NORMAL);
             seekingTicks = 0;
             noProgressTicks = 0;
             lastSeekingPosition = null;
@@ -1160,7 +1275,8 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
                 }
                 getCoverManager().clearTargetCover();
                 stuckTicks = 0;
-                findAndMoveToCover();
+                requestCoverSearch(soldier.hasValidAttackTarget()
+                    ? QueuedSearchMode.ATTACK_SELECTING : QueuedSearchMode.NORMAL);
             }
         } else {
             stuckTicks = 0;
@@ -1240,7 +1356,8 @@ private void tickRepositioning() {
                                 soldier.getId());
                         }
                         getCoverManager().clearTargetCover();
-                        findAndMoveToCover();
+                        requestCoverSearch(soldier.hasValidAttackTarget()
+                            ? QueuedSearchMode.ATTACK_SELECTING : QueuedSearchMode.NORMAL);
                         return;
                     } else {
                         if (DiagnosticLogManager.isCoverLoggingEnabled()) {
@@ -2135,7 +2252,8 @@ private boolean shouldExitCoverForFollow() {
         getCoverManager().resetPeekState();
         getCoverManager().setPeekPosition(null);
         getPositionController().clear();
-        findAndMoveToCover();
+        requestCoverSearch(soldier.hasValidAttackTarget()
+            ? QueuedSearchMode.ATTACK_SELECTING : QueuedSearchMode.REPOSITION);
         if (getCoverManager().getTargetCover() != null) {
             getCoverManager().setState(CoverBehaviorManager.CoverState.REPOSITIONING);
         } else {
@@ -2840,6 +2958,12 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
      * doesn't abandon protection unnecessarily.
      */
     private void resetAttackCommand() {
+        CoverSearchScheduler.cancel(this);
+        coverSearchPending = false;
+        queuedSearchMode = null;
+        queuedAttackGeneration = -1;
+        queuedRelocationType = RelocationType.NONE;
+        queuedRelocationCenter = null;
         // Cancel old movement
         navigation.stop();
         getPositionController().clear();
@@ -2975,39 +3099,9 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
                     break;
                 }
 
-                CoverMoveResult result;
-                if (currentCover != null) {
-                    // Already in a cover — use canonical repositioning to synchronize cover state
-                    result = findAndMoveToCover();
-                    if (getCoverManager().getTargetCover() != null) {
-                        getCoverManager().setState(CoverBehaviorManager.CoverState.REPOSITIONING);
-                    }
-                } else {
-                    result = findAndMoveToCover();
-                }
-
-                if (result == CoverMoveResult.NO_COVER_FOUND || result == CoverMoveResult.NO_ELIGIBLE_COVER) {
-                    // No cover in the corridor: advance a short, normal navigation
-                    // segment and search again without changing movement owners.
-                    startFallbackAdvance();
-                    attackPhase = AttackPhase.SELECTING_COVER;
-                    if (attackDebugLog()) {
-                        StevesArmyMod.LOGGER.info("[AttackPhase] Soldier {} advancing through uncovered corridor (result={})",
-                            soldier.getId(), result);
-                    }
-                } else {
-                    attackPhase = AttackPhase.MOVING_TO_COVER;
-                    // If starting from NO_COVER, set the cover manager state to
-                    // SEEKING_COVER so the normal arrival, micro-positioning,
-                    // stuck detection, and timeout handlers will run.
-                    if (currentCover == null && getCoverManager().getTargetCover() != null) {
-                        getCoverManager().setState(CoverBehaviorManager.CoverState.SEEKING_COVER);
-                    }
-                    if (attackDebugLog()) {
-                        StevesArmyMod.LOGGER.info("[AttackPhase] Soldier {} SELECTING_COVER -> MOVING_TO_COVER: cover found",
-                            soldier.getId());
-                    }
-                }
+                // Search execution is budgeted by CoverSearchScheduler. Do not
+                // treat a queued search as a failed search and advance exposed.
+                requestCoverSearch(QueuedSearchMode.ATTACK_SELECTING);
                 break;
             }
 
@@ -3166,20 +3260,11 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
                 }
 
                 if (maxDwellReached || (canAdvance && attackHasPeekedThisCover)) {
-                    if (selectForwardCover()) {
-                        attackPhase = AttackPhase.MOVING_TO_COVER;
-                        if (attackDebugLog()) {
-                            StevesArmyMod.LOGGER.info("[AttackPhase] Soldier {} {} -> MOVING_TO_COVER: advancing to next cover",
-                                soldier.getId(), maxDwellReached ? "max dwell" : "advance");
-                        }
-                    } else {
-                        startFallbackAdvance();
-                        attackPhase = AttackPhase.SELECTING_COVER;
-                        if (attackDebugLog()) {
-                            StevesArmyMod.LOGGER.info("[AttackPhase] Soldier {} advancing through uncovered corridor",
-                                soldier.getId(), maxDwellReached ? "max dwell" : "advance");
-                        }
-                    }
+                    // The next forward-cover search is budgeted just like the
+                    // initial attack search. Waiting here must not be treated
+                    // as a failed search and trigger exposed fallback travel.
+                    attackPhase = AttackPhase.SELECTING_COVER;
+                    requestCoverSearch(QueuedSearchMode.ATTACK_SELECTING);
                 }
 
                 // Handle non-peekable cover reposition (only when recovered)

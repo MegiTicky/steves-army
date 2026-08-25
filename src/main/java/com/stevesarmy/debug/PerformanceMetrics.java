@@ -92,6 +92,12 @@ public final class PerformanceMetrics {
     private static final LongAdder riflemanPathFailures = new LongAdder();
     private static final LongAdder machineGunnerPathFailures = new LongAdder();
     private static final LongAdder machineGunnerAsyncRequests = new LongAdder();
+    private static final LongAdder coverSearchRequestsQueued = new LongAdder();
+    private static final LongAdder coverSearchRequestsExecuted = new LongAdder();
+    private static final LongAdder coverSearchRequestsDeferred = new LongAdder();
+    private static final LongAdder coverSearchRequestsCoalesced = new LongAdder();
+    private static final LongAdder coverSearchRequestsCancelled = new LongAdder();
+    private static final LongAdder coverSearchRequestsStale = new LongAdder();
 
     private PerformanceMetrics() {}
 
@@ -187,6 +193,12 @@ public final class PerformanceMetrics {
         riflemanPathFailures.reset();
         machineGunnerPathFailures.reset();
         machineGunnerAsyncRequests.reset();
+        coverSearchRequestsQueued.reset();
+        coverSearchRequestsExecuted.reset();
+        coverSearchRequestsDeferred.reset();
+        coverSearchRequestsCoalesced.reset();
+        coverSearchRequestsCancelled.reset();
+        coverSearchRequestsStale.reset();
     }
 
     public static void recordVisibilityCacheHit() {
@@ -450,6 +462,30 @@ public final class PerformanceMetrics {
         if (enabled) asyncCoverApplyNanos.add(nanos);
     }
 
+    public static void recordCoverSearchRequestQueued() {
+        if (enabled) coverSearchRequestsQueued.increment();
+    }
+
+    public static void recordCoverSearchRequestExecuted() {
+        if (enabled) coverSearchRequestsExecuted.increment();
+    }
+
+    public static void recordCoverSearchRequestDeferred() {
+        if (enabled) coverSearchRequestsDeferred.increment();
+    }
+
+    public static void recordCoverSearchRequestCoalesced() {
+        if (enabled) coverSearchRequestsCoalesced.increment();
+    }
+
+    public static void recordCoverSearchRequestCancelled() {
+        if (enabled) coverSearchRequestsCancelled.increment();
+    }
+
+    public static void recordCoverSearchRequestStale() {
+        if (enabled) coverSearchRequestsStale.increment();
+    }
+
     public static void recordCoverStateTime(String state, long nanos) {
         if (!enabled) return;
         coverStateNanos.add(nanos);
@@ -547,7 +583,13 @@ public final class PerformanceMetrics {
             + ", suppressed=" + coverSuppressedTicks.sum() + ")\n"
             + "  Cover paths: " + coverPathRequests.sum() + " requests, "
             + coverPathRetries.sum() + " retries, " + coverPathFailures.sum() + " failures\n"
-            + "  Cover search cooldown skips: " + coverSearchCooldownSkips.sum() + "\n"
+             + "  Cover search cooldown skips: " + coverSearchCooldownSkips.sum() + "\n"
+             + "  Cover search queue: " + coverSearchRequestsQueued.sum() + " queued, "
+             + coverSearchRequestsExecuted.sum() + " executed, "
+             + coverSearchRequestsDeferred.sum() + " deferred, "
+             + coverSearchRequestsCoalesced.sum() + " coalesced, "
+             + coverSearchRequestsCancelled.sum() + " cancelled, "
+             + coverSearchRequestsStale.sum() + " stale\n"
             + "  Cover maintenance: " + coverMaintenanceRuns.sum() + " runs, "
             + coverMaintenanceSkips.sum() + " skips\n"
             + "  Cover state time: " + formatMillis(coverStateNanos.sum()) + " ms total"
