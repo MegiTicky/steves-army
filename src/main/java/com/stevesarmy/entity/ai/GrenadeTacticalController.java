@@ -43,10 +43,14 @@ public final class GrenadeTacticalController {
     private static final int RESERVATION_LEASE_TICKS = PREPARE_TICKS + 20;
     private static final double BLAST_RADIUS = 5.5;
     private static final double MAX_LANDING_ERROR = 3.0;
+    private static final double PREMATURE_IMPACT_TOLERANCE = 0.35;
     private static final double THROWER_CLEARANCE_DISTANCE = 2.75;
     private static final int THROWER_CLEARANCE_TICKS = 3;
     private static final int MAX_ARC_CANDIDATES = 12;
-    private static final int MAX_ARC_CANDIDATES_PER_SLICE = 3;
+    // A bounce search is bounded to MAX_ARC_CANDIDATES. Test the complete
+    // bounded set on the next evaluation tick instead of stretching one
+    // search over several 10-tick evaluation intervals.
+    private static final int MAX_ARC_CANDIDATES_PER_SLICE = MAX_ARC_CANDIDATES;
     private static final double ARC_PITCH_CORRECTION_DEGREES = 3.0;
     private static final double MIN_AIM_YAW_SIGMA = 1.25;
     private static final double MAX_AIM_YAW_SIGMA = 3.0;
@@ -73,6 +77,7 @@ public final class GrenadeTacticalController {
     private boolean lastArcSawThrowerCoverBlock;
     private boolean lastArcRejectedAllForLanding;
     private boolean lastArcBounceMode;
+    private boolean lastArcSawPrematureImpact;
     private double lastClosestTerminalError = Double.POSITIVE_INFINITY;
     private List<String> lastArcCandidateDescriptions = List.of();
     private EvaluationCache evaluationCache;
@@ -86,7 +91,8 @@ public final class GrenadeTacticalController {
         SUPPRESSION_INTEL
     }
 
-    private record Candidate(@Nullable LivingEntity entity, UUID targetId, Vec3 landing,
+    private record Candidate(@Nullable LivingEntity entity, UUID targetId, Vec3 targetPoint,
+                             Vec3 landing, boolean preferHighArc,
                              TargetSource source, @Nullable SquadThreatIntel.ThreatKnowledge knowledge,
                              int score) {}
 
@@ -262,7 +268,7 @@ public final class GrenadeTacticalController {
         if (!ballistic.available()) {
             return ForceThrowResult.failure("ballistic profile unavailable: " + ballistic.reason());
         }
-        Arc arc = findArc(landing, ballistic.profile(), AimDeviation.ZERO);
+        Arc arc = findArc(landing, landing, ballistic.profile(), AimDeviation.ZERO, false);
         if (arc == null) {
             if (lastArcSawFriendlyPathBlock) {
                 return ForceThrowResult.failure("a friendly entity is in the grenade path");
@@ -320,7 +326,7 @@ public final class GrenadeTacticalController {
             // Repeat the trajectory preview at a low rate while preparing.
             long debugTick = soldier.level().getGameTime();
             if (DiagnosticLogEnabled() && debugTick - lastDebugRenderTick >= 5) {
-                renderDebugTrajectory(pendingArc, pendingPlan.candidate.landing, activePlanId);
+                renderDebugTrajectory(pendingArc, pendingPlan.candidate.targetPoint, activePlanId);
             }
             if (prepareTicks > 0) {
                 alignToPlan();
@@ -390,7 +396,7 @@ public final class GrenadeTacticalController {
             return false;
         }
         plan = aimed.plan();
-        renderDebugTrajectory(plan.arc, plan.candidate.landing, plan.planId());
+        renderDebugTrajectory(plan.arc, plan.candidate.targetPoint, plan.planId());
 
         activePlanId = plan.planId();
         logDecision("plan=" + activePlanId + " grenade plan began slot=" + plan.slot
@@ -415,7 +421,8 @@ public final class GrenadeTacticalController {
 
     private AimPlanResolution applyAutonomousAim(Plan nominalPlan) {
         AimDeviation deviation = sampleAimDeviation(nominalPlan.candidate());
-        Arc arc = findArc(nominalPlan.candidate().landing(), nominalPlan.profile(), deviation);
+        Arc arc = findArc(nominalPlan.candidate().targetPoint(), nominalPlan.candidate().landing(),
+            nominalPlan.profile(), deviation, nominalPlan.candidate().preferHighArc());
         if (arc == null) {
             String reason = lastArcSawFriendlyPathBlock
                 ? "inaccurate aim would enter friendly grenade path"
@@ -531,14 +538,14 @@ public final class GrenadeTacticalController {
             return new Decision(null, resolution.reason);
         }
 
-        double distance = soldier.position().distanceTo(candidate.landing);
+        double distance = soldier.position().distanceTo(candidate.targetPoint);
         if (distance < StevesArmyConfig.getGrenadeMinRange()
             || distance > StevesArmyConfig.getGrenadeMaxRange()) {
             return new Decision(null, String.format(
                 "target position is %.1f blocks away; allowed range is %.1f-%.1f",
                 distance, StevesArmyConfig.getGrenadeMinRange(), StevesArmyConfig.getGrenadeMaxRange()));
         }
-        if (!isSafeLanding(candidate.landing)) {
+        if (!isSafeLanding(candidate.targetPoint) || !isSafeLanding(candidate.landing)) {
             return new Decision(null, "friendly entity in blast safety radius");
         }
 
@@ -554,7 +561,8 @@ public final class GrenadeTacticalController {
             return new Decision(null, searchReason);
         }
 
-        Arc arc = findArc(candidate.landing, ballistic.profile(), AimDeviation.ZERO);
+        Arc arc = findArc(candidate.targetPoint, candidate.landing, ballistic.profile(),
+            AimDeviation.ZERO, candidate.preferHighArc);
         if (arc == null) {
             if (lastArcSawFriendlyPathBlock) {
                 return new Decision(null, "friendly entity in grenade path");
@@ -590,13 +598,17 @@ public final class GrenadeTacticalController {
                     if (knowledge == null) {
                         return new CandidateResolution(null, hiddenThreatReason(intel, target.getUUID()));
                     }
+                    Vec3 targetPoint = threatLanding(knowledge.lastKnownPosition);
+                    boolean preferHighArc = true;
                     return new CandidateResolution(new Candidate(target, target.getUUID(),
-                        threatLanding(knowledge.lastKnownPosition),
+                        targetPoint, preferredLanding(targetPoint, preferHighArc), preferHighArc,
                         suppressionResponse ? TargetSource.SUPPRESSION_INTEL : TargetSource.THREAT_INTEL,
                         knowledge, targetProtected ? 3 : 2), "hidden target using squad intel");
                 }
+                Vec3 targetPoint = target.position().add(0.0, 0.2, 0.0);
+                boolean preferHighArc = defensive || suppressionResponse;
                 return new CandidateResolution(new Candidate(target, target.getUUID(),
-                    target.position().add(0.0, 0.2, 0.0),
+                    targetPoint, preferredLanding(targetPoint, preferHighArc), preferHighArc,
                     suppressionResponse ? TargetSource.SUPPRESSION_INTEL : TargetSource.LIVE_ENTITY,
                     getKnownThreat(intel, target.getUUID()), suppressionResponse ? 3 : 2),
                     suppressionResponse ? "suppression response using visible target" : "visible defensive target");
@@ -613,8 +625,11 @@ public final class GrenadeTacticalController {
         if (threat == null) return new CandidateResolution(null, positionThreatReason(intel));
         boolean suppressionResponse = isSuppressionResponse(intel, threat.threatEntityId);
         TargetSource source = suppressionResponse ? TargetSource.SUPPRESSION_INTEL : TargetSource.THREAT_INTEL;
+        Vec3 targetPoint = threatLanding(threat.lastKnownPosition);
+        boolean preferHighArc = true;
         return new CandidateResolution(new Candidate(null, threat.threatEntityId,
-            threatLanding(threat.lastKnownPosition), source, threat, 3),
+            targetPoint, preferredLanding(targetPoint, preferHighArc), preferHighArc,
+            source, threat, 3),
             source == TargetSource.SUPPRESSION_INTEL
                 ? "suppression response using threat intel position"
                 : "position-only throw using threat intel");
@@ -722,6 +737,14 @@ public final class GrenadeTacticalController {
     private Vec3 threatLanding(@Nullable BlockPos position) {
         if (position == null) return soldier.position();
         return new Vec3(position.getX() + 0.5, position.getY() + 0.25, position.getZ() + 0.5);
+    }
+
+    private Vec3 preferredLanding(Vec3 targetPoint, boolean preferHighArc) {
+        if (!preferHighArc) return targetPoint;
+        double overthrow = StevesArmyConfig.getGrenadeOverthrowDistance();
+        Vec3 horizontal = targetPoint.subtract(soldier.position()).multiply(1.0, 0.0, 1.0);
+        if (overthrow <= 0.0 || horizontal.lengthSqr() < 1.0e-6) return targetPoint;
+        return targetPoint.add(horizontal.normalize().scale(overthrow));
     }
 
     private void logDecision(String reason) {
@@ -900,8 +923,11 @@ public final class GrenadeTacticalController {
             return "throw origin moved";
         }
 
-        LivingEntity currentTarget = target;
-        if (currentTarget == null && candidate.entity() != null) currentTarget = candidate.entity();
+        // Intel-backed plans are deliberately allowed to outlive a combat
+        // target switch. Only a live-entity plan is tied to the current target
+        // selected by the combat goal.
+        LivingEntity currentTarget = candidate.source() == TargetSource.LIVE_ENTITY
+            ? target : candidate.entity();
         if (candidate.entity() != null) {
             if (currentTarget == null) return "live target reference lost";
             if (!currentTarget.isAlive()) return "live target is no longer alive";
@@ -910,14 +936,14 @@ public final class GrenadeTacticalController {
                 return "live target is no longer valid";
             }
             if (candidate.source() == TargetSource.LIVE_ENTITY
-                && currentTarget.position().add(0.0, 0.2, 0.0).distanceTo(candidate.landing()) > 0.35) {
+                && currentTarget.position().add(0.0, 0.2, 0.0).distanceTo(candidate.targetPoint()) > 0.35) {
                 return "live target position changed";
             }
         }
         if (candidate.source() != TargetSource.LIVE_ENTITY) {
             SquadThreatIntel.ThreatKnowledge current = getFreshThreat(intel, candidate.targetId());
             if (current == null) return "target threat intel became stale or unavailable";
-            if (!threatLanding(current.lastKnownPosition).equals(candidate.landing())) {
+            if (!threatLanding(current.lastKnownPosition).equals(candidate.targetPoint())) {
                 return "threat position changed";
             }
         }
@@ -936,20 +962,23 @@ public final class GrenadeTacticalController {
         if (!ballistic.available() || !ballistic.profile().equals(search.profile)) {
             return "native ballistic profile changed";
         }
-        double distance = soldier.position().distanceTo(candidate.landing());
+        double distance = soldier.position().distanceTo(candidate.targetPoint());
         if (distance < StevesArmyConfig.getGrenadeMinRange()
             || distance > StevesArmyConfig.getGrenadeMaxRange()) {
             return "target moved out of range";
         }
-        if (!isSafeLanding(candidate.landing())) return "friendly entity entered blast safety radius";
+        if (!isSafeLanding(candidate.targetPoint()) || !isSafeLanding(candidate.landing())) {
+            return "friendly entity entered blast safety radius";
+        }
         return null;
     }
 
     @Nullable
-    private Arc validateSelectedArc(Vec3 target, GrenadeIntegration.BallisticProfile profile,
+    private Arc validateSelectedArc(Vec3 targetPoint, Vec3 landing,
+                                    GrenadeIntegration.BallisticProfile profile,
                                     AimDeviation deviation, Arc expectedArc) {
-        ArcSearchState geometry = createArcSearchState(target, profile, deviation,
-            null, null, -1, null);
+        ArcSearchState geometry = createArcSearchState(targetPoint, landing, profile, deviation,
+            false, null, null, -1, null);
         if (geometry == null) return null;
         PitchCandidate selected = new PitchCandidate(expectedArc.pitch(), expectedArc.pitchBranch());
         return simulateArc(geometry.target, geometry.aimPoint, geometry.origin,
@@ -980,10 +1009,8 @@ public final class GrenadeTacticalController {
             // Hidden intel-backed plans may outlive the combat goal's target
             // reference for a tick. Revalidate against the entity captured in
             // the plan while still requiring that entity to be alive and valid.
-            LivingEntity currentTarget = target;
-            if (currentTarget == null && candidate.source != TargetSource.LIVE_ENTITY) {
-                currentTarget = candidate.entity;
-            }
+            LivingEntity currentTarget = candidate.source == TargetSource.LIVE_ENTITY
+                ? target : candidate.entity;
             if (currentTarget == null) return "live target reference lost";
             if (!currentTarget.isAlive()) return "live target is no longer alive";
             if (!currentTarget.getUUID().equals(candidate.targetId)) return "target identity changed";
@@ -994,14 +1021,14 @@ public final class GrenadeTacticalController {
                 || candidate.source == TargetSource.SUPPRESSION_INTEL) {
                 SquadThreatIntel.ThreatKnowledge current = getFreshThreat(intel, candidate.targetId);
                 if (current == null) return "threat intel became stale or unavailable";
-                if (!threatLanding(current.lastKnownPosition).equals(candidate.landing)) {
+                if (!threatLanding(current.lastKnownPosition).equals(candidate.targetPoint)) {
                     return "threat position changed";
                 }
             }
         } else {
             SquadThreatIntel.ThreatKnowledge current = getFreshThreat(intel, candidate.targetId);
             if (current == null) return "position-only threat intel became stale or unavailable";
-            if (!threatLanding(current.lastKnownPosition).equals(candidate.landing)) {
+            if (!threatLanding(current.lastKnownPosition).equals(candidate.targetPoint)) {
                 return "position-only threat position changed";
             }
         }
@@ -1019,12 +1046,14 @@ public final class GrenadeTacticalController {
         if (!support.supported() || current.getCount() <= 0) {
             return "grenade slot changed: " + formatSupport(support);
         }
-        double distance = soldier.position().distanceTo(candidate.landing);
+        double distance = soldier.position().distanceTo(candidate.targetPoint);
         if (distance < StevesArmyConfig.getGrenadeMinRange()
             || distance > StevesArmyConfig.getGrenadeMaxRange()) {
             return String.format("target moved out of range (%.1f blocks)", distance);
         }
-        if (!isSafeLanding(candidate.landing)) return "friendly entity entered blast safety radius";
+        if (!isSafeLanding(candidate.targetPoint) || !isSafeLanding(candidate.landing)) {
+            return "friendly entity entered blast safety radius";
+        }
         GrenadeIntegration.BallisticResult ballistic = GrenadeIntegration.inspectBallistics(current);
         if (!ballistic.available()) {
             return "ballistic profile unavailable: " + ballistic.reason();
@@ -1032,7 +1061,8 @@ public final class GrenadeTacticalController {
         if (pendingProfile == null || !pendingProfile.equals(ballistic.profile())) {
             return "native profile changed during preparation";
         }
-        Arc currentArc = validateSelectedArc(candidate.landing, ballistic.profile(),
+        Arc currentArc = validateSelectedArc(candidate.targetPoint, candidate.landing,
+            ballistic.profile(),
             pendingPlan.aimDeviation(), pendingArc);
         if (currentArc == null) {
             return lastArcSawFriendlyPathBlock
@@ -1090,7 +1120,8 @@ public final class GrenadeTacticalController {
             cancel("final ballistic profile unavailable");
             return false;
         }
-        Arc finalArc = validateSelectedArc(plan.candidate.landing, ballistic.profile(),
+        Arc finalArc = validateSelectedArc(plan.candidate.targetPoint, plan.candidate.landing,
+            ballistic.profile(),
             plan.aimDeviation(), pendingArc);
         if (finalArc == null) {
             String reason = lastArcSawFriendlyPathBlock
@@ -1107,7 +1138,7 @@ public final class GrenadeTacticalController {
             cancel("final inaccurate aim entered an unsafe blast area");
             return false;
         }
-        renderDebugTrajectory(finalArc, plan.candidate.landing, plan.planId());
+        renderDebugTrajectory(finalArc, plan.candidate.targetPoint, plan.planId());
 
         int before = stack.getCount();
         applyArcRotation(finalArc);
@@ -1232,10 +1263,11 @@ public final class GrenadeTacticalController {
         return soldier.isFriendlyTo(entity) || entity.isAlliedTo(soldier) || soldier.isAlliedTo(entity);
     }
 
-    private Arc findArc(Vec3 target, GrenadeIntegration.BallisticProfile profile,
-                         AimDeviation deviation) {
-        ArcSearchState search = createArcSearchState(target, profile, deviation,
-            null, null, -1, null);
+    private Arc findArc(Vec3 targetPoint, Vec3 landing,
+                         GrenadeIntegration.BallisticProfile profile,
+                         AimDeviation deviation, boolean preferHighArc) {
+        ArcSearchState search = createArcSearchState(targetPoint, landing, profile, deviation,
+            preferHighArc, null, null, -1, null);
         if (search == null) return null;
 
         while (search.nextCandidate < search.candidates.size()) {
@@ -1253,10 +1285,11 @@ public final class GrenadeTacticalController {
     }
 
     @Nullable
-    private ArcSearchState createArcSearchState(Vec3 target,
-                                                GrenadeIntegration.BallisticProfile profile,
-                                                AimDeviation deviation,
-                                                @Nullable Candidate candidate,
+    private ArcSearchState createArcSearchState(Vec3 targetPoint, Vec3 landing,
+                                                 GrenadeIntegration.BallisticProfile profile,
+                                                 AimDeviation deviation,
+                                                 boolean preferHighArc,
+                                                 @Nullable Candidate candidate,
                                                 @Nullable ItemStack stack,
                                                 int slot,
                                                 @Nullable SquadData squad) {
@@ -1264,28 +1297,29 @@ public final class GrenadeTacticalController {
         lastArcSawThrowerCoverBlock = false;
         lastArcRejectedAllForLanding = false;
         lastArcBounceMode = profile.shouldBounce();
+        lastArcSawPrematureImpact = false;
         lastClosestTerminalError = Double.POSITIVE_INFINITY;
         lastArcCandidateDescriptions = List.of();
-        LaunchOrigin launchOrigin = resolveLaunchOrigin(target);
+        LaunchOrigin launchOrigin = resolveLaunchOrigin(landing);
         if (launchOrigin == null) {
             lastArcSawThrowerCoverBlock = true;
             return null;
         }
 
         Vec3 origin = launchOrigin.position();
-        Vec3 aimPoint = displacedAimPoint(origin, target, deviation);
+        Vec3 aimPoint = displacedAimPoint(origin, landing, deviation);
         double dx = aimPoint.x - origin.x;
         double dz = aimPoint.z - origin.z;
         double horizontal = Math.sqrt(dx * dx + dz * dz);
         if (horizontal < 0.001) return null;
 
         float yaw = (float) Math.toDegrees(Math.atan2(dz, dx)) - 90.0f;
-        float losPitch = (float) -Math.toDegrees(Math.atan2(target.y - origin.y,
-            Math.sqrt((target.x - origin.x) * (target.x - origin.x)
-                + (target.z - origin.z) * (target.z - origin.z))));
+        float losPitch = (float) -Math.toDegrees(Math.atan2(targetPoint.y - origin.y,
+            Math.sqrt((targetPoint.x - origin.x) * (targetPoint.x - origin.x)
+                + (targetPoint.z - origin.z) * (targetPoint.z - origin.z))));
         List<PitchCandidate> candidates = estimatePitchCandidates(
             horizontal, aimPoint.y - origin.y, profile,
-            launchOrigin.mode().equals("RAISED_ABOVE_COVER"));
+            preferHighArc || launchOrigin.mode().equals("RAISED_ABOVE_COVER"));
         if (candidates.isEmpty()) return null;
         lastArcCandidateDescriptions = candidates.stream()
             .map(pitchCandidate -> String.format("%.1f/%s", pitchCandidate.pitch(), pitchCandidate.branch()))
@@ -1293,7 +1327,7 @@ public final class GrenadeTacticalController {
 
         PathSafetyContext safety = createPathSafetyContext(origin, aimPoint, profile);
         return new ArcSearchState(candidate, stack, slot, profile, squad, deviation,
-            target, aimPoint, origin, launchOrigin, yaw, losPitch, candidates, safety,
+            targetPoint, aimPoint, origin, launchOrigin, yaw, losPitch, candidates, safety,
             soldier.getPose().ordinal(), soldier.getCoverBehaviorManager().isInCover(),
             soldier.getCoverBehaviorManager().isSuppressed(), DiagnosticLogEnabled());
     }
@@ -1302,10 +1336,12 @@ public final class GrenadeTacticalController {
                                    GrenadeIntegration.BallisticProfile profile,
                                    @Nullable SquadData squad) {
         AimDeviation deviation = sampleAimDeviation(candidate);
-        ArcSearchState search = createArcSearchState(candidate.landing, profile, deviation,
+        ArcSearchState search = createArcSearchState(candidate.targetPoint, candidate.landing,
+            profile, deviation, candidate.preferHighArc,
             candidate, stack, slot, squad);
         if (search == null) return noArcReason();
-        if (!isSafeLanding(search.aimPoint) || !isSafeLanding(candidate.landing)) {
+        if (!isSafeLanding(search.aimPoint) || !isSafeLanding(candidate.targetPoint)
+            || !isSafeLanding(candidate.landing)) {
             return "inaccurate aim would place the grenade in an unsafe blast area";
         }
         arcSearch = search;
@@ -1596,7 +1632,14 @@ public final class GrenadeTacticalController {
                 if (collectPath) path.add(hit);
 
                 if (!profile.shouldBounce()) {
-                    terminalPosition = position.lerp(hit, 0.8);
+                    if (isPrematureImpact(hit, origin, target)) {
+                        lastArcSawPrematureImpact = true;
+                        safePath = false;
+                        break;
+                    }
+                    // The native projectile detonates on contact. Keep the
+                    // collision point instead of backing up toward the prior tick.
+                    terminalPosition = hit;
                     if (collectPath) path.add(terminalPosition);
                     terminal = true;
                     break;
@@ -1624,6 +1667,10 @@ public final class GrenadeTacticalController {
         }
 
         if (!safePath || terminalPosition == null) return null;
+        if (!profile.shouldBounce() && isPrematureImpact(terminalPosition, origin, target)) {
+            lastArcSawPrematureImpact = true;
+            return null;
+        }
         double aimError = terminalPosition.distanceTo(aimPoint);
         lastClosestTerminalError = Math.min(lastClosestTerminalError, aimError);
         if (aimError > MAX_LANDING_ERROR) return null;
@@ -1750,6 +1797,18 @@ public final class GrenadeTacticalController {
         return false;
     }
 
+    private boolean isPrematureImpact(Vec3 hit, Vec3 origin, Vec3 target) {
+        Vec3 targetHorizontal = target.subtract(origin).multiply(1.0, 0.0, 1.0);
+        Vec3 hitHorizontal = hit.subtract(origin).multiply(1.0, 0.0, 1.0);
+        double targetDistance = targetHorizontal.length();
+        double hitDistance = hitHorizontal.length();
+        if (targetDistance <= PREMATURE_IMPACT_TOLERANCE
+            || hitDistance >= targetDistance - PREMATURE_IMPACT_TOLERANCE) {
+            return false;
+        }
+        return targetHorizontal.dot(hitHorizontal) > 0.0;
+    }
+
     @Nullable
     private ArbitrationBlocker findArbitrationBlocker(Plan plan) {
         SquadData squad = plan.squad;
@@ -1821,9 +1880,9 @@ public final class GrenadeTacticalController {
         String closest = lastClosestTerminalError == Double.POSITIVE_INFINITY
             ? "none" : String.format("%.2f", lastClosestTerminalError);
         return String.format("no native ballistic arc reaches the target (bounce=%s,candidates=%s,"
-                + "allCandidatesFailedLanding=%s,closestTerminalError=%s)",
+                + "allCandidatesFailedLanding=%s,prematureImpact=%s,closestTerminalError=%s)",
             lastArcBounceMode, candidates,
-            lastArcRejectedAllForLanding, closest);
+            lastArcRejectedAllForLanding, lastArcSawPrematureImpact, closest);
     }
 
     private String formatArc(Arc arc, GrenadeIntegration.BallisticProfile profile) {

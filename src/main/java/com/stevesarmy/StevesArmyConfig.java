@@ -43,6 +43,7 @@ public class StevesArmyConfig {
     public static final ForgeConfigSpec.DoubleValue GRENADE_SAFETY_MARGIN;
     public static final ForgeConfigSpec.DoubleValue GRENADE_MIN_THREAT_ACCURACY;
     public static final ForgeConfigSpec.DoubleValue GRENADE_AIM_ERROR_SCALE;
+    public static final ForgeConfigSpec.DoubleValue GRENADE_OVERTHROW_DISTANCE;
 
     public static final ForgeConfigSpec.BooleanValue VS2_COMPAT_ENABLED;
     public static final ForgeConfigSpec.BooleanValue VS2_AUTO_TRANSPORT;
@@ -265,6 +266,11 @@ BUILDER.pop();
                      "0.0 restores deterministic aim; higher values make throws less precise.")
             .defineInRange("aimErrorScale", 1.0, 0.0, 2.0);
 
+        GRENADE_OVERTHROW_DISTANCE = BUILDER
+            .comment("Preferred horizontal distance beyond the target for autonomous grenade landings.",
+                     "This helps grenades clear the near side of enemy cover. Default: 1.5 blocks.")
+            .defineInRange("overthrowDistance", 1.5, 0.0, 8.0);
+
         BUILDER.pop();
 
         BUILDER.push("valkyrienskies");
@@ -425,6 +431,10 @@ BUILDER.pop();
 
     public static float getGrenadeAimErrorScale() {
         return GRENADE_AIM_ERROR_SCALE.get().floatValue();
+    }
+
+    public static double getGrenadeOverthrowDistance() {
+        return GRENADE_OVERTHROW_DISTANCE.get();
     }
 
     public static int getOptimizationLevel() {
