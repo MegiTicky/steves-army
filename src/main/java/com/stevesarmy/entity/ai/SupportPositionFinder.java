@@ -26,6 +26,7 @@ import java.util.UUID;
  * search anchor; the cover machinery snaps it to an actual cover block.
  */
 public final class SupportPositionFinder {
+    private static final double REAR_ANCHOR_OFFSET_BLOCKS = 3.0;
     private static final double SUPPORT_OFFSET_BLOCKS = 10.0;
     private static final double LATERAL_OFFSET_BLOCKS = 4.0;
     private static final double MIN_AWAY_DISTANCE_SQ = 0.01;
@@ -37,6 +38,36 @@ public final class SupportPositionFinder {
     private static final double ECHELON_BONUS = 0.35;
 
     private SupportPositionFinder() {}
+
+    /**
+     * Returns a small rearward search anchor for the MG relative to the
+     * squad's rifleman line. This is intentionally separate from the larger
+     * support-position evaluator below: it biases cover discovery without
+     * forcing the MG into a fixed formation slot.
+     */
+    @Nullable
+    public static BlockPos findRearAnchor(MachineGunnerEntity mg, @Nullable BlockPos forwardTarget) {
+        Vec3 line = lineAnchor(mg);
+        if (line == null) {
+            return null;
+        }
+
+        if (forwardTarget == null) {
+            LivingEntity owner = mg.getOwner();
+            if (owner == null) {
+                return null;
+            }
+            forwardTarget = owner.blockPosition();
+        }
+
+        Vec3 towardTarget = Vec3.atCenterOf(forwardTarget).subtract(line);
+        if (towardTarget.horizontalDistanceSqr() < MIN_AWAY_DISTANCE_SQ) {
+            return null;
+        }
+        Vec3 rearDirection = new Vec3(-towardTarget.x, 0.0, -towardTarget.z).normalize();
+        Vec3 anchor = line.add(rearDirection.scale(REAR_ANCHOR_OFFSET_BLOCKS));
+        return snapToGround(mg.level(), BlockPos.containing(anchor));
+    }
 
     @Nullable
     public static BlockPos findSupportPosition(MachineGunnerEntity mg) {

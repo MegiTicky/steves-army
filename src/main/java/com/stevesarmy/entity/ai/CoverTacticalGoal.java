@@ -7,6 +7,7 @@ import com.stevesarmy.combat.cover.*;
 import com.stevesarmy.debug.DiagnosticLogManager;
 import com.stevesarmy.debug.PerformanceMetrics;
 import com.stevesarmy.entity.SoldierEntity;
+import com.stevesarmy.entity.MachineGunnerEntity;
 import com.stevesarmy.squad.SquadCoverContext;
 import com.stevesarmy.squad.SquadManager;
 import com.stevesarmy.squad.SquadMode;
@@ -400,6 +401,22 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
     }
 
     /**
+     * Uses a small rearward squad anchor for MG cover searches in FOLLOW and
+     * ATTACK. Other roles and HOLD mode retain the existing search centers.
+     */
+    private BlockPos getMachineGunnerSearchCenter() {
+        if (!(soldier instanceof MachineGunnerEntity machineGunner)) {
+            return null;
+        }
+        if (!soldier.hasValidAttackTarget() && soldier.getSquadMode() != SquadMode.FOLLOW) {
+            return null;
+        }
+        BlockPos target = soldier.hasValidAttackTarget()
+            ? soldier.getAttackTargetPos() : machineGunner.getSuppressionCenter();
+        return SupportPositionFinder.findRearAnchor(machineGunner, target);
+    }
+
+    /**
      * Counts entries into suppression while occupying the same cover. Individual
      * rounds and ticks inside one suppressed state do not create extra episodes.
      */
@@ -574,6 +591,14 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
             if (owner instanceof Player) {
                 searchCenter = owner.blockPosition();
                 searchRadius = (int) FOLLOW_COVER_SEARCH_RADIUS;
+            }
+        }
+
+        BlockPos machineGunnerAnchor = getMachineGunnerSearchCenter();
+        if (machineGunnerAnchor != null) {
+            searchCenter = machineGunnerAnchor;
+            if (soldier.hasValidAttackTarget()) {
+                searchRadius = ATTACK_CORRIDOR_SEARCH_RADIUS;
             }
         }
 
@@ -2244,6 +2269,14 @@ private boolean shouldExitCoverForFollow() {
                 }
             }
         }
+
+        BlockPos machineGunnerAnchor = getMachineGunnerSearchCenter();
+        if (machineGunnerAnchor != null) {
+            searchCenter = machineGunnerAnchor;
+            if (soldier.hasValidAttackTarget()) {
+                searchRadius = ATTACK_CORRIDOR_SEARCH_RADIUS;
+            }
+        }
         this.debugSearchCenter = searchCenter;
         
         Optional<CoverPoint> bestCover = Optional.empty();
@@ -3193,6 +3226,11 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
         double ahead = Math.min(distToTarget * 0.25, ATTACK_FORWARD_BIAS_BLOCKS);
         BlockPos searchCenter = soldier.blockPosition().offset(
             (int)(toTarget.x * ahead), 0, (int)(toTarget.z * ahead));
+
+        BlockPos machineGunnerAnchor = getMachineGunnerSearchCenter();
+        if (machineGunnerAnchor != null) {
+            searchCenter = machineGunnerAnchor;
+        }
 
         Level level = soldier.level();
         CoverFinder finder = new CoverFinder(level);
