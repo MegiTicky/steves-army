@@ -35,6 +35,10 @@ public class C2SRequestSoldierModelPacket {
         buf.writeUtf(message.textureId);
     }
 
+    public static C2SRequestSoldierModelPacket clear(int entityId) {
+        return new C2SRequestSoldierModelPacket(entityId, "", "");
+    }
+
     public static C2SRequestSoldierModelPacket decode(FriendlyByteBuf buf) {
         return new C2SRequestSoldierModelPacket(buf.readInt(), buf.readUtf(), buf.readUtf());
     }
@@ -63,6 +67,11 @@ public class C2SRequestSoldierModelPacket {
         }
         if (!soldier.isOwnedBy(sender) && !sender.getAbilities().instabuild) {
             StevesArmyMod.LOGGER.debug("[YSM] Reject soldier model {} for {}: not owned and not creative", message.modelId, sender.getName().getString());
+            return;
+        }
+        if (message.modelId.isEmpty()) {
+            soldier.setYsmModelId("");
+            soldier.setYsmTextureId("");
             return;
         }
         // The client is authoritative for the cosmetic model choice; it may have models the

@@ -70,7 +70,6 @@ public class MachineGunnerEntity extends SoldierEntity {
      * the suppression center otherwise. Falls back to rifleman behavior when no
      * aim point exists.
      */
-    @Override
     @Nullable
     public Vec3 getPreferredCoverEvaluationDirection() {
         BlockPos aim = hasValidAttackTarget() ? getAttackTargetPos() : getSuppressionCenter();

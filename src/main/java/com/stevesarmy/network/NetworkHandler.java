@@ -1,13 +1,17 @@
 package com.stevesarmy.network;
 
 import com.stevesarmy.StevesArmyMod;
-import com.stevesarmy.compat.ysm.C2SRequestSoldierModelPacket;
+import com.stevesarmy.compat.ysm.YsmCompat;
+import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.Entity;
 import net.minecraftforge.network.NetworkRegistry;
 import net.minecraftforge.network.PacketDistributor;
 import net.minecraftforge.network.simple.SimpleChannel;
+import java.util.function.BiConsumer;
+import java.util.function.Function;
+import java.util.function.Supplier;
 
 public class NetworkHandler {
     private static final String PROTOCOL_VERSION = "6";
@@ -109,10 +113,33 @@ public class NetworkHandler {
             BulkGarrisonPacket::encode,
             BulkGarrisonPacket::decode,
             BulkGarrisonPacket::handle);
-        INSTANCE.registerMessage(id++, C2SRequestSoldierModelPacket.class,
-            C2SRequestSoldierModelPacket::encode,
-            C2SRequestSoldierModelPacket::decode,
-            C2SRequestSoldierModelPacket::handle);
+        if (YsmCompat.isLoaded()) {
+            registerYsmPacket(id++);
+        }
+    }
+
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private static void registerYsmPacket(int id) {
+        try {
+            Class packetClass = Class.forName("com.stevesarmy.compat.ysm.C2SRequestSoldierModelPacket");
+            java.lang.reflect.Method encode = packetClass.getMethod("encode", packetClass, FriendlyByteBuf.class);
+            java.lang.reflect.Method decode = packetClass.getMethod("decode", FriendlyByteBuf.class);
+            java.lang.reflect.Method handle = packetClass.getMethod("handle", packetClass, Supplier.class);
+            INSTANCE.registerMessage(id, packetClass,
+                (BiConsumer) (message, buffer) -> invokeStatic(encode, message, buffer),
+                (Function) buffer -> invokeStatic(decode, buffer),
+                (BiConsumer) (message, context) -> invokeStatic(handle, message, context));
+        } catch (Throwable throwable) {
+            StevesArmyMod.LOGGER.warn("[YSM] Failed to register optional packet: {}", throwable.toString());
+        }
+    }
+
+    private static Object invokeStatic(java.lang.reflect.Method method, Object... args) {
+        try {
+            return method.invoke(null, args);
+        } catch (ReflectiveOperationException exception) {
+            throw new RuntimeException(exception);
+        }
     }
 
     public static void sendTo(ServerPlayer player, Object message) {

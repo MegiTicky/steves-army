@@ -64,17 +64,19 @@ public class SoldierInventoryScreen extends AbstractContainerScreen<SoldierInven
     private void refreshRoleButtons() {
         SoldierEntity soldier = resolveSoldier();
         SoldierRole role = soldier != null ? soldier.getRole() : null;
+        boolean canConvert = soldier != null && this.minecraft != null && this.minecraft.player != null
+            && (soldier.isOwnedBy(this.minecraft.player) || this.minecraft.player.getAbilities().instabuild);
         if (this.rifleButton != null) {
-            this.rifleButton.active = role != null && role != SoldierRole.RIFLEMAN;
-            this.rifleButton.visible = role != null;
+            this.rifleButton.active = canConvert && role != null && role != SoldierRole.RIFLEMAN;
+            this.rifleButton.visible = canConvert && role != null;
         }
         if (this.machineGunnerButton != null) {
-            this.machineGunnerButton.active = role != null && role != SoldierRole.MACHINE_GUNNER;
-            this.machineGunnerButton.visible = role != null;
+            this.machineGunnerButton.active = canConvert && role != null && role != SoldierRole.MACHINE_GUNNER;
+            this.machineGunnerButton.visible = canConvert && role != null;
         }
         if (this.garrisonButton != null) {
-            this.garrisonButton.active = role != null && role != SoldierRole.GARRISON;
-            this.garrisonButton.visible = role != null;
+            this.garrisonButton.active = canConvert && role != null && role != SoldierRole.GARRISON;
+            this.garrisonButton.visible = canConvert && role != null;
         }
     }
 

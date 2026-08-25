@@ -19,6 +19,7 @@ public class SoldierModelRenderer extends GeoReplacedEntityRenderer<SoldierEntit
 
     public SoldierModelRenderer(EntityRendererProvider.Context context) {
         super(context);
+        addLayerRenderer(new SoldierItemInHandLayer(context.getItemInHandRenderer()));
     }
 
     @Override

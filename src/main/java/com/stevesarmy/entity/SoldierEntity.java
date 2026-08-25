@@ -467,6 +467,15 @@ public class SoldierEntity extends PathfinderMob implements Container {
         return SoldierRole.RIFLEMAN;
     }
 
+    /**
+     * Optional direction that a role prefers for cover evaluation. Riflemen keep
+     * the default threat-based evaluation direction.
+     */
+    @Nullable
+    public Vec3 getPreferredCoverEvaluationDirection() {
+        return null;
+    }
+
     @Override
     public void addAdditionalSaveData(CompoundTag tag) {
         super.addAdditionalSaveData(tag);

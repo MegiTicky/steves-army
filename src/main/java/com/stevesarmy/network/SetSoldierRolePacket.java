@@ -43,7 +43,8 @@ public class SetSoldierRolePacket {
             }
 
             Entity entity = player.level().getEntity(message.soldierId);
-            if (!(entity instanceof SoldierEntity soldier) || !soldier.isOwnedBy(player)) {
+            if (!(entity instanceof SoldierEntity soldier)
+                || !(soldier.isOwnedBy(player) || player.getAbilities().instabuild)) {
                 return;
             }
             if (player.distanceToSqr(soldier) > 400.0) {

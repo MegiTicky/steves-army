@@ -23,7 +23,12 @@ public class SurgicalKnifeItem extends Item {
     public InteractionResult interactLivingEntity(ItemStack stack, Player player, LivingEntity entity, InteractionHand hand) {
         if (entity instanceof SoldierEntity soldier && YsmCompat.isLoaded() && YsmCompat.canEditModel(player, soldier)) {
             if (player.level().isClientSide) {
-                YsmCompat.openModelScreen(soldier);
+                if (player.isShiftKeyDown()) {
+                    YsmCompat.disableModel(soldier);
+                    YsmCompat.requestDisableModel(soldier);
+                } else {
+                    YsmCompat.openModelScreen(soldier);
+                }
             }
             return InteractionResult.sidedSuccess(player.level().isClientSide);
         }

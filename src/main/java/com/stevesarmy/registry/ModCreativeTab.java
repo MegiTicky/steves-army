@@ -20,6 +20,7 @@ public class ModCreativeTab {
             .title(Component.translatable("itemGroup.steves_army"))
             .displayItems((parameters, output) -> {
                 output.accept(ModItems.RECRUIT_ITEM.get());
+                output.accept(ModItems.SURGICAL_KNIFE.get());
                 output.accept(ModItems.SOLDIER_SPAWN_EGG.get());
                 output.accept(ModItems.MACHINE_GUNNER_SPAWN_EGG.get());
                 output.accept(ModItems.GARRISON_SPAWN_EGG.get());
