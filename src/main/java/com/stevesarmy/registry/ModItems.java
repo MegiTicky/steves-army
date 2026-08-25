@@ -4,6 +4,7 @@ import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.item.RecruitItem;
 import com.stevesarmy.item.SoldierSpawnEggItem;
+import com.stevesarmy.item.SurgicalKnifeItem;
 import com.stevesarmy.item.TargetSpawnEggItem;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.item.Item;
@@ -19,6 +20,11 @@ public class ModItems {
     public static final RegistryObject<Item> RECRUIT_ITEM = ITEMS.register(
         "recruit_item",
         () -> new RecruitItem(new Item.Properties().stacksTo(16))
+    );
+
+    public static final RegistryObject<Item> SURGICAL_KNIFE = ITEMS.register(
+        "surgical_knife",
+        () -> new SurgicalKnifeItem(new Item.Properties().stacksTo(1))
     );
 
     public static final RegistryObject<Item> SOLDIER_SPAWN_EGG = ITEMS.register(

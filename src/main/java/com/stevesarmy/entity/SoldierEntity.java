@@ -158,6 +158,11 @@ public class SoldierEntity extends PathfinderMob implements Container {
     private static final EntityDataAccessor<Integer> FIRE_TEAM =
         SynchedEntityData.defineId(SoldierEntity.class, EntityDataSerializers.INT);
 
+    private static final EntityDataAccessor<String> YSM_MODEL_ID =
+        SynchedEntityData.defineId(SoldierEntity.class, EntityDataSerializers.STRING);
+    private static final EntityDataAccessor<String> YSM_TEXTURE_ID =
+        SynchedEntityData.defineId(SoldierEntity.class, EntityDataSerializers.STRING);
+
     private static final EntityDataAccessor<Integer> RECALL_TICKS =
         SynchedEntityData.defineId(SoldierEntity.class, EntityDataSerializers.INT);
     private static final EntityDataAccessor<BlockPos> MG_DEBUG_POSITION =
@@ -407,6 +412,8 @@ public class SoldierEntity extends PathfinderMob implements Container {
         this.entityData.define(DEBUG_CQB_PATH, "");
         this.entityData.define(FIRE_DISCIPLINE, FireDiscipline.STANDARD.ordinal());
         this.entityData.define(FIRE_TEAM, FireTeam.ALPHA.ordinal());
+        this.entityData.define(YSM_MODEL_ID, "");
+        this.entityData.define(YSM_TEXTURE_ID, "");
         this.entityData.define(RECALL_TICKS, 0);
         this.entityData.define(MG_DEBUG_POSITION, BlockPos.ZERO);
         this.entityData.define(MG_DEBUG_CENTER, BlockPos.ZERO);
@@ -476,6 +483,8 @@ public class SoldierEntity extends PathfinderMob implements Container {
         tag.putInt("FireDiscipline", getFireDiscipline().ordinal());
         tag.putInt("FireTeam", getFireTeam().ordinal());
         tag.putLong("GrenadeCooldownUntil", grenadeCooldownUntilTick);
+        tag.putString("YsmModelId", getYsmModelId());
+        tag.putString("YsmTextureId", getYsmTextureId());
     }
 
     @Override
@@ -501,6 +510,12 @@ public class SoldierEntity extends PathfinderMob implements Container {
             setFireTeam(FireTeam.values()[tag.getInt("FireTeam") % FireTeam.values().length]);
         }
         grenadeCooldownUntilTick = tag.getLong("GrenadeCooldownUntil");
+        if (tag.contains("YsmModelId")) {
+            setYsmModelId(tag.getString("YsmModelId"));
+        }
+        if (tag.contains("YsmTextureId")) {
+            setYsmTextureId(tag.getString("YsmTextureId"));
+        }
     }
 
     @Override
@@ -528,6 +543,8 @@ public class SoldierEntity extends PathfinderMob implements Container {
         }
         tag.putInt("FireTeam", getFireTeam().ordinal());
         tag.putInt("FireDiscipline", getFireDiscipline().ordinal());
+        tag.putString("YsmModelId", getYsmModelId());
+        tag.putString("YsmTextureId", getYsmTextureId());
 
         stack.getOrCreateTag().put("EntityTag", tag);
         return stack;
@@ -587,6 +604,12 @@ public class SoldierEntity extends PathfinderMob implements Container {
                 setFireDiscipline(disciplines[ordinal]);
             }
         }
+        if (entityTag.contains("YsmModelId")) {
+            setYsmModelId(entityTag.getString("YsmModelId"));
+        }
+        if (entityTag.contains("YsmTextureId")) {
+            setYsmTextureId(entityTag.getString("YsmTextureId"));
+        }
         if (entityTag.contains("Inventory")) {
             inventory.load(entityTag.getCompound("Inventory"));
             inventory.syncArmorToEntity(this);
@@ -595,17 +618,24 @@ public class SoldierEntity extends PathfinderMob implements Container {
 
     @Override
     public InteractionResult mobInteract(Player player, InteractionHand hand) {
-        if (isOwnedBy(player)) {
-            if (player.isShiftKeyDown()) {
-                if (!this.level().isClientSide && player instanceof ServerPlayer serverPlayer) {
-                    com.stevesarmy.inventory.SoldierInventoryMenuProvider provider = 
-                        new com.stevesarmy.inventory.SoldierInventoryMenuProvider(this);
-                    net.minecraftforge.network.NetworkHooks.openScreen(serverPlayer, 
-                        provider,
-                        provider::writeExtraData);
-                }
-                return InteractionResult.sidedSuccess(this.level().isClientSide);
+        // Let the surgical knife's item interaction open the YSM editor before the
+        // generic owned-soldier interaction consumes the click.
+        if (player.getItemInHand(hand).is(ModItems.SURGICAL_KNIFE.get())) {
+            return InteractionResult.PASS;
+        }
+        // Creative players may inspect the inventory of any soldier, regardless of ownership.
+        boolean canOpenInventory = isOwnedBy(player) || player.getAbilities().instabuild;
+        if (canOpenInventory && player.isShiftKeyDown()) {
+            if (!this.level().isClientSide && player instanceof ServerPlayer serverPlayer) {
+                com.stevesarmy.inventory.SoldierInventoryMenuProvider provider =
+                    new com.stevesarmy.inventory.SoldierInventoryMenuProvider(this);
+                net.minecraftforge.network.NetworkHooks.openScreen(serverPlayer,
+                    provider,
+                    provider::writeExtraData);
             }
+            return InteractionResult.sidedSuccess(this.level().isClientSide);
+        }
+        if (isOwnedBy(player)) {
             if (!this.level().isClientSide) {
                 // Right-click behavior reserved for future use
                 // HOLD/FOLLOW modes are now set via ping wheel exclusively
@@ -692,6 +722,26 @@ public class SoldierEntity extends PathfinderMob implements Container {
 
     public void setFireTeam(FireTeam team) {
         this.entityData.set(FIRE_TEAM, team.ordinal());
+    }
+
+    public String getYsmModelId() {
+        return this.entityData.get(YSM_MODEL_ID);
+    }
+
+    public void setYsmModelId(String modelId) {
+        this.entityData.set(YSM_MODEL_ID, modelId);
+    }
+
+    public String getYsmTextureId() {
+        return this.entityData.get(YSM_TEXTURE_ID);
+    }
+
+    public void setYsmTextureId(String textureId) {
+        this.entityData.set(YSM_TEXTURE_ID, textureId);
+    }
+
+    public boolean hasYsmModel() {
+        return !getYsmModelId().isEmpty();
     }
 
     public int getRecallTicks() {

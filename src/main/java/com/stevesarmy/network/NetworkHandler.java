@@ -1,6 +1,7 @@
 package com.stevesarmy.network;
 
 import com.stevesarmy.StevesArmyMod;
+import com.stevesarmy.compat.ysm.C2SRequestSoldierModelPacket;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.Entity;
@@ -108,6 +109,10 @@ public class NetworkHandler {
             BulkGarrisonPacket::encode,
             BulkGarrisonPacket::decode,
             BulkGarrisonPacket::handle);
+        INSTANCE.registerMessage(id++, C2SRequestSoldierModelPacket.class,
+            C2SRequestSoldierModelPacket::encode,
+            C2SRequestSoldierModelPacket::decode,
+            C2SRequestSoldierModelPacket::handle);
     }
 
     public static void sendTo(ServerPlayer player, Object message) {
