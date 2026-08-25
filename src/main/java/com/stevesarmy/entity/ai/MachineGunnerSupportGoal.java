@@ -32,6 +32,7 @@ public final class MachineGunnerSupportGoal extends Goal implements CoverGoalCon
         }
         this.soldier = machineGunner;
         this.coverController = new CoverTacticalGoal(soldier, true);
+        this.coverController.setCoverSelectionStrategy(new MachineGunnerLaneFirstSelection(this.soldier));
         this.setFlags(EnumSet.of(Flag.MOVE, Flag.LOOK));
     }
 

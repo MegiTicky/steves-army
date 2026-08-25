@@ -9,6 +9,7 @@ import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.ai.goal.Goal;
 import net.minecraft.world.level.Level;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.phys.Vec3;
 
 import javax.annotation.Nullable;
 
@@ -61,6 +62,26 @@ public class MachineGunnerEntity extends SoldierEntity {
             candidate = getPingThreatPos();
         }
         return candidate;
+    }
+
+    /**
+     * Aims cover evaluation (protection filter and fire-lane scoring) at the
+     * attack objective during ATTACK so the MG advances with the squad, and at
+     * the suppression center otherwise. Falls back to rifleman behavior when no
+     * aim point exists.
+     */
+    @Override
+    @Nullable
+    public Vec3 getPreferredCoverEvaluationDirection() {
+        BlockPos aim = hasValidAttackTarget() ? getAttackTargetPos() : getSuppressionCenter();
+        if (aim == null) {
+            return null;
+        }
+        Vec3 direction = new Vec3(
+            aim.getX() + 0.5 - getX(),
+            0.0,
+            aim.getZ() + 0.5 - getZ());
+        return direction.lengthSqr() > 0.001 ? direction.normalize() : null;
     }
 
     @Nullable

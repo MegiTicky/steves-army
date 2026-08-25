@@ -43,6 +43,7 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
     private final SoldierEntity soldier;
     private final PathNavigation navigation;
     private final boolean machineGunnerPipeline;
+    private CoverSelectionStrategy coverSelectionStrategy;
     
     private int cooldown = 0;
     private int stuckTicks = 0;
@@ -281,6 +282,28 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
         // scheduler's movement lock across every cover-state transition.
         this.setFlags(EnumSet.of(Flag.MOVE, Flag.LOOK));
     }
+
+    /**
+     * Installs a role-specific cover-selection override (e.g. the MG's fire
+     * lane first selection). Riflemen never set this, so their base selection
+     * is unchanged. Null clears the override.
+     */
+    public void setCoverSelectionStrategy(@javax.annotation.Nullable CoverSelectionStrategy strategy) {
+        this.coverSelectionStrategy = strategy;
+    }
+
+    /**
+     * Consults the installed cover-selection strategy over the path's
+     * already-scored candidates. Returns empty when no strategy is installed or
+     * when the strategy defers, so callers always fall back to the base
+     * selection.
+     */
+    private Optional<CoverPoint> selectPreferredCover(List<CoverFinder.ScoredCover> candidates) {
+        if (coverSelectionStrategy == null) {
+            return Optional.empty();
+        }
+        return coverSelectionStrategy.select(soldier, candidates);
+    }
     
     private CoverBehaviorManager getCoverManager() {
         return soldier.getCoverBehaviorManager();
@@ -361,6 +384,19 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
     
     private ThreatAwareness getThreats() {
         return soldier.getThreatAwareness();
+    }
+
+    /**
+     * Direction used to score cover candidates. Roles may aim cover selection
+     * via SoldierEntity.getPreferredCoverEvaluationDirection(); the default is
+     * the primary threat direction (rifleman behavior).
+     */
+    private Vec3 getCoverSearchDirection() {
+        Vec3 preferred = soldier.getPreferredCoverEvaluationDirection();
+        if (preferred != null) {
+            return preferred;
+        }
+        return getThreats().getPrimaryDirection(soldier.position());
     }
 
     /**
@@ -2129,7 +2165,7 @@ private boolean shouldExitCoverForFollow() {
             }
         }
         
-        Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
+        Vec3 threatDirection = getCoverSearchDirection();
         List<LivingEntity> threats = getThreatList();
         SquadCoverContext squadCtx = buildSquadCoverContext();
 
@@ -2256,7 +2292,10 @@ private boolean shouldExitCoverForFollow() {
                 ? CoverFinder.getDirectionFromVector(threatDirection) : null;
 
             // Filter: require forward progress AND primary-threat protection,
-            // skip current/blacklisted covers
+            // skip current/blacklisted covers. Collect every eligible cover so a
+            // role strategy can pick the best fire lane; the first eligible is
+            // the unchanged base fallback.
+            List<CoverFinder.ScoredCover> eligible = new ArrayList<>();
             for (CoverFinder.ScoredCover sc : scored) {
                 CoverPoint cover = sc.cover;
                 if (currentCover != null && cover.getPosition().equals(currentCover.getPosition())) continue;
@@ -2272,8 +2311,12 @@ private boolean shouldExitCoverForFollow() {
                     continue;
                 }
 
-                bestCover = Optional.of(cover);
-                break;
+                eligible.add(sc);
+            }
+
+            bestCover = selectPreferredCover(eligible);
+            if (bestCover.isEmpty() && !eligible.isEmpty()) {
+                bestCover = Optional.of(eligible.get(0).cover);
             }
 
             // If forward-biased found nothing protected, search from soldier position as fallback
@@ -2311,7 +2354,10 @@ private boolean shouldExitCoverForFollow() {
         } else {
             reusableScored = finder.evaluateAndScoreAll(
                 soldier, threatDirection, threats, searchRadius, true, squadCtx);
-            bestCover = selectBestAvailableCover(reusableScored, threatDirection);
+            bestCover = selectPreferredCover(reusableScored);
+            if (bestCover.isEmpty()) {
+                bestCover = selectBestAvailableCover(reusableScored, threatDirection);
+            }
 
             if (bestCover.isEmpty()) {
                 bestCover = finder.findBestCover(
@@ -2542,7 +2588,7 @@ private Optional<CoverPoint> findBetterCover() {
         Level level = soldier.level();
         CoverFinder finder = new CoverFinder(level);
 
-        Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
+        Vec3 threatDirection = getCoverSearchDirection();
         List<LivingEntity> threats = getThreatList();
         SquadCoverContext squadCtx = buildSquadCoverContext();
 
