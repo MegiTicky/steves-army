@@ -1,5 +1,6 @@
 package com.stevesarmy.combat;
 
+import com.stevesarmy.StevesArmyConfig;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.AABB;
@@ -26,6 +27,9 @@ public final class CombatTargetQueryCache {
 
     public static List<LivingEntity> getNearbyLivingEntities(Level level, Vec3 center,
                                                               double radius, int ttlTicks) {
+        if (StevesArmyConfig.isPhase3PerceptionFrameEnabled()) {
+            return SameTickPerceptionFrame.getNearbyLivingEntities(level, center, radius);
+        }
         if (ttlTicks <= 0) {
             return query(level, center, radius, 0);
         }
@@ -60,6 +64,7 @@ public final class CombatTargetQueryCache {
     }
 
     public static void invalidate(Level level) {
+        SameTickPerceptionFrame.invalidate(level);
         synchronized (CACHES) {
             CACHES.remove(level);
         }

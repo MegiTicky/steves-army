@@ -51,6 +51,7 @@ public class StevesArmyConfig {
 
     public static final ForgeConfigSpec.IntValue OPTIMIZATION_LEVEL;
     public static final ForgeConfigSpec.BooleanValue PHASE_2_RETRY_POLICY_ENABLED;
+    public static final ForgeConfigSpec.BooleanValue PHASE_3_PERCEPTION_FRAME_ENABLED;
 
     static {
         BUILDER.push("aim_quality");
@@ -307,6 +308,12 @@ BUILDER.pop();
                      "Default: false")
             .define("phase2RetryPolicyEnabled", false);
 
+        PHASE_3_PERCEPTION_FRAME_ENABLED = BUILDER
+            .comment("Enable Phase 3 same-tick target, smoke, and visibility perception reuse.",
+                     "The frame is invalidated at tick boundaries and on relevant world/entity changes.",
+                     "Default: false")
+            .define("phase3PerceptionFrameEnabled", false);
+
         BUILDER.pop();
 
         SPEC = BUILDER.build();
@@ -452,6 +459,10 @@ BUILDER.pop();
         return PHASE_2_RETRY_POLICY_ENABLED.get();
     }
 
+    public static boolean isPhase3PerceptionFrameEnabled() {
+        return PHASE_3_PERCEPTION_FRAME_ENABLED.get();
+    }
+
     /** Legacy compatibility hook; nearby-target snapshots are disabled. */
     public static int getTargetCandidateCacheTicks() {
         return 0;
@@ -473,6 +484,6 @@ BUILDER.pop();
     }
 
     public static boolean useSharedTargetQueryCache() {
-        return false;
+        return isPhase3PerceptionFrameEnabled();
     }
 }

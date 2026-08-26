@@ -139,6 +139,10 @@ public final class PerformanceMetrics {
     private static final LongAdder smokeQueries = new LongAdder();
     private static final LongAdder smokeEntitiesTested = new LongAdder();
     private static final LongAdder smokeHits = new LongAdder();
+    private static final LongAdder sameTickVisibilityFrameHits = new LongAdder();
+    private static final LongAdder sameTickVisibilityFrameMisses = new LongAdder();
+    private static final LongAdder sameTickSmokeFrameHits = new LongAdder();
+    private static final LongAdder sameTickSmokeFrameMisses = new LongAdder();
 
     private static final int TICK_BUFFER_SIZE = 1000;
     private static final long[] tickWorkNanos = new long[TICK_BUFFER_SIZE];
@@ -270,6 +274,10 @@ public final class PerformanceMetrics {
         smokeQueries.reset();
         smokeEntitiesTested.reset();
         smokeHits.reset();
+        sameTickVisibilityFrameHits.reset();
+        sameTickVisibilityFrameMisses.reset();
+        sameTickSmokeFrameHits.reset();
+        sameTickSmokeFrameMisses.reset();
         java.util.Arrays.fill(tickWorkNanos, 0L);
         tickBufferIndex = 0;
         tickWorkSamples = 0;
@@ -337,6 +345,22 @@ public final class PerformanceMetrics {
 
     public static void recordSameTickPotentialTargetCacheHit() {
         if (enabled) sameTickPotentialTargetCacheHits.increment();
+    }
+
+    public static void recordSameTickVisibilityFrameHit() {
+        if (enabled) sameTickVisibilityFrameHits.increment();
+    }
+
+    public static void recordSameTickVisibilityFrameMiss() {
+        if (enabled) sameTickVisibilityFrameMisses.increment();
+    }
+
+    public static void recordSameTickSmokeFrameHit() {
+        if (enabled) sameTickSmokeFrameHits.increment();
+    }
+
+    public static void recordSameTickSmokeFrameMiss() {
+        if (enabled) sameTickSmokeFrameMisses.increment();
     }
 
     public static void recordCoverDiscoveryCacheHit() {
@@ -726,6 +750,10 @@ public final class PerformanceMetrics {
              + "  Phase 1 reuse: " + sameTickPotentialTargetCacheHits.sum()
              + " same-tick target hits, " + coverDiscoveryCacheHits.sum()
              + " cover discovery hits, " + coverPathReuseHits.sum() + " path hits\n"
+             + "  Phase 3 perception frame: " + sameTickVisibilityFrameHits.sum()
+             + " visibility hits, " + sameTickVisibilityFrameMisses.sum()
+             + " visibility misses, " + sameTickSmokeFrameHits.sum()
+             + " smoke cell hits, " + sameTickSmokeFrameMisses.sum() + " smoke cell misses\n"
             + "  Threat reports: " + threatReportAttempts.sum() + " attempts, "
             + threatReportPublished.sum() + " published, "
             + threatReportGeometryCalculations.sum() + " geometry calculations, "

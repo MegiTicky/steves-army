@@ -735,6 +735,57 @@ Implementation status:
   not replace an archived instrumented A/B capture with matched reset and Spark
   windows, so the formal quantitative performance gate remains open.
 
+### Phase 2 Disabled/Enabled A/B Capture 1
+
+- Phase 2 disabled Spark profile: `https://spark.lucko.me/G693PgEOqx`.
+- Phase 2 enabled Spark profile: `https://spark.lucko.me/rc83bVjV7X`.
+- The disabled report recorded `13,815,859` visibility rays, `122,328`
+  exposure calculations, `84,144` detection ticks, `112,725` target refreshes,
+  `4,286` cover searches, and `1,192` path requests. The enabled report
+  recorded `11,033,282` visibility rays, `114,395` exposure calculations,
+  `67,233` detection ticks, `92,346` target refreshes, `3,581` cover searches,
+  and `953` path requests.
+- Enabled versus disabled total work was lower: visibility rays `-20.1%`,
+  exposure calculations `-6.5%`, detection ticks `-20.1%`, target refreshes
+  `-18.1%`, cover searches `-16.4%`, and path requests `-20.1%`. Path failures
+  fell from `692` to `477` (`-31.1%`). Stage totals also fell: LOS traversal
+  `29,467.98 ms` to `22,197.61 ms` (`-24.7%`), smoke lookup `6,259.04 ms` to
+  `4,922.09 ms` (`-21.4%`), exposure `2,744.30 ms` to `2,508.59 ms` (`-8.6%`),
+  cover scoring `17,809.04 ms` to `12,805.10 ms` (`-28.1%`), and path request
+  time `12,493.75 ms` to `8,972.18 ms` (`-28.2%`).
+- Sampled AI latency was mixed rather than uniformly better. Enabled versus
+  disabled was average `17.35 ms` versus `15.95 ms` (`+8.8%`), p50 `13.46 ms`
+  versus `11.72 ms` (`+14.8%`), p95 `43.88 ms` versus `41.33 ms` (`+6.2%`),
+  p99 `53.06 ms` versus `52.90 ms` (`+0.3%`), and worst `75.59 ms` versus
+  `97.88 ms` (`-22.8%`). Cover search time fell from `1,360.44 ms` to
+  `1,231.50 ms` (`-9.5%`), while average cost per search rose slightly from
+  `0.32 ms` to `0.34 ms` (`+6.3%`).
+- Queue behavior remained healthy with Phase 2 enabled: routine queue age
+  improved from `9.25` to `7.47` ticks, while the emergency queue processed
+  `346` executions at `1.36` ticks average age, with `465` deferred and `0`
+  stale or cancelled requests. Phase 2A retry suppression was active with
+  `124` flank attempts, `107` failures, `94` retry skips, and `100` fingerprint
+  changes. With Phase 2 disabled, emergency requests correctly remained at
+  zero and flank retry suppression remained at zero.
+- Evaluation: this is strong evidence that Phase 2 reduces aggregate tactical
+  work and improves worst-tick behavior under the supplied scenarios. It does
+  not show lower sampled average or p95 AI latency. The reports are not fully
+  normalized because the enabled window has about `20%` fewer detection ticks,
+  rays, paths, and other work units; therefore the lower totals cannot alone
+  prove a per-tick performance improvement. The result supports keeping Phase 2
+  enabled in the tested configuration, but the formal p95/no-regression exit
+  gate remains open until equal-duration, equal-population windows are captured
+  after resetting metrics and Spark at the same tick boundary.
+- As a rough work-rate normalization, dividing cumulative counters and stage
+  totals by detection ticks gives nearly identical visibility-ray rate (`164.19`
+  disabled versus `164.11` enabled, `-0.1%`) and path-request rate (`0.0142`
+  versus `0.0142`, `+0.1%`). Per-detection-tick LOS time fell `5.7%`, smoke
+  time fell `1.6%`, cover-scoring time fell `10.0%`, and path-request time fell
+  `10.1%`; exposure calculation rate rose `17.0%` and exposure time per tick
+  rose `14.4%`. This supports lower cost in several expensive stages, but
+  detection ticks are only a proxy for elapsed capture duration and should not
+  replace a tick-aligned A/B run.
+
 Deliverables:
 
 - Add a failed flank-search retry policy or input fingerprint.
@@ -755,6 +806,29 @@ Exit gate:
 - Routine requests cannot starve under sustained emergency traffic.
 
 ### Phase 3: Same-Tick Perception Frame
+
+Implementation status:
+
+- Implemented an opt-in server config flag, `performance.phase3PerceptionFrameEnabled`,
+  defaulting to `false`.
+- Implemented `SameTickPerceptionFrame` as a per-level, server-thread-only frame
+  whose live-entity entries are replaced at every game-tick boundary. Target
+  broad-phase results are shared by 16-block spatial cells with bounded frame
+  storage and exact observer-side filtering remains unchanged.
+- Integrated same-tick target broad-phase reuse into `CombatTargetQueryCache`.
+  The previous multi-tick shared query path remains available only when Phase 3
+  is disabled; Phase 3 does not introduce a cross-tick entity TTL.
+- Integrated same-tick visibility-result reuse keyed by observer, exact endpoints,
+  smoke policy, and ignored cover blocks. Immediate `traceFresh` calls continue
+  to bypass the frame.
+- Integrated same-tick smoke AABB lookup using bounded spatial smoke cells. Block,
+  entity join/death, and level-unload invalidation clear the frame; the frame is
+  also replaced automatically when the level game time changes.
+- Added Phase 3 hit/miss counters for visibility results and smoke cells to
+  `PerformanceMetrics`, alongside the existing target-query cache counters.
+
+The implementation is compiled but remains disabled by default pending gameplay
+equivalence and controlled performance validation.
 
 Deliverables:
 
