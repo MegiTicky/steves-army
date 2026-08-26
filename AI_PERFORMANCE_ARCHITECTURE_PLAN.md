@@ -539,6 +539,73 @@ Implementation status:
   metrics report still predates the Spark start by eight seconds, so its values
   are recorded as reset-window totals rather than strictly Spark-window totals.
 
+### Phase 2A Capture 1
+
+- Spark profile: `https://spark.lucko.me/ANPasMDg2Q`.
+- Supplied metrics reports: `14:16:06` initial report and `14:18:15` final
+  cumulative report. The final report recorded `6,980,017` visibility ray
+  requests and actual traces, `139,214` exposure calculations, `54,826`
+  detection ticks with `1,830,111` candidates, `79,381` target refreshes with
+  `2,588,472` candidates, `1,346` cover searches, `63,268` candidates
+  discovered, `65,091` evaluated, and `64,874` scored. It recorded `554` cover
+  path requests, `6` retries, and `187` failures.
+- Phase 1 reuse counters were `100,285` same-tick target hits, `255` cover
+  discovery hits, and `200` path hits. Visibility cache counters were
+  `1,414,897` hits / `1,877,998` misses. Smoke lookups were `6,937,214`, with
+  zero entities tested and zero hits.
+- Stage totals were entity query `1,107.92 ms` / `101,596` calls, LOS block
+  traversal `20,412.36 ms` / `6,980,017` calls, smoke lookup `4,438.14 ms` /
+  `6,937,214` calls, exposure `4,195.28 ms` / `139,214` calls, cover scoring
+  `6,059.40 ms` / `1,527` calls, and path request `8,292.02 ms` / `34,319`
+  calls.
+- AI work per tick over the last `1,000` samples was average `2.91 ms`, p50
+  `0.61 ms`, p95 `10.63 ms`, p99 `33.56 ms`, and worst `87.63 ms`. Cover search
+  time was `575.83 ms` total, averaging `0.43 ms/search`.
+- Phase 2A counters were `151` flank-search attempts, `142` failures, `0`
+  retry skips, and `0` fingerprint changes. Queue counters were `660` queued,
+  `679` executed, `5,221` deferred, `2,914` coalesced, `19` cancelled, `0`
+  stale, and `0` aged; executed requests averaged `8.44` overdue ticks with a
+  maximum of `24` ticks.
+- Interpretation: this run has much lower measured AI work per tick than the
+  previous supplied Phase 1 capture (`2.91 ms` average, `10.63 ms` p95, and
+  `87.63 ms` worst versus no recovered comparable percentile values in the
+  earlier report). Total work counts are also lower, but the captures are not
+  strictly normalized for identical duration, soldier population, scenario
+  state, or Spark window. Therefore this is evidence of improved measured
+  server-thread AI cost in this run, not a controlled Phase 1-to-Phase 2A proof.
+- Phase 2A itself was not demonstrated by the counters: no failed flank input
+  was suppressed, and no queue request reached the `40`-tick aging threshold.
+  The next validation should enable `performance.phase2RetryPolicyEnabled`,
+  confirm the config is loaded, and run a controlled repeated-failed-flank
+  scenario long enough to produce retry skips before evaluating the policy.
+
+### Phase 2A Capture 2: Enabled Failed-Flank Scenario
+
+- Supplied metrics report: `14:50:59`. The test ran with
+  `performance.phase2RetryPolicyEnabled = true` after the scheduler clock fix.
+- The Phase 2A retry policy was exercised: `254` flank-search attempts, `244`
+  failed searches, `227` retry skips, and `244` fingerprint changes. This shows
+  repeated unchanged failed inputs were suppressed instead of searching every
+  tick. The fingerprint changes show the scenario also produced changing flank
+  inputs; because the fingerprint includes soldier/threat block positions,
+  moving entities can legitimately produce changes and should be interpreted as
+  revalidation events rather than automatic regressions.
+- Queue-age telemetry is now internally consistent: `41` queued, `41` executed,
+  `0` deferred, `37` coalesced, `0` cancelled, `0` stale, and average/max age
+  both `0.00` ticks. The previous false thousands-of-ticks ages are resolved.
+- The run recorded `314` cover searches, `8,386` candidates discovered, `5,898`
+  evaluated/scored, `26` path requests, `1` retry, and `1` failure. Phase 1
+  reuse counters were `3,917` same-tick target hits, `17` cover discovery hits,
+  and `12` path hits.
+- Measured AI work over the last `365` samples was average `0.66 ms`, p50
+  `0.01 ms`, p95 `3.65 ms`, p99 `5.34 ms`, and worst `6.12 ms`. Cover search
+  time was `737.13 ms` total, averaging `2.35 ms/search`.
+- Phase 2A validation result: the failed-flank suppression and input-change
+  re-evaluation counters are active, queue age is corrected, and no stuck
+  selecting/seeking state is indicated by the supplied metrics. This passes the
+  diagnostic portion of the Phase 2A exit gate. A longer controlled run is
+  still advisable before enabling Phase 2 emergency suppression admission.
+
 Deliverables:
 
 - Reuse potential-target results within one soldier tick.
@@ -562,6 +629,111 @@ Exit gate:
 - No regression in p95 or worst-tick MSPT.
 
 ### Phase 2: Retry Policies And Global Work Admission
+
+Implementation status:
+
+- Phase 2A implemented behind the server config flag
+  `performance.phase2RetryPolicyEnabled` (default `false`). Failed flank
+  searches retain a fingerprint of the current cover, soldier position, squad
+  context, owner/hold anchors, primary threat direction, and threat positions.
+  An unchanged failed input is suppressed for `40` ticks; meaningful input
+  changes immediately permit a new search.
+- Cover-search queue telemetry now records average and maximum overdue age and
+  counts requests promoted by priority aging. When Phase 2 is enabled, queued
+  priority `1` or `2` requests gain one effective priority level every `40`
+  overdue ticks. Priority `0` requests remain emergency work and are not
+  demoted. With the flag disabled, scheduler ordering is unchanged.
+- Phase 2B queue-age telemetry and Phase 2A retry counters are diagnostic until
+  controlled gameplay validation is complete. Emergency suppression admission
+  and other failed tactical-search policies remain deferred.
+- Corrected the cover scheduler clock mismatch: requests now use the
+  `ServerLevel` server tick for both enqueue due-times and execution age
+  measurement, with the soldier tick retained only as a non-server fallback.
+  The Performance test world config has Phase 2A enabled for the next run:
+  `phase2RetryPolicyEnabled = true`.
+- Rebuilt and deployed the corrected test artifact with SHA-256
+  `E39348182005B409079D21F0B9624ACBA8F26499298AF88B715FEC1EB4B5D192`.
+- Implemented explicit queued emergency modes for shot-in-cover,
+  continuous-suppression, and recovered suppression reposition requests. These
+  use a separate one-search-per-server-tick emergency budget and dedicated
+  queue counters. When the Phase 2 flag is disabled, the existing synchronous
+  emergency behavior remains the fallback. The first emergency workload
+  capture validated queue admission and bounded execution; matched performance
+  comparison remains outstanding.
+
+### Phase 2 Emergency Capture 1
+
+- Spark profile: `https://spark.lucko.me/xcNVEjlfyS`.
+- Supplied final metrics report: `15:19:21`. The emergency queue was exercised
+  under sustained traffic: `485` emergency requests queued and executed, `721`
+  deferred, `0` coalesced, `0` cancelled, and `1` stale. Emergency request age
+  averaged `1.49` ticks. The one-search-per-server-tick emergency budget was
+  therefore enforced while keeping executed emergency work responsive.
+- Routine cover scheduling recorded `836` queued, `870` executed, `4,611`
+  deferred, `2,989` coalesced, `2` cancelled, and `0` stale requests. Routine
+  request age averaged `5.61` ticks and reached `23` ticks maximum, with `0`
+  aged requests. This does not indicate routine starvation in this capture.
+- Phase 2A flank suppression remained active: `46` flank-search attempts, `23`
+  failures, `12` retry skips, and `20` fingerprint changes. Phase 1 reuse was
+  `127,358` same-tick target hits, `322` cover discovery hits, and `196` path
+  hits.
+- Work totals were `7,894,962` visibility rays, `126,854` exposure
+  calculations, `1,729` cover searches, `67,454` candidates discovered,
+  `68,531` evaluated, `66,745` scored, and `629` cover path requests with `7`
+  retries and `147` failures. Stage totals were LOS `17,970.85 ms`, smoke
+  lookup `3,812.75 ms`, exposure `2,967.75 ms`, cover scoring `6,637.86 ms`,
+  and path requests `4,541.05 ms`.
+- AI work over the last `1,000` samples was average `11.51 ms`, p50 `4.51 ms`,
+  p95 `40.02 ms`, p99 `58.22 ms`, and worst `106.50 ms`. Cover search time was
+  `733.98 ms` total, averaging `0.42 ms/search`.
+- Validation result: emergency admission, bounded execution, queue-age
+  telemetry, and Phase 2A retry suppression all operated as designed. The
+  emergency deferral count confirms sustained demand, but low emergency queue
+  age shows the budget kept up sufficiently in this run. The AI-work percentiles
+  are materially higher than the earlier low-load Phase 2A capture (`0.66 ms`
+  average, `3.65 ms` p95, `6.12 ms` worst), so this is not a performance win
+  claim. The scenarios and active soldier states differ; a matched 50v50
+  before/after capture is still required before declaring no regression.
+
+### Phase 2 Emergency Capture 1 Compared With Post-Phase 1
+
+- The closest post-Phase 1 comparison is Phase 2A Capture 1, which used the
+  same instrumented Phase 1 reuse paths before emergency admission was added.
+  Compared with that report, the emergency capture's AI work was higher: average
+  `11.51 ms` versus `2.91 ms` (`+295.5%`), p50 `4.51 ms` versus `0.61 ms`
+  (`+639.3%`), p95 `40.02 ms` versus `10.63 ms` (`+276.5%`), p99 `58.22 ms`
+  versus `33.56 ms` (`+73.5%`), and worst `106.50 ms` versus `87.63 ms`
+  (`+21.5%`).
+- Cover-search efficiency was effectively unchanged: `0.42 ms/search` in the
+  emergency capture versus `0.43 ms/search` in Phase 2A Capture 1 (`-2.3%`).
+  The emergency capture performed `1,729` searches versus `1,346` (`+28.5%`),
+  so the higher AI total is consistent with a heavier search workload even
+  though individual searches did not become slower.
+- The emergency capture also had `13.1%` more visibility rays, `13.8%` more
+  detection ticks, `15.2%` more target refreshes, and `13.5%` more path requests
+  than Phase 2A Capture 1. Exposure calculations were `8.9%` lower and path
+  failures were `21.4%` lower. These are cumulative counters from unmatched
+  windows and cannot establish a causal performance delta.
+- Interpretation: relative to the measured post-Phase 1 run, this capture is a
+  performance regression in sampled AI latency, especially at average and p95.
+  It is not yet attributable to emergency queueing because the capture has
+  more cover searches and a different scenario/load. The stable per-search
+  cost is encouraging, while the `106.50 ms` worst tick and `40.02 ms` p95 are
+  not acceptable as a final result without a matched comparison.
+- Next performance gate: repeat the same scenario, population, warm-up/reset
+  interval, capture duration, and Spark window with Phase 2 emergency admission
+  disabled and enabled. Compare AI percentiles, searches per tick, emergency
+  queue age, deferred work, and Spark server-thread stack share. Do not commit
+  or broadly enable the emergency slice until that comparison explains the
+  latency increase or demonstrates that it is workload-only.
+
+### Phase 2 Emergency User Validation
+
+- The user confirmed that the current deployed build performs better with
+  `phase2RetryPolicyEnabled = true` in the active gameplay scenario. This is
+  practical gameplay validation supporting the opt-in Phase 2 commit. It does
+  not replace an archived instrumented A/B capture with matched reset and Spark
+  windows, so the formal quantitative performance gate remains open.
 
 Deliverables:
 

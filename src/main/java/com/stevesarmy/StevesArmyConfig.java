@@ -50,6 +50,7 @@ public class StevesArmyConfig {
     public static final ForgeConfigSpec.IntValue VS2_MAX_TRANSPORTED_SOLDIERS;
 
     public static final ForgeConfigSpec.IntValue OPTIMIZATION_LEVEL;
+    public static final ForgeConfigSpec.BooleanValue PHASE_2_RETRY_POLICY_ENABLED;
 
     static {
         BUILDER.push("aim_quality");
@@ -300,6 +301,12 @@ BUILDER.pop();
                      "Default: 1")
             .defineInRange("optimizationLevel", 1, 0, 3);
 
+        PHASE_2_RETRY_POLICY_ENABLED = BUILDER
+            .comment("Enable Phase 2 tactical retry suppression, emergency cover admission, and queue aging.",
+                     "This can change flank and suppression reaction timing and is disabled until gameplay validation is complete.",
+                     "Default: false")
+            .define("phase2RetryPolicyEnabled", false);
+
         BUILDER.pop();
 
         SPEC = BUILDER.build();
@@ -439,6 +446,10 @@ BUILDER.pop();
 
     public static int getOptimizationLevel() {
         return OPTIMIZATION_LEVEL.get();
+    }
+
+    public static boolean isPhase2RetryPolicyEnabled() {
+        return PHASE_2_RETRY_POLICY_ENABLED.get();
     }
 
     /** Legacy compatibility hook; nearby-target snapshots are disabled. */

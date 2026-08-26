@@ -4,6 +4,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.LongAdder;
+import java.util.concurrent.atomic.AtomicLong;
 
 /** Opt-in counters for diagnosing server-thread performance in live tests. */
 public final class PerformanceMetrics {
@@ -101,6 +102,22 @@ public final class PerformanceMetrics {
     private static final LongAdder coverSearchRequestsCoalesced = new LongAdder();
     private static final LongAdder coverSearchRequestsCancelled = new LongAdder();
     private static final LongAdder coverSearchRequestsStale = new LongAdder();
+    private static final LongAdder coverSearchRequestAgeSamples = new LongAdder();
+    private static final LongAdder coverSearchRequestAgeTicks = new LongAdder();
+    private static final LongAdder coverSearchRequestsAged = new LongAdder();
+    private static final AtomicLong coverSearchRequestMaxAgeTicks = new AtomicLong();
+    private static final LongAdder flankSearchAttempts = new LongAdder();
+    private static final LongAdder flankSearchFailures = new LongAdder();
+    private static final LongAdder flankSearchRetrySkips = new LongAdder();
+    private static final LongAdder flankSearchFingerprintChanges = new LongAdder();
+    private static final LongAdder emergencyCoverRequestsQueued = new LongAdder();
+    private static final LongAdder emergencyCoverRequestsExecuted = new LongAdder();
+    private static final LongAdder emergencyCoverRequestsDeferred = new LongAdder();
+    private static final LongAdder emergencyCoverRequestsCoalesced = new LongAdder();
+    private static final LongAdder emergencyCoverRequestsCancelled = new LongAdder();
+    private static final LongAdder emergencyCoverRequestsStale = new LongAdder();
+    private static final LongAdder emergencyCoverRequestAgeSamples = new LongAdder();
+    private static final LongAdder emergencyCoverRequestAgeTicks = new LongAdder();
 
     public enum Stage {
         ENTITY_QUERY,
@@ -232,6 +249,22 @@ public final class PerformanceMetrics {
         coverSearchRequestsCoalesced.reset();
         coverSearchRequestsCancelled.reset();
         coverSearchRequestsStale.reset();
+        coverSearchRequestAgeSamples.reset();
+        coverSearchRequestAgeTicks.reset();
+        coverSearchRequestsAged.reset();
+        coverSearchRequestMaxAgeTicks.set(0L);
+        flankSearchAttempts.reset();
+        flankSearchFailures.reset();
+        flankSearchRetrySkips.reset();
+        flankSearchFingerprintChanges.reset();
+        emergencyCoverRequestsQueued.reset();
+        emergencyCoverRequestsExecuted.reset();
+        emergencyCoverRequestsDeferred.reset();
+        emergencyCoverRequestsCoalesced.reset();
+        emergencyCoverRequestsCancelled.reset();
+        emergencyCoverRequestsStale.reset();
+        emergencyCoverRequestAgeSamples.reset();
+        emergencyCoverRequestAgeTicks.reset();
         for (LongAdder adder : stageNanos) adder.reset();
         for (LongAdder adder : stageCounts) adder.reset();
         smokeQueries.reset();
@@ -520,24 +553,82 @@ public final class PerformanceMetrics {
         if (enabled) coverSearchRequestsQueued.increment();
     }
 
+    public static void recordEmergencyCoverRequestQueued() {
+        if (enabled) emergencyCoverRequestsQueued.increment();
+    }
+
     public static void recordCoverSearchRequestExecuted() {
         if (enabled) coverSearchRequestsExecuted.increment();
+    }
+
+    public static void recordEmergencyCoverRequestExecuted() {
+        if (enabled) emergencyCoverRequestsExecuted.increment();
     }
 
     public static void recordCoverSearchRequestDeferred() {
         if (enabled) coverSearchRequestsDeferred.increment();
     }
 
+    public static void recordEmergencyCoverRequestDeferred() {
+        if (enabled) emergencyCoverRequestsDeferred.increment();
+    }
+
     public static void recordCoverSearchRequestCoalesced() {
         if (enabled) coverSearchRequestsCoalesced.increment();
+    }
+
+    public static void recordEmergencyCoverRequestCoalesced() {
+        if (enabled) emergencyCoverRequestsCoalesced.increment();
     }
 
     public static void recordCoverSearchRequestCancelled() {
         if (enabled) coverSearchRequestsCancelled.increment();
     }
 
+    public static void recordEmergencyCoverRequestCancelled() {
+        if (enabled) emergencyCoverRequestsCancelled.increment();
+    }
+
     public static void recordCoverSearchRequestStale() {
         if (enabled) coverSearchRequestsStale.increment();
+    }
+
+    public static void recordEmergencyCoverRequestStale() {
+        if (enabled) emergencyCoverRequestsStale.increment();
+    }
+
+    public static void recordCoverSearchRequestAge(long ageTicks) {
+        if (!enabled) return;
+        long safeAge = Math.max(0L, ageTicks);
+        coverSearchRequestAgeSamples.increment();
+        coverSearchRequestAgeTicks.add(safeAge);
+        coverSearchRequestMaxAgeTicks.accumulateAndGet(safeAge, Math::max);
+    }
+
+    public static void recordEmergencyCoverRequestAge(long ageTicks) {
+        if (!enabled) return;
+        emergencyCoverRequestAgeSamples.increment();
+        emergencyCoverRequestAgeTicks.add(Math.max(0L, ageTicks));
+    }
+
+    public static void recordCoverSearchRequestAged() {
+        if (enabled) coverSearchRequestsAged.increment();
+    }
+
+    public static void recordFlankSearchAttempt() {
+        if (enabled) flankSearchAttempts.increment();
+    }
+
+    public static void recordFlankSearchFailure() {
+        if (enabled) flankSearchFailures.increment();
+    }
+
+    public static void recordFlankSearchRetrySkip() {
+        if (enabled) flankSearchRetrySkips.increment();
+    }
+
+    public static void recordFlankSearchFingerprintChange() {
+        if (enabled) flankSearchFingerprintChanges.increment();
     }
 
     public static void recordStageTime(Stage stage, long nanos) {
@@ -675,7 +766,23 @@ public final class PerformanceMetrics {
              + coverSearchRequestsDeferred.sum() + " deferred, "
              + coverSearchRequestsCoalesced.sum() + " coalesced, "
              + coverSearchRequestsCancelled.sum() + " cancelled, "
-             + coverSearchRequestsStale.sum() + " stale\n"
+             + coverSearchRequestsStale.sum() + " stale, "
+             + coverSearchRequestsAged.sum() + " aged, age avg="
+             + formatTicks(coverSearchRequestAgeSamples.sum() == 0 ? 0.0
+                 : coverSearchRequestAgeTicks.sum() / (double) coverSearchRequestAgeSamples.sum())
+             + " ticks, max=" + coverSearchRequestMaxAgeTicks.get() + " ticks\n"
+             + "  Flank searches: " + flankSearchAttempts.sum() + " attempts, "
+             + flankSearchFailures.sum() + " failed, " + flankSearchRetrySkips.sum()
+             + " retry skips, " + flankSearchFingerprintChanges.sum() + " fingerprint changes\n"
+             + "  Emergency cover queue: " + emergencyCoverRequestsQueued.sum() + " queued, "
+             + emergencyCoverRequestsExecuted.sum() + " executed, "
+             + emergencyCoverRequestsDeferred.sum() + " deferred, "
+             + emergencyCoverRequestsCoalesced.sum() + " coalesced, "
+             + emergencyCoverRequestsCancelled.sum() + " cancelled, "
+             + emergencyCoverRequestsStale.sum() + " stale, age avg="
+             + formatTicks(emergencyCoverRequestAgeSamples.sum() == 0 ? 0.0
+                 : emergencyCoverRequestAgeTicks.sum() / (double) emergencyCoverRequestAgeSamples.sum())
+             + " ticks\n"
             + "  Cover maintenance: " + coverMaintenanceRuns.sum() + " runs, "
             + coverMaintenanceSkips.sum() + " skips\n"
             + "  Cover state time: " + formatMillis(coverStateNanos.sum()) + " ms total"
@@ -754,5 +861,9 @@ public final class PerformanceMetrics {
 
     private static String formatMillis(double nanos) {
         return String.format(Locale.ROOT, "%.2f", nanos / 1_000_000.0);
+    }
+
+    private static String formatTicks(double ticks) {
+        return String.format(Locale.ROOT, "%.2f", ticks);
     }
 }
