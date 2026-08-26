@@ -113,12 +113,15 @@ public class ExposureCalculator {
         
         Vec3[] targetPoints = getTargetPoints(target);
         
+        long exposureStart = System.nanoTime();
         int visiblePoints = 0;
         for (Vec3 point : targetPoints) {
             if (getVisibility(level, observerEye, point, observer).hasContact()) {
                 visiblePoints++;
             }
         }
+        PerformanceMetrics.recordStageTime(PerformanceMetrics.Stage.EXPOSURE,
+            System.nanoTime() - exposureStart);
         
         return visiblePoints;
     }

@@ -32,6 +32,9 @@ public final class PerformanceMetrics {
     private static final LongAdder targetQueryCacheHits = new LongAdder();
     private static final LongAdder targetQueryCacheMisses = new LongAdder();
     private static final LongAdder targetQueryCacheEntities = new LongAdder();
+    private static final LongAdder sameTickPotentialTargetCacheHits = new LongAdder();
+    private static final LongAdder coverDiscoveryCacheHits = new LongAdder();
+    private static final LongAdder coverPathReuseHits = new LongAdder();
     private static final LongAdder threatReportAttempts = new LongAdder();
     private static final LongAdder threatReportPublished = new LongAdder();
     private static final LongAdder threatReportGeometryCalculations = new LongAdder();
@@ -99,6 +102,33 @@ public final class PerformanceMetrics {
     private static final LongAdder coverSearchRequestsCancelled = new LongAdder();
     private static final LongAdder coverSearchRequestsStale = new LongAdder();
 
+    public enum Stage {
+        ENTITY_QUERY,
+        LOS_BLOCK_TRAVERSAL,
+        SMOKE_LOOKUP,
+        EXPOSURE,
+        COVER_SCORING,
+        PATH_REQUEST
+    }
+
+    private static final LongAdder[] stageNanos = new LongAdder[Stage.values().length];
+    private static final LongAdder[] stageCounts = new LongAdder[Stage.values().length];
+    static {
+        for (int i = 0; i < Stage.values().length; i++) {
+            stageNanos[i] = new LongAdder();
+            stageCounts[i] = new LongAdder();
+        }
+    }
+    private static final LongAdder smokeQueries = new LongAdder();
+    private static final LongAdder smokeEntitiesTested = new LongAdder();
+    private static final LongAdder smokeHits = new LongAdder();
+
+    private static final int TICK_BUFFER_SIZE = 1000;
+    private static final long[] tickWorkNanos = new long[TICK_BUFFER_SIZE];
+    private static int tickBufferIndex;
+    private static int tickWorkSamples;
+    private static long currentTickWorkNanos;
+
     private PerformanceMetrics() {}
 
     public static boolean isEnabled() {
@@ -133,6 +163,9 @@ public final class PerformanceMetrics {
         targetQueryCacheHits.reset();
         targetQueryCacheMisses.reset();
         targetQueryCacheEntities.reset();
+        sameTickPotentialTargetCacheHits.reset();
+        coverDiscoveryCacheHits.reset();
+        coverPathReuseHits.reset();
         threatReportAttempts.reset();
         threatReportPublished.reset();
         threatReportGeometryCalculations.reset();
@@ -199,6 +232,15 @@ public final class PerformanceMetrics {
         coverSearchRequestsCoalesced.reset();
         coverSearchRequestsCancelled.reset();
         coverSearchRequestsStale.reset();
+        for (LongAdder adder : stageNanos) adder.reset();
+        for (LongAdder adder : stageCounts) adder.reset();
+        smokeQueries.reset();
+        smokeEntitiesTested.reset();
+        smokeHits.reset();
+        java.util.Arrays.fill(tickWorkNanos, 0L);
+        tickBufferIndex = 0;
+        tickWorkSamples = 0;
+        currentTickWorkNanos = 0L;
     }
 
     public static void recordVisibilityCacheHit() {
@@ -258,6 +300,18 @@ public final class PerformanceMetrics {
         if (!enabled) return;
         targetQueryCacheMisses.increment();
         targetQueryCacheEntities.add(entityCount);
+    }
+
+    public static void recordSameTickPotentialTargetCacheHit() {
+        if (enabled) sameTickPotentialTargetCacheHits.increment();
+    }
+
+    public static void recordCoverDiscoveryCacheHit() {
+        if (enabled) coverDiscoveryCacheHits.increment();
+    }
+
+    public static void recordCoverPathReuseHit() {
+        if (enabled) coverPathReuseHits.increment();
     }
 
     public static void recordThreatReportAttempt() {
@@ -486,6 +540,35 @@ public final class PerformanceMetrics {
         if (enabled) coverSearchRequestsStale.increment();
     }
 
+    public static void recordStageTime(Stage stage, long nanos) {
+        if (!enabled) return;
+        stageNanos[stage.ordinal()].add(nanos);
+        stageCounts[stage.ordinal()].increment();
+        currentTickWorkNanos += nanos;
+    }
+
+    public static void recordSmokeQuery(int entitiesTested) {
+        if (!enabled) return;
+        smokeQueries.increment();
+        smokeEntitiesTested.add(entitiesTested);
+    }
+
+    public static void recordSmokeHit() {
+        if (enabled) smokeHits.increment();
+    }
+
+    public static void beginTick() {
+        if (enabled) currentTickWorkNanos = 0L;
+    }
+
+    public static void endTick() {
+        if (!enabled) return;
+        tickWorkNanos[tickBufferIndex] = currentTickWorkNanos;
+        tickBufferIndex = (tickBufferIndex + 1) % TICK_BUFFER_SIZE;
+        if (tickWorkSamples < TICK_BUFFER_SIZE) tickWorkSamples++;
+        currentTickWorkNanos = 0L;
+    }
+
     public static void recordCoverStateTime(String state, long nanos) {
         if (!enabled) return;
         coverStateNanos.add(nanos);
@@ -547,8 +630,11 @@ public final class PerformanceMetrics {
             + aimPointCacheMisses.sum() + " misses\n"
             + "  Exposure cache: " + exposureHits + " hits, " + exposureMisses + " misses\n"
             + "  Exposure calculations: " + exposureCalculations.sum() + "\n"
-            + "  Target query cache: " + targetQueryCacheHits.sum() + " hits, "
-            + targetQueryCacheMisses.sum() + " misses, " + targetQueryCacheEntities.sum() + " entities\n"
+             + "  Target query cache: " + targetQueryCacheHits.sum() + " hits, "
+             + targetQueryCacheMisses.sum() + " misses, " + targetQueryCacheEntities.sum() + " entities\n"
+             + "  Phase 1 reuse: " + sameTickPotentialTargetCacheHits.sum()
+             + " same-tick target hits, " + coverDiscoveryCacheHits.sum()
+             + " cover discovery hits, " + coverPathReuseHits.sum() + " path hits\n"
             + "  Threat reports: " + threatReportAttempts.sum() + " attempts, "
             + threatReportPublished.sum() + " published, "
             + threatReportGeometryCalculations.sum() + " geometry calculations, "
@@ -613,9 +699,57 @@ public final class PerformanceMetrics {
             + "  Role path failures: rifleman=" + riflemanPathFailures.sum()
             + ", machine-gunner=" + machineGunnerPathFailures.sum() + "\n"
             + "  Machine-gunner async requests: " + machineGunnerAsyncRequests.sum() + "\n"
+            + "  Smoke lookups: " + smokeQueries.sum() + " queries, "
+            + smokeEntitiesTested.sum() + " entities tested, " + smokeHits.sum() + " hits\n"
+            + "  Stage time:\n"
+            + stageReport(Stage.ENTITY_QUERY, "Entity query")
+            + stageReport(Stage.LOS_BLOCK_TRAVERSAL, "LOS block traversal")
+            + stageReport(Stage.SMOKE_LOOKUP, "Smoke lookup")
+            + stageReport(Stage.EXPOSURE, "Exposure")
+            + stageReport(Stage.COVER_SCORING, "Cover scoring")
+            + stageReport(Stage.PATH_REQUEST, "Path request")
+            + "  AI work per tick (last " + tickWorkSamples + " ticks): avg "
+            + formatMillis(tickAverageNanos()) + " ms, p50 "
+            + formatMillis(tickPercentileNanos(0.50)) + " ms, p95 "
+            + formatMillis(tickPercentileNanos(0.95)) + " ms, p99 "
+            + formatMillis(tickPercentileNanos(0.99)) + " ms, worst "
+            + formatMillis(tickMaxNanos()) + " ms\n"
             + "  Cover search time: " + formatMillis(coverSearchNanos.sum())
             + " ms total, " + formatMillis(searches == 0 ? 0 : coverSearchNanos.sum() / (double) searches)
             + " ms/search";
+    }
+
+    private static String stageReport(Stage stage, String label) {
+        long count = stageCounts[stage.ordinal()].sum();
+        long nanos = stageNanos[stage.ordinal()].sum();
+        return "    " + label + ": " + count + " calls, "
+            + formatMillis(nanos) + " ms total"
+            + (count == 0 ? "" : ", " + formatMillis(nanos / (double) count) + " ms/call") + "\n";
+    }
+
+    private static long tickAverageNanos() {
+        if (tickWorkSamples == 0) return 0L;
+        long total = 0L;
+        for (int i = 0; i < tickWorkSamples; i++) total += tickWorkNanos[i];
+        return total / tickWorkSamples;
+    }
+
+    private static long tickPercentileNanos(double percentile) {
+        if (tickWorkSamples == 0) return 0L;
+        long[] sorted = tickWorkNanos.clone();
+        java.util.Arrays.sort(sorted, 0, tickWorkSamples);
+        int index = (int) Math.ceil(percentile * tickWorkSamples) - 1;
+        if (index < 0) index = 0;
+        return sorted[index];
+    }
+
+    private static long tickMaxNanos() {
+        if (tickWorkSamples == 0) return 0L;
+        long max = 0L;
+        for (int i = 0; i < tickWorkSamples; i++) {
+            if (tickWorkNanos[i] > max) max = tickWorkNanos[i];
+        }
+        return max;
     }
 
     private static String formatMillis(double nanos) {

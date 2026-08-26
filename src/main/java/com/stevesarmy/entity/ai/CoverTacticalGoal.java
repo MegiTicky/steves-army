@@ -210,6 +210,9 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
 
     private BlockPos movementAttemptTarget = null;
     private int movementAttemptCount = 0;
+    private final Map<BlockPos, Path> validatedCoverPaths = new HashMap<>();
+    private BlockPos validatedCoverPathSource = null;
+    private long validatedCoverPathTick = Long.MIN_VALUE;
 
     private CoverFinder.ScoredCover[] cachedTopCovers = new CoverFinder.ScoredCover[0];
     private BlockPos debugSearchCenter = null;
@@ -611,7 +614,10 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
 
     private boolean isExposedToFlank() {
         if (soldier.isCQB() || soldier.hasCloseRangeTarget()) return false;
-        if (System.currentTimeMillis() - lastFlankRepositionTime < FLANK_REPOSITION_COOLDOWN_MS) return false;
+        if (System.currentTimeMillis() - lastFlankRepositionTime < FLANK_REPOSITION_COOLDOWN_MS) {
+            PerformanceMetrics.recordCoverSearchCooldownSkip();
+            return false;
+        }
 
         CoverPoint cover = getCoverManager().getCurrentCover();
         if (cover == null) return false;
@@ -2296,6 +2302,9 @@ private boolean shouldExitCoverForFollow() {
     private CoverMoveResult findAndMoveToCover() {
         PerformanceMetrics.recordRoleCoverSearch(machineGunnerPipeline);
         long searchStarted = System.nanoTime();
+        validatedCoverPaths.clear();
+        validatedCoverPathSource = null;
+        validatedCoverPathTick = Long.MIN_VALUE;
         Level level = soldier.level();
         CoverFinder finder = new CoverFinder(level);
         long now = System.currentTimeMillis();
@@ -2511,6 +2520,7 @@ private boolean shouldExitCoverForFollow() {
             }
 
             if (bestCover.isEmpty()) {
+                PerformanceMetrics.recordCoverFullSearchAttempt();
                 bestCover = finder.findBestCover(
                     searchCenter,
                     searchRadius,
@@ -2520,6 +2530,7 @@ private boolean shouldExitCoverForFollow() {
             }
 
             if (bestCover.isEmpty() && squadCtx.inSquad()) {
+                PerformanceMetrics.recordCoverFullSearchAttempt();
                 bestCover = finder.findBestCover(
                     soldier,
                     threatDirection,
@@ -3501,10 +3512,29 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
     }
 
     private boolean isExactCoverPathReachable(CoverPoint cover) {
+        BlockPos source = soldier.blockPosition();
+        BlockPos target = cover.getPosition();
+        if (soldier.tickCount != validatedCoverPathTick
+            || !source.equals(validatedCoverPathSource)) {
+            validatedCoverPaths.clear();
+            validatedCoverPathSource = source.immutable();
+            validatedCoverPathTick = soldier.tickCount;
+        }
+        if (validatedCoverPaths.containsKey(target)) {
+            return true;
+        }
+
         Vec3 standingPos = getCoverStandingPosition(cover.getPosition());
+        long pathStarted = System.nanoTime();
         Path path = navigation.createPath(standingPos.x, standingPos.y, standingPos.z, 0);
-        return path != null && path.canReach() && path.getNodeCount() > 0
+        PerformanceMetrics.recordStageTime(PerformanceMetrics.Stage.PATH_REQUEST,
+            System.nanoTime() - pathStarted);
+        boolean reachable = path != null && path.canReach() && path.getNodeCount() > 0
             && path.getNode(path.getNodeCount() - 1).asBlockPos().equals(cover.getPosition());
+        if (reachable) {
+            validatedCoverPaths.put(target.immutable(), path);
+        }
+        return reachable;
     }
 
     /**
@@ -3629,6 +3659,7 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
     /** Starts navigation without re-entering tactical-bound admission. */
     private boolean startCoverPath(CoverPoint cover) {
         PerformanceMetrics.recordRolePathRequest(machineGunnerPipeline);
+        PerformanceMetrics.recordCoverPathRequest();
         BlockPos wallPos = cover.getPosition();
         ensureMovementAttemptTarget(cover);
         movementAttemptCount++;
@@ -3651,8 +3682,19 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
         SuppressionRoutePlan routePlan = selectedSuppressionRoute != null
             && selectedSuppressionRoute.cover().getPosition().equals(wallPos)
             ? selectedSuppressionRoute : null;
-        Path path = routePlan != null ? routePlan.path()
-            : navigation.createPath(standingPos.x, standingPos.y, standingPos.z, 0);
+        Path path;
+        if (routePlan != null) {
+            path = routePlan.path();
+        } else if (soldier.blockPosition().equals(validatedCoverPathSource)
+            && soldier.tickCount == validatedCoverPathTick
+            && (path = validatedCoverPaths.get(wallPos)) != null) {
+            PerformanceMetrics.recordCoverPathReuseHit();
+        } else {
+            long routePathStart = System.nanoTime();
+            path = navigation.createPath(standingPos.x, standingPos.y, standingPos.z, 0);
+            PerformanceMetrics.recordStageTime(PerformanceMetrics.Stage.PATH_REQUEST,
+                System.nanoTime() - routePathStart);
+        }
 
         if (routePlan != null
             && classifySuppressionRoute(path, routePlan.firingOrigin(), new HashMap<>()) == RouteNodeExposure.EXPOSED) {
@@ -3664,6 +3706,7 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
             activeSuppressionRouteMovement = RouteMovement.NORMAL;
             soldier.setLowCrouching(false);
             PerformanceMetrics.recordRolePathFailure(machineGunnerPipeline);
+            PerformanceMetrics.recordCoverPathFailure();
             return false;
         }
         
@@ -3754,6 +3797,7 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
             }
             if (!accepted) {
                 PerformanceMetrics.recordRolePathFailure(machineGunnerPipeline);
+                PerformanceMetrics.recordCoverPathFailure();
             }
             return accepted;
         } else {
@@ -3772,6 +3816,7 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
                 pendingRetryCover = cover;
                 getCoverManager().setTargetCover(cover);
                 PerformanceMetrics.recordRolePathRetry(machineGunnerPipeline);
+                PerformanceMetrics.recordCoverPathRetry();
                 return false;
             }
             
@@ -3781,6 +3826,7 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
             }
             blacklistCover(wallPos, BlacklistReason.PATH_FAILED);
             PerformanceMetrics.recordRolePathFailure(machineGunnerPipeline);
+            PerformanceMetrics.recordCoverPathFailure();
         }
         return false;
     }

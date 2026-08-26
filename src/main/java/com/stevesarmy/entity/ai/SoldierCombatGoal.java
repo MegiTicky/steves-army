@@ -1659,6 +1659,13 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
         long currentTick = soldier.tickCount;
         
         int cacheTicks = StevesArmyConfig.getTargetCandidateCacheTicks();
+        // Reuse the exact same-tick result even when cross-tick candidate caching
+        // is disabled. The list contains live entity references and is never
+        // retained beyond the soldier tick by this path.
+        if (cachedPotentialTargets != null && currentTick == cachedPotentialTargetsTick) {
+            PerformanceMetrics.recordSameTickPotentialTargetCacheHit();
+            return cachedPotentialTargets;
+        }
         if (cachedPotentialTargets != null && cacheTicks > 0
             && (currentTick - cachedPotentialTargetsTick < cacheTicks)) {
             return cachedPotentialTargets;
@@ -1675,6 +1682,7 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
     }
     
     private List<LivingEntity> computePotentialTargets() {
+        long queryStart = System.nanoTime();
         List<LivingEntity> potentialTargets = new ArrayList<>();
 
         double maxRange = Math.max(detectionSystem.getFocusedRange(), DetectionSystem.PERIPHERAL_RANGE);
@@ -1710,6 +1718,8 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
                     potentialTargets.add(otherSoldier);
                 }
             }
+            PerformanceMetrics.recordStageTime(PerformanceMetrics.Stage.ENTITY_QUERY,
+                System.nanoTime() - queryStart);
             return potentialTargets;
         }
 
@@ -1754,6 +1764,8 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
             }
         }
 
+        PerformanceMetrics.recordStageTime(PerformanceMetrics.Stage.ENTITY_QUERY,
+            System.nanoTime() - queryStart);
         return potentialTargets;
     }
 

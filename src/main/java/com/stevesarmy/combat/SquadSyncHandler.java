@@ -1,6 +1,7 @@
 package com.stevesarmy.combat;
 
 import com.stevesarmy.StevesArmyMod;
+import com.stevesarmy.debug.PerformanceMetrics;
 import com.stevesarmy.network.NetworkHandler;
 import com.stevesarmy.network.SquadStatusSyncPacket;
 import com.stevesarmy.squad.OwnedSoldierRegistry;
@@ -17,31 +18,38 @@ public class SquadSyncHandler {
 
     @SubscribeEvent
     public static void onServerTick(TickEvent.ServerTickEvent event) {
+        if (event.phase == TickEvent.Phase.START) {
+            PerformanceMetrics.beginTick();
+            return;
+        }
         if (event.phase != TickEvent.Phase.END) return;
 
         SquadActivityManager.tick(event.getServer());
 
         tickCounter++;
-        if (tickCounter < 20) return;
-        tickCounter = 0;
+        if (tickCounter >= 20) {
+            tickCounter = 0;
 
-        for (net.minecraft.server.level.ServerLevel level : event.getServer().getAllLevels()) {
-            for (var entity : level.getEntities().getAll()) {
-                if (entity instanceof SoldierEntity soldier && !soldier.level().isClientSide) {
-                    OwnedSoldierRegistry registry = OwnedSoldierRegistry.get(event.getServer());
-                    if (soldier.isAlive()) {
-                        registry.refresh(soldier, level);
-                    } else {
-                        registry.remove(soldier.getUUID());
+            for (net.minecraft.server.level.ServerLevel level : event.getServer().getAllLevels()) {
+                for (var entity : level.getEntities().getAll()) {
+                    if (entity instanceof SoldierEntity soldier && !soldier.level().isClientSide) {
+                        OwnedSoldierRegistry registry = OwnedSoldierRegistry.get(event.getServer());
+                        if (soldier.isAlive()) {
+                            registry.refresh(soldier, level);
+                        } else {
+                            registry.remove(soldier.getUUID());
+                        }
                     }
                 }
             }
+
+            for (ServerPlayer player : event.getServer().getPlayerList().getPlayers()) {
+                SquadStatusSyncPacket packet = SquadStatusSyncPacket.createForPlayer(player);
+                NetworkHandler.sendTo(player, packet);
+                SquadActivityManager.sync(player);
+            }
         }
 
-        for (ServerPlayer player : event.getServer().getPlayerList().getPlayers()) {
-            SquadStatusSyncPacket packet = SquadStatusSyncPacket.createForPlayer(player);
-            NetworkHandler.sendTo(player, packet);
-            SquadActivityManager.sync(player);
-        }
+        PerformanceMetrics.endTick();
     }
 }

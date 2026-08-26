@@ -152,6 +152,7 @@ public final class VisibilityRay {
         int endY = floor(to.y);
         int endZ = floor(to.z);
 
+        long blockStart = System.nanoTime();
         double t = 0.0;
         while (t <= length + EPSILON) {
             BlockPos pos = new BlockPos(x, y, z);
@@ -177,6 +178,9 @@ public final class VisibilityRay {
                     // If smoke is blocking, we still need to find the nearest obstruction.
                     // If smoke is ignored, we return immediately on solid block hit.
                     if (smokePolicy == SmokePolicy.IGNORE) {
+                        PerformanceMetrics.recordStageTime(
+                            PerformanceMetrics.Stage.LOS_BLOCK_TRAVERSAL,
+                            System.nanoTime() - blockStart);
                         return new Result(false, concealment, blocked);
                     }
                 }
@@ -200,9 +204,15 @@ public final class VisibilityRay {
             t = next;
         }
 
+        PerformanceMetrics.recordStageTime(PerformanceMetrics.Stage.LOS_BLOCK_TRAVERSAL,
+            System.nanoTime() - blockStart);
+
         // Check for smoke clouds when smoke is not ignored.
         if (smokePolicy == SmokePolicy.BLOCK) {
+            long smokeStart = System.nanoTime();
             double smokeEntry = findSmokeIntersection(level, from, to);
+            PerformanceMetrics.recordStageTime(PerformanceMetrics.Stage.SMOKE_LOOKUP,
+                System.nanoTime() - smokeStart);
             if (smokeEntry >= 0) {
                 // If smoke is closer than nearestObstruction, the smoke wins.
                 if (smokeEntry < nearestObstruction) {
@@ -243,6 +253,7 @@ public final class VisibilityRay {
         AABB rayBounds = new AABB(from, to).inflate(EPSILON);
         List<? extends Entity> clouds = level.getEntities(
             (Entity) null, rayBounds, e -> e.getType() == type && e.isAlive());
+        PerformanceMetrics.recordSmokeQuery(clouds.size());
         double nearest = Double.POSITIVE_INFINITY;
         for (Entity cloud : clouds) {
             Optional<Vec3> hit = cloud.getBoundingBox().clip(from, to);
@@ -252,6 +263,9 @@ public final class VisibilityRay {
                     nearest = entryDist;
                 }
             }
+        }
+        if (nearest < Double.POSITIVE_INFINITY) {
+            PerformanceMetrics.recordSmokeHit();
         }
         return nearest < Double.POSITIVE_INFINITY ? nearest : -1;
     }

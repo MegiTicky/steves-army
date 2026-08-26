@@ -79,6 +79,9 @@ public class CoverFinder {
     private int candidatesDiscovered;
     private int candidatesEvaluated;
     private int candidatesScored;
+    private final Map<SearchKey, List<CoverPoint>> discoveredCoverCache = new HashMap<>();
+
+    private record SearchKey(BlockPos center, int radius, java.util.UUID threatId) {}
     
     public CoverFinder(Level level) {
         this.level = level;
@@ -103,6 +106,14 @@ public class CoverFinder {
     }
     
     public List<CoverPoint> findCoverPoints(BlockPos center, int radius, LivingEntity threat) {
+        SearchKey searchKey = new SearchKey(center.immutable(), radius,
+            threat == null ? null : threat.getUUID());
+        List<CoverPoint> cached = discoveredCoverCache.get(searchKey);
+        if (cached != null) {
+            PerformanceMetrics.recordCoverDiscoveryCacheHit();
+            return cached;
+        }
+
         long started = System.nanoTime();
         List<CoverPoint> coverPoints = new ArrayList<>();
         int searchRadius = Math.min(radius, MAX_SEARCH_RADIUS);
@@ -122,13 +133,17 @@ public class CoverFinder {
                     coverPoints.add(coverPoint);
 
                     if (coverPoints.size() >= MAX_COVER_POINTS) {
-                        return finishCoverPointSearch(coverPoints, started);
+                        List<CoverPoint> result = finishCoverPointSearch(coverPoints, started);
+                        discoveredCoverCache.put(searchKey, result);
+                        return result;
                     }
                 }
             }
         }
 
-        return finishCoverPointSearch(coverPoints, started);
+        List<CoverPoint> result = finishCoverPointSearch(coverPoints, started);
+        discoveredCoverCache.put(searchKey, result);
+        return result;
     }
 
     private List<CoverPoint> finishCoverPointSearch(List<CoverPoint> coverPoints, long started) {
@@ -272,8 +287,10 @@ public class CoverFinder {
             .map(cp -> new ScoredCover(cp, cp.getCombatScore()))
             .sorted(Comparator.comparingDouble((ScoredCover s) -> s.score).reversed())
             .collect(java.util.stream.Collectors.toList());
-        tacticalScoringNanos += System.nanoTime() - scoringStarted;
+        long scoringNanos = System.nanoTime() - scoringStarted;
+        tacticalScoringNanos += scoringNanos;
         candidatesScored += scored.size();
+        PerformanceMetrics.recordStageTime(PerformanceMetrics.Stage.COVER_SCORING, scoringNanos);
         PerformanceMetrics.recordCoverCandidatesScored(scored.size());
         return scored;
     }
@@ -319,8 +336,10 @@ public class CoverFinder {
             .map(cp -> new ScoredCover(cp, cp.getCombatScore()))
             .sorted(Comparator.comparingDouble((ScoredCover s) -> s.score).reversed())
             .collect(java.util.stream.Collectors.toList());
-        tacticalScoringNanos += System.nanoTime() - scoringStarted;
+        long scoringNanos = System.nanoTime() - scoringStarted;
+        tacticalScoringNanos += scoringNanos;
         candidatesScored += scored.size();
+        PerformanceMetrics.recordStageTime(PerformanceMetrics.Stage.COVER_SCORING, scoringNanos);
         PerformanceMetrics.recordCoverCandidatesScored(scored.size());
         return scored;
     }
@@ -366,8 +385,10 @@ public class CoverFinder {
             .map(cp -> new ScoredCover(cp, cp.getCombatScore()))
             .sorted(Comparator.comparingDouble((ScoredCover s) -> s.score).reversed())
             .collect(java.util.stream.Collectors.toList());
-        tacticalScoringNanos += System.nanoTime() - scoringStarted;
+        long scoringNanos = System.nanoTime() - scoringStarted;
+        tacticalScoringNanos += scoringNanos;
         candidatesScored += scored.size();
+        PerformanceMetrics.recordStageTime(PerformanceMetrics.Stage.COVER_SCORING, scoringNanos);
         PerformanceMetrics.recordCoverCandidatesScored(scored.size());
         return scored;
     }
