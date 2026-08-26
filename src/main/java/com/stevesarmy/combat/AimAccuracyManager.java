@@ -122,50 +122,7 @@ public class AimAccuracyManager {
     }
 
     public static float[] getGunRecoil(LivingEntity entity) {
-        if (!GunIntegration.isTaczLoaded()) {
-            return new float[]{0.5f, 0.25f};
-        }
-        try {
-            ItemStack gunStack = entity.getMainHandItem();
-            Class<?> iGunClass = Class.forName("com.tacz.guns.api.item.IGun");
-            Method getIGunOrNull = iGunClass.getMethod("getIGunOrNull", ItemStack.class);
-            Object iGun = getIGunOrNull.invoke(null, gunStack);
-            if (iGun == null) return new float[]{0.5f, 0.25f};
-
-            Method getGunId = iGunClass.getMethod("getGunId", ItemStack.class);
-            Object gunId = getGunId.invoke(iGun, gunStack);
-
-            Class<?> timelessApiClass = Class.forName("com.tacz.guns.api.TimelessAPI");
-            Method getCommonGunIndex = timelessApiClass.getMethod("getCommonGunIndex", ResourceLocation.class);
-            Object indexOpt = getCommonGunIndex.invoke(null, gunId);
-
-            if (indexOpt instanceof Optional<?> opt && opt.isPresent()) {
-                Object gunIndex = opt.get();
-                Method getGunData = gunIndex.getClass().getMethod("getGunData");
-                Object gunData = getGunData.invoke(gunIndex);
-
-                Method getRecoilMethod = gunData.getClass().getMethod("getRecoil");
-                Object recoil = getRecoilMethod.invoke(gunData);
-
-                Method getPitch = recoil.getClass().getMethod("getPitch");
-                Object[] pitchFrames = (Object[]) getPitch.invoke(recoil);
-
-                Method getYaw = recoil.getClass().getMethod("getYaw");
-                Object[] yawFrames = (Object[]) getYaw.invoke(recoil);
-
-                Method getValue = pitchFrames[0].getClass().getMethod("getValue");
-                float[] pitchValues = (float[]) getValue.invoke(pitchFrames[0]);
-                float[] yawValues = (float[]) getValue.invoke(yawFrames[0]);
-
-                float vertical = Math.abs(pitchValues.length > 0 ? pitchValues[0] : 0);
-                float horizontal = Math.abs(yawValues.length > 0 ? yawValues[0] : 0);
-
-                return new float[]{vertical, horizontal};
-            }
-        } catch (Exception e) {
-            StevesArmyMod.LOGGER.debug("[AimQuality] Failed to get gun recoil: {}", e.getMessage());
-        }
-        return new float[]{0.5f, 0.25f};
+        return GunIntegration.getGunRecoil(entity);
     }
 
     private static float calculateDistanceTrackingFactor(double distance, double effectiveRange) {

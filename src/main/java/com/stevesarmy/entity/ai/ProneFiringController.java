@@ -103,7 +103,7 @@ final class ProneFiringController {
 
     @Nullable
     private String getBlockReason(@Nullable LivingEntity target) {
-        if (!GunIntegration.isTaczLoaded() || !GunIntegration.hasGun(soldier)) return "no_gun";
+        if (!GunIntegration.isAnyGunLoaded() || !GunIntegration.hasGun(soldier)) return "no_gun";
 
         CoverBehaviorManager cover = soldier.getCoverBehaviorManager();
         if (cover.getCurrentCover() != null || cover.getTargetCover() != null

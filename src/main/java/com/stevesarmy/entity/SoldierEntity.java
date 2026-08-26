@@ -355,13 +355,13 @@ public class SoldierEntity extends PathfinderMob implements Container {
         this.inventory.setMainHandChangedCallback(stack -> {
             if (!this.level().isClientSide) {
                 if (inventorySyncingFromEntity) return;
-                boolean reloading = GunIntegration.isTaczLoaded() && GunIntegration.isReloading(this);
+                boolean reloading = GunIntegration.isAnyGunLoaded() && GunIntegration.isReloading(this);
                 if (reloading && !ItemStack.isSameItem(stack, getMainHandItem())) {
                     StevesArmyMod.LOGGER.info("[Soldier] Blocked gun swap during reload (callback)");
                     return;
                 }
                 setItemSlot(EquipmentSlot.MAINHAND, stack.copy());
-                if (GunIntegration.isTaczLoaded() && !stack.isEmpty() && !reloading) {
+                if (GunIntegration.isAnyGunLoaded() && !stack.isEmpty() && !reloading) {
                     GunIntegration.initialData(this);
                     GunIntegration.draw(this);
                 }
@@ -1059,7 +1059,7 @@ public class SoldierEntity extends PathfinderMob implements Container {
 
     @Override
     public void setItem(int slot, ItemStack stack) {
-        boolean reloading = GunIntegration.isTaczLoaded() && GunIntegration.isReloading(this);
+        boolean reloading = GunIntegration.isAnyGunLoaded() && GunIntegration.isReloading(this);
         if (slot == SoldierInventory.SLOT_MAIN_HAND && reloading && !ItemStack.isSameItem(stack, getMainHandItem())) {
             StevesArmyMod.LOGGER.info("[Soldier] Blocked gun swap during reload (setItem)");
             return;
@@ -1067,7 +1067,7 @@ public class SoldierEntity extends PathfinderMob implements Container {
         inventory.setItem(slot, stack);
         if (slot == SoldierInventory.SLOT_MAIN_HAND) {
             setItemSlot(EquipmentSlot.MAINHAND, stack.copy());
-            if (GunIntegration.isTaczLoaded() && !stack.isEmpty() && !reloading) {
+            if (GunIntegration.isAnyGunLoaded() && !stack.isEmpty() && !reloading) {
                 GunIntegration.initialData(this);
                 GunIntegration.draw(this);
             }
@@ -1196,6 +1196,7 @@ public class SoldierEntity extends PathfinderMob implements Container {
             VS2Compat.onSoldierRemoved(this);
             TeamManager.removeFromTeam(this);
             com.stevesarmy.combat.cover.CoverReservationManager.releaseAll(this);
+            com.stevesarmy.combat.VpbEntityState.remove(this.getUUID());
             if (this.level() instanceof ServerLevel serverLevel) {
                 com.stevesarmy.squad.SquadManager.get(serverLevel).removeMemberFromSquad(this.getUUID());
             }
@@ -1640,7 +1641,7 @@ public BlockPos getPingMoveTarget() {
 
     public boolean isPreparingOrReloading() {
         return entityData.get(RELOAD_PENDING)
-            || (GunIntegration.isTaczLoaded() && GunIntegration.isReloading(this));
+            || (GunIntegration.isAnyGunLoaded() && GunIntegration.isReloading(this));
     }
 
     public boolean isTacticalReloading() {

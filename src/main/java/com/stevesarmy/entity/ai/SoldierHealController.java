@@ -32,7 +32,7 @@ public final class SoldierHealController {
         if (!soldier.isAlive() || soldier.isHealing() || soldier.isUsingItem()) return false;
         if (!soldier.getOffhandItem().isEmpty()) return false;
         if (soldier.isRecalling() || soldier.isInWaterOrBubble() || soldier.isOnFire() || soldier.isPassenger()) return false;
-        if (GunIntegration.isTaczLoaded() && GunIntegration.isReloading(soldier)) return false;
+        if (GunIntegration.isAnyGunLoaded() && GunIntegration.isReloading(soldier)) return false;
 
         float healthFraction = soldier.getHealth() / soldier.getMaxHealth();
         if (healthFraction >= NORMAL_HEALTH_THRESHOLD) return false;
@@ -64,7 +64,7 @@ public final class SoldierHealController {
         soldier.setItemSlot(net.minecraft.world.entity.EquipmentSlot.OFFHAND, selected);
         soldier.setHealing(true);
         syncInventory();
-        if (GunIntegration.isTaczLoaded() && GunIntegration.hasGun(soldier)) {
+        if (GunIntegration.isAnyGunLoaded() && GunIntegration.hasGun(soldier)) {
             GunIntegration.aim(soldier, false);
         }
 

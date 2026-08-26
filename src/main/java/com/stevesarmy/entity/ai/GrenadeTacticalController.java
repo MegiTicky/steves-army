@@ -411,7 +411,7 @@ public final class GrenadeTacticalController {
         savedPitch = soldier.getXRot();
         savedHeadYaw = soldier.getYHeadRot();
         savedBodyYaw = soldier.getCrawlFacingYaw();
-        if (GunIntegration.isTaczLoaded() && GunIntegration.hasGun(soldier)) {
+        if (GunIntegration.isAnyGunLoaded() && GunIntegration.hasGun(soldier)) {
             GunIntegration.aim(soldier, false);
         }
         alignToPlan();

@@ -315,7 +315,7 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
         if (soldier.getCoverBehaviorManager().isInCover()) {
             return true;
         }
-        if (GunIntegration.isTaczLoaded() && GunIntegration.hasGun(soldier)) {
+        if (GunIntegration.isAnyGunLoaded() && GunIntegration.hasGun(soldier)) {
             if (reloadPending || GunIntegration.isReloading(soldier)) {
                 return true;
             }
@@ -348,7 +348,7 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
     public void stop() {
         cancelAllSuppression();
         soldier.endCqbEngagement();
-        if (GunIntegration.isTaczLoaded() && GunIntegration.hasGun(soldier)) {
+        if (GunIntegration.isAnyGunLoaded() && GunIntegration.hasGun(soldier)) {
             GunIntegration.aim(soldier, false);
         }
         soldier.setTarget(null);
@@ -465,7 +465,7 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
             }
         }
         
-        boolean hasGun = GunIntegration.isTaczLoaded() && GunIntegration.hasGun(soldier);
+        boolean hasGun = GunIntegration.isAnyGunLoaded() && GunIntegration.hasGun(soldier);
         if (!hasGun && reloadPending) {
             clearReloadStatus();
         }
@@ -515,11 +515,12 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
         }
         
         if (target != null && target.isAlive()) {
+            LivingEntity combatTarget = target;
             tickCombat(hasGun);
             updateDebugSync();
-            
-            if (TargetAcquisition.hasLineOfSight(soldier, target)) {
-                reportThreatToSquadIntel(target, 1.0f);
+
+            if (combatTarget.isAlive() && TargetAcquisition.hasLineOfSight(soldier, combatTarget)) {
+                reportThreatToSquadIntel(combatTarget, 1.0f);
             }
         } else {
             CoverBehaviorManager coverManager = soldier.getCoverBehaviorManager();
@@ -923,7 +924,7 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
 
     /** Called by cover behavior when combat target acquisition is inactive. */
     public void tickFiringPronePositionFromCover() {
-        boolean hasGun = GunIntegration.isTaczLoaded() && GunIntegration.hasGun(soldier);
+        boolean hasGun = GunIntegration.isAnyGunLoaded() && GunIntegration.hasGun(soldier);
         boolean canSee = target != null && target.isAlive()
             && TargetAcquisition.hasLineOfSight(soldier, target);
         tickFiringProne(hasGun, canSee);
@@ -1392,7 +1393,7 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
                     soldier.getId(), target.getId(), aimPoint.type.displayName);
             }
 
-            if (GunIntegration.isTaczLoaded() && GunIntegration.hasGun(soldier)) {
+            if (GunIntegration.isAnyGunLoaded() && GunIntegration.hasGun(soldier)) {
                 float[] recoil = AimAccuracyManager.getGunRecoil(soldier);
                 float recoilMagnitude = Math.abs(recoil[0]) + Math.abs(recoil[1]);
                 float recoilLoss = recoilMagnitude * StevesArmyConfig.getAimQualityRecoilScale()
@@ -1608,7 +1609,7 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
 
     private void tickScanning(List<LivingEntity> potentialTargets) {
         if (wasAiming) {
-            if (GunIntegration.isTaczLoaded() && GunIntegration.hasGun(soldier)) {
+            if (GunIntegration.isAnyGunLoaded() && GunIntegration.hasGun(soldier)) {
                 GunIntegration.aim(soldier, false);
             }
             wasAiming = false;
@@ -2329,7 +2330,7 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
             double dist = soldier.position().distanceTo(threat.lastKnownPosition.getCenter());
             if (dist > SUPPRESSION_MAX_RANGE) continue;
             
-            if (GunIntegration.isTaczLoaded() && GunIntegration.hasGun(soldier)) {
+            if (GunIntegration.isAnyGunLoaded() && GunIntegration.hasGun(soldier)) {
                 int totalAmmo = getTotalAmmo();
                 if (totalAmmo == 0) continue;
             }
@@ -2921,7 +2922,7 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
             return false;
         }
         
-        if (!GunIntegration.isTaczLoaded() || !GunIntegration.hasGun(soldier)) {
+        if (!GunIntegration.isAnyGunLoaded() || !GunIntegration.hasGun(soldier)) {
             if (isSuppressionDebugLogging()) {
                 StevesArmyMod.LOGGER.info("[SuppressPing] Soldier {} shouldSuppressPingTarget: no gun", soldier.getId());
             }
