@@ -830,6 +830,46 @@ Implementation status:
 The implementation is compiled but remains disabled by default pending gameplay
 equivalence and controlled performance validation.
 
+### Phase 3 Off/On Validation Capture 1
+
+- Phase 3 off Spark profile: `https://spark.lucko.me/oDU8FFn1eS`.
+- Phase 3 on Spark profile: `https://spark.lucko.me/2Y0c8X5OOj`.
+- The disabled report recorded `6,740,293` actual visibility traces,
+  `6,706,688` smoke lookups, `49,839` detection ticks, `71,292` target
+  refreshes, `1,556` cover searches, and `539` path requests. The enabled report
+  recorded `5,923,995` actual visibility traces, `5,896,009` smoke lookups,
+  `55,062` detection ticks, `74,969` target refreshes, `2,729` cover searches,
+  and `625` path requests.
+- Phase 3 reuse was active: `1,993,942` visibility hits and `5,923,423`
+  visibility misses, for a `25.18%` same-tick visibility hit rate. Smoke-cell
+  reuse recorded `22,756,411` hits and `12,458` misses, for a `99.95%` hit rate.
+  Target-query reuse recorded `78,213` hits and `9,951` misses.
+- Enabled versus disabled AI work improved for average `9.97 ms` versus
+  `10.81 ms` (`-7.8%`), p95 `29.28 ms` versus `35.52 ms` (`-17.6%`), and p99
+  `50.85 ms` versus `52.98 ms` (`-4.0%`). P50 increased from `5.75 ms` to
+  `7.53 ms` (`+31.0%`) and worst tick increased from `76.79 ms` to `80.91 ms`
+  (`+5.4%`).
+- Total stage time changed as follows: entity query `-8.3%`, LOS traversal
+  `-5.4%`, smoke lookup `-74.7%`, and cover scoring `-24.6%`. Path request time
+  increased `88.1%`, coinciding with `16.0%` more path requests and `75.4%`
+  more cover searches in the enabled window. The per-detection-tick rates
+  reinforce the perception wins: LOS `-14.4%`, smoke `-77.1%`, cover scoring
+  `-31.7%`, and entity query `-17.0%`; path time per detection tick rose
+  `70.2%`.
+- Gameplay/scheduler behavior remained active in both runs. Phase 3 on recorded
+  `56` flank retry skips, `361` emergency executions at `1.65` ticks average
+  age, and `4` emergency stale requests. No Phase 3-specific target or smoke
+  equivalence failure was reported.
+- Evaluation: this is positive Phase 3 validation and a more noticeable result
+  than the Phase 2 comparison. Same-tick perception reuse is demonstrably
+  active, smoke lookup cost is substantially reduced, and average/p95 AI work
+  improved despite the enabled window doing more cover and path work. The p50
+  and worst-tick increases prevent declaring an unconditional latency win; the
+  path workload needs a separate investigation. The capture supports keeping
+  Phase 3 enabled for further gameplay testing while retaining the default-off
+  setting until target ordering, smoke behavior, and path-heavy scenarios are
+  explicitly checked.
+
 Deliverables:
 
 - Introduce or redesign a per-level same-tick target broad-phase view.
