@@ -143,6 +143,61 @@ public final class PerformanceMetrics {
     private static final LongAdder sameTickVisibilityFrameMisses = new LongAdder();
     private static final LongAdder sameTickSmokeFrameHits = new LongAdder();
     private static final LongAdder sameTickSmokeFrameMisses = new LongAdder();
+    private static final LongAdder phase4Captures = new LongAdder();
+    private static final LongAdder phase4CaptureNanos = new LongAdder();
+    private static final LongAdder phase4Evaluations = new LongAdder();
+    private static final LongAdder phase4EvaluationNanos = new LongAdder();
+    private static final LongAdder phase4Candidates = new LongAdder();
+    private static final LongAdder phase4Top1Matches = new LongAdder();
+    private static final LongAdder phase4Top1Mismatches = new LongAdder();
+    private static final LongAdder phase4OrderingMatches = new LongAdder();
+    private static final LongAdder phase4OrderingDivergences = new LongAdder();
+    private static final LongAdder phase4Skips = new LongAdder();
+    private static final LongAdder phase5Snapshots = new LongAdder();
+    private static final LongAdder phase5SnapshotNanos = new LongAdder();
+    private static final LongAdder phase5SnapshotFailures = new LongAdder();
+    private static final LongAdder phase5RequestsQueued = new LongAdder();
+    private static final LongAdder phase5RequestsCoalesced = new LongAdder();
+    private static final LongAdder phase5QueueSkips = new LongAdder();
+    private static final LongAdder phase5WorkerRequests = new LongAdder();
+    private static final LongAdder phase5WorkerCompleted = new LongAdder();
+    private static final LongAdder phase5WorkerFailures = new LongAdder();
+    private static final LongAdder phase5Cancelled = new LongAdder();
+    private static final LongAdder phase5ResultCoalesced = new LongAdder();
+    private static final LongAdder phase5StaleResults = new LongAdder();
+    private static final LongAdder phase5ValidationRejects = new LongAdder();
+    private static final LongAdder phase5QueueWaitNanos = new LongAdder();
+    private static final LongAdder phase5WorkerNanos = new LongAdder();
+    private static final LongAdder phase5ApplyNanos = new LongAdder();
+    private static final LongAdder phase5ResultAgeSamples = new LongAdder();
+    private static final LongAdder phase5ResultAgeTicks = new LongAdder();
+    private static final AtomicLong phase5ResultMaxAgeTicks = new AtomicLong();
+    private static final LongAdder phase5Top1Matches = new LongAdder();
+    private static final LongAdder phase5Top1Mismatches = new LongAdder();
+    private static final LongAdder phase5OrderingMatches = new LongAdder();
+    private static final LongAdder phase5OrderingDivergences = new LongAdder();
+    private static final LongAdder phase6Snapshots = new LongAdder();
+    private static final LongAdder phase6SnapshotNanos = new LongAdder();
+    private static final LongAdder phase6SnapshotFailures = new LongAdder();
+    private static final LongAdder phase6RequestsQueued = new LongAdder();
+    private static final LongAdder phase6RequestsCoalesced = new LongAdder();
+    private static final LongAdder phase6QueueSkips = new LongAdder();
+    private static final LongAdder phase6WorkerRequests = new LongAdder();
+    private static final LongAdder phase6WorkerCompleted = new LongAdder();
+    private static final LongAdder phase6WorkerFailures = new LongAdder();
+    private static final LongAdder phase6Cancelled = new LongAdder();
+    private static final LongAdder phase6StaleResults = new LongAdder();
+    private static final LongAdder phase6ValidationRejects = new LongAdder();
+    private static final LongAdder phase6QueueWaitNanos = new LongAdder();
+    private static final LongAdder phase6WorkerNanos = new LongAdder();
+    private static final LongAdder phase6ApplyNanos = new LongAdder();
+    private static final LongAdder phase6ResultAgeSamples = new LongAdder();
+    private static final LongAdder phase6ResultAgeTicks = new LongAdder();
+    private static final AtomicLong phase6ResultMaxAgeTicks = new AtomicLong();
+    private static final LongAdder phase6Selections = new LongAdder();
+    private static final LongAdder phase6Fallbacks = new LongAdder();
+    private static final LongAdder phase6ReservationRejects = new LongAdder();
+    private static final LongAdder phase6PathRejects = new LongAdder();
 
     private static final int TICK_BUFFER_SIZE = 1000;
     private static final long[] tickWorkNanos = new long[TICK_BUFFER_SIZE];
@@ -278,6 +333,61 @@ public final class PerformanceMetrics {
         sameTickVisibilityFrameMisses.reset();
         sameTickSmokeFrameHits.reset();
         sameTickSmokeFrameMisses.reset();
+        phase4Captures.reset();
+        phase4CaptureNanos.reset();
+        phase4Evaluations.reset();
+        phase4EvaluationNanos.reset();
+        phase4Candidates.reset();
+        phase4Top1Matches.reset();
+        phase4Top1Mismatches.reset();
+        phase4OrderingMatches.reset();
+        phase4OrderingDivergences.reset();
+        phase4Skips.reset();
+        phase5Snapshots.reset();
+        phase5SnapshotNanos.reset();
+        phase5SnapshotFailures.reset();
+        phase5RequestsQueued.reset();
+        phase5RequestsCoalesced.reset();
+        phase5QueueSkips.reset();
+        phase5WorkerRequests.reset();
+        phase5WorkerCompleted.reset();
+        phase5WorkerFailures.reset();
+        phase5Cancelled.reset();
+        phase5ResultCoalesced.reset();
+        phase5StaleResults.reset();
+        phase5ValidationRejects.reset();
+        phase5QueueWaitNanos.reset();
+        phase5WorkerNanos.reset();
+        phase5ApplyNanos.reset();
+        phase5ResultAgeSamples.reset();
+        phase5ResultAgeTicks.reset();
+        phase5ResultMaxAgeTicks.set(0L);
+        phase5Top1Matches.reset();
+        phase5Top1Mismatches.reset();
+        phase5OrderingMatches.reset();
+        phase5OrderingDivergences.reset();
+        phase6Snapshots.reset();
+        phase6SnapshotNanos.reset();
+        phase6SnapshotFailures.reset();
+        phase6RequestsQueued.reset();
+        phase6RequestsCoalesced.reset();
+        phase6QueueSkips.reset();
+        phase6WorkerRequests.reset();
+        phase6WorkerCompleted.reset();
+        phase6WorkerFailures.reset();
+        phase6Cancelled.reset();
+        phase6StaleResults.reset();
+        phase6ValidationRejects.reset();
+        phase6QueueWaitNanos.reset();
+        phase6WorkerNanos.reset();
+        phase6ApplyNanos.reset();
+        phase6ResultAgeSamples.reset();
+        phase6ResultAgeTicks.reset();
+        phase6ResultMaxAgeTicks.set(0L);
+        phase6Selections.reset();
+        phase6Fallbacks.reset();
+        phase6ReservationRejects.reset();
+        phase6PathRejects.reset();
         java.util.Arrays.fill(tickWorkNanos, 0L);
         tickBufferIndex = 0;
         tickWorkSamples = 0;
@@ -727,6 +837,149 @@ public final class PerformanceMetrics {
         if (enabled) coverCandidatesScored.add(candidates);
     }
 
+    public static void recordPhase4Capture(long nanos, int candidates) {
+        if (!enabled) return;
+        phase4Captures.increment();
+        phase4CaptureNanos.add(nanos);
+        phase4Candidates.add(candidates);
+    }
+
+    public static void recordPhase4Evaluation(long nanos) {
+        if (!enabled) return;
+        phase4Evaluations.increment();
+        phase4EvaluationNanos.add(nanos);
+    }
+
+    public static void recordPhase4Top1Comparison(boolean match) {
+        if (!enabled) return;
+        if (match) phase4Top1Matches.increment();
+        else phase4Top1Mismatches.increment();
+    }
+
+    public static void recordPhase4OrderingComparison(boolean match) {
+        if (!enabled) return;
+        if (match) phase4OrderingMatches.increment();
+        else phase4OrderingDivergences.increment();
+    }
+
+    public static void recordPhase4Skip() {
+        if (enabled) phase4Skips.increment();
+    }
+
+    public static void recordPhase5Snapshot(long nanos) {
+        if (!enabled) return;
+        phase5Snapshots.increment();
+        phase5SnapshotNanos.add(Math.max(0L, nanos));
+    }
+
+    public static void recordPhase5SnapshotFailure() {
+        if (enabled) phase5SnapshotFailures.increment();
+    }
+
+    public static void recordPhase5RequestQueued() {
+        if (enabled) phase5RequestsQueued.increment();
+    }
+
+    public static void recordPhase5RequestCoalesced() {
+        if (enabled) phase5RequestsCoalesced.increment();
+    }
+
+    public static void recordPhase5QueueSkip() {
+        if (enabled) phase5QueueSkips.increment();
+    }
+
+    public static void recordPhase5WorkerRequest() {
+        if (enabled) phase5WorkerRequests.increment();
+    }
+
+    public static void recordPhase5WorkerCompleted(long nanos) {
+        if (!enabled) return;
+        phase5WorkerCompleted.increment();
+        phase5WorkerNanos.add(Math.max(0L, nanos));
+    }
+
+    public static void recordPhase5Failure() {
+        if (enabled) phase5WorkerFailures.increment();
+    }
+
+    public static void recordPhase5Cancelled() {
+        if (enabled) phase5Cancelled.increment();
+    }
+
+    public static void recordPhase5ResultCoalesced() {
+        if (enabled) phase5ResultCoalesced.increment();
+    }
+
+    public static void recordPhase5StaleResult() {
+        if (enabled) phase5StaleResults.increment();
+    }
+
+    public static void recordPhase5ValidationReject() {
+        if (enabled) phase5ValidationRejects.increment();
+    }
+
+    public static void recordPhase5QueueWait(long nanos) {
+        if (enabled) phase5QueueWaitNanos.add(Math.max(0L, nanos));
+    }
+
+    public static void recordPhase5Apply(long nanos) {
+        if (enabled) phase5ApplyNanos.add(Math.max(0L, nanos));
+    }
+
+    public static void recordPhase5ResultAge(long ageTicks) {
+        if (!enabled) return;
+        long safeAge = Math.max(0L, ageTicks);
+        phase5ResultAgeSamples.increment();
+        phase5ResultAgeTicks.add(safeAge);
+        phase5ResultMaxAgeTicks.accumulateAndGet(safeAge, Math::max);
+    }
+
+    public static void recordPhase5Top1Comparison(boolean match) {
+        if (!enabled) return;
+        if (match) phase5Top1Matches.increment();
+        else phase5Top1Mismatches.increment();
+    }
+
+    public static void recordPhase5OrderingComparison(boolean match) {
+        if (!enabled) return;
+        if (match) phase5OrderingMatches.increment();
+        else phase5OrderingDivergences.increment();
+    }
+
+    public static void recordPhase6Snapshot(long nanos) {
+        if (!enabled) return;
+        phase6Snapshots.increment();
+        phase6SnapshotNanos.add(Math.max(0L, nanos));
+    }
+
+    public static void recordPhase6SnapshotFailure() { if (enabled) phase6SnapshotFailures.increment(); }
+    public static void recordPhase6RequestQueued() { if (enabled) phase6RequestsQueued.increment(); }
+    public static void recordPhase6RequestCoalesced() { if (enabled) phase6RequestsCoalesced.increment(); }
+    public static void recordPhase6QueueSkip() { if (enabled) phase6QueueSkips.increment(); }
+    public static void recordPhase6WorkerRequest() { if (enabled) phase6WorkerRequests.increment(); }
+    public static void recordPhase6WorkerCompleted(long nanos) {
+        if (!enabled) return;
+        phase6WorkerCompleted.increment();
+        phase6WorkerNanos.add(Math.max(0L, nanos));
+    }
+    public static void recordPhase6Failure() { if (enabled) phase6WorkerFailures.increment(); }
+    public static void recordPhase6Cancelled() { if (enabled) phase6Cancelled.increment(); }
+    public static void recordPhase6StaleResult() { if (enabled) phase6StaleResults.increment(); }
+    public static void recordPhase6ValidationReject() { if (enabled) phase6ValidationRejects.increment(); }
+    public static void recordPhase6QueueWait(long nanos) { if (enabled) phase6QueueWaitNanos.add(Math.max(0L, nanos)); }
+    public static void recordPhase6Apply(long nanos) { if (enabled) phase6ApplyNanos.add(Math.max(0L, nanos)); }
+    public static void recordPhase6ResultAge(long ageTicks) {
+        if (!enabled) return;
+        long safeAge = Math.max(0L, ageTicks);
+        phase6ResultAgeSamples.increment();
+        phase6ResultAgeTicks.add(safeAge);
+        phase6ResultMaxAgeTicks.accumulateAndGet(safeAge, Math::max);
+    }
+    public static void recordPhase6Selection() { if (enabled) phase6Selections.increment(); }
+    public static void recordPhase6Fallback() { if (enabled) phase6Fallbacks.increment(); }
+    public static void recordPhase6ReservationReject() { if (enabled) phase6ReservationRejects.increment(); }
+    public static void recordPhase6PathReject() { if (enabled) phase6PathRejects.increment(); }
+
     public static String report() {
         long visibilityHits = visibilityCacheHits.sum();
         long visibilityMisses = visibilityCacheMisses.sum();
@@ -753,8 +1006,52 @@ public final class PerformanceMetrics {
              + "  Phase 3 perception frame: " + sameTickVisibilityFrameHits.sum()
              + " visibility hits, " + sameTickVisibilityFrameMisses.sum()
              + " visibility misses, " + sameTickSmokeFrameHits.sum()
-             + " smoke cell hits, " + sameTickSmokeFrameMisses.sum() + " smoke cell misses\n"
-            + "  Threat reports: " + threatReportAttempts.sum() + " attempts, "
+              + " smoke cell hits, " + sameTickSmokeFrameMisses.sum() + " smoke cell misses\n"
+             + "  Phase 4 pure cover shadow: " + phase4Captures.sum() + " captures ("
+             + formatMillis(phase4CaptureNanos.sum()) + " ms), " + phase4Evaluations.sum()
+             + " evaluations (" + formatMillis(phase4EvaluationNanos.sum()) + " ms), "
+             + phase4Candidates.sum() + " candidates, top-1=" + phase4Top1Matches.sum()
+             + " matches/" + phase4Top1Mismatches.sum() + " mismatches, ordering="
+             + phase4OrderingMatches.sum() + " matches/" + phase4OrderingDivergences.sum()
+             + " divergences, " + phase4Skips.sum() + " skips\n"
+              + "  Phase 5 async rifleman shadow: " + phase5Snapshots.sum() + " snapshots ("
+              + formatMillis(phase5SnapshotNanos.sum()) + " ms), " + phase5SnapshotFailures.sum()
+              + " snapshot failures, "
+             + phase5RequestsQueued.sum() + " queued, " + phase5RequestsCoalesced.sum()
+             + " coalesced, " + phase5QueueSkips.sum() + " queue skips, "
+             + phase5WorkerRequests.sum() + " worker requests, " + phase5WorkerCompleted.sum()
+             + " completed, " + phase5WorkerFailures.sum() + " failures, " + phase5Cancelled.sum()
+             + " cancelled, " + phase5ResultCoalesced.sum() + " result coalesced, "
+             + phase5StaleResults.sum() + " stale, " + phase5ValidationRejects.sum()
+             + " validation rejects\n"
+              + "    queue wait="
+             + formatMillis(phase5QueueWaitNanos.sum()) + " ms, worker="
+             + formatMillis(phase5WorkerNanos.sum()) + " ms, apply="
+             + formatMillis(phase5ApplyNanos.sum()) + " ms, result age avg="
+             + formatTicks(phase5ResultAgeSamples.sum() == 0 ? 0.0
+                 : phase5ResultAgeTicks.sum() / (double) phase5ResultAgeSamples.sum())
+             + " ticks, max=" + phase5ResultMaxAgeTicks.get() + " ticks, top-1="
+             + phase5Top1Matches.sum() + " matches/" + phase5Top1Mismatches.sum()
+             + " mismatches, ordering=" + phase5OrderingMatches.sum() + " matches/"
+              + phase5OrderingDivergences.sum() + " divergences\n"
+              + "  Phase 6 async cover pilot: " + phase6Snapshots.sum() + " snapshots ("
+              + formatMillis(phase6SnapshotNanos.sum()) + " ms), " + phase6SnapshotFailures.sum()
+              + " snapshot failures, " + phase6RequestsQueued.sum() + " queued, "
+              + phase6RequestsCoalesced.sum() + " coalesced, " + phase6QueueSkips.sum()
+              + " queue skips, " + phase6WorkerRequests.sum() + " worker requests, "
+              + phase6WorkerCompleted.sum() + " completed, " + phase6WorkerFailures.sum()
+              + " failures, " + phase6Cancelled.sum() + " cancelled, " + phase6StaleResults.sum()
+              + " stale, " + phase6ValidationRejects.sum() + " validation rejects, selections="
+              + phase6Selections.sum() + ", fallbacks=" + phase6Fallbacks.sum()
+              + ", reservation rejects=" + phase6ReservationRejects.sum() + ", path rejects="
+              + phase6PathRejects.sum() + "\n"
+              + "    queue wait=" + formatMillis(phase6QueueWaitNanos.sum()) + " ms, worker="
+              + formatMillis(phase6WorkerNanos.sum()) + " ms, apply="
+              + formatMillis(phase6ApplyNanos.sum()) + " ms, result age avg="
+              + formatTicks(phase6ResultAgeSamples.sum() == 0 ? 0.0
+                  : phase6ResultAgeTicks.sum() / (double) phase6ResultAgeSamples.sum())
+              + " ticks, max=" + phase6ResultMaxAgeTicks.get() + " ticks\n"
+             + "  Threat reports: " + threatReportAttempts.sum() + " attempts, "
             + threatReportPublished.sum() + " published, "
             + threatReportGeometryCalculations.sum() + " geometry calculations, "
             + threatReportDeduplicated.sum() + " deduplicated\n"

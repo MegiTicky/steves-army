@@ -5,6 +5,10 @@ import com.stevesarmy.StevesArmyConfig;
 import com.stevesarmy.combat.ThreatAwareness;
 import com.stevesarmy.combat.VisibilityRay;
 import com.stevesarmy.combat.cover.*;
+import com.stevesarmy.combat.cover.pure.CoverSearchResult;
+import com.stevesarmy.combat.cover.pure.AsyncCoverShadowService;
+import com.stevesarmy.combat.cover.pure.CoverSnapshotCapture;
+import com.stevesarmy.combat.cover.pure.PureCoverEvaluator;
 import com.stevesarmy.debug.DiagnosticLogManager;
 import com.stevesarmy.debug.PerformanceMetrics;
 import com.stevesarmy.entity.SoldierEntity;
@@ -39,7 +43,8 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
     private enum CoverMoveResult {
         COVER_STARTED,
         NO_COVER_FOUND,
-        NO_ELIGIBLE_COVER
+        NO_ELIGIBLE_COVER,
+        ASYNC_PENDING
     }
 
     private enum QueuedSearchMode {
@@ -210,6 +215,9 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
     private int followReplanCooldownTicks = 0;
 
     private boolean coverSearchPending;
+    private boolean asyncPilotPending;
+    private long asyncPilotSubmittedTick = Long.MIN_VALUE;
+    private boolean asyncPilotFallback;
     private QueuedSearchMode queuedSearchMode;
     private int queuedAttackGeneration = -1;
     private RelocationType queuedRelocationType = RelocationType.NONE;
@@ -422,6 +430,92 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
         } else if ((mode == QueuedSearchMode.REPOSITION || relocationType != RelocationType.NONE)
             && getCoverManager().getTargetCover() != null) {
             getCoverManager().setState(CoverBehaviorManager.CoverState.REPOSITIONING);
+        }
+    }
+
+    @Override
+    public void applyAsyncCoverPilotResult(CoverSearchResult result, BlockPos sourcePosition, long sourceTick) {
+        if (!asyncPilotPending) {
+            PerformanceMetrics.recordPhase6StaleResult();
+            return;
+        }
+        asyncPilotPending = false;
+        asyncPilotSubmittedTick = Long.MIN_VALUE;
+        if (!StevesArmyConfig.isPhase6AsyncCoverPilotEnabled()
+            || asyncPilotFallback
+            || !isAsyncCoverPilotEligible()
+            || !soldier.blockPosition().equals(sourcePosition)
+            || result == null) {
+            runAsyncPilotFallback();
+            return;
+        }
+
+        CoverFinder finder = new CoverFinder(soldier.level());
+        CoverPoint currentCover = getCoverManager().getCurrentCover();
+        for (CoverSearchResult.RankedCandidate ranked : result.rankedCandidates()) {
+            BlockPos position = ranked.candidate().position();
+            if (failedCoverPositions.contains(position)
+                || (currentCover != null && currentCover.getPosition().equals(position))
+                || !CoverReservationManager.isAvailableFor(position, soldier)) {
+                continue;
+            }
+            CoverPoint cover = finder.evaluatePosition(position, null);
+            if (cover == null || cover.getType() == CoverType.NONE
+                || !cover.getProtectedDirections().equals(ranked.candidate().protectedDirections())) {
+                PerformanceMetrics.recordPhase6ValidationReject();
+                continue;
+            }
+            cover.setQuality(ranked.score());
+            cover.setCombatScore(ranked.score());
+            if (currentCover != null
+                && soldier.position().distanceTo(cover.getPosition().getCenter()) < COVER_REACHED_DISTANCE) {
+                blacklistCover(cover.getPosition(), BlacklistReason.STUCK_REPOSITIONING);
+                continue;
+            }
+            getCoverManager().clearCoverQualityPenalty();
+            cancelProneFiringPlan();
+            if (!CoverReservationManager.reserve(position, soldier)) {
+                PerformanceMetrics.recordPhase6ReservationReject();
+                continue;
+            }
+            getCoverManager().setTargetCover(cover);
+            if (!moveToCover(cover)) {
+                CoverReservationManager.release(position, soldier);
+                getCoverManager().clearTargetCover();
+                PerformanceMetrics.recordPhase6PathReject();
+                continue;
+            }
+            PerformanceMetrics.recordPhase6Selection();
+            return;
+        }
+        runAsyncPilotFallback();
+    }
+
+    @Override
+    public void rejectAsyncCoverPilot() {
+        if (!asyncPilotPending) {
+            return;
+        }
+        asyncPilotPending = false;
+        asyncPilotSubmittedTick = Long.MIN_VALUE;
+        runAsyncPilotFallback();
+    }
+
+    private boolean isAsyncCoverPilotEligible() {
+        return !machineGunnerPipeline && !soldier.hasValidAttackTarget()
+            && relocationType == RelocationType.NONE && !suppressionRouteSearchActive
+            && getCoverManager().getState() == CoverBehaviorManager.CoverState.SEEKING_COVER;
+    }
+
+    private void runAsyncPilotFallback() {
+        PerformanceMetrics.recordPhase6Fallback();
+        asyncPilotFallback = true;
+        try {
+            if (soldier.isAlive() && isAsyncCoverPilotEligible()) {
+                findAndMoveToCover();
+            }
+        } finally {
+            asyncPilotFallback = false;
         }
     }
 
@@ -1086,6 +1180,8 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
     public void stop() {
         CoverSearchScheduler.cancel(this);
         coverSearchPending = false;
+        asyncPilotPending = false;
+        asyncPilotSubmittedTick = Long.MIN_VALUE;
         queuedSearchMode = null;
         queuedAttackGeneration = -1;
         queuedRelocationType = RelocationType.NONE;
@@ -1332,6 +1428,14 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
         CoverPoint targetCover = getCoverManager().getTargetCover();
         
         if (targetCover == null) {
+            if (asyncPilotPending) {
+                if (soldier.level().getGameTime() - asyncPilotSubmittedTick > 40L) {
+                    asyncPilotPending = false;
+                    asyncPilotSubmittedTick = Long.MIN_VALUE;
+                    runAsyncPilotFallback();
+                }
+                return;
+            }
             requestCoverSearch(soldier.hasValidAttackTarget()
                 ? QueuedSearchMode.ATTACK_SELECTING : QueuedSearchMode.NORMAL);
             seekingTicks = 0;
@@ -2628,8 +2732,38 @@ private boolean shouldExitCoverForFollow() {
                 }
             }
         } else {
+            if (!asyncPilotFallback && StevesArmyConfig.isPhase6AsyncCoverPilotEnabled()
+                && isAsyncCoverPilotEligible()) {
+                List<CoverPoint> discovered = finder.discoverCoverPoints(searchCenter, searchRadius);
+                if (discovered.isEmpty()) {
+                    PerformanceMetrics.recordPhase6Fallback();
+                } else {
+                    CoverProtectionContext protection = soldier.getCombatGoal() != null
+                        ? soldier.getCombatGoal().resolveCoverProtectionContext()
+                        : CoverProtectionContext.NONE;
+                    long captureStarted = System.nanoTime();
+                    try {
+                        CoverSnapshotCapture.Capture capture = CoverSnapshotCapture.captureRaw(
+                            soldier.level(), soldier, threatDirection, protection, threats, squadCtx,
+                            discovered, searchCenter, searchRadius);
+                        PerformanceMetrics.recordPhase6Snapshot(System.nanoTime() - captureStarted);
+                        if (soldier.level() instanceof ServerLevel serverLevel
+                            && AsyncCoverShadowService.submitPilot(serverLevel, soldier.getUUID(), capture)) {
+                            asyncPilotPending = true;
+                            asyncPilotSubmittedTick = soldier.level().getGameTime();
+                            return CoverMoveResult.ASYNC_PENDING;
+                        }
+                    } catch (RuntimeException exception) {
+                        PerformanceMetrics.recordPhase6SnapshotFailure();
+                        StevesArmyMod.LOGGER.warn("Cover pilot snapshot failed for soldier {}", soldier.getId(), exception);
+                    }
+                    PerformanceMetrics.recordPhase6Fallback();
+                }
+            }
             reusableScored = finder.evaluateAndScoreAll(
                 soldier, threatDirection, threats, searchRadius, true, squadCtx);
+            runPureCoverShadow(threatDirection, threats, squadCtx, reusableScored,
+                searchCenter, searchRadius);
             bestCover = selectPreferredCover(reusableScored);
             if (bestCover.isEmpty()) {
                 bestCover = selectBestAvailableCover(reusableScored, threatDirection);
@@ -2861,6 +2995,78 @@ private boolean shouldExitCoverForFollow() {
     private static String formatMillis(long nanos) {
         return String.format(java.util.Locale.ROOT, "%.2f", nanos / 1_000_000.0);
     }
+
+    /** Runs Phase 4 and/or Phase 5 beside routine rifleman NORMAL searches. */
+    private void runPureCoverShadow(Vec3 threatDirection, List<LivingEntity> threats,
+                                    SquadCoverContext squadContext,
+                                    List<CoverFinder.ScoredCover> legacyScored,
+                                    BlockPos searchCenter, int searchRadius) {
+        boolean phase4Enabled = StevesArmyConfig.isPhase4PureEvaluatorEnabled();
+        boolean phase5Enabled = StevesArmyConfig.isPhase5AsyncShadowEnabled() && !machineGunnerPipeline;
+        if (!phase4Enabled && !phase5Enabled) {
+            PerformanceMetrics.recordPhase4Skip();
+            return;
+        }
+        if (legacyScored == null || legacyScored.isEmpty()) {
+            if (phase4Enabled) {
+                PerformanceMetrics.recordPhase4Skip();
+            }
+            return;
+        }
+
+        CoverProtectionContext protection = soldier.getCombatGoal() != null
+            ? soldier.getCombatGoal().resolveCoverProtectionContext()
+            : CoverProtectionContext.NONE;
+        long captureStarted = System.nanoTime();
+        CoverSnapshotCapture.Capture capture;
+        try {
+            capture = CoverSnapshotCapture.capture(
+                soldier.level(), soldier, threatDirection, protection, threats, squadContext,
+                legacyScored, searchCenter, searchRadius);
+        } catch (RuntimeException exception) {
+            if (phase4Enabled) {
+                PerformanceMetrics.recordPhase4Skip();
+            }
+            if (phase5Enabled) {
+                PerformanceMetrics.recordPhase5SnapshotFailure();
+            }
+            StevesArmyMod.LOGGER.warn("Cover shadow snapshot failed for soldier {}", soldier.getId(), exception);
+            return;
+        }
+        long captureNanos = System.nanoTime() - captureStarted;
+        if (phase4Enabled) {
+            PerformanceMetrics.recordPhase4Capture(captureNanos,
+                capture.input().candidates().size());
+        }
+        if (phase5Enabled) {
+            PerformanceMetrics.recordPhase5Snapshot(captureNanos);
+        }
+
+        if (phase4Enabled) {
+            List<BlockPos> legacyPositions = legacyScored.stream()
+                .map(scored -> scored.cover.getPosition()).toList();
+            long evaluationStarted = System.nanoTime();
+            CoverSearchResult pure = PureCoverEvaluator.evaluate(capture.input(), capture.terrain());
+            long evaluationNanos = System.nanoTime() - evaluationStarted;
+            PerformanceMetrics.recordPhase4Evaluation(evaluationNanos);
+
+            CoverSearchResult.RankedCandidate pureTop = pure.top();
+            BlockPos legacyTop = legacyPositions.get(0);
+            boolean topMatches = pureTop != null && legacyTop.equals(pureTop.candidate().position());
+            PerformanceMetrics.recordPhase4Top1Comparison(topMatches);
+
+            int comparableCount = Math.min(legacyPositions.size(), pure.positions().size());
+            boolean orderingMatches = comparableCount > 0
+                && legacyPositions.subList(0, comparableCount).equals(pure.positions().subList(0, comparableCount));
+            PerformanceMetrics.recordPhase4OrderingComparison(orderingMatches);
+        }
+
+        if (phase5Enabled && soldier.level() instanceof ServerLevel serverLevel) {
+            List<BlockPos> legacyPositions = legacyScored.stream()
+                .map(scored -> scored.cover.getPosition()).toList();
+            AsyncCoverShadowService.submit(serverLevel, soldier.getUUID(), capture, legacyPositions);
+        }
+    }
     
 private Optional<CoverPoint> findBetterCover() {
         Level level = soldier.level();
@@ -3087,6 +3293,8 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
     private void resetAttackCommand() {
         CoverSearchScheduler.cancel(this);
         coverSearchPending = false;
+        asyncPilotPending = false;
+        asyncPilotSubmittedTick = Long.MIN_VALUE;
         queuedSearchMode = null;
         queuedAttackGeneration = -1;
         queuedRelocationType = RelocationType.NONE;

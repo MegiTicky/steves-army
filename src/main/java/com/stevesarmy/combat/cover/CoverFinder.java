@@ -104,6 +104,11 @@ public class CoverFinder {
     public List<CoverPoint> findCoverPoints(BlockPos center, int radius) {
         return findCoverPoints(center, radius, null);
     }
+
+    /** Discovers physical candidates without tactical scoring. */
+    public List<CoverPoint> discoverCoverPoints(BlockPos center, int radius) {
+        return findCoverPoints(center, radius, null);
+    }
     
     public List<CoverPoint> findCoverPoints(BlockPos center, int radius, LivingEntity threat) {
         SearchKey searchKey = new SearchKey(center.immutable(), radius,

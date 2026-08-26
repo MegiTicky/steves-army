@@ -1,6 +1,7 @@
 package com.stevesarmy.entity.ai;
 
 import net.minecraft.core.BlockPos;
+import com.stevesarmy.combat.cover.pure.CoverSearchResult;
 
 import javax.annotation.Nullable;
 
@@ -12,4 +13,10 @@ public interface CoverGoalController {
 
     @Nullable
     BlockPos getProneDefensivePosition();
+
+    default void applyAsyncCoverPilotResult(CoverSearchResult result, BlockPos sourcePosition, long sourceTick) {
+    }
+
+    default void rejectAsyncCoverPilot() {
+    }
 }

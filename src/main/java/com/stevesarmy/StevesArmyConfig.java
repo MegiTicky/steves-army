@@ -52,6 +52,9 @@ public class StevesArmyConfig {
     public static final ForgeConfigSpec.IntValue OPTIMIZATION_LEVEL;
     public static final ForgeConfigSpec.BooleanValue PHASE_2_RETRY_POLICY_ENABLED;
     public static final ForgeConfigSpec.BooleanValue PHASE_3_PERCEPTION_FRAME_ENABLED;
+    public static final ForgeConfigSpec.BooleanValue PHASE_4_PURE_EVALUATOR_ENABLED;
+    public static final ForgeConfigSpec.BooleanValue PHASE_5_ASYNC_SHADOW_ENABLED;
+    public static final ForgeConfigSpec.BooleanValue PHASE_6_ASYNC_COVER_PILOT_ENABLED;
 
     static {
         BUILDER.push("aim_quality");
@@ -314,6 +317,26 @@ BUILDER.pop();
                      "Default: false")
             .define("phase3PerceptionFrameEnabled", false);
 
+        PHASE_4_PURE_EVALUATOR_ENABLED = BUILDER
+            .comment("Run the Phase 4 pure cover evaluator in shadow mode for NORMAL cover searches.",
+                     "Legacy cover scoring remains authoritative; this only captures and compares results.",
+                     "Default: false")
+            .define("phase4PureEvaluatorEnabled", false);
+
+        PHASE_5_ASYNC_SHADOW_ENABLED = BUILDER
+            .comment("Run the pure rifleman NORMAL cover evaluator on a bounded worker in read-only shadow mode.",
+                     "Snapshot capture, live validation, pathfinding, reservations, and gameplay remain on the server thread.",
+                     "Results never affect gameplay; disable this if worker diagnostics are not needed.",
+                     "Default: false")
+            .define("phase5AsyncShadowEnabled", false);
+
+        PHASE_6_ASYNC_COVER_PILOT_ENABLED = BUILDER
+            .comment("Use the bounded worker to select routine NORMAL rifleman cover.",
+                     "Candidates are discovered and captured on the server thread; live validation, reservations, paths, and movement remain server-thread only.",
+                     "Unsupported searches and any failed async step use the synchronous cover search.",
+                     "Default: false")
+            .define("phase6AsyncCoverPilotEnabled", false);
+
         BUILDER.pop();
 
         SPEC = BUILDER.build();
@@ -461,6 +484,18 @@ BUILDER.pop();
 
     public static boolean isPhase3PerceptionFrameEnabled() {
         return PHASE_3_PERCEPTION_FRAME_ENABLED.get();
+    }
+
+    public static boolean isPhase4PureEvaluatorEnabled() {
+        return PHASE_4_PURE_EVALUATOR_ENABLED.get();
+    }
+
+    public static boolean isPhase5AsyncShadowEnabled() {
+        return PHASE_5_ASYNC_SHADOW_ENABLED.get();
+    }
+
+    public static boolean isPhase6AsyncCoverPilotEnabled() {
+        return PHASE_6_ASYNC_COVER_PILOT_ENABLED.get();
     }
 
     /** Legacy compatibility hook; nearby-target snapshots are disabled. */
