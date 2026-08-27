@@ -1,6 +1,7 @@
 package com.stevesarmy.mixins;
 
 import com.stevesarmy.client.FireTeamScopeState;
+import com.stevesarmy.client.StevesArmyClientConfig;
 import com.stevesarmy.entity.EnemySoldierEntity;
 import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.squad.FireTeam;
@@ -31,6 +32,11 @@ public class MinecraftGlowMixin {
         }
 
         if (!soldier.isOwnedBy(player)) {
+            cir.setReturnValue(false);
+            return;
+        }
+
+        if (!StevesArmyClientConfig.SHOW_OWNED_SOLDIER_GLOW.get()) {
             cir.setReturnValue(false);
             return;
         }

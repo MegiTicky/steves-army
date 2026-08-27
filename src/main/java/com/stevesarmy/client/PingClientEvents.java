@@ -139,6 +139,11 @@ public class PingClientEvents {
             return;
         }
 
+        if (!StevesArmyClientConfig.SHOW_FRIENDLY_SOLDIER_NAME_TAGS.get()) {
+            event.setResult(Event.Result.DENY);
+            return;
+        }
+
         Minecraft mc = Minecraft.getInstance();
         Player viewer = mc.player;
         if (viewer == null) return;

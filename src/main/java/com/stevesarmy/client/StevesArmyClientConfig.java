@@ -5,6 +5,8 @@ import net.minecraftforge.common.ForgeConfigSpec;
 public final class StevesArmyClientConfig {
     public static final ForgeConfigSpec SPEC;
     public static final ForgeConfigSpec.DoubleValue SOLDIER_HELD_ITEM_RENDER_DISTANCE;
+    public static final ForgeConfigSpec.BooleanValue SHOW_OWNED_SOLDIER_GLOW;
+    public static final ForgeConfigSpec.BooleanValue SHOW_FRIENDLY_SOLDIER_NAME_TAGS;
     public static final ForgeConfigSpec.BooleanValue ENABLE_FIRE_TEAM_WHEEL;
     public static final ForgeConfigSpec.DoubleValue PING_SCALE;
     public static final ForgeConfigSpec.DoubleValue ENEMY_CONTACT_PING_BASELINE_SIZE;
@@ -20,6 +22,14 @@ public final class StevesArmyClientConfig {
                      "Set to 0 to hide all soldier-held items, or -1 to disable this optimization.",
                      "Default: 24 blocks")
             .defineInRange("soldierHeldItemRenderDistance", 24.0, -1.0, 128.0);
+        SHOW_OWNED_SOLDIER_GLOW = builder
+            .comment("Show the glowing outline on soldiers owned by the local player.",
+                     "Default: true")
+            .define("showOwnedSoldierGlow", true);
+        SHOW_FRIENDLY_SOLDIER_NAME_TAGS = builder
+            .comment("Show name tags for owned and allied soldiers.",
+                     "Default: true")
+            .define("showFriendlySoldierNameTags", true);
         PING_SCALE = builder
             .comment("Global scale factor for ping icons and text.",
                      "Default: 0.8")
