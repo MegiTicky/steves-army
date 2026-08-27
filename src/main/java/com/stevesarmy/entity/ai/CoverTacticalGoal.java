@@ -66,6 +66,7 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
     private int reevaluateCounter = 0;
     private int noProgressTicks = 0;
     private int seekingTicks = 0;
+    private int goToRelocationTicks = 0;
     private Vec3 lastSeekingPosition = null;
     // A prone lane is intentionally not a CoverPoint: no reservation, peek state, or cover bonus.
     private BlockPos proneFiringDestination;
@@ -88,6 +89,9 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
     private static final float BACKWARD_HYSTERESIS_THRESHOLD = 0.35f;
     private static final long MIN_PEEK_INTERVAL_MS = 2000;
     private static final int MAX_SEEKING_TICKS = 200;
+    // GO_TO must fall back to direct navigation promptly if cover search is
+    // queued behind a large squad or repeatedly fails to produce a route.
+    private static final int MAX_GO_TO_RELOCATION_TICKS = MAX_SEEKING_TICKS;
     private static final float LOW_HEALTH_THRESHOLD = 0.3f;
     private static final float FOLLOW_COVER_DISTANCE = 15.0f;
     private static final int REPEATED_SUPPRESSION_EPISODE_THRESHOLD = 3;
@@ -634,6 +638,7 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
         relocationType = RelocationType.GO_TO;
         relocationCenter = destination.immutable();
         relocationCommandGeneration = commandGeneration;
+        goToRelocationTicks = 0;
         return true;
     }
 
@@ -682,6 +687,27 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
         relocationType = RelocationType.NONE;
         relocationCenter = null;
         relocationCommandGeneration = -1;
+        goToRelocationTicks = 0;
+    }
+
+    private void failGoToRelocation() {
+        if (relocationType != RelocationType.GO_TO) {
+            return;
+        }
+
+        failedGoToRelocationGeneration = relocationCommandGeneration;
+        CoverSearchScheduler.cancel(this);
+        coverSearchPending = false;
+        queuedSearchMode = null;
+        queuedAttackGeneration = -1;
+        queuedRelocationType = RelocationType.NONE;
+        queuedRelocationCenter = null;
+        pendingRetryCover = null;
+        isRetryAttempt = false;
+        navigation.stop();
+        getPositionController().clear();
+        clearRelocationTarget();
+        getCoverManager().setState(CoverBehaviorManager.CoverState.NO_COVER);
     }
     
     private PeekController getPeekController() {
@@ -1186,6 +1212,11 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
         queuedAttackGeneration = -1;
         queuedRelocationType = RelocationType.NONE;
         queuedRelocationCenter = null;
+        boolean hadRelocation = relocationType != RelocationType.NONE;
+        if (hadRelocation) {
+            clearRelocationTarget();
+            getCoverManager().setState(CoverBehaviorManager.CoverState.NO_COVER);
+        }
         boolean wasHealing = soldier.isHealing();
         CoverBehaviorManager.CoverState state = getCoverManager().getState();
         boolean preserveCoverForHealing = wasHealing
@@ -1255,6 +1286,16 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
             getPositionController().clear();
             clearRelocationTarget();
             getCoverManager().setState(CoverBehaviorManager.CoverState.NO_COVER);
+            return;
+        }
+
+        if (relocationType == RelocationType.GO_TO
+            && ++goToRelocationTicks > MAX_GO_TO_RELOCATION_TICKS) {
+            if (DiagnosticLogManager.isCoverLoggingEnabled()) {
+                StevesArmyMod.LOGGER.info("[CoverRelocation] Soldier {} GO_TO relocation timed out after {} ticks",
+                    soldier.getId(), goToRelocationTicks);
+            }
+            failGoToRelocation();
             return;
         }
 
@@ -1419,9 +1460,12 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
                     soldier.getId(), pendingRetryCover.getPosition());
             }
             isRetryAttempt = true;
-            moveToCover(pendingRetryCover);
+            boolean movementStarted = moveToCover(pendingRetryCover);
             isRetryAttempt = false;
             pendingRetryCover = null;
+            if (!movementStarted && relocationType == RelocationType.GO_TO) {
+                failGoToRelocation();
+            }
             return;
         }
         
@@ -1603,9 +1647,12 @@ private void tickRepositioning() {
                     soldier.getId(), pendingRetryCover.getPosition());
             }
             isRetryAttempt = true;
-            moveToCover(pendingRetryCover);
+            boolean movementStarted = moveToCover(pendingRetryCover);
             isRetryAttempt = false;
             pendingRetryCover = null;
+            if (!movementStarted && relocationType == RelocationType.GO_TO) {
+                failGoToRelocation();
+            }
             return;
         }
 
@@ -2514,7 +2561,16 @@ private boolean shouldExitCoverForFollow() {
             }
             getCoverManager().setTargetCover(newCover);
             getCoverManager().setState(CoverBehaviorManager.CoverState.REPOSITIONING);
-            moveToCover(newCover);
+            boolean movementStarted = moveToCover(newCover);
+            if (!movementStarted && pendingRetryCover == null) {
+                if (getCoverManager().getTargetCover() != null) {
+                    blacklistCover(newCover.getPosition(), BlacklistReason.PATH_FAILED);
+                }
+                getCoverManager().setState(currentCover != null
+                    ? CoverBehaviorManager.CoverState.IN_COVER
+                    : CoverBehaviorManager.CoverState.SEEKING_COVER);
+                return false;
+            }
             return true;
         }
         return false;
@@ -2567,7 +2623,13 @@ private boolean shouldExitCoverForFollow() {
                             String.format("%.1f", horizontalDistanceToCover(cover)),
                             isDistantRelocationCover(cover) ? "staged" : "exact");
                     }
-                    moveToCover(cover);
+                    boolean movementStarted = moveToCover(cover);
+                    if (!movementStarted && pendingRetryCover == null) {
+                        failGoToRelocation();
+                        logCoverSearchPerformance(finder, searchStarted, CoverMoveResult.NO_COVER_FOUND,
+                            "relocation-path-failed");
+                        return CoverMoveResult.NO_COVER_FOUND;
+                    }
                     logCoverSearchPerformance(finder, searchStarted, CoverMoveResult.COVER_STARTED, "relocation");
                     return CoverMoveResult.COVER_STARTED;
                 }
@@ -2881,6 +2943,17 @@ private boolean shouldExitCoverForFollow() {
                     CoverReservationManager.release(cover.getPosition(), soldier);
                     getCoverManager().clearTargetCover();
                     logCoverSearchPerformance(finder, searchStarted, CoverMoveResult.NO_COVER_FOUND, "emergency-path");
+                    return CoverMoveResult.NO_COVER_FOUND;
+                }
+                if (!movementStarted && pendingRetryCover == null) {
+                    if (getCoverManager().getTargetCover() != null) {
+                        blacklistCover(cover.getPosition(), BlacklistReason.PATH_FAILED);
+                    }
+                    getCoverManager().setState(getCoverManager().getCurrentCover() != null
+                        ? CoverBehaviorManager.CoverState.IN_COVER
+                        : CoverBehaviorManager.CoverState.NO_COVER);
+                    logCoverSearchPerformance(finder, searchStarted, CoverMoveResult.NO_COVER_FOUND,
+                        "path-failed");
                     return CoverMoveResult.NO_COVER_FOUND;
                 }
                 logCoverSearchPerformance(finder, searchStarted, CoverMoveResult.COVER_STARTED, "selected");

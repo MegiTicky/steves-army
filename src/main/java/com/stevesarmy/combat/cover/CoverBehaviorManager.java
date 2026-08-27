@@ -307,6 +307,9 @@ if (currentCover != null) {
                 soldier.getId(),
                 targetCover != null ? targetCover.getPosition().toString() : "null");
         }
+        if (targetCover != null) {
+            CoverReservationManager.release(targetCover.getPosition(), soldier);
+        }
         this.targetCover = null;
         syncTargetCover();
     }
