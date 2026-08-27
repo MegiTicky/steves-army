@@ -2206,10 +2206,25 @@ public BlockPos getPingMoveTarget() {
             return;
         }
 
+        // A soldier without occupied cover must be allowed to finish an
+        // already-selected cover approach. The cover goal and position
+        // controller apply the bounded movement exception for this case.
+        if (isMovingToUnoccupiedCoverDuringReload()) {
+            return;
+        }
+
         this.getNavigation().stop();
         if (moveControl instanceof com.stevesarmy.entity.ai.CoverPositionController ctrl) {
             // A tactical goal may deliberately preserve a full-cover duck-back.
             ctrl.stopForReload();
         }
+    }
+
+    public boolean isMovingToUnoccupiedCoverDuringReload() {
+        CoverBehaviorManager.CoverState state = coverBehaviorManager.getState();
+        return coverBehaviorManager.getCurrentCover() == null
+            && coverBehaviorManager.getTargetCover() != null
+            && (state == CoverBehaviorManager.CoverState.SEEKING_COVER
+                || state == CoverBehaviorManager.CoverState.REPOSITIONING);
     }
 }

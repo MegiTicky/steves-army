@@ -1988,8 +1988,9 @@ private void tickRepositioning() {
 
     private void holdForReload(CoverPoint currentCover) {
         if (currentCover == null) {
-            // Reloading in the open must not visually cancel a selected firing-prone plan.
-            soldier.setLowCrouching(soldier.isFiringProne());
+            // A soldier is not protected until a cover point is physically
+            // reached. Never enter the prone pose while reloading in the open.
+            soldier.setLowCrouching(false);
             soldier.holdMovementForReload();
             return;
         }
@@ -2022,7 +2023,7 @@ private void tickRepositioning() {
             return;
         }
 
-        soldier.setLowCrouching(soldier.isFiringProne());
+        soldier.setLowCrouching(false);
         CoverPoint targetCover = getCoverManager().getTargetCover();
         if (targetCover != null) {
             moveToCover(targetCover);
@@ -2030,7 +2031,9 @@ private void tickRepositioning() {
     }
 
     private void continueCoverMovementDuringReload(CoverBehaviorManager.CoverState state) {
-        soldier.setLowCrouching(soldier.isFiringProne());
+        // Keep the approach upright. Firing-prone posture is only valid after
+        // onCoverReached() has promoted the target to current cover.
+        soldier.setLowCrouching(false);
         if (DiagnosticLogManager.isCoverLoggingEnabled() && reloadMovementLogCooldown-- <= 0) {
             reloadMovementLogCooldown = 20;
             CoverPoint targetCover = getCoverManager().getTargetCover();

@@ -413,10 +413,12 @@ public class PeekController {
             completeReturn(soldier, cover);
         } else if (result == CoverPositionController.MovementResult.FAILED) {
             if (CoverTacticalGoal.isDebugLoggingEnabled()) {
-                StevesArmyMod.LOGGER.info("[PeekController] Soldier {} return failed, forcing HIDING",
+                StevesArmyMod.LOGGER.info("[PeekController] Soldier {} return failed, retrying",
                     soldier.getId());
             }
-            completeReturn(soldier, cover);
+            // A failed controller result does not prove that the soldier is
+            // protected. Reset the request and let the next tick retry it.
+            mover.clear();
         } else if (result == CoverPositionController.MovementResult.NONE) {
             // Not moving — start return
             coverReturnTarget = CoverTacticalGoal.getCoverStandingPositionStatic(cover.getPosition());

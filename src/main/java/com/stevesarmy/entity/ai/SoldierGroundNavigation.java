@@ -30,7 +30,7 @@ public class SoldierGroundNavigation extends GroundPathNavigation {
 
     @Override
     public boolean moveTo(double x, double y, double z, double speedModifier) {
-        if (isPreparingOrReloading()) {
+        if (isPreparingOrReloading() && !isCoverApproachDuringReload()) {
             this.stop();
             return false;
         }
@@ -43,7 +43,7 @@ public class SoldierGroundNavigation extends GroundPathNavigation {
 
     @Override
     public boolean moveTo(Entity entity, double speedModifier) {
-        if (isPreparingOrReloading()) {
+        if (isPreparingOrReloading() && !isCoverApproachDuringReload()) {
             this.stop();
             return false;
         }
@@ -56,7 +56,7 @@ public class SoldierGroundNavigation extends GroundPathNavigation {
 
     @Override
     public boolean moveTo(Path path, double speedModifier) {
-        if (isPreparingOrReloading()) {
+        if (isPreparingOrReloading() && !isCoverApproachDuringReload()) {
             this.stop();
             return false;
         }
@@ -73,5 +73,10 @@ public class SoldierGroundNavigation extends GroundPathNavigation {
 
     private boolean isPreparingOrReloading() {
         return this.mob instanceof SoldierEntity soldier && soldier.isPreparingOrReloading();
+    }
+
+    private boolean isCoverApproachDuringReload() {
+        return this.mob instanceof SoldierEntity soldier
+            && soldier.isMovingToUnoccupiedCoverDuringReload();
     }
 }

@@ -75,7 +75,7 @@ public class CoverPositionController extends MoveControl {
             return;
         }
         if (isPreparingOrReloading()) {
-            if (!controlledReturnToCover) {
+            if (!controlledReturnToCover && !isCoverApproachDuringReload()) {
                 stopForReload();
                 this.lastResult = MovementResult.FAILED;
                 this.lastFailureReason = FailureReason.RELOAD_INTERRUPTED;
@@ -275,7 +275,8 @@ public class CoverPositionController extends MoveControl {
         Vec3 anchorTarget = this.coverAnchorTarget;
         this.coverAnchorTarget = null;
 
-        if (isPreparingOrReloading() && !controlledReturnToCover) {
+        if (isPreparingOrReloading() && !controlledReturnToCover
+            && !isCoverApproachDuringReload()) {
             clear();
             this.debugMoveSource = "reload";
             this.debugMoveReason = "movement held while reloading";
@@ -383,6 +384,11 @@ public class CoverPositionController extends MoveControl {
         double dx = target.x - this.mob.getX();
         double dz = target.z - this.mob.getZ();
         return Math.sqrt(dx * dx + dz * dz);
+    }
+
+    private boolean isCoverApproachDuringReload() {
+        return this.mob instanceof SoldierEntity soldier
+            && soldier.isMovingToUnoccupiedCoverDuringReload();
     }
 
     private void traceMoveControlRotation(String source, float previousYaw, float previousBodyYaw,
