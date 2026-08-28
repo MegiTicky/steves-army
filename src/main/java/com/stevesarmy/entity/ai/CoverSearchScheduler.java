@@ -40,6 +40,9 @@ public final class CoverSearchScheduler {
     public static boolean request(CoverTacticalGoal goal, int priority, int dueTick, boolean emergency) {
         Request existing = PENDING.get(goal);
         if (existing != null) {
+            if (goal.isGoToRelocation()) {
+                existing.goTo = true;
+            }
             if (emergency && !existing.emergency) {
                 existing.emergency = true;
                 existing.priority = 0;
@@ -50,15 +53,20 @@ public final class CoverSearchScheduler {
             }
             if (emergency) {
                 PerformanceMetrics.recordEmergencyCoverRequestCoalesced();
+            } else if (existing.goTo) {
+                PerformanceMetrics.recordGoToCoverSearchRequestCoalesced();
             } else {
                 PerformanceMetrics.recordCoverSearchRequestCoalesced();
             }
             return false;
         }
 
-        PENDING.put(goal, new Request(goal, priority, dueTick, sequence++, emergency));
+        boolean goTo = goal.isGoToRelocation();
+        PENDING.put(goal, new Request(goal, priority, dueTick, sequence++, emergency, goTo));
         if (emergency) {
             PerformanceMetrics.recordEmergencyCoverRequestQueued();
+        } else if (goTo) {
+            PerformanceMetrics.recordGoToCoverSearchRequestQueued();
         } else {
             PerformanceMetrics.recordCoverSearchRequestQueued();
         }
@@ -76,6 +84,8 @@ public final class CoverSearchScheduler {
         if (request != null) {
             if (request.emergency) {
                 PerformanceMetrics.recordEmergencyCoverRequestCancelled();
+            } else if (request.goTo) {
+                PerformanceMetrics.recordGoToCoverSearchRequestCancelled();
             } else {
                 PerformanceMetrics.recordCoverSearchRequestCancelled();
             }
@@ -111,7 +121,11 @@ public final class CoverSearchScheduler {
                 continue;
             }
             if (!request.emergency && executed >= MAX_SEARCHES_PER_TICK) {
-                PerformanceMetrics.recordCoverSearchRequestDeferred();
+                if (request.goTo) {
+                    PerformanceMetrics.recordGoToCoverSearchRequestDeferred();
+                } else {
+                    PerformanceMetrics.recordCoverSearchRequestDeferred();
+                }
                 continue;
             }
 
@@ -127,19 +141,38 @@ public final class CoverSearchScheduler {
             long queueAge = request.queueAge(currentTick);
             if (request.emergency) {
                 PerformanceMetrics.recordEmergencyCoverRequestAge(queueAge);
+            } else if (request.goTo) {
+                PerformanceMetrics.recordGoToCoverSearchRequestAge(queueAge);
             } else {
                 PerformanceMetrics.recordCoverSearchRequestAge(queueAge);
             }
             if (request.isAged(currentTick) && !request.ageRecorded) {
                 request.ageRecorded = true;
-                PerformanceMetrics.recordCoverSearchRequestAged();
+                if (request.goTo) {
+                    PerformanceMetrics.recordGoToCoverSearchRequestAged();
+                } else {
+                    PerformanceMetrics.recordCoverSearchRequestAged();
+                }
             }
             if (request.emergency) {
                 PerformanceMetrics.recordEmergencyCoverRequestExecuted();
+            } else if (request.goTo) {
+                PerformanceMetrics.recordGoToCoverSearchRequestExecuted();
             } else {
                 PerformanceMetrics.recordCoverSearchRequestExecuted();
             }
-            request.goal.executeQueuedCoverSearch();
+            long started = request.goTo ? System.nanoTime() : 0L;
+            if (request.goTo) {
+                PerformanceMetrics.beginGoToCoverSearch();
+            }
+            try {
+                request.goal.executeQueuedCoverSearch();
+            } finally {
+                if (request.goTo) {
+                    PerformanceMetrics.recordGoToCoverSearch(currentTick, System.nanoTime() - started);
+                    PerformanceMetrics.endGoToCoverSearch();
+                }
+            }
         }
     }
 
@@ -151,6 +184,8 @@ public final class CoverSearchScheduler {
             requests.remove();
             if (request.emergency) {
                 PerformanceMetrics.recordEmergencyCoverRequestCancelled();
+            } else if (request.goTo) {
+                PerformanceMetrics.recordGoToCoverSearchRequestCancelled();
             } else {
                 PerformanceMetrics.recordCoverSearchRequestCancelled();
             }
@@ -163,14 +198,17 @@ public final class CoverSearchScheduler {
         private int dueTick;
         private final long sequence;
         private boolean emergency;
+        private boolean goTo;
         private boolean ageRecorded;
 
-        private Request(CoverTacticalGoal goal, int priority, int dueTick, long sequence, boolean emergency) {
+        private Request(CoverTacticalGoal goal, int priority, int dueTick, long sequence,
+                        boolean emergency, boolean goTo) {
             this.goal = goal;
             this.priority = priority;
             this.dueTick = dueTick;
             this.sequence = sequence;
             this.emergency = emergency;
+            this.goTo = goTo;
         }
 
         private long queueAge(int currentTick) {

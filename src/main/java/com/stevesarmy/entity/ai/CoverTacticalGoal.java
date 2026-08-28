@@ -424,7 +424,11 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
             && (relocationType != expectedRelocationType
                 || !Objects.equals(relocationCenter, expectedRelocationCenter)
                 || !isRelocationStillValid())) {
-            PerformanceMetrics.recordCoverSearchRequestStale();
+            if (expectedRelocationType == RelocationType.GO_TO) {
+                PerformanceMetrics.recordGoToCoverSearchRequestStale();
+            } else {
+                PerformanceMetrics.recordCoverSearchRequestStale();
+            }
             return;
         }
 
@@ -645,6 +649,11 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
     public boolean isHandlingGoToRelocation(int commandGeneration) {
         return relocationType == RelocationType.GO_TO
             && relocationCommandGeneration == commandGeneration;
+    }
+
+    /** True while a queued cover search belongs to a GO_TO command. */
+    public boolean isGoToRelocation() {
+        return relocationType == RelocationType.GO_TO;
     }
 
     private boolean beginFollowRelocationIfNeeded() {
@@ -2608,14 +2617,23 @@ private boolean shouldExitCoverForFollow() {
                 squadCtx);
 
             CoverPoint currentCover = getCoverManager().getCurrentCover();
+            int exactPathValidations = 0;
             for (CoverFinder.ScoredCover scoredCover : relocationCovers) {
                 CoverPoint cover = scoredCover.cover;
                 if (failedCoverPositions.contains(cover.getPosition())
                     || (currentCover != null && cover.getPosition().equals(currentCover.getPosition()))) {
                     continue;
                 }
-                if (!isDistantRelocationCover(cover) && !isExactCoverPathReachable(cover)) {
-                    continue;
+                if (!isDistantRelocationCover(cover)) {
+                    if (relocationType == RelocationType.GO_TO
+                        && exactPathValidations >= StevesArmyConfig.getGoToExactPathValidationLimit()) {
+                        PerformanceMetrics.recordGoToCoverPathValidationBudgetExhausted();
+                        break;
+                    }
+                    exactPathValidations++;
+                    if (!isExactCoverPathReachable(cover)) {
+                        continue;
+                    }
                 }
                 if (CoverReservationManager.reserve(cover.getPosition(), soldier)) {
                     getCoverManager().clearCoverQualityPenalty();
@@ -3931,6 +3949,9 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
             System.nanoTime() - pathStarted);
         boolean reachable = path != null && path.canReach() && path.getNodeCount() > 0
             && path.getNode(path.getNodeCount() - 1).asBlockPos().equals(cover.getPosition());
+        if (relocationType == RelocationType.GO_TO) {
+            PerformanceMetrics.recordGoToCoverPathValidation(reachable);
+        }
         if (reachable) {
             validatedCoverPaths.put(target.immutable(), path);
         }

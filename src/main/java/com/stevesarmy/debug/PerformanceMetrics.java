@@ -24,6 +24,18 @@ public final class PerformanceMetrics {
     private static final LongAdder coverCandidatesEvaluated = new LongAdder();
     private static final LongAdder coverCandidatesScored = new LongAdder();
     private static final LongAdder coverSearchNanos = new LongAdder();
+    private static final LongAdder goToCoverSearches = new LongAdder();
+    private static final LongAdder goToCoverSearchNanos = new LongAdder();
+    private static final AtomicLong goToCoverSearchMaxNanos = new AtomicLong();
+    private static final LongAdder goToCoverDiscoveryNanos = new LongAdder();
+    private static final LongAdder goToCoverScoringNanos = new LongAdder();
+    private static final LongAdder goToCoverPathNanos = new LongAdder();
+    private static final LongAdder goToCoverCandidatesDiscovered = new LongAdder();
+    private static final LongAdder goToCoverCandidatesEvaluated = new LongAdder();
+    private static final LongAdder goToCoverCandidatesScored = new LongAdder();
+    private static final LongAdder goToCoverPathValidations = new LongAdder();
+    private static final LongAdder goToCoverPathValidationFailures = new LongAdder();
+    private static final LongAdder goToCoverPathValidationBudgetExhausted = new LongAdder();
     private static final LongAdder visibilityRays = new LongAdder();
     private static final LongAdder visibilityRayCacheHits = new LongAdder();
     private static final LongAdder visibilityRayCacheMisses = new LongAdder();
@@ -106,6 +118,16 @@ public final class PerformanceMetrics {
     private static final LongAdder coverSearchRequestAgeTicks = new LongAdder();
     private static final LongAdder coverSearchRequestsAged = new LongAdder();
     private static final AtomicLong coverSearchRequestMaxAgeTicks = new AtomicLong();
+    private static final LongAdder goToCoverSearchRequestsQueued = new LongAdder();
+    private static final LongAdder goToCoverSearchRequestsExecuted = new LongAdder();
+    private static final LongAdder goToCoverSearchRequestsDeferred = new LongAdder();
+    private static final LongAdder goToCoverSearchRequestsCoalesced = new LongAdder();
+    private static final LongAdder goToCoverSearchRequestsCancelled = new LongAdder();
+    private static final LongAdder goToCoverSearchRequestsStale = new LongAdder();
+    private static final LongAdder goToCoverSearchRequestsAged = new LongAdder();
+    private static final LongAdder goToCoverSearchRequestAgeSamples = new LongAdder();
+    private static final LongAdder goToCoverSearchRequestAgeTicks = new LongAdder();
+    private static final AtomicLong goToCoverSearchRequestMaxAgeTicks = new AtomicLong();
     private static final LongAdder flankSearchAttempts = new LongAdder();
     private static final LongAdder flankSearchFailures = new LongAdder();
     private static final LongAdder flankSearchRetrySkips = new LongAdder();
@@ -204,6 +226,13 @@ public final class PerformanceMetrics {
     private static int tickBufferIndex;
     private static int tickWorkSamples;
     private static long currentTickWorkNanos;
+    private static int currentGoToSearchTick = Integer.MIN_VALUE;
+    private static long currentGoToSearchTickNanos;
+    private static int currentGoToSearchTickCount;
+    private static final AtomicLong goToCoverSearchMaxTickNanos = new AtomicLong();
+    private static final AtomicLong goToCoverSearchMaxTickCount = new AtomicLong();
+    private static final ThreadLocal<Boolean> GO_TO_SEARCH_CONTEXT =
+        ThreadLocal.withInitial(() -> Boolean.FALSE);
 
     private PerformanceMetrics() {}
 
@@ -230,6 +259,20 @@ public final class PerformanceMetrics {
         coverCandidatesEvaluated.reset();
         coverCandidatesScored.reset();
         coverSearchNanos.reset();
+        goToCoverSearches.reset();
+        goToCoverSearchNanos.reset();
+        goToCoverSearchMaxNanos.set(0L);
+        goToCoverSearchMaxTickNanos.set(0L);
+        goToCoverSearchMaxTickCount.set(0L);
+        goToCoverDiscoveryNanos.reset();
+        goToCoverScoringNanos.reset();
+        goToCoverPathNanos.reset();
+        goToCoverCandidatesDiscovered.reset();
+        goToCoverCandidatesEvaluated.reset();
+        goToCoverCandidatesScored.reset();
+        goToCoverPathValidations.reset();
+        goToCoverPathValidationFailures.reset();
+        goToCoverPathValidationBudgetExhausted.reset();
         visibilityRays.reset();
         visibilityRayCacheHits.reset();
         visibilityRayCacheMisses.reset();
@@ -312,6 +355,16 @@ public final class PerformanceMetrics {
         coverSearchRequestAgeTicks.reset();
         coverSearchRequestsAged.reset();
         coverSearchRequestMaxAgeTicks.set(0L);
+        goToCoverSearchRequestsQueued.reset();
+        goToCoverSearchRequestsExecuted.reset();
+        goToCoverSearchRequestsDeferred.reset();
+        goToCoverSearchRequestsCoalesced.reset();
+        goToCoverSearchRequestsCancelled.reset();
+        goToCoverSearchRequestsStale.reset();
+        goToCoverSearchRequestsAged.reset();
+        goToCoverSearchRequestAgeSamples.reset();
+        goToCoverSearchRequestAgeTicks.reset();
+        goToCoverSearchRequestMaxAgeTicks.set(0L);
         flankSearchAttempts.reset();
         flankSearchFailures.reset();
         flankSearchRetrySkips.reset();
@@ -392,6 +445,10 @@ public final class PerformanceMetrics {
         tickBufferIndex = 0;
         tickWorkSamples = 0;
         currentTickWorkNanos = 0L;
+        currentGoToSearchTick = Integer.MIN_VALUE;
+        currentGoToSearchTickNanos = 0L;
+        currentGoToSearchTickCount = 0;
+        GO_TO_SEARCH_CONTEXT.remove();
     }
 
     public static void recordVisibilityCacheHit() {
@@ -687,12 +744,20 @@ public final class PerformanceMetrics {
         if (enabled) coverSearchRequestsQueued.increment();
     }
 
+    public static void recordGoToCoverSearchRequestQueued() {
+        if (enabled) goToCoverSearchRequestsQueued.increment();
+    }
+
     public static void recordEmergencyCoverRequestQueued() {
         if (enabled) emergencyCoverRequestsQueued.increment();
     }
 
     public static void recordCoverSearchRequestExecuted() {
         if (enabled) coverSearchRequestsExecuted.increment();
+    }
+
+    public static void recordGoToCoverSearchRequestExecuted() {
+        if (enabled) goToCoverSearchRequestsExecuted.increment();
     }
 
     public static void recordEmergencyCoverRequestExecuted() {
@@ -703,12 +768,20 @@ public final class PerformanceMetrics {
         if (enabled) coverSearchRequestsDeferred.increment();
     }
 
+    public static void recordGoToCoverSearchRequestDeferred() {
+        if (enabled) goToCoverSearchRequestsDeferred.increment();
+    }
+
     public static void recordEmergencyCoverRequestDeferred() {
         if (enabled) emergencyCoverRequestsDeferred.increment();
     }
 
     public static void recordCoverSearchRequestCoalesced() {
         if (enabled) coverSearchRequestsCoalesced.increment();
+    }
+
+    public static void recordGoToCoverSearchRequestCoalesced() {
+        if (enabled) goToCoverSearchRequestsCoalesced.increment();
     }
 
     public static void recordEmergencyCoverRequestCoalesced() {
@@ -719,12 +792,24 @@ public final class PerformanceMetrics {
         if (enabled) coverSearchRequestsCancelled.increment();
     }
 
+    public static void recordGoToCoverSearchRequestCancelled() {
+        if (enabled) goToCoverSearchRequestsCancelled.increment();
+    }
+
     public static void recordEmergencyCoverRequestCancelled() {
         if (enabled) emergencyCoverRequestsCancelled.increment();
     }
 
     public static void recordCoverSearchRequestStale() {
         if (enabled) coverSearchRequestsStale.increment();
+    }
+
+    public static void recordGoToCoverSearchRequestStale() {
+        if (enabled) goToCoverSearchRequestsStale.increment();
+    }
+
+    public static void recordGoToCoverSearchRequestAged() {
+        if (enabled) goToCoverSearchRequestsAged.increment();
     }
 
     public static void recordEmergencyCoverRequestStale() {
@@ -737,6 +822,14 @@ public final class PerformanceMetrics {
         coverSearchRequestAgeSamples.increment();
         coverSearchRequestAgeTicks.add(safeAge);
         coverSearchRequestMaxAgeTicks.accumulateAndGet(safeAge, Math::max);
+    }
+
+    public static void recordGoToCoverSearchRequestAge(long ageTicks) {
+        if (!enabled) return;
+        long safeAge = Math.max(0L, ageTicks);
+        goToCoverSearchRequestAgeSamples.increment();
+        goToCoverSearchRequestAgeTicks.add(safeAge);
+        goToCoverSearchRequestMaxAgeTicks.accumulateAndGet(safeAge, Math::max);
     }
 
     public static void recordEmergencyCoverRequestAge(long ageTicks) {
@@ -770,6 +863,13 @@ public final class PerformanceMetrics {
         stageNanos[stage.ordinal()].add(nanos);
         stageCounts[stage.ordinal()].increment();
         currentTickWorkNanos += nanos;
+        if (Boolean.TRUE.equals(GO_TO_SEARCH_CONTEXT.get())) {
+            if (stage == Stage.COVER_SCORING) {
+                goToCoverScoringNanos.add(nanos);
+            } else if (stage == Stage.PATH_REQUEST) {
+                goToCoverPathNanos.add(nanos);
+            }
+        }
     }
 
     public static void recordSmokeQuery(int entitiesTested) {
@@ -827,14 +927,61 @@ public final class PerformanceMetrics {
         coverSearches.increment();
         coverSearchNanos.add(nanos);
         coverCandidatesDiscovered.add(candidates);
+        if (Boolean.TRUE.equals(GO_TO_SEARCH_CONTEXT.get())) {
+            goToCoverDiscoveryNanos.add(nanos);
+            goToCoverCandidatesDiscovered.add(candidates);
+        }
     }
 
     public static void recordCoverCandidatesEvaluated(int candidates) {
-        if (enabled) coverCandidatesEvaluated.add(candidates);
+        if (!enabled) return;
+        coverCandidatesEvaluated.add(candidates);
+        if (Boolean.TRUE.equals(GO_TO_SEARCH_CONTEXT.get())) {
+            goToCoverCandidatesEvaluated.add(candidates);
+        }
     }
 
     public static void recordCoverCandidatesScored(int candidates) {
-        if (enabled) coverCandidatesScored.add(candidates);
+        if (!enabled) return;
+        coverCandidatesScored.add(candidates);
+        if (Boolean.TRUE.equals(GO_TO_SEARCH_CONTEXT.get())) {
+            goToCoverCandidatesScored.add(candidates);
+        }
+    }
+
+    public static void beginGoToCoverSearch() {
+        if (enabled) GO_TO_SEARCH_CONTEXT.set(Boolean.TRUE);
+    }
+
+    public static void endGoToCoverSearch() {
+        GO_TO_SEARCH_CONTEXT.remove();
+    }
+
+    public static void recordGoToCoverSearch(int serverTick, long nanos) {
+        if (!enabled) return;
+        long safeNanos = Math.max(0L, nanos);
+        goToCoverSearches.increment();
+        goToCoverSearchNanos.add(safeNanos);
+        goToCoverSearchMaxNanos.accumulateAndGet(safeNanos, Math::max);
+        if (currentGoToSearchTick != serverTick) {
+            currentGoToSearchTick = serverTick;
+            currentGoToSearchTickNanos = 0L;
+            currentGoToSearchTickCount = 0;
+        }
+        currentGoToSearchTickNanos += safeNanos;
+        currentGoToSearchTickCount++;
+        goToCoverSearchMaxTickNanos.accumulateAndGet(currentGoToSearchTickNanos, Math::max);
+        goToCoverSearchMaxTickCount.accumulateAndGet(currentGoToSearchTickCount, Math::max);
+    }
+
+    public static void recordGoToCoverPathValidation(boolean reachable) {
+        if (!enabled) return;
+        goToCoverPathValidations.increment();
+        if (!reachable) goToCoverPathValidationFailures.increment();
+    }
+
+    public static void recordGoToCoverPathValidationBudgetExhausted() {
+        if (enabled) goToCoverPathValidationBudgetExhausted.increment();
     }
 
     public static void recordPhase4Capture(long nanos, int candidates) {
@@ -1086,8 +1233,8 @@ public final class PerformanceMetrics {
             + "  Cover paths: " + coverPathRequests.sum() + " requests, "
             + coverPathRetries.sum() + " retries, " + coverPathFailures.sum() + " failures\n"
              + "  Cover search cooldown skips: " + coverSearchCooldownSkips.sum() + "\n"
-             + "  Cover search queue: " + coverSearchRequestsQueued.sum() + " queued, "
-             + coverSearchRequestsExecuted.sum() + " executed, "
+              + "  Cover search queue: " + coverSearchRequestsQueued.sum() + " queued, "
+              + coverSearchRequestsExecuted.sum() + " executed, "
              + coverSearchRequestsDeferred.sum() + " deferred, "
              + coverSearchRequestsCoalesced.sum() + " coalesced, "
              + coverSearchRequestsCancelled.sum() + " cancelled, "
@@ -1095,8 +1242,34 @@ public final class PerformanceMetrics {
              + coverSearchRequestsAged.sum() + " aged, age avg="
              + formatTicks(coverSearchRequestAgeSamples.sum() == 0 ? 0.0
                  : coverSearchRequestAgeTicks.sum() / (double) coverSearchRequestAgeSamples.sum())
-             + " ticks, max=" + coverSearchRequestMaxAgeTicks.get() + " ticks\n"
-             + "  Flank searches: " + flankSearchAttempts.sum() + " attempts, "
+              + " ticks, max=" + coverSearchRequestMaxAgeTicks.get() + " ticks\n"
+              + "  GO_TO cover search queue: " + goToCoverSearchRequestsQueued.sum() + " queued, "
+              + goToCoverSearchRequestsExecuted.sum() + " executed, "
+              + goToCoverSearchRequestsDeferred.sum() + " deferred, "
+              + goToCoverSearchRequestsCoalesced.sum() + " coalesced, "
+              + goToCoverSearchRequestsCancelled.sum() + " cancelled, "
+              + goToCoverSearchRequestsStale.sum() + " stale, "
+              + goToCoverSearchRequestsAged.sum() + " aged, age avg="
+              + formatTicks(goToCoverSearchRequestAgeSamples.sum() == 0 ? 0.0
+                  : goToCoverSearchRequestAgeTicks.sum() / (double) goToCoverSearchRequestAgeSamples.sum())
+              + " ticks, max=" + goToCoverSearchRequestMaxAgeTicks.get() + " ticks\n"
+              + "  GO_TO cover calculations: " + goToCoverSearches.sum() + " searches, "
+              + formatMillis(goToCoverSearchNanos.sum()) + " ms total, "
+              + formatMillis(goToCoverSearches.sum() == 0 ? 0 : goToCoverSearchNanos.sum()
+                  / (double) goToCoverSearches.sum()) + " ms/search, max="
+              + formatMillis(goToCoverSearchMaxNanos.get()) + " ms\n"
+               + "    discovery=" + formatMillis(goToCoverDiscoveryNanos.sum())
+               + " ms, scoring=" + formatMillis(goToCoverScoringNanos.sum())
+               + " ms, path=" + formatMillis(goToCoverPathNanos.sum())
+               + " ms, exact validations=" + goToCoverPathValidations.sum()
+               + " (failed=" + goToCoverPathValidationFailures.sum()
+               + ", budget exhausted=" + goToCoverPathValidationBudgetExhausted.sum() + ")"
+               + ", candidates discovered/evaluated/scored="
+               + goToCoverCandidatesDiscovered.sum() + "/" + goToCoverCandidatesEvaluated.sum()
+              + "/" + goToCoverCandidatesScored.sum() + "\n"
+              + "    per tick: max=" + formatMillis(goToCoverSearchMaxTickNanos.get())
+              + " ms, max searches=" + goToCoverSearchMaxTickCount.get() + "\n"
+              + "  Flank searches: " + flankSearchAttempts.sum() + " attempts, "
              + flankSearchFailures.sum() + " failed, " + flankSearchRetrySkips.sum()
              + " retry skips, " + flankSearchFingerprintChanges.sum() + " fingerprint changes\n"
              + "  Emergency cover queue: " + emergencyCoverRequestsQueued.sum() + " queued, "

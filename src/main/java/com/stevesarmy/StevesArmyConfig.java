@@ -57,6 +57,7 @@ public class StevesArmyConfig {
     public static final ForgeConfigSpec.BooleanValue PURE_EVALUATOR_SHADOW_ENABLED;
     public static final ForgeConfigSpec.BooleanValue ASYNC_COVER_SHADOW_ENABLED;
     public static final ForgeConfigSpec.BooleanValue ASYNC_COVER_PILOT_ENABLED;
+    public static final ForgeConfigSpec.IntValue GO_TO_EXACT_PATH_VALIDATION_LIMIT;
 
     static {
         BUILDER.push("aim_quality");
@@ -350,6 +351,12 @@ BUILDER.pop();
                      "Default: true")
             .define("asyncCoverPilotEnabled", true);
 
+        GO_TO_EXACT_PATH_VALIDATION_LIMIT = BUILDER
+            .comment("Maximum exact navigation paths tested while selecting cover for one GO_TO search.",
+                     "Lower values limit server-thread spikes; the existing direct GO_TO navigation resumes when the limit is reached.",
+                     "Default: 8")
+            .defineInRange("goToExactPathValidationLimit", 8, 1, 50);
+
         BUILDER.pop();
 
         SPEC = BUILDER.build();
@@ -514,6 +521,10 @@ BUILDER.pop();
 
     public static boolean isAsyncCoverPilotEnabled() {
         return ASYNC_COVER_PILOT_ENABLED.get();
+    }
+
+    public static int getGoToExactPathValidationLimit() {
+        return GO_TO_EXACT_PATH_VALIDATION_LIMIT.get();
     }
 
     /** Legacy compatibility hook; nearby-target snapshots are disabled. */
