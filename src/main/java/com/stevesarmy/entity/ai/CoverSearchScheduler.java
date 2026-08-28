@@ -178,12 +178,12 @@ public final class CoverSearchScheduler {
         }
 
         private boolean isAged(int currentTick) {
-            return StevesArmyConfig.isPhase2RetryPolicyEnabled()
+            return StevesArmyConfig.isRetryPolicyEnabled()
                 && queueAge(currentTick) >= PRIORITY_AGING_INTERVAL_TICKS && priority > 0;
         }
 
         private int effectivePriority(int currentTick) {
-            if (!StevesArmyConfig.isPhase2RetryPolicyEnabled()) {
+            if (!StevesArmyConfig.isRetryPolicyEnabled()) {
                 return priority;
             }
             long age = queueAge(currentTick);

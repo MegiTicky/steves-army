@@ -1016,7 +1016,10 @@ public class SoldierEntity extends PathfinderMob implements Container {
             || DiagnosticLogManager.isGrenadeLoggingEnabled()) {
             return true;
         }
-        if (!GrenadeTacticalController.isEvaluationTick(gameTime)) return false;
+        // The shared arc scheduler limits expensive world simulations to one
+        // complete request per server tick. Let controllers submit requests on
+        // every tick so the queue is responsive instead of adding another
+        // ten-tick delay before a soldier can enter it.
         return GrenadeIntegration.findSupportedSlot(inventory) >= 0;
     }
 

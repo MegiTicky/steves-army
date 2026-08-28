@@ -20,6 +20,7 @@ public final class GrenadeFriendlyFireHandler {
         if (event.getLevel().isClientSide()) return;
         Explosion explosion = event.getExplosion();
         if (!GrenadeIntegration.isGrenadeEntity(explosion.getExploder())) return;
+        GrenadeIntegration.logExplosionDiagnostic(explosion);
         LivingEntity owner = GrenadeIntegration.getOwner(explosion.getExploder());
         if (owner == null) return;
         event.getAffectedEntities().removeIf(entity -> entity instanceof LivingEntity living

@@ -27,7 +27,7 @@ public final class CombatTargetQueryCache {
 
     public static List<LivingEntity> getNearbyLivingEntities(Level level, Vec3 center,
                                                               double radius, int ttlTicks) {
-        if (StevesArmyConfig.isPhase3PerceptionFrameEnabled()) {
+        if (StevesArmyConfig.isPerceptionFrameEnabled()) {
             return SameTickPerceptionFrame.getNearbyLivingEntities(level, center, radius);
         }
         if (ttlTicks <= 0) {

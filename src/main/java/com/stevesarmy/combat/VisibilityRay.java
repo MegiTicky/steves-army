@@ -108,7 +108,7 @@ public final class VisibilityRay {
     private static Result trace(Level level, Vec3 from, Vec3 to, LivingEntity observer,
                                 SmokePolicy smokePolicy, Set<BlockPos> ignoredBlocks) {
         Set<BlockPos> immutableIgnored = Set.copyOf(ignoredBlocks);
-        if (StevesArmyConfig.isPhase3PerceptionFrameEnabled()) {
+        if (StevesArmyConfig.isPerceptionFrameEnabled()) {
             Result cached = SameTickPerceptionFrame.getVisibility(level,
                 observer == null ? 0 : observer.getId(), from, to, smokePolicy, immutableIgnored);
             if (cached != null) {
@@ -272,7 +272,7 @@ public final class VisibilityRay {
         // Use a tight search box: the ray's AABB inflated by a tiny margin.
         AABB rayBounds = new AABB(from, to).inflate(EPSILON);
         List<? extends Entity> clouds = usePerceptionFrame
-            && StevesArmyConfig.isPhase3PerceptionFrameEnabled()
+            && StevesArmyConfig.isPerceptionFrameEnabled()
             ? SameTickPerceptionFrame.getSmokeEntities(level, rayBounds, type)
             : level.getEntities((Entity) null, rayBounds,
                 e -> e.getType() == type && e.isAlive());

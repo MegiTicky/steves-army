@@ -1130,20 +1130,19 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
     }
     
     private void cancelAllSuppression() {
-        if (isSuppressing) {
-            SquadThreatIntel intel = getSquadIntel();
-            if (intel != null && suppressionTargetUUID != null) {
-                intel.releaseThreatSuppression(suppressionTargetUUID, soldier.getUUID());
-            }
-            suppressionTargetUUID = null;
-            suppressionTargetPos = null;
-            suppressionTargetAimPoint = null;
-            suppressionPlanStartTick = -1;
-            suppressionFirstShotTick = -1;
-            suppressionLastSeenTick = -1;
-            pendingSuppressionThreat = null;
-            isSuppressing = false;
+        SquadThreatIntel intel = getSquadIntel();
+        if (intel != null && suppressionTargetUUID != null) {
+            intel.releaseThreatSuppression(suppressionTargetUUID, soldier.getUUID());
         }
+
+        suppressionTargetUUID = null;
+        suppressionTargetPos = null;
+        suppressionTargetAimPoint = null;
+        suppressionPlanStartTick = -1;
+        suppressionFirstShotTick = -1;
+        suppressionLastSeenTick = -1;
+        pendingSuppressionThreat = null;
+        isSuppressing = false;
         
         if (isPingSuppressing || soldier.hasValidPingSuppressPos()) {
             soldier.clearPingSuppressPos();
@@ -1686,43 +1685,6 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
         List<LivingEntity> potentialTargets = new ArrayList<>();
 
         double maxRange = Math.max(detectionSystem.getFocusedRange(), DetectionSystem.PERIPHERAL_RANGE);
-
-        if (!StevesArmyConfig.useSharedTargetQueryCache()) {
-            if (StevesArmyConfig.shouldTargetMonsters()) {
-                for (Monster monster : soldier.level().getEntitiesOfClass(
-                    Monster.class, soldier.getBoundingBox().inflate(maxRange))) {
-                    if (TargetAcquisition.isValidTarget(soldier, monster) && !soldier.isFriendlyTo(monster)) {
-                        potentialTargets.add(monster);
-                    }
-                }
-            }
-            if (StevesArmyConfig.shouldTargetTargetEntities()) {
-                for (TargetEntity targetEntity : soldier.level().getEntitiesOfClass(
-                    TargetEntity.class, soldier.getBoundingBox().inflate(maxRange))) {
-                    if (TargetAcquisition.isValidTarget(soldier, targetEntity)
-                        && !soldier.isFriendlyTo(targetEntity)) {
-                        potentialTargets.add(targetEntity);
-                    }
-                }
-            }
-            for (Player player : soldier.level().getEntitiesOfClass(
-                Player.class, soldier.getBoundingBox().inflate(maxRange))) {
-                if (TargetAcquisition.isValidTarget(soldier, player) && !soldier.isFriendlyTo(player)) {
-                    potentialTargets.add(player);
-                }
-            }
-            for (SoldierEntity otherSoldier : soldier.level().getEntitiesOfClass(
-                SoldierEntity.class, soldier.getBoundingBox().inflate(maxRange))) {
-                if (otherSoldier != soldier && TargetAcquisition.isValidTarget(soldier, otherSoldier)
-                    && !soldier.isFriendlyTo(otherSoldier)) {
-                    potentialTargets.add(otherSoldier);
-                }
-            }
-            PerformanceMetrics.recordStageTime(PerformanceMetrics.Stage.ENTITY_QUERY,
-                System.nanoTime() - queryStart);
-            return potentialTargets;
-        }
-
         List<LivingEntity> nearby = StevesArmyConfig.useSharedTargetQueryCache()
             ? CombatTargetQueryCache.getNearbyLivingEntities(
                 soldier.level(), soldier.position(), maxRange,
@@ -1730,7 +1692,7 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
             : soldier.level().getEntitiesOfClass(
                 LivingEntity.class, soldier.getBoundingBox().inflate(maxRange));
 
-        // Preserve the original target-type ordering after the shared broad-phase query.
+        // Query living entities once, then preserve the original target-type ordering.
         net.minecraft.world.phys.AABB searchBox = soldier.getBoundingBox().inflate(maxRange);
         if (StevesArmyConfig.shouldTargetMonsters()) {
             for (LivingEntity entity : nearby) {
@@ -1992,6 +1954,7 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
         }
         
         this.target = null;
+        soldier.setTarget(null);
         return false;
     }
     
@@ -2266,6 +2229,10 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
     }
 
     private void reportThreatToSquadIntel(LivingEntity threat, float accuracy) {
+        if (!threat.isAlive() || !TargetAcquisition.isValidTarget(soldier, threat)) {
+            return;
+        }
+
         SquadThreatIntel intel = getSquadIntel();
         if (intel == null) {
             if (isDebugLogging()) {
@@ -2283,7 +2250,8 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
         // use the combat cache here because that may ignore the observer's cover.
         ExposureCalculator.AimPointResult aimPoint = ExposureCalculator.getBestAimPoint(soldier, threat);
         intel.reportThreat(soldier.getUUID(), threat, threat.blockPosition(),
-            aimPoint != null && aimPoint.canShoot() ? aimPoint.position : threat.getEyePosition(), accuracy);
+            aimPoint != null && aimPoint.canShoot() ? aimPoint.position : threat.getEyePosition(),
+            threat.getEyePosition(), accuracy);
     }
 
     private boolean shouldSuppressTarget() {
@@ -2323,7 +2291,12 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
             intel.getAssignedThreatForSoldier(soldier.getUUID());
         if (existingAssignment.isPresent()) {
             pendingSuppressionThreat = existingAssignment.get();
-            return true;
+            if (pendingSuppressionThreat.isAlive
+                && !intel.isThreatStale(pendingSuppressionThreat.threatEntityId, soldier.level().getGameTime())) {
+                return true;
+            }
+            intel.releaseThreatSuppression(pendingSuppressionThreat.threatEntityId, soldier.getUUID());
+            pendingSuppressionThreat = null;
         }
         
         List<SquadThreatIntel.ThreatKnowledge> suppressibleThreats = intel.getAllThreats().stream()
@@ -2403,7 +2376,8 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
         if (!isSuppressing || suppressionTargetUUID == null) return;
 
         SquadThreatIntel intel = getSquadIntel();
-        if (intel == null || !intel.hasSuppressionAssignment(suppressionTargetUUID, soldier.getUUID())) {
+        if (intel == null || !isLiveSuppressionThreat(intel, suppressionTargetUUID)
+            || !intel.hasSuppressionAssignment(suppressionTargetUUID, soldier.getUUID())) {
             cancelAllSuppression();
             return;
         }
@@ -2668,7 +2642,8 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
 
         if (suppressionTargetPos == null && pendingSuppressionThreat != null) {
             SquadThreatIntel intel = getSquadIntel();
-            if (intel == null) {
+            if (intel == null || !isLiveSuppressionThreat(intel, pendingSuppressionThreat.threatEntityId)
+                || pendingSuppressionThreat.lastKnownPosition == null) {
                 pendingSuppressionThreat = null;
                 return;
             }
@@ -2706,15 +2681,15 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
         if (suppressionTargetPos == null) {
             return;
         }
-        
+
         SquadThreatIntel intel = getSquadIntel();
-        if (intel != null && suppressionTargetUUID != null) {
-            if (!intel.hasSuppressionAssignment(suppressionTargetUUID, soldier.getUUID())) {
-                cancelAllSuppression();
-                return;
-            }
-            intel.updateSuppressionHeartbeat(suppressionTargetUUID, soldier.getUUID(), soldier.level().getGameTime());
+        if (intel == null || suppressionTargetUUID == null
+            || !isLiveSuppressionThreat(intel, suppressionTargetUUID)
+            || !intel.hasSuppressionAssignment(suppressionTargetUUID, soldier.getUUID())) {
+            cancelAllSuppression();
+            return;
         }
+        intel.updateSuppressionHeartbeat(suppressionTargetUUID, soldier.getUUID(), soldier.level().getGameTime());
 
         long contactAge = soldier.level().getGameTime() - suppressionLastSeenTick;
         boolean planExpired = soldier.tickCount - suppressionPlanStartTick > SUPPRESSION_PLAN_MAX_TICKS
@@ -2883,11 +2858,10 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
     }
 
     public void onTargetKilledByTeammate(UUID killedThreatId) {
-        if (suppressionTargetUUID != null && suppressionTargetUUID.equals(killedThreatId)) {
-            suppressionTargetUUID = null;
-            suppressionTargetPos = null;
-            isSuppressing = false;
-            resetBurstState();
+        boolean suppressionMatches = (suppressionTargetUUID != null && suppressionTargetUUID.equals(killedThreatId))
+            || (pendingSuppressionThreat != null && pendingSuppressionThreat.threatEntityId.equals(killedThreatId));
+        if (suppressionMatches) {
+            cancelAllSuppression();
         }
         
         SquadThreatIntel intel = getSquadIntel();
@@ -2899,6 +2873,10 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
             target = null;
             soldier.setTarget(null);
         }
+    }
+
+    private boolean isLiveSuppressionThreat(SquadThreatIntel intel, UUID threatId) {
+        return intel.getThreat(threatId).map(threat -> threat.isAlive).orElse(false);
     }
 
     public boolean isSuppressing() {

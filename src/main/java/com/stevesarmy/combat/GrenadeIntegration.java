@@ -2,6 +2,7 @@ package com.stevesarmy.combat;
 
 import com.stevesarmy.StevesArmyConfig;
 import com.stevesarmy.StevesArmyMod;
+import com.stevesarmy.debug.DiagnosticLogManager;
 import com.stevesarmy.inventory.SoldierInventory;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.nbt.CompoundTag;
@@ -22,8 +23,12 @@ import net.minecraftforge.fml.ModList;
 import javax.annotation.Nullable;
 import java.lang.reflect.Method;
 import java.util.HashSet;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.UUID;
+import net.minecraft.world.level.Explosion;
 
 /** Optional LesRaisins Tactical Equipments integration. */
 public final class GrenadeIntegration {
@@ -40,6 +45,7 @@ public final class GrenadeIntegration {
     private static Method getId;
     private static Method getThrowableIndex;
     private static Method onThrow;
+    private static final Map<UUID, GrenadeDiagnostic> GRENADE_DIAGNOSTICS = new HashMap<>();
 
     private GrenadeIntegration() {}
 
@@ -48,15 +54,17 @@ public final class GrenadeIntegration {
 
     public record BallisticProfile(String throwableId, double initialSpeed, double gravity,
                                    double airDrag, double waterDrag, double crouchSpeedMultiplier,
-                                   int lifetime, boolean shouldBounce, double bounceFactor) {
+                                   int lifetime, boolean shouldBounce, boolean brokeOnGround,
+                                   double bounceFactor) {
         public double launchSpeed(boolean crouching) {
-            return initialSpeed * (crouching ? crouchSpeedMultiplier : 1.0);
+            return initialSpeed * (crouching ? crouchSpeedMultiplier : 1.0)
+                * StevesArmyConfig.getGrenadeThrowPowerScale();
         }
 
         public String describe() {
-            return String.format("throwableId=%s,speed=%.3f,gravity=%.3f,airDrag=%.3f,waterDrag=%.3f,crouchMultiplier=%.3f,lifetime=%d,shouldBounce=%s,bounceFactor=%.3f",
+            return String.format("throwableId=%s,speed=%.3f,gravity=%.3f,airDrag=%.3f,waterDrag=%.3f,crouchMultiplier=%.3f,lifetime=%d,shouldBounce=%s,brokeOnGround=%s,bounceFactor=%.3f",
                 throwableId, initialSpeed, gravity, airDrag, waterDrag,
-                crouchSpeedMultiplier, lifetime, shouldBounce, bounceFactor);
+                crouchSpeedMultiplier, lifetime, shouldBounce, brokeOnGround, bounceFactor);
         }
     }
 
@@ -70,6 +78,7 @@ public final class GrenadeIntegration {
                               @Nullable Vec3 nativeVelocity,
                               @Nullable Vec3 appliedVelocity,
                               boolean velocitySyncBroadcast,
+                              @Nullable UUID projectileId,
                               String reason) {
         public double nativeSpeed() {
             return nativeVelocity == null ? 0.0 : nativeVelocity.length();
@@ -83,6 +92,15 @@ public final class GrenadeIntegration {
             return appliedVelocity != null && nativeVelocity != null;
         }
     }
+
+    private record GrenadeDiagnostic(UUID projectileId, @Nullable UUID targetId,
+                                      @Nullable Vec3 targetAtThrow,
+                                      @Nullable Vec3 predictedLanding,
+                                      @Nullable Vec3 launchOrigin,
+                                      @Nullable Vec3 appliedVelocity,
+                                      @Nullable String trajectoryDiagnostics,
+                                      String mode, int estimatedFlightTicks,
+                                      long throwGameTime) {}
 
     public static String supportedItemDescription() {
         return THROWABLE_ITEM_ID + " with NBT " + THROWABLE_ID_TAG
@@ -108,6 +126,7 @@ public final class GrenadeIntegration {
             double gravity = number(entityData, "getGravity");
             int lifetime = integer(entityData, "getLifeTime");
             boolean shouldBounce = bool(entityData, "isShouldBounce");
+            boolean brokeOnGround = bool(entityData, "isBrokeOnGround");
             double bounceFactor = number(entityData, "getBounceFactor");
             double crouchSpeedMultiplier = readCrouchSpeedMultiplier();
             if (!Double.isFinite(initialSpeed) || initialSpeed <= 0.0
@@ -118,7 +137,8 @@ public final class GrenadeIntegration {
             }
             return new BallisticResult(new BallisticProfile(
                 support.throwableId(), initialSpeed, gravity, 0.99, 0.8,
-                crouchSpeedMultiplier, lifetime, shouldBounce, bounceFactor), "resolved");
+                crouchSpeedMultiplier, lifetime, shouldBounce, brokeOnGround,
+                bounceFactor), "resolved");
         } catch (ReflectiveOperationException | RuntimeException exception) {
             return new BallisticResult(null, "ballistic profile reflection failed: "
                 + describeFailure(exception));
@@ -247,6 +267,7 @@ public final class GrenadeIntegration {
         int before = stack == null ? 0 : stack.getCount();
         if (!isSupported(stack) || owner == null || owner.level().isClientSide) {
             return new ThrowResult(false, before, before, null, appliedVelocity, false,
+                null,
                 "unsupported stack, missing owner, or client-side throw");
         }
         Set<java.util.UUID> existingProjectiles = ownedGrenades(owner);
@@ -255,6 +276,7 @@ public final class GrenadeIntegration {
             Object optional = getThrowableIndex.invoke(throwable, stack);
             if (!(optional instanceof Optional<?> indexOptional) || indexOptional.isEmpty()) {
                 return new ThrowResult(false, before, stack.getCount(), null, appliedVelocity, false,
+                    null,
                     "LesRaisins returned no ThrowableIndex");
             }
             onThrow.invoke(throwable, owner.level(), owner, stack, indexOptional.get());
@@ -262,12 +284,14 @@ public final class GrenadeIntegration {
             if (projectile == null) {
                 stack.setCount(before);
                 return new ThrowResult(false, before, stack.getCount(), null, appliedVelocity, false,
+                    null,
                     "native projectile not found after LesRaisins accepted the throw");
             }
             Vec3 nativeVelocity = projectile.getDeltaMovement();
             int after = stack.getCount();
             if (after >= before) {
                 return new ThrowResult(false, before, after, nativeVelocity, appliedVelocity, false,
+                    projectile.getUUID(),
                     "item consumption mismatch");
             }
 
@@ -287,16 +311,69 @@ public final class GrenadeIntegration {
                     velocitySyncBroadcast = true;
                 } else {
                     return new ThrowResult(false, before, after, nativeVelocity, appliedVelocity, false,
+                        projectile.getUUID(),
                         "server level unavailable for corrected velocity synchronization");
                 }
             }
             return new ThrowResult(true, before, after, nativeVelocity, appliedVelocity, velocitySyncBroadcast,
+                projectile.getUUID(),
                 appliedVelocity == null ? "native throw succeeded" : "native spread corrected");
         } catch (ReflectiveOperationException | RuntimeException exception) {
             logFailure(exception);
             return new ThrowResult(false, before, stack.getCount(), null, appliedVelocity, false,
+                null,
                 "native throw reflection failed: " + describeFailure(exception));
         }
+    }
+
+    /** Associates a throw with its target and prediction for one later explosion log. */
+    public static void recordDiagnostic(ThrowResult result, @Nullable LivingEntity target,
+                                         @Nullable Vec3 targetPoint, @Nullable Vec3 predictedLanding,
+                                         @Nullable Vec3 launchOrigin, int estimatedFlightTicks,
+                                         String mode, @Nullable String trajectoryDiagnostics,
+                                         long gameTime) {
+        if (!DiagnosticLogManager.isGrenadeLoggingEnabled() || !result.success()
+            || result.projectileId() == null) return;
+        GRENADE_DIAGNOSTICS.entrySet().removeIf(entry -> entry.getValue().throwGameTime() + 200 < gameTime);
+        Vec3 targetAtThrow = targetPoint != null
+            ? targetPoint : target == null ? null : target.position();
+        GRENADE_DIAGNOSTICS.put(result.projectileId(), new GrenadeDiagnostic(
+            result.projectileId(), target == null ? null : target.getUUID(), targetAtThrow,
+            predictedLanding, launchOrigin, result.appliedVelocity(), trajectoryDiagnostics, mode,
+            estimatedFlightTicks, gameTime));
+        StevesArmyMod.LOGGER.info(
+            "[GrenadeTrace] throw projectile={} mode={} target={} targetAtThrow={} origin={} velocity={} predictedLanding={} trajectory={} estimatedFlightTicks={} gameTime={}",
+            result.projectileId(), mode, target == null ? "none" : target.getUUID(), targetAtThrow,
+            launchOrigin, result.appliedVelocity(), predictedLanding, trajectoryDiagnostics,
+            estimatedFlightTicks, gameTime);
+    }
+
+    /** Logs the actual native explosion against the correlated throw prediction. */
+    public static void logExplosionDiagnostic(Explosion explosion) {
+        if (!DiagnosticLogManager.isGrenadeLoggingEnabled()) return;
+        Entity exploder = explosion.getExploder();
+        if (!isGrenadeEntity(exploder)) return;
+        GrenadeDiagnostic diagnostic = GRENADE_DIAGNOSTICS.remove(exploder.getUUID());
+        if (diagnostic == null) {
+            StevesArmyMod.LOGGER.info(
+                "[GrenadeTrace] explode projectile={} mode=untracked actualExplosion={} projectilePosition={} gameTime={}",
+                exploder.getUUID(), explosion.getPosition(), exploder.position(),
+                exploder.level().getGameTime());
+            return;
+        }
+        Entity target = diagnostic.targetId() == null ? null
+            : exploder.level() instanceof ServerLevel serverLevel
+                ? serverLevel.getEntity(diagnostic.targetId()) : null;
+        Vec3 targetAtDetonation = target instanceof LivingEntity living
+            ? new Vec3(living.getX(), living.getEyeY(), living.getZ()) : null;
+        double predictionError = diagnostic.predictedLanding() == null
+            ? Double.NaN : diagnostic.predictedLanding().distanceTo(explosion.getPosition());
+        StevesArmyMod.LOGGER.info(
+            "[GrenadeTrace] explode projectile={} mode={} actualExplosion={} projectilePosition={} targetAtThrow={} targetAtDetonation={} predictedLanding={} predictionError={} launchOrigin={} velocity={} trajectory={} ageTicks={} gameTime={}",
+            diagnostic.projectileId(), diagnostic.mode(), explosion.getPosition(), exploder.position(),
+            diagnostic.targetAtThrow(), targetAtDetonation, diagnostic.predictedLanding(), predictionError,
+            diagnostic.launchOrigin(), diagnostic.appliedVelocity(), diagnostic.trajectoryDiagnostics(),
+            exploder.level().getGameTime() - diagnostic.throwGameTime(), exploder.level().getGameTime());
     }
 
     private static Set<java.util.UUID> ownedGrenades(LivingEntity owner) {

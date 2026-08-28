@@ -44,17 +44,19 @@ public class StevesArmyConfig {
     public static final ForgeConfigSpec.DoubleValue GRENADE_MIN_THREAT_ACCURACY;
     public static final ForgeConfigSpec.DoubleValue GRENADE_AIM_ERROR_SCALE;
     public static final ForgeConfigSpec.DoubleValue GRENADE_OVERTHROW_DISTANCE;
+    public static final ForgeConfigSpec.DoubleValue GRENADE_THROW_POWER_SCALE;
+
 
     public static final ForgeConfigSpec.BooleanValue VS2_COMPAT_ENABLED;
     public static final ForgeConfigSpec.BooleanValue VS2_AUTO_TRANSPORT;
     public static final ForgeConfigSpec.IntValue VS2_MAX_TRANSPORTED_SOLDIERS;
 
     public static final ForgeConfigSpec.IntValue OPTIMIZATION_LEVEL;
-    public static final ForgeConfigSpec.BooleanValue PHASE_2_RETRY_POLICY_ENABLED;
-    public static final ForgeConfigSpec.BooleanValue PHASE_3_PERCEPTION_FRAME_ENABLED;
-    public static final ForgeConfigSpec.BooleanValue PHASE_4_PURE_EVALUATOR_ENABLED;
-    public static final ForgeConfigSpec.BooleanValue PHASE_5_ASYNC_SHADOW_ENABLED;
-    public static final ForgeConfigSpec.BooleanValue PHASE_6_ASYNC_COVER_PILOT_ENABLED;
+    public static final ForgeConfigSpec.BooleanValue RETRY_POLICY_ENABLED;
+    public static final ForgeConfigSpec.BooleanValue PERCEPTION_FRAME_ENABLED;
+    public static final ForgeConfigSpec.BooleanValue PURE_EVALUATOR_SHADOW_ENABLED;
+    public static final ForgeConfigSpec.BooleanValue ASYNC_COVER_SHADOW_ENABLED;
+    public static final ForgeConfigSpec.BooleanValue ASYNC_COVER_PILOT_ENABLED;
 
     static {
         BUILDER.push("aim_quality");
@@ -254,7 +256,10 @@ BUILDER.pop();
             .defineInRange("minRange", 6.0, 1.0, 64.0);
 
         GRENADE_MAX_RANGE = BUILDER
-            .comment("Maximum distance for an autonomous grenade throw. Default: 32 blocks.")
+            .comment("Maximum distance for an autonomous grenade throw. Default: 32 blocks.",
+                     "The physical range of a throw is also bounded by the grenade's",
+                     "launch speed and bounce behavior; the smaller of the two applies.",
+                     "The /stevesarmy grenade command uses the physical range instead.")
             .defineInRange("maxRange", 32.0, 4.0, 64.0);
 
         GRENADE_SAFETY_MARGIN = BUILDER
@@ -273,10 +278,18 @@ BUILDER.pop();
 
         GRENADE_OVERTHROW_DISTANCE = BUILDER
             .comment("Preferred horizontal distance beyond the target for autonomous grenade landings.",
-                     "This helps grenades clear the near side of enemy cover. Default: 1.5 blocks.")
-            .defineInRange("overthrowDistance", 1.5, 0.0, 8.0);
+                     "This helps grenades clear the near side of enemy cover. Default: 2.5 blocks.")
+            .defineInRange("overthrowDistance", 2.5, 0.0, 8.0);
+
+        GRENADE_THROW_POWER_SCALE = BUILDER
+            .comment("Scales the launch speed of soldier grenade throws.",
+                     "1.0 matches a player throwing at standing power; raise it to make",
+                     "soldier throws travel further (e.g. 1.7 reaches roughly 50 blocks).",
+                     "Default: 1.0")
+            .defineInRange("throwPowerScale", 1.0, 0.1, 3.0);
 
         BUILDER.pop();
+
 
         BUILDER.push("valkyrienskies");
 
@@ -302,40 +315,40 @@ BUILDER.pop();
             .comment("Performance optimization profile: 0=compatibility, 1=conservative, 2=balanced, 3=aggressive.",
                      "Retained for config-file compatibility; soldier perception uses the compatibility cadence.",
                      "The isolated machine-gunner pipeline remains enabled independently of this setting.",
-                     "Default: 1")
-            .defineInRange("optimizationLevel", 1, 0, 3);
+                      "Default: 3")
+            .defineInRange("optimizationLevel", 3, 0, 3);
 
-        PHASE_2_RETRY_POLICY_ENABLED = BUILDER
-            .comment("Enable Phase 2 tactical retry suppression, emergency cover admission, and queue aging.",
-                     "This can change flank and suppression reaction timing and is disabled until gameplay validation is complete.",
-                     "Default: false")
-            .define("phase2RetryPolicyEnabled", false);
+        RETRY_POLICY_ENABLED = BUILDER
+            .comment("Enable tactical retry suppression, emergency cover admission, and queue aging.",
+                     "This can change flank and suppression reaction timing.",
+                     "Default: true")
+            .define("retryPolicyEnabled", true);
 
-        PHASE_3_PERCEPTION_FRAME_ENABLED = BUILDER
-            .comment("Enable Phase 3 same-tick target, smoke, and visibility perception reuse.",
+        PERCEPTION_FRAME_ENABLED = BUILDER
+            .comment("Enable same-tick target, smoke, and visibility perception reuse.",
                      "The frame is invalidated at tick boundaries and on relevant world/entity changes.",
-                     "Default: false")
-            .define("phase3PerceptionFrameEnabled", false);
+                     "Default: true")
+            .define("perceptionFrameEnabled", true);
 
-        PHASE_4_PURE_EVALUATOR_ENABLED = BUILDER
-            .comment("Run the Phase 4 pure cover evaluator in shadow mode for NORMAL cover searches.",
+        PURE_EVALUATOR_SHADOW_ENABLED = BUILDER
+            .comment("Run the pure cover evaluator in shadow mode for NORMAL cover searches.",
                      "Legacy cover scoring remains authoritative; this only captures and compares results.",
                      "Default: false")
-            .define("phase4PureEvaluatorEnabled", false);
+            .define("pureEvaluatorShadowEnabled", false);
 
-        PHASE_5_ASYNC_SHADOW_ENABLED = BUILDER
+        ASYNC_COVER_SHADOW_ENABLED = BUILDER
             .comment("Run the pure rifleman NORMAL cover evaluator on a bounded worker in read-only shadow mode.",
                      "Snapshot capture, live validation, pathfinding, reservations, and gameplay remain on the server thread.",
                      "Results never affect gameplay; disable this if worker diagnostics are not needed.",
                      "Default: false")
-            .define("phase5AsyncShadowEnabled", false);
+            .define("asyncCoverShadowEnabled", false);
 
-        PHASE_6_ASYNC_COVER_PILOT_ENABLED = BUILDER
+        ASYNC_COVER_PILOT_ENABLED = BUILDER
             .comment("Use the bounded worker to select routine NORMAL rifleman cover.",
                      "Candidates are discovered and captured on the server thread; live validation, reservations, paths, and movement remain server-thread only.",
                      "Unsupported searches and any failed async step use the synchronous cover search.",
-                     "Default: false")
-            .define("phase6AsyncCoverPilotEnabled", false);
+                     "Default: true")
+            .define("asyncCoverPilotEnabled", true);
 
         BUILDER.pop();
 
@@ -474,28 +487,33 @@ BUILDER.pop();
         return GRENADE_OVERTHROW_DISTANCE.get();
     }
 
+    public static double getGrenadeThrowPowerScale() {
+        return GRENADE_THROW_POWER_SCALE.get();
+    }
+
+
     public static int getOptimizationLevel() {
         return OPTIMIZATION_LEVEL.get();
     }
 
-    public static boolean isPhase2RetryPolicyEnabled() {
-        return PHASE_2_RETRY_POLICY_ENABLED.get();
+    public static boolean isRetryPolicyEnabled() {
+        return RETRY_POLICY_ENABLED.get();
     }
 
-    public static boolean isPhase3PerceptionFrameEnabled() {
-        return PHASE_3_PERCEPTION_FRAME_ENABLED.get();
+    public static boolean isPerceptionFrameEnabled() {
+        return PERCEPTION_FRAME_ENABLED.get();
     }
 
-    public static boolean isPhase4PureEvaluatorEnabled() {
-        return PHASE_4_PURE_EVALUATOR_ENABLED.get();
+    public static boolean isPureEvaluatorShadowEnabled() {
+        return PURE_EVALUATOR_SHADOW_ENABLED.get();
     }
 
-    public static boolean isPhase5AsyncShadowEnabled() {
-        return PHASE_5_ASYNC_SHADOW_ENABLED.get();
+    public static boolean isAsyncCoverShadowEnabled() {
+        return ASYNC_COVER_SHADOW_ENABLED.get();
     }
 
-    public static boolean isPhase6AsyncCoverPilotEnabled() {
-        return PHASE_6_ASYNC_COVER_PILOT_ENABLED.get();
+    public static boolean isAsyncCoverPilotEnabled() {
+        return ASYNC_COVER_PILOT_ENABLED.get();
     }
 
     /** Legacy compatibility hook; nearby-target snapshots are disabled. */
@@ -519,6 +537,6 @@ BUILDER.pop();
     }
 
     public static boolean useSharedTargetQueryCache() {
-        return isPhase3PerceptionFrameEnabled();
+        return isPerceptionFrameEnabled();
     }
 }

@@ -67,7 +67,7 @@ public final class AsyncCoverShadowService {
      */
     public static boolean submit(ServerLevel level, UUID soldierId, CoverSnapshotCapture.Capture capture,
                             List<BlockPos> legacyPositions) {
-        if (!StevesArmyConfig.isPhase5AsyncShadowEnabled() || level == null || soldierId == null
+        if (!StevesArmyConfig.isAsyncCoverShadowEnabled() || level == null || soldierId == null
             || capture == null || legacyPositions == null) {
             return false;
         }
@@ -116,7 +116,7 @@ public final class AsyncCoverShadowService {
     }
 
     public static boolean submitPilot(ServerLevel level, UUID soldierId, CoverSnapshotCapture.Capture capture) {
-        if (!StevesArmyConfig.isPhase6AsyncCoverPilotEnabled() || level == null || soldierId == null || capture == null) {
+        if (!StevesArmyConfig.isAsyncCoverPilotEnabled() || level == null || soldierId == null || capture == null) {
             return false;
         }
         ThreadPoolExecutor currentExecutor = executor;
@@ -195,7 +195,7 @@ public final class AsyncCoverShadowService {
                     return;
                 }
 
-                if (!StevesArmyConfig.isPhase5AsyncShadowEnabled()) {
+                if (!StevesArmyConfig.isAsyncCoverShadowEnabled()) {
                     LATEST_SEQUENCES.remove(soldierId, request.sequence());
                     PerformanceMetrics.recordPhase5Cancelled();
                     continue;
@@ -257,7 +257,7 @@ public final class AsyncCoverShadowService {
             while (!Thread.currentThread().isInterrupted()) {
                 Request request = PILOT_REQUESTS.remove(soldierId);
                 if (request == null) return;
-                if (!StevesArmyConfig.isPhase6AsyncCoverPilotEnabled()) {
+                if (!StevesArmyConfig.isAsyncCoverPilotEnabled()) {
                     PILOT_SEQUENCES.remove(soldierId, request.sequence());
                     PerformanceMetrics.recordPhase6Cancelled();
                     continue;
@@ -361,7 +361,7 @@ public final class AsyncCoverShadowService {
         Request request = completed.request();
         try {
             UUID currentEpoch = serverEpoch;
-            if (!StevesArmyConfig.isPhase5AsyncShadowEnabled()
+            if (!StevesArmyConfig.isAsyncCoverShadowEnabled()
                 || !request.serverEpoch().equals(currentEpoch)
                 || dimensionGeneration(request.dimension()) != request.dimensionGeneration()
                 || !isDimensionLoaded(server, request.dimension())) {
@@ -419,7 +419,7 @@ public final class AsyncCoverShadowService {
         long started = System.nanoTime();
         Request request = completed.request();
         try {
-            if (!StevesArmyConfig.isPhase6AsyncCoverPilotEnabled()
+            if (!StevesArmyConfig.isAsyncCoverPilotEnabled()
                 || !request.serverEpoch().equals(serverEpoch)
                 || dimensionGeneration(request.dimension()) != request.dimensionGeneration()
                 || !isDimensionLoaded(server, request.dimension())) {

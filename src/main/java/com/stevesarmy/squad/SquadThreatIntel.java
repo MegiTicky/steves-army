@@ -139,8 +139,14 @@ public class SquadThreatIntel {
 
     public void reportThreat(UUID reporterId, LivingEntity threat, BlockPos pos,
                              @Nullable Vec3 aimPoint, @Nullable Vec3 headPoint, float accuracy) {
-        ThreatKnowledge knowledge = knownThreats.getOrDefault(threat.getUUID(), 
-            new ThreatKnowledge(threat.getUUID()));
+        UUID threatId = threat.getUUID();
+        ThreatKnowledge knowledge = knownThreats.get(threatId);
+        if (knowledge != null && !knowledge.isAlive) {
+            return;
+        }
+        if (knowledge == null) {
+            knowledge = new ThreatKnowledge(threatId);
+        }
         
         knowledge.lastKnownPosition = pos;
         knowledge.lastSeenTime = threat.level().getGameTime();
@@ -152,7 +158,7 @@ public class SquadThreatIntel {
         knowledge.accuracy = Math.max(knowledge.accuracy, accuracy);
         knowledge.isAlive = true;
         
-        knownThreats.put(threat.getUUID(), knowledge);
+        knownThreats.put(threatId, knowledge);
         
         if (CoverTacticalGoal.isDebugLoggingEnabled()) {
             StevesArmyMod.LOGGER.info("[SquadThreatIntel] Threat reported: {} at {} by {}, accuracy={}",
@@ -161,7 +167,13 @@ public class SquadThreatIntel {
     }
 
     public void reportThreatPosition(UUID reporterId, UUID threatId, BlockPos pos, float accuracy, Level level) {
-        ThreatKnowledge knowledge = knownThreats.getOrDefault(threatId, new ThreatKnowledge(threatId));
+        ThreatKnowledge knowledge = knownThreats.get(threatId);
+        if (knowledge != null && !knowledge.isAlive) {
+            return;
+        }
+        if (knowledge == null) {
+            knowledge = new ThreatKnowledge(threatId);
+        }
         
         knowledge.lastKnownPosition = pos;
         knowledge.lastSeenTime = level.getGameTime();

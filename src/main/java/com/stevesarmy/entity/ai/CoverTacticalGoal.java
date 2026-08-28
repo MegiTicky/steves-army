@@ -375,7 +375,7 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
     }
 
     private void requestEmergencySearch(QueuedSearchMode mode) {
-        if (!StevesArmyConfig.isPhase2RetryPolicyEnabled()) {
+        if (!StevesArmyConfig.isRetryPolicyEnabled()) {
             executeQueuedEmergencySearch(mode);
             return;
         }
@@ -445,7 +445,7 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
         }
         asyncPilotPending = false;
         asyncPilotSubmittedTick = Long.MIN_VALUE;
-        if (!StevesArmyConfig.isPhase6AsyncCoverPilotEnabled()
+        if (!StevesArmyConfig.isAsyncCoverPilotEnabled()
             || asyncPilotFallback
             || !isAsyncCoverPilotEligible()
             || !soldier.blockPosition().equals(sourcePosition)
@@ -978,13 +978,13 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
         }
 
         long fingerprint = getFlankSearchFingerprint();
-        if (StevesArmyConfig.isPhase2RetryPolicyEnabled()
+        if (StevesArmyConfig.isRetryPolicyEnabled()
             && failedFlankSearchFingerprint == fingerprint
             && soldier.tickCount < nextFlankSearchTick) {
             PerformanceMetrics.recordFlankSearchRetrySkip();
             return Optional.empty();
         }
-        if (StevesArmyConfig.isPhase2RetryPolicyEnabled()
+        if (StevesArmyConfig.isRetryPolicyEnabled()
             && failedFlankSearchFingerprint != Long.MIN_VALUE
             && failedFlankSearchFingerprint != fingerprint) {
             PerformanceMetrics.recordFlankSearchFingerprintChange();
@@ -996,7 +996,7 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
         Optional<CoverPoint> betterCover = findBetterCoverForFlank();
         if (betterCover.isEmpty()) {
             PerformanceMetrics.recordFlankSearchFailure();
-            if (StevesArmyConfig.isPhase2RetryPolicyEnabled()) {
+            if (StevesArmyConfig.isRetryPolicyEnabled()) {
                 failedFlankSearchFingerprint = fingerprint;
                 nextFlankSearchTick = soldier.tickCount + FLANK_SEARCH_RETRY_TICKS;
             }
@@ -2797,7 +2797,7 @@ private boolean shouldExitCoverForFollow() {
                 }
             }
         } else {
-            if (!asyncPilotFallback && StevesArmyConfig.isPhase6AsyncCoverPilotEnabled()
+            if (!asyncPilotFallback && StevesArmyConfig.isAsyncCoverPilotEnabled()
                 && isAsyncCoverPilotEligible()) {
                 List<CoverPoint> discovered = finder.discoverCoverPoints(searchCenter, searchRadius);
                 if (discovered.isEmpty()) {
@@ -3077,8 +3077,8 @@ private boolean shouldExitCoverForFollow() {
                                     SquadCoverContext squadContext,
                                     List<CoverFinder.ScoredCover> legacyScored,
                                     BlockPos searchCenter, int searchRadius) {
-        boolean phase4Enabled = StevesArmyConfig.isPhase4PureEvaluatorEnabled();
-        boolean phase5Enabled = StevesArmyConfig.isPhase5AsyncShadowEnabled() && !machineGunnerPipeline;
+        boolean phase4Enabled = StevesArmyConfig.isPureEvaluatorShadowEnabled();
+        boolean phase5Enabled = StevesArmyConfig.isAsyncCoverShadowEnabled() && !machineGunnerPipeline;
         if (!phase4Enabled && !phase5Enabled) {
             PerformanceMetrics.recordPhase4Skip();
             return;
