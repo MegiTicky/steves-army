@@ -20,9 +20,16 @@ import net.minecraft.world.phys.shapes.VoxelShape;
 public class HazardAwareWalkNodeEvaluator extends WalkNodeEvaluator {
 
     private static final double PARTIAL_BLOCK_THRESHOLD = 6.0 / 16.0;
+    private final boolean asyncSafe;
 
     public HazardAwareWalkNodeEvaluator() {
+        this(false);
+    }
+
+    /** Async evaluators omit live VS2 queries; navigation validates VS2 on the server thread. */
+    public HazardAwareWalkNodeEvaluator(boolean asyncSafe) {
         super();
+        this.asyncSafe = asyncSafe;
     }
 
     /**
@@ -39,7 +46,7 @@ public class HazardAwareWalkNodeEvaluator extends WalkNodeEvaluator {
         if (type != BlockPathTypes.BLOCKED && isPartialObstacle(level, x, y, z)) {
             return BlockPathTypes.BLOCKED;
         }
-        if (type != BlockPathTypes.BLOCKED
+        if (!asyncSafe && type != BlockPathTypes.BLOCKED
             && VS2Compat.isNodeBlockedByShip(mob.level(), new BlockPos(x, y, z), mob)) {
             return BlockPathTypes.BLOCKED;
         }

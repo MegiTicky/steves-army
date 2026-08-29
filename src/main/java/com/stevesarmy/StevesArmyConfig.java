@@ -57,6 +57,10 @@ public class StevesArmyConfig {
     public static final ForgeConfigSpec.BooleanValue PURE_EVALUATOR_SHADOW_ENABLED;
     public static final ForgeConfigSpec.BooleanValue ASYNC_COVER_SHADOW_ENABLED;
     public static final ForgeConfigSpec.BooleanValue ASYNC_COVER_PILOT_ENABLED;
+    public static final ForgeConfigSpec.BooleanValue ASYNC_PATHFINDING_ENABLED;
+    public static final ForgeConfigSpec.IntValue ASYNC_PATHFINDING_THREADS;
+    public static final ForgeConfigSpec.IntValue ASYNC_PATHFINDING_QUEUE_CAPACITY;
+    public static final ForgeConfigSpec.IntValue ASYNC_PATHFINDING_MAX_PENDING_TICKS;
     public static final ForgeConfigSpec.IntValue EXACT_PATH_VALIDATION_LIMIT;
     public static final ForgeConfigSpec.IntValue COVER_SEARCH_FAILURE_RETRY_TICKS;
 
@@ -352,6 +356,28 @@ BUILDER.pop();
                      "Default: true")
             .define("asyncCoverPilotEnabled", true);
 
+        ASYNC_PATHFINDING_ENABLED = BUILDER
+            .comment("Run soldier A* path searches on a bounded worker pool.",
+                     "World preparation, path validation, navigation, and entity movement remain on the server thread.",
+                     "Default: false")
+            .define("asyncPathfindingEnabled", false);
+
+        ASYNC_PATHFINDING_THREADS = BUILDER
+            .comment("Maximum worker threads used for soldier A* path searches.",
+                     "Start with 2; more threads can increase contention and stale work.",
+                     "Default: 2")
+            .defineInRange("asyncPathfindingThreads", 2, 1, 8);
+
+        ASYNC_PATHFINDING_QUEUE_CAPACITY = BUILDER
+            .comment("Maximum queued soldier path searches before new requests use synchronous fallback.",
+                     "Default: 16")
+            .defineInRange("asyncPathfindingQueueCapacity", 16, 1, 128);
+
+        ASYNC_PATHFINDING_MAX_PENDING_TICKS = BUILDER
+            .comment("Maximum ticks a soldier may wait for an async path before it is rejected.",
+                     "Default: 40")
+            .defineInRange("asyncPathfindingMaxPendingTicks", 40, 5, 200);
+
         EXACT_PATH_VALIDATION_LIMIT = BUILDER
             .comment("Maximum exact navigation paths tested while selecting cover during one cover search.",
                      "The limit applies to GO_TO, FOLLOW, ATTACK, HOLD, and suppression cover searches.",
@@ -529,6 +555,22 @@ BUILDER.pop();
 
     public static boolean isAsyncCoverPilotEnabled() {
         return ASYNC_COVER_PILOT_ENABLED.get();
+    }
+
+    public static boolean isAsyncPathfindingEnabled() {
+        return ASYNC_PATHFINDING_ENABLED.get();
+    }
+
+    public static int getAsyncPathfindingThreads() {
+        return ASYNC_PATHFINDING_THREADS.get();
+    }
+
+    public static int getAsyncPathfindingQueueCapacity() {
+        return ASYNC_PATHFINDING_QUEUE_CAPACITY.get();
+    }
+
+    public static int getAsyncPathfindingMaxPendingTicks() {
+        return ASYNC_PATHFINDING_MAX_PENDING_TICKS.get();
     }
 
     public static int getExactPathValidationLimit() {

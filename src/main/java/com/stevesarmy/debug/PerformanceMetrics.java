@@ -85,6 +85,14 @@ public final class PerformanceMetrics {
     private static final LongAdder asyncCoverValidationRejects = new LongAdder();
     private static final LongAdder asyncCoverWorkerNanos = new LongAdder();
     private static final LongAdder asyncCoverApplyNanos = new LongAdder();
+
+    private static final LongAdder asyncPathRequests = new LongAdder();
+    private static final LongAdder asyncPathCompleted = new LongAdder();
+    private static final LongAdder asyncPathNullResults = new LongAdder();
+    private static final LongAdder asyncPathFallbacks = new LongAdder();
+    private static final LongAdder asyncPathStaleCancelled = new LongAdder();
+    private static final LongAdder asyncPathWorkerNanos = new LongAdder();
+
     private static final Map<String, LongAdder> coverInvalidationReasons = new ConcurrentHashMap<>();
     private static final Map<String, LongAdder> passiveMaintenanceRunsByState = new ConcurrentHashMap<>();
     private static final Map<String, LongAdder> passiveMaintenanceSkipsByState = new ConcurrentHashMap<>();
@@ -371,6 +379,12 @@ public final class PerformanceMetrics {
         asyncCoverValidationRejects.reset();
         asyncCoverWorkerNanos.reset();
         asyncCoverApplyNanos.reset();
+        asyncPathRequests.reset();
+        asyncPathCompleted.reset();
+        asyncPathNullResults.reset();
+        asyncPathFallbacks.reset();
+        asyncPathStaleCancelled.reset();
+        asyncPathWorkerNanos.reset();
         coverInvalidationReasons.clear();
         passiveMaintenanceRunsByState.clear();
         passiveMaintenanceSkipsByState.clear();
@@ -819,6 +833,29 @@ phase6Selections.reset();
 
     public static void recordAsyncCoverApply(long nanos) {
         if (enabled) asyncCoverApplyNanos.add(nanos);
+    }
+
+    public static void recordAsyncPathRequest() {
+        if (enabled) asyncPathRequests.increment();
+    }
+
+    public static void recordAsyncPathCompleted(long nanos) {
+        if (enabled) {
+            asyncPathCompleted.increment();
+            asyncPathWorkerNanos.add(nanos);
+        }
+    }
+
+    public static void recordAsyncPathNullResult() {
+        if (enabled) asyncPathNullResults.increment();
+    }
+
+    public static void recordAsyncPathFallback() {
+        if (enabled) asyncPathFallbacks.increment();
+    }
+
+    public static void recordAsyncPathStaleCancelled() {
+        if (enabled) asyncPathStaleCancelled.increment();
     }
 
     public static void recordCoverSearchRequestQueued() {
@@ -1434,6 +1471,12 @@ phase6Selections.reset();
             + asyncCoverValidationRejects.sum() + " validation rejects, "
             + formatMillis(asyncCoverWorkerNanos.sum()) + " ms worker, "
             + formatMillis(asyncCoverApplyNanos.sum()) + " ms apply\n"
+            + "  Async pathfinding: " + asyncPathRequests.sum() + " requests, "
+            + asyncPathCompleted.sum() + " completed, "
+            + asyncPathNullResults.sum() + " null-results, "
+            + asyncPathFallbacks.sum() + " sync-fallbacks, "
+            + asyncPathStaleCancelled.sum() + " stale-cancelled, "
+            + formatMillis(asyncPathWorkerNanos.sum()) + " ms worker\n"
             + "  Detection ticks: " + detectionTicks.sum() + "\n"
             + "  Detection candidates: " + detectionCandidates.sum() + "\n"
             + "  Target refreshes: " + targetRefreshes.sum() + "\n"
