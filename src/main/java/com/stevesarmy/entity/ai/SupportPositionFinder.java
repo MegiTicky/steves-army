@@ -2,6 +2,7 @@ package com.stevesarmy.entity.ai;
 
 import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.combat.VisibilityRay;
+import com.stevesarmy.combat.cover.ExactPathValidationBudget;
 import com.stevesarmy.debug.DiagnosticLogManager;
 import com.stevesarmy.entity.MachineGunnerEntity;
 import com.stevesarmy.entity.SoldierEntity;
@@ -90,9 +91,10 @@ public final class SupportPositionFinder {
         Vec3 rearAxis = anchor.add(awayDir.scale(SUPPORT_OFFSET_BLOCKS));
         Vec3 lateral = new Vec3(-awayDir.z, 0.0, awayDir.x);
         List<AnchorCandidate> candidates = new ArrayList<>(3);
-        addCandidate(candidates, mg, threatPos, rearAxis, lateral, LATERAL_OFFSET_BLOCKS);
-        addCandidate(candidates, mg, threatPos, rearAxis, lateral, 0.0);
-        addCandidate(candidates, mg, threatPos, rearAxis, lateral, -LATERAL_OFFSET_BLOCKS);
+        ExactPathValidationBudget pathBudget = new ExactPathValidationBudget();
+        addCandidate(candidates, mg, threatPos, rearAxis, lateral, LATERAL_OFFSET_BLOCKS, pathBudget);
+        addCandidate(candidates, mg, threatPos, rearAxis, lateral, 0.0, pathBudget);
+        addCandidate(candidates, mg, threatPos, rearAxis, lateral, -LATERAL_OFFSET_BLOCKS, pathBudget);
 
         AnchorCandidate selected = null;
         for (AnchorCandidate candidate : candidates) {
@@ -115,11 +117,12 @@ public final class SupportPositionFinder {
 
     private static void addCandidate(List<AnchorCandidate> candidates, MachineGunnerEntity mg,
                                      Vec3 threatPos, Vec3 rearAxis,
-                                     Vec3 lateral, double lateralOffset) {
+                                     Vec3 lateral, double lateralOffset,
+                                     ExactPathValidationBudget pathBudget) {
         Vec3 target = rearAxis.add(lateral.scale(lateralOffset));
         BlockPos position = snapToGround(mg.level(), BlockPos.containing(target));
         boolean terrainValid = isValidAnchorCell(mg.level(), position);
-        Path path = !terrainValid || position.equals(mg.blockPosition())
+        Path path = !terrainValid || position.equals(mg.blockPosition()) || !pathBudget.tryAcquire()
             ? null : mg.getNavigation().createPath(position, 0);
         boolean reachable = terrainValid
             && (position.equals(mg.blockPosition()) || (path != null && path.canReach()));

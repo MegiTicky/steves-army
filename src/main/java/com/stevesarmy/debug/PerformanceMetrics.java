@@ -1,5 +1,6 @@
 package com.stevesarmy.debug;
 
+import java.util.EnumMap;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -33,9 +34,9 @@ public final class PerformanceMetrics {
     private static final LongAdder goToCoverCandidatesDiscovered = new LongAdder();
     private static final LongAdder goToCoverCandidatesEvaluated = new LongAdder();
     private static final LongAdder goToCoverCandidatesScored = new LongAdder();
-    private static final LongAdder goToCoverPathValidations = new LongAdder();
-    private static final LongAdder goToCoverPathValidationFailures = new LongAdder();
-    private static final LongAdder goToCoverPathValidationBudgetExhausted = new LongAdder();
+    private static final LongAdder exactCoverPathValidations = new LongAdder();
+    private static final LongAdder exactCoverPathValidationFailures = new LongAdder();
+    private static final LongAdder exactCoverPathValidationBudgetExhausted = new LongAdder();
     private static final LongAdder visibilityRays = new LongAdder();
     private static final LongAdder visibilityRayCacheHits = new LongAdder();
     private static final LongAdder visibilityRayCacheMisses = new LongAdder();
@@ -220,6 +221,37 @@ public final class PerformanceMetrics {
     private static final LongAdder phase6Fallbacks = new LongAdder();
     private static final LongAdder phase6ReservationRejects = new LongAdder();
     private static final LongAdder phase6PathRejects = new LongAdder();
+    private static final LongAdder phase6ResultsApplied = new LongAdder();
+    private static final LongAdder phase6RankedCandidates = new LongAdder();
+    private static final LongAdder phase6RankedEmptyResults = new LongAdder();
+    private static final LongAdder phase6SkippedFailedCovers = new LongAdder();
+    private static final LongAdder phase6SkippedCurrentCovers = new LongAdder();
+    private static final LongAdder phase6SkippedReservationUnavailable = new LongAdder();
+    private static final LongAdder phase6FallbackDiscoveryEmpty = new LongAdder();
+    private static final LongAdder phase6FallbackSubmissionFailed = new LongAdder();
+    private static final LongAdder phase6FallbackTimeout = new LongAdder();
+    private static final LongAdder phase6FallbackRejected = new LongAdder();
+    private static final EnumMap<Phase6ApplyFallbackReason, LongAdder> phase6ApplyFallbackReasons =
+        new EnumMap<>(Phase6ApplyFallbackReason.class);
+
+    static {
+        for (Phase6ApplyFallbackReason reason : Phase6ApplyFallbackReason.values()) {
+            phase6ApplyFallbackReasons.put(reason, new LongAdder());
+        }
+    }
+
+    public enum Phase6ApplyFallbackReason {
+        DISABLED,
+        FALLBACK_IN_PROGRESS,
+        MACHINE_GUNNER,
+        ATTACK_TARGET,
+        RELOCATION,
+        SUPPRESSION_SEARCH,
+        STATE,
+        UNKNOWN,
+        MOVED,
+        NULL_RESULT
+    }
 
     private static final int TICK_BUFFER_SIZE = 1000;
     private static final long[] tickWorkNanos = new long[TICK_BUFFER_SIZE];
@@ -270,9 +302,9 @@ public final class PerformanceMetrics {
         goToCoverCandidatesDiscovered.reset();
         goToCoverCandidatesEvaluated.reset();
         goToCoverCandidatesScored.reset();
-        goToCoverPathValidations.reset();
-        goToCoverPathValidationFailures.reset();
-        goToCoverPathValidationBudgetExhausted.reset();
+        exactCoverPathValidations.reset();
+        exactCoverPathValidationFailures.reset();
+        exactCoverPathValidationBudgetExhausted.reset();
         visibilityRays.reset();
         visibilityRayCacheHits.reset();
         visibilityRayCacheMisses.reset();
@@ -437,10 +469,23 @@ public final class PerformanceMetrics {
         phase6ResultAgeSamples.reset();
         phase6ResultAgeTicks.reset();
         phase6ResultMaxAgeTicks.set(0L);
-        phase6Selections.reset();
+phase6Selections.reset();
         phase6Fallbacks.reset();
         phase6ReservationRejects.reset();
         phase6PathRejects.reset();
+        phase6ResultsApplied.reset();
+        phase6RankedCandidates.reset();
+        phase6RankedEmptyResults.reset();
+        phase6SkippedFailedCovers.reset();
+        phase6SkippedCurrentCovers.reset();
+        phase6SkippedReservationUnavailable.reset();
+        phase6FallbackDiscoveryEmpty.reset();
+        phase6FallbackSubmissionFailed.reset();
+        phase6FallbackTimeout.reset();
+        phase6FallbackRejected.reset();
+        for (Phase6ApplyFallbackReason reason : Phase6ApplyFallbackReason.values()) {
+            phase6ApplyFallbackReasons.get(reason).reset();
+        }
         java.util.Arrays.fill(tickWorkNanos, 0L);
         tickBufferIndex = 0;
         tickWorkSamples = 0;
@@ -974,14 +1019,14 @@ public final class PerformanceMetrics {
         goToCoverSearchMaxTickCount.accumulateAndGet(currentGoToSearchTickCount, Math::max);
     }
 
-    public static void recordGoToCoverPathValidation(boolean reachable) {
+    public static void recordExactCoverPathValidation(boolean reachable) {
         if (!enabled) return;
-        goToCoverPathValidations.increment();
-        if (!reachable) goToCoverPathValidationFailures.increment();
+        exactCoverPathValidations.increment();
+        if (!reachable) exactCoverPathValidationFailures.increment();
     }
 
-    public static void recordGoToCoverPathValidationBudgetExhausted() {
-        if (enabled) goToCoverPathValidationBudgetExhausted.increment();
+    public static void recordExactCoverPathValidationBudgetExhausted() {
+        if (enabled) exactCoverPathValidationBudgetExhausted.increment();
     }
 
     public static void recordPhase4Capture(long nanos, int candidates) {
@@ -1127,6 +1172,52 @@ public final class PerformanceMetrics {
     public static void recordPhase6ReservationReject() { if (enabled) phase6ReservationRejects.increment(); }
     public static void recordPhase6PathReject() { if (enabled) phase6PathRejects.increment(); }
 
+    public static void recordPhase6ResultApplied() {
+        if (enabled) phase6ResultsApplied.increment();
+    }
+
+    public static void recordPhase6RankedCandidates(int count) {
+        if (enabled) phase6RankedCandidates.add(Math.max(0, count));
+    }
+
+    public static void recordPhase6RankedEmpty() {
+        if (enabled) phase6RankedEmptyResults.increment();
+    }
+
+    public static void recordPhase6SkippedFailedCover() {
+        if (enabled) phase6SkippedFailedCovers.increment();
+    }
+
+    public static void recordPhase6SkippedCurrentCover() {
+        if (enabled) phase6SkippedCurrentCovers.increment();
+    }
+
+    public static void recordPhase6SkippedReservationUnavailable() {
+        if (enabled) phase6SkippedReservationUnavailable.increment();
+    }
+
+    public static void recordPhase6ApplyFallback(Phase6ApplyFallbackReason reason) {
+        if (!enabled || reason == null) return;
+        LongAdder adder = phase6ApplyFallbackReasons.get(reason);
+        if (adder != null) adder.increment();
+    }
+
+    public static void recordPhase6FallbackDiscoveryEmpty() {
+        if (enabled) phase6FallbackDiscoveryEmpty.increment();
+    }
+
+    public static void recordPhase6FallbackSubmissionFailed() {
+        if (enabled) phase6FallbackSubmissionFailed.increment();
+    }
+
+    public static void recordPhase6FallbackTimeout() {
+        if (enabled) phase6FallbackTimeout.increment();
+    }
+
+    public static void recordPhase6FallbackRejected() {
+        if (enabled) phase6FallbackRejected.increment();
+    }
+
     public static String report() {
         long visibilityHits = visibilityCacheHits.sum();
         long visibilityMisses = visibilityCacheMisses.sum();
@@ -1198,6 +1289,27 @@ public final class PerformanceMetrics {
               + formatTicks(phase6ResultAgeSamples.sum() == 0 ? 0.0
                   : phase6ResultAgeTicks.sum() / (double) phase6ResultAgeSamples.sum())
               + " ticks, max=" + phase6ResultMaxAgeTicks.get() + " ticks\n"
+              + "    pilot acceptance: applied=" + phase6ResultsApplied.sum()
+              + ", ranked=" + phase6RankedCandidates.sum()
+              + ", empty results=" + phase6RankedEmptyResults.sum()
+              + ", skipped failed/current/reserved="
+              + phase6SkippedFailedCovers.sum() + "/"
+              + phase6SkippedCurrentCovers.sum() + "/"
+              + phase6SkippedReservationUnavailable.sum() + "\n"
+              + "    apply fallback reasons: disabled=" + phase6ApplyFallbackSum(Phase6ApplyFallbackReason.DISABLED)
+              + ", active=" + phase6ApplyFallbackSum(Phase6ApplyFallbackReason.FALLBACK_IN_PROGRESS)
+              + ", machine-gunner=" + phase6ApplyFallbackSum(Phase6ApplyFallbackReason.MACHINE_GUNNER)
+              + ", target=" + phase6ApplyFallbackSum(Phase6ApplyFallbackReason.ATTACK_TARGET)
+              + ", relocation=" + phase6ApplyFallbackSum(Phase6ApplyFallbackReason.RELOCATION)
+              + ", suppression=" + phase6ApplyFallbackSum(Phase6ApplyFallbackReason.SUPPRESSION_SEARCH)
+              + ", state=" + phase6ApplyFallbackSum(Phase6ApplyFallbackReason.STATE)
+              + ", moved=" + phase6ApplyFallbackSum(Phase6ApplyFallbackReason.MOVED)
+              + ", null=" + phase6ApplyFallbackSum(Phase6ApplyFallbackReason.NULL_RESULT)
+              + ", unknown=" + phase6ApplyFallbackSum(Phase6ApplyFallbackReason.UNKNOWN) + "\n"
+              + "    other fallbacks: discovery-empty=" + phase6FallbackDiscoveryEmpty.sum()
+              + ", submission-failed=" + phase6FallbackSubmissionFailed.sum()
+              + ", timeout=" + phase6FallbackTimeout.sum()
+              + ", rejected=" + phase6FallbackRejected.sum() + "\n"
              + "  Threat reports: " + threatReportAttempts.sum() + " attempts, "
             + threatReportPublished.sum() + " published, "
             + threatReportGeometryCalculations.sum() + " geometry calculations, "
@@ -1261,14 +1373,14 @@ public final class PerformanceMetrics {
                + "    discovery=" + formatMillis(goToCoverDiscoveryNanos.sum())
                + " ms, scoring=" + formatMillis(goToCoverScoringNanos.sum())
                + " ms, path=" + formatMillis(goToCoverPathNanos.sum())
-               + " ms, exact validations=" + goToCoverPathValidations.sum()
-               + " (failed=" + goToCoverPathValidationFailures.sum()
-               + ", budget exhausted=" + goToCoverPathValidationBudgetExhausted.sum() + ")"
                + ", candidates discovered/evaluated/scored="
                + goToCoverCandidatesDiscovered.sum() + "/" + goToCoverCandidatesEvaluated.sum()
-              + "/" + goToCoverCandidatesScored.sum() + "\n"
-              + "    per tick: max=" + formatMillis(goToCoverSearchMaxTickNanos.get())
-              + " ms, max searches=" + goToCoverSearchMaxTickCount.get() + "\n"
+               + "/" + goToCoverCandidatesScored.sum() + "\n"
+               + "    per tick: max=" + formatMillis(goToCoverSearchMaxTickNanos.get())
+               + " ms, max searches=" + goToCoverSearchMaxTickCount.get() + "\n"
+               + "  Exact cover path validations: " + exactCoverPathValidations.sum()
+               + " (failed=" + exactCoverPathValidationFailures.sum()
+               + ", budget exhausted=" + exactCoverPathValidationBudgetExhausted.sum() + ")\n"
               + "  Flank searches: " + flankSearchAttempts.sum() + " attempts, "
              + flankSearchFailures.sum() + " failed, " + flankSearchRetrySkips.sum()
              + " retry skips, " + flankSearchFingerprintChanges.sum() + " fingerprint changes\n"
@@ -1330,6 +1442,11 @@ public final class PerformanceMetrics {
         return "    " + label + ": " + count + " calls, "
             + formatMillis(nanos) + " ms total"
             + (count == 0 ? "" : ", " + formatMillis(nanos / (double) count) + " ms/call") + "\n";
+    }
+
+    private static long phase6ApplyFallbackSum(Phase6ApplyFallbackReason reason) {
+        LongAdder adder = phase6ApplyFallbackReasons.get(reason);
+        return adder == null ? 0L : adder.sum();
     }
 
     private static long tickAverageNanos() {

@@ -232,6 +232,7 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
     private final Map<BlockPos, Path> validatedCoverPaths = new HashMap<>();
     private BlockPos validatedCoverPathSource = null;
     private long validatedCoverPathTick = Long.MIN_VALUE;
+    private ExactPathValidationBudget exactPathValidationBudget = new ExactPathValidationBudget();
 
     private CoverFinder.ScoredCover[] cachedTopCovers = new CoverFinder.ScoredCover[0];
     private BlockPos debugSearchCenter = null;
@@ -449,22 +450,54 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
         }
         asyncPilotPending = false;
         asyncPilotSubmittedTick = Long.MIN_VALUE;
-        if (!StevesArmyConfig.isAsyncCoverPilotEnabled()
-            || asyncPilotFallback
-            || !isAsyncCoverPilotEligible()
-            || !soldier.blockPosition().equals(sourcePosition)
-            || result == null) {
+        PerformanceMetrics.recordPhase6ResultApplied();
+
+        if (!StevesArmyConfig.isAsyncCoverPilotEnabled()) {
+            PerformanceMetrics.recordPhase6ApplyFallback(PerformanceMetrics.Phase6ApplyFallbackReason.DISABLED);
+            runAsyncPilotFallback();
+            return;
+        }
+        if (asyncPilotFallback) {
+            PerformanceMetrics.recordPhase6ApplyFallback(PerformanceMetrics.Phase6ApplyFallbackReason.FALLBACK_IN_PROGRESS);
+            runAsyncPilotFallback();
+            return;
+        }
+        if (!isAsyncCoverPilotEligible()) {
+            PerformanceMetrics.recordPhase6ApplyFallback(asyncPilotIneligibilityReason());
+            runAsyncPilotFallback();
+            return;
+        }
+        if (!soldier.blockPosition().equals(sourcePosition)) {
+            PerformanceMetrics.recordPhase6ApplyFallback(PerformanceMetrics.Phase6ApplyFallbackReason.MOVED);
+            runAsyncPilotFallback();
+            return;
+        }
+        if (result == null) {
+            PerformanceMetrics.recordPhase6ApplyFallback(PerformanceMetrics.Phase6ApplyFallbackReason.NULL_RESULT);
             runAsyncPilotFallback();
             return;
         }
 
         CoverFinder finder = new CoverFinder(soldier.level());
         CoverPoint currentCover = getCoverManager().getCurrentCover();
-        for (CoverSearchResult.RankedCandidate ranked : result.rankedCandidates()) {
+        List<CoverSearchResult.RankedCandidate> rankedCandidates = result.rankedCandidates();
+        PerformanceMetrics.recordPhase6RankedCandidates(rankedCandidates.size());
+        if (rankedCandidates.isEmpty()) {
+            PerformanceMetrics.recordPhase6RankedEmpty();
+        }
+
+        for (CoverSearchResult.RankedCandidate ranked : rankedCandidates) {
             BlockPos position = ranked.candidate().position();
-            if (failedCoverPositions.contains(position)
-                || (currentCover != null && currentCover.getPosition().equals(position))
-                || !CoverReservationManager.isAvailableFor(position, soldier)) {
+            if (failedCoverPositions.contains(position)) {
+                PerformanceMetrics.recordPhase6SkippedFailedCover();
+                continue;
+            }
+            if (currentCover != null && currentCover.getPosition().equals(position)) {
+                PerformanceMetrics.recordPhase6SkippedCurrentCover();
+                continue;
+            }
+            if (!CoverReservationManager.isAvailableFor(position, soldier)) {
+                PerformanceMetrics.recordPhase6SkippedReservationUnavailable();
                 continue;
             }
             CoverPoint cover = finder.evaluatePosition(position, null);
@@ -506,6 +539,7 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
         }
         asyncPilotPending = false;
         asyncPilotSubmittedTick = Long.MIN_VALUE;
+        PerformanceMetrics.recordPhase6FallbackRejected();
         runAsyncPilotFallback();
     }
 
@@ -513,6 +547,25 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
         return !machineGunnerPipeline && !soldier.hasValidAttackTarget()
             && relocationType == RelocationType.NONE && !suppressionRouteSearchActive
             && getCoverManager().getState() == CoverBehaviorManager.CoverState.SEEKING_COVER;
+    }
+
+    private PerformanceMetrics.Phase6ApplyFallbackReason asyncPilotIneligibilityReason() {
+        if (machineGunnerPipeline) {
+            return PerformanceMetrics.Phase6ApplyFallbackReason.MACHINE_GUNNER;
+        }
+        if (soldier.hasValidAttackTarget()) {
+            return PerformanceMetrics.Phase6ApplyFallbackReason.ATTACK_TARGET;
+        }
+        if (relocationType != RelocationType.NONE) {
+            return PerformanceMetrics.Phase6ApplyFallbackReason.RELOCATION;
+        }
+        if (suppressionRouteSearchActive) {
+            return PerformanceMetrics.Phase6ApplyFallbackReason.SUPPRESSION_SEARCH;
+        }
+        if (getCoverManager().getState() != CoverBehaviorManager.CoverState.SEEKING_COVER) {
+            return PerformanceMetrics.Phase6ApplyFallbackReason.STATE;
+        }
+        return PerformanceMetrics.Phase6ApplyFallbackReason.UNKNOWN;
     }
 
     private void runAsyncPilotFallback() {
@@ -1485,6 +1538,7 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
                 if (soldier.level().getGameTime() - asyncPilotSubmittedTick > 40L) {
                     asyncPilotPending = false;
                     asyncPilotSubmittedTick = Long.MIN_VALUE;
+                    PerformanceMetrics.recordPhase6FallbackTimeout();
                     runAsyncPilotFallback();
                 }
                 return;
@@ -2593,6 +2647,7 @@ private boolean shouldExitCoverForFollow() {
         validatedCoverPaths.clear();
         validatedCoverPathSource = null;
         validatedCoverPathTick = Long.MIN_VALUE;
+        exactPathValidationBudget = new ExactPathValidationBudget();
         Level level = soldier.level();
         CoverFinder finder = new CoverFinder(level);
         long now = System.currentTimeMillis();
@@ -2617,7 +2672,6 @@ private boolean shouldExitCoverForFollow() {
                 squadCtx);
 
             CoverPoint currentCover = getCoverManager().getCurrentCover();
-            int exactPathValidations = 0;
             for (CoverFinder.ScoredCover scoredCover : relocationCovers) {
                 CoverPoint cover = scoredCover.cover;
                 if (failedCoverPositions.contains(cover.getPosition())
@@ -2625,13 +2679,8 @@ private boolean shouldExitCoverForFollow() {
                     continue;
                 }
                 if (!isDistantRelocationCover(cover)) {
-                    if (relocationType == RelocationType.GO_TO
-                        && exactPathValidations >= StevesArmyConfig.getGoToExactPathValidationLimit()) {
-                        PerformanceMetrics.recordGoToCoverPathValidationBudgetExhausted();
-                        break;
-                    }
-                    exactPathValidations++;
                     if (!isExactCoverPathReachable(cover)) {
+                        if (!hasExactPathValidationBudget()) break;
                         continue;
                     }
                 }
@@ -2819,6 +2868,7 @@ private boolean shouldExitCoverForFollow() {
                 && isAsyncCoverPilotEligible()) {
                 List<CoverPoint> discovered = finder.discoverCoverPoints(searchCenter, searchRadius);
                 if (discovered.isEmpty()) {
+                    PerformanceMetrics.recordPhase6FallbackDiscoveryEmpty();
                     PerformanceMetrics.recordPhase6Fallback();
                 } else {
                     CoverProtectionContext protection = soldier.getCombatGoal() != null
@@ -2840,6 +2890,7 @@ private boolean shouldExitCoverForFollow() {
                         PerformanceMetrics.recordPhase6SnapshotFailure();
                         StevesArmyMod.LOGGER.warn("Cover pilot snapshot failed for soldier {}", soldier.getId(), exception);
                     }
+                    PerformanceMetrics.recordPhase6FallbackSubmissionFailed();
                     PerformanceMetrics.recordPhase6Fallback();
                 }
             }
@@ -2880,11 +2931,22 @@ private boolean shouldExitCoverForFollow() {
                 reusableScored = finder.evaluateAndScoreAll(
                     soldier, threatDirection, threats, searchRadius, true, squadCtx);
             }
-            List<CoverFinder.ScoredCover> tacticalCovers = reusableScored.stream()
-                .filter(sc -> isExactCoverPathReachable(sc.cover))
-                .collect(java.util.stream.Collectors.toList());
+            List<CoverFinder.ScoredCover> tacticalCovers;
+            if (soldier.hasValidAttackTarget() && relocationType == RelocationType.NONE) {
+                tacticalCovers = new ArrayList<>();
+                for (CoverFinder.ScoredCover sc : reusableScored) {
+                    if (isExactCoverPathReachable(sc.cover)) {
+                        tacticalCovers.add(sc);
+                    } else if (!hasExactPathValidationBudget()) {
+                        break;
+                    }
+                }
+            } else {
+                tacticalCovers = List.of();
+            }
             Optional<DefensivePositionCandidate.ProneFiringCandidate> prone =
-                DefensivePositionSelector.selectProne(soldier, soldier.getTarget(), getThreats(), tacticalCovers, squadCtx);
+                DefensivePositionSelector.selectProne(soldier, soldier.getTarget(), getThreats(), tacticalCovers,
+                    squadCtx, exactPathValidationBudget);
             if (prone.isPresent() && relocationType == RelocationType.NONE) {
                 startProneFiringMovement(prone.get());
                 logCoverSearchPerformance(finder, searchStarted, CoverMoveResult.COVER_STARTED, "prone-lane");
@@ -2987,11 +3049,17 @@ private boolean shouldExitCoverForFollow() {
             reusableScored = finder.evaluateAndScoreAll(
                 soldier, threatDirection, threats, searchRadius, true, squadCtx);
         }
-        List<CoverFinder.ScoredCover> tacticalCovers = reusableScored.stream()
-            .filter(sc -> isExactCoverPathReachable(sc.cover))
-            .collect(java.util.stream.Collectors.toList());
+        List<CoverFinder.ScoredCover> tacticalCovers = new ArrayList<>();
+        for (CoverFinder.ScoredCover sc : reusableScored) {
+            if (isExactCoverPathReachable(sc.cover)) {
+                tacticalCovers.add(sc);
+            } else if (!hasExactPathValidationBudget()) {
+                break;
+            }
+        }
         Optional<DefensivePositionCandidate.ProneFiringCandidate> prone =
-            DefensivePositionSelector.selectProne(soldier, soldier.getTarget(), getThreats(), tacticalCovers, squadCtx);
+            DefensivePositionSelector.selectProne(soldier, soldier.getTarget(), getThreats(), tacticalCovers,
+                squadCtx, exactPathValidationBudget);
         if (prone.isPresent() && relocationType == RelocationType.NONE) {
             startProneFiringMovement(prone.get());
             logCoverSearchPerformance(finder, searchStarted, CoverMoveResult.COVER_STARTED, "prone-no-cover");
@@ -3330,6 +3398,10 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
             double lateral = Math.abs(displacement.x * objectiveDir.z - displacement.z * objectiveDir.x);
             if (forward > ATTACK_CORRIDOR_FORWARD_LENGTH || lateral > ATTACK_WIDE_SECTOR_HALF_WIDTH) continue;
 
+            if (!exactPathValidationBudget.tryAcquire()) {
+                PerformanceMetrics.recordExactCoverPathValidationBudgetExhausted();
+                break;
+            }
             Vec3 standingPos = getCoverStandingPosition(cover.getPosition());
             Path path = navigation.createPath(standingPos.x, standingPos.y, standingPos.z, 1);
             if (path == null || !path.canReach()) continue;
@@ -3726,6 +3798,7 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
      */
     private boolean selectForwardCover() {
         if (!soldier.hasValidAttackTarget()) return false;
+        exactPathValidationBudget = new ExactPathValidationBudget();
         BlockPos objective = soldier.getAttackTargetPos();
 
         // Compute forward-biased search center
@@ -3942,6 +4015,11 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
             return true;
         }
 
+        if (!exactPathValidationBudget.tryAcquire()) {
+            PerformanceMetrics.recordExactCoverPathValidationBudgetExhausted();
+            return false;
+        }
+
         Vec3 standingPos = getCoverStandingPosition(cover.getPosition());
         long pathStarted = System.nanoTime();
         Path path = navigation.createPath(standingPos.x, standingPos.y, standingPos.z, 0);
@@ -3949,13 +4027,15 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
             System.nanoTime() - pathStarted);
         boolean reachable = path != null && path.canReach() && path.getNodeCount() > 0
             && path.getNode(path.getNodeCount() - 1).asBlockPos().equals(cover.getPosition());
-        if (relocationType == RelocationType.GO_TO) {
-            PerformanceMetrics.recordGoToCoverPathValidation(reachable);
-        }
+        PerformanceMetrics.recordExactCoverPathValidation(reachable);
         if (reachable) {
             validatedCoverPaths.put(target.immutable(), path);
         }
         return reachable;
+    }
+
+    private boolean hasExactPathValidationBudget() {
+        return exactPathValidationBudget.hasRemaining();
     }
 
     /**
@@ -3987,12 +4067,13 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
                 continue;
             }
 
-            Vec3 standingPos = getCoverStandingPosition(cover.getPosition());
-            Path path = navigation.createPath(standingPos.x, standingPos.y, standingPos.z, 0);
-            if (path == null || !path.canReach() || path.getNodeCount() == 0
-                || !path.getNode(path.getNodeCount() - 1).asBlockPos().equals(cover.getPosition())) {
+            if (!hasExactPathValidationBudget()) {
+                break;
+            }
+            if (!isExactCoverPathReachable(cover)) {
                 continue;
             }
+            Path path = validatedCoverPaths.get(cover.getPosition());
             validPathsEvaluated++;
 
             RouteNodeExposure exposure = classifySuppressionRoute(path, firingOrigin, exposureCache);

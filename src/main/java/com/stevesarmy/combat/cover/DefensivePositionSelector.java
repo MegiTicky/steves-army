@@ -28,7 +28,8 @@ public final class DefensivePositionSelector {
 
     public static Optional<DefensivePositionCandidate.ProneFiringCandidate> selectProne(
         SoldierEntity soldier, @Nullable LivingEntity target, ThreatAwareness threats,
-        List<CoverFinder.ScoredCover> covers, SquadCoverContext squadCtx) {
+        List<CoverFinder.ScoredCover> covers, SquadCoverContext squadCtx,
+        ExactPathValidationBudget pathBudget) {
         CombatGoalController combatGoal = soldier.getCombatGoal();
         if (combatGoal == null) {
             trace(soldier, "no_combat_goal", "none", 0, 0, 0, 0, false, 0, -1.0D, false);
@@ -52,7 +53,7 @@ public final class DefensivePositionSelector {
             return Optional.empty();
         }
 
-        ScanResult scan = scanProneLanes(soldier, aimSource.aimPoint(), soldier.level());
+        ScanResult scan = scanProneLanes(soldier, aimSource.aimPoint(), soldier.level(), pathBudget);
         SpacingResult spacing = selectWithSpacing(scan.candidates(), squadCtx.getDefensivePositions());
         trace(soldier, spacing.candidate() != null ? "selected" : "no_valid_lane", aimSource.label(), scan.terrainValid(),
             scan.proneLos(), scan.pathValid(), scan.pathRejected(), false, squadCtx.getDefensivePositions().size(),
@@ -85,7 +86,7 @@ public final class DefensivePositionSelector {
     }
 
     private static ScanResult scanProneLanes(
-        SoldierEntity soldier, Vec3 aimPoint, Level level) {
+        SoldierEntity soldier, Vec3 aimPoint, Level level, ExactPathValidationBudget pathBudget) {
         java.util.ArrayList<DefensivePositionCandidate.ProneFiringCandidate> result = new java.util.ArrayList<>();
         BlockPos origin = soldier.blockPosition();
         int terrainValid = 0;
@@ -104,6 +105,7 @@ public final class DefensivePositionSelector {
             proneLos++;
             boolean currentPosition = pos.equals(origin);
             if (!currentPosition) {
+                if (!pathBudget.tryAcquire()) break;
                 net.minecraft.world.level.pathfinder.Path path = soldier.getNavigation().createPath(pos, 0);
                 if (path == null || !path.canReach()) {
                     pathRejected++;

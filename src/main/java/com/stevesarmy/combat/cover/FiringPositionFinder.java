@@ -209,6 +209,7 @@ public final class FiringPositionFinder {
         candidates.sort((a, b) -> Float.compare(b.score(), a.score()));
         FiringPosition best = null;
         List<CandidateDiagnostic> pathChecks = new ArrayList<>();
+        ExactPathValidationBudget pathBudget = new ExactPathValidationBudget();
         for (int candidateIndex = 0;
              candidateIndex < candidates.size() && candidateIndex < MAX_PATH_CHECK_CANDIDATES;
              candidateIndex++) {
@@ -217,6 +218,7 @@ public final class FiringPositionFinder {
                 break;
             }
             boolean samePosition = candidate.destination().equals(mg.blockPosition());
+            if (!samePosition && !pathBudget.tryAcquire()) break;
             Path path = samePosition ? null : candidate.posture() == FiringPosition.FiringPosture.OPEN_PRONE
                 ? mg.getNavigation().createPath(candidate.destination(), 0)
                 : mg.getNavigation().createPath(candidate.destination().getX() + 0.5,
@@ -339,11 +341,13 @@ public final class FiringPositionFinder {
         List<CandidateDiagnostic> pathChecks = new ArrayList<>();
         FiringPosition best = null;
         List<FiringPosition> candidates = result.candidates();
+        ExactPathValidationBudget pathBudget = new ExactPathValidationBudget();
         for (int candidateIndex = 0;
              candidateIndex < candidates.size() && candidateIndex < MAX_PATH_CHECK_CANDIDATES;
              candidateIndex++) {
             FiringPosition candidate = candidates.get(candidateIndex);
             boolean samePosition = candidate.destination().equals(mg.blockPosition());
+            if (!samePosition && !pathBudget.tryAcquire()) break;
             Path path = samePosition ? null : candidate.posture() == FiringPosition.FiringPosture.OPEN_PRONE
                 ? mg.getNavigation().createPath(candidate.destination(), 0)
                 : mg.getNavigation().createPath(candidate.destination().getX() + 0.5,
