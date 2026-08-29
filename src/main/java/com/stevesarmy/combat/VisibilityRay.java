@@ -297,7 +297,7 @@ public final class VisibilityRay {
         return nearest < Double.POSITIVE_INFINITY ? nearest : -1;
     }
 
-    private static EntityType<?> getSmokeEmitterType() {
+    public static EntityType<?> getSmokeEmitterType() {
         if (!smokeTypeResolved) {
             smokeTypeResolved = true;
             EntityType<?> resolved = BuiltInRegistries.ENTITY_TYPE.get(
@@ -306,6 +306,11 @@ public final class VisibilityRay {
                 new ResourceLocation("air")) ? resolved : null;
         }
         return smokeEmitterType;
+    }
+
+    public static void resetSmokeTypeCache() {
+        smokeTypeResolved = false;
+        smokeEmitterType = null;
     }
 
     private static boolean intersectsBlock(Level level, BlockState state, BlockPos pos,

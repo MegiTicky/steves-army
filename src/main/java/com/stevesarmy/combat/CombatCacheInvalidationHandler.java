@@ -2,8 +2,11 @@ package com.stevesarmy.combat;
 
 import com.stevesarmy.StevesArmyMod;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraftforge.event.entity.EntityJoinLevelEvent;
+import net.minecraftforge.event.entity.EntityLeaveLevelEvent;
 import net.minecraftforge.event.entity.living.LivingDeathEvent;
 import net.minecraftforge.event.level.BlockEvent;
 import net.minecraftforge.event.level.LevelEvent;
@@ -27,7 +30,14 @@ public final class CombatCacheInvalidationHandler {
 
     @SubscribeEvent
     public static void onEntityJoin(EntityJoinLevelEvent event) {
-        if (event.getEntity() instanceof LivingEntity) {
+        if (event.getEntity() instanceof LivingEntity || isSmokeEmitter(event.getEntity())) {
+            invalidate(event.getLevel());
+        }
+    }
+
+    @SubscribeEvent
+    public static void onEntityLeave(EntityLeaveLevelEvent event) {
+        if (isSmokeEmitter(event.getEntity())) {
             invalidate(event.getLevel());
         }
     }
@@ -41,7 +51,13 @@ public final class CombatCacheInvalidationHandler {
     public static void onLevelUnload(LevelEvent.Unload event) {
         if (event.getLevel() instanceof Level level) {
             invalidate(level);
+            VisibilityRay.resetSmokeTypeCache();
         }
+    }
+
+    private static boolean isSmokeEmitter(Entity entity) {
+        EntityType<?> smokeType = VisibilityRay.getSmokeEmitterType();
+        return smokeType != null && entity.getType() == smokeType;
     }
 
     private static void invalidate(Level level) {
