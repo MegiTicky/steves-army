@@ -176,16 +176,25 @@ public class EnemySoldierEntity extends SoldierEntity {
         EquipmentSlot slot = armorItem.getEquipmentSlot();
         return slot.getType() == EquipmentSlot.Type.ARMOR ? slot : null;
     }
-
     @Override
     public ItemStack getPickedResult(HitResult target) {
         getSoldierInventory().syncFromEntity(this);
 
+        CompoundTag inventoryNbt = getSoldierInventory().save();
+        StevesArmyMod.LOGGER.info("[EnemyPick] Capturing enemy {} inventory: {}", this.getId(), inventoryNbt.toString());
+        StevesArmyMod.LOGGER.info("[EnemyPick] Entity main hand: {}", getMainHandItem().toString());
+        StevesArmyMod.LOGGER.info("[EnemyPick] Entity head: {}", getItemBySlot(net.minecraft.world.entity.EquipmentSlot.HEAD).toString());
+        StevesArmyMod.LOGGER.info("[EnemyPick] Entity chest: {}", getItemBySlot(net.minecraft.world.entity.EquipmentSlot.CHEST).toString());
+        StevesArmyMod.LOGGER.info("[EnemyPick] Entity legs: {}", getItemBySlot(net.minecraft.world.entity.EquipmentSlot.LEGS).toString());
+        StevesArmyMod.LOGGER.info("[EnemyPick] Entity feet: {}", getItemBySlot(net.minecraft.world.entity.EquipmentSlot.FEET).toString());
+
         var egg = (com.stevesarmy.item.EnemySoldierSpawnEggItem) com.stevesarmy.registry.ModItems.ENEMY_SOLDIER_SPAWN_EGG.get();
+
         ItemStack stack = new ItemStack(egg);
         CompoundTag tag = new CompoundTag();
-        tag.put("Inventory", getSoldierInventory().save());
+        tag.put("Inventory", inventoryNbt);
         stack.getOrCreateTag().put("EntityTag", tag);
+        StevesArmyMod.LOGGER.info("[EnemyPick] Created spawn egg with EntityTag: {}", tag.toString());
         return stack;
     }
 

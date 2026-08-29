@@ -7,7 +7,7 @@ import com.stevesarmy.inventory.SoldierInventory;
 import com.stevesarmy.registry.ModEntities;
 import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
-import net.minecraft.nbt.ListTag;
+
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.InteractionResult;
@@ -39,34 +39,54 @@ public class EnemySoldierSpawnEggItem extends ForgeSpawnEggItem {
         ItemStack stack = context.getItemInHand();
 
         ServerLevel serverLevel = (ServerLevel) level;
-        
+
+        StevesArmyMod.LOGGER.info("[EnemySpawnEgg] === SPAWN EGG USED ===");
+        StevesArmyMod.LOGGER.info("[EnemySpawnEgg] Stack tag present: {}", stack.hasTag());
+
         EntityType<?> entityType = this.getType(stack.getTag());
         if (entityType == null) {
+            StevesArmyMod.LOGGER.warn("[EnemySpawnEgg] EntityType is null!");
             return InteractionResult.FAIL;
         }
-        
+
         EnemySoldierEntity enemy = (EnemySoldierEntity) entityType.create(serverLevel);
         if (enemy == null) {
+            StevesArmyMod.LOGGER.warn("[EnemySpawnEgg] Failed to create enemy entity!");
             return InteractionResult.FAIL;
         }
-        
+
+        StevesArmyMod.LOGGER.info("[EnemySpawnEgg] Enemy created, id: {}", enemy.getId());
+
         CompoundTag stackTag = stack.getTag();
         boolean hasEntityTag = stackTag != null && stackTag.contains("EntityTag");
-        
+
         if (hasEntityTag) {
             CompoundTag entityTag = stackTag.getCompound("EntityTag");
+            StevesArmyMod.LOGGER.info("[EnemySpawnEgg] EntityTag contents: {}", entityTag.toString());
             fillEnemyFromEntityTag(enemy, entityTag, pos);
         } else {
+            StevesArmyMod.LOGGER.info("[EnemySpawnEgg] No EntityTag, using default position");
             enemy.setPos(pos.getX() + 0.5, pos.getY() + 1.0, pos.getZ() + 0.5);
         }
-        
+
+        StevesArmyMod.LOGGER.info("[EnemySpawnEgg] After fill, inventory size: {}", enemy.getSoldierInventory().getContainerSize());
+        StevesArmyMod.LOGGER.info("[EnemySpawnEgg] After fill, inventory items:");
+        SoldierInventory inv = enemy.getSoldierInventory();
+        for (int i = 0; i < inv.getContainerSize(); i++) {
+            ItemStack item = inv.getItem(i);
+            if (!item.isEmpty()) {
+                StevesArmyMod.LOGGER.info("[EnemySpawnEgg]   Slot {}: {} x{}", i, item.getItem().toString(), item.getCount());
+            }
+        }
+        StevesArmyMod.LOGGER.info("[EnemySpawnEgg] After fill, main hand: {}", enemy.getMainHandItem().toString());
+
         enemy.setPersistenceRequired();
         serverLevel.addFreshEntity(enemy);
-        
+
         if (context.getPlayer() != null && !context.getPlayer().isCreative()) {
             stack.shrink(1);
         }
-        
+
         ItemStack mainHand = enemy.getMainHandItem();
         if (mainHand.isEmpty()) {
             equipAk47(enemy);
@@ -87,21 +107,12 @@ public class EnemySoldierSpawnEggItem extends ForgeSpawnEggItem {
         
         if (entityTag.contains("Inventory")) {
             CompoundTag inventoryTag = entityTag.getCompound("Inventory");
+            StevesArmyMod.LOGGER.info("[EnemySpawnEgg] Restoring inventory from EntityTag: {}", inventoryTag.toString());
             SoldierInventory inventory = enemy.getSoldierInventory();
-            
-            if (inventoryTag.contains("Items")) {
-                ListTag itemsList = inventoryTag.getList("Items", 10);
-                for (int i = 0; i < itemsList.size(); i++) {
-                    CompoundTag itemTag = itemsList.getCompound(i);
-                    int slot = itemTag.getInt("Slot");
-                    if (slot >= 0 && slot < inventory.getContainerSize()) {
-                        ItemStack itemStack = ItemStack.of(itemTag);
-                        inventory.setItem(slot, itemStack);
-                    }
-                }
-            }
-            
+            inventory.load(inventoryTag);
             inventory.syncArmorToEntity(enemy);
+        } else {
+            StevesArmyMod.LOGGER.warn("[EnemySpawnEgg] No Inventory key in EntityTag!");
         }
     }
 
