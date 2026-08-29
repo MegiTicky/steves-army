@@ -1,6 +1,7 @@
 package com.stevesarmy.combat;
 
 import com.stevesarmy.StevesArmyConfig;
+import com.stevesarmy.compat.VS2Compat;
 import com.stevesarmy.debug.PerformanceMetrics;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -160,6 +161,7 @@ public final class VisibilityRay {
         Vec3 direction = to.subtract(from);
         double length = direction.length();
         Vec3 unit = direction.scale(1.0 / length);
+        double shipObstruction = VS2Compat.getShipAwareBlockHitDistance(level, from, to, observer);
         Set<BlockPos> visited = new HashSet<>();
         double concealment = 0.0;
         double nearestObstruction = Double.POSITIVE_INFINITY;
@@ -200,7 +202,7 @@ public final class VisibilityRay {
                         PerformanceMetrics.recordStageTime(
                             PerformanceMetrics.Stage.LOS_BLOCK_TRAVERSAL,
                             System.nanoTime() - blockStart);
-                        return new Result(false, concealment, blocked);
+                        return new Result(false, concealment, Math.min(blocked, shipObstruction));
                     }
                 }
             }
@@ -225,6 +227,8 @@ public final class VisibilityRay {
 
         PerformanceMetrics.recordStageTime(PerformanceMetrics.Stage.LOS_BLOCK_TRAVERSAL,
             System.nanoTime() - blockStart);
+
+        nearestObstruction = Math.min(nearestObstruction, shipObstruction);
 
         // Check for smoke clouds when smoke is not ignored.
         if (smokePolicy == SmokePolicy.BLOCK) {

@@ -13,10 +13,14 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.Pose;
+import net.minecraft.world.level.BlockGetter;
+import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.fml.ModList;
 
@@ -48,6 +52,9 @@ public final class VS2Compat {
     private static MethodHandle getShipsIntersecting;
     private static MethodHandle getShipObjectManagingPos;
     private static MethodHandle getShipObjectManagingPosDouble;
+    private static MethodHandle clipIncludeShips;
+    private static MethodHandle clipIncludeShipsOnly;
+    private static MethodHandle vanillaClip;
     // Non-VSGameUtilsKt reflection (safe to use ordinary Method)
     private static Method getMountPosInShip;
     private static Method createSeatSitDown;
@@ -282,6 +289,48 @@ public final class VS2Compat {
         } catch (ReflectiveOperationException exception) {
             logReflectionFailure(exception);
             return false;
+        }
+    }
+
+    /**
+     * Returns the nearest block hit found by VS's ship-aware raycast. A vanilla
+     * hit is harmless because VisibilityRay also checks vanilla blocks itself.
+     */
+    public static double getShipAwareBlockHitDistance(Level level, Vec3 from, Vec3 to,
+                                                       @Nullable Entity source) {
+        if (!isEnabled()) {
+            return Double.POSITIVE_INFINITY;
+        }
+
+        try {
+            ClipContext context = new ClipContext(
+                from,
+                to,
+                ClipContext.Block.COLLIDER,
+                ClipContext.Fluid.NONE,
+                source
+            );
+            BlockHitResult hit;
+            if (clipIncludeShipsOnly != null) {
+                hit = (BlockHitResult) reflect(clipIncludeShipsOnly, level, context, true, null, true);
+            } else {
+                hit = (BlockHitResult) reflect(clipIncludeShips, level, context);
+                BlockHitResult vanillaHit = (BlockHitResult) reflect(vanillaClip, level, context);
+                if (hit.getType() != HitResult.Type.BLOCK
+                    || (vanillaHit.getType() == HitResult.Type.BLOCK
+                        && hit.getLocation().distanceToSqr(from)
+                            >= vanillaHit.getLocation().distanceToSqr(from))) {
+                    return Double.POSITIVE_INFINITY;
+                }
+            }
+            if (hit.getType() != HitResult.Type.BLOCK) {
+                return Double.POSITIVE_INFINITY;
+            }
+
+            return from.distanceTo(hit.getLocation());
+        } catch (ReflectiveOperationException | RuntimeException exception) {
+            logReflectionFailure(exception);
+            return Double.POSITIVE_INFINITY;
         }
     }
 
@@ -896,6 +945,22 @@ private static boolean isTransportOwnerOnShip(LivingEntity owner, SoldierState s
                 MethodType.methodType(mountedDataClass, Entity.class, Float.class));
             toWorldCoordinates = lookup.findStatic(utils, "toWorldCoordinates",
                 MethodType.methodType(vector3dClass, shipClass, double.class, double.class, double.class));
+            Class<?> raycastUtils = Class.forName(
+                "org.valkyrienskies.mod.common.world.RaycastUtilsKt");
+            clipIncludeShips = lookup.findStatic(raycastUtils, "clipIncludeShips",
+                MethodType.methodType(BlockHitResult.class, Level.class, ClipContext.class));
+            try {
+                // VS 2.4 added skipWorld, which lets us avoid classifying the
+                // vanilla result when looking for a ship-only obstruction.
+                clipIncludeShipsOnly = lookup.findStatic(raycastUtils, "clipIncludeShips",
+                    MethodType.methodType(BlockHitResult.class, Level.class, ClipContext.class,
+                        boolean.class, Long.class, boolean.class));
+            } catch (NoSuchMethodException ignored) {
+                // VS 2.3 has no skipWorld overload; the fallback below uses the
+                // vanilla-only result to identify a ship hit.
+                vanillaClip = lookup.findStatic(raycastUtils, "vanillaClip",
+                    MethodType.methodType(BlockHitResult.class, BlockGetter.class, ClipContext.class));
+            }
 
             createSeatBlockClass = Class.forName("com.simibubi.create.content.contraptions.actors.seat.SeatBlock");
             createSeatEntityClass = Class.forName("com.simibubi.create.content.contraptions.actors.seat.SeatEntity");
