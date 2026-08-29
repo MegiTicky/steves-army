@@ -20,6 +20,7 @@ public class SquadSyncHandler {
     public static void onServerTick(TickEvent.ServerTickEvent event) {
         if (event.phase == TickEvent.Phase.START) {
             PerformanceMetrics.beginTick();
+            PerformanceMetrics.beginCoverPopulationTick();
             return;
         }
         if (event.phase != TickEvent.Phase.END) return;
@@ -50,6 +51,7 @@ public class SquadSyncHandler {
             }
         }
 
+        PerformanceMetrics.endCoverPopulationTick();
         PerformanceMetrics.endTick();
     }
 }

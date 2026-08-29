@@ -58,6 +58,7 @@ public class StevesArmyConfig {
     public static final ForgeConfigSpec.BooleanValue ASYNC_COVER_SHADOW_ENABLED;
     public static final ForgeConfigSpec.BooleanValue ASYNC_COVER_PILOT_ENABLED;
     public static final ForgeConfigSpec.IntValue EXACT_PATH_VALIDATION_LIMIT;
+    public static final ForgeConfigSpec.IntValue COVER_SEARCH_FAILURE_RETRY_TICKS;
 
     static {
         BUILDER.push("aim_quality");
@@ -358,6 +359,12 @@ BUILDER.pop();
                      "Default: 16")
             .defineInRange("exactPathValidationLimit", 16, 1, 50);
 
+        COVER_SEARCH_FAILURE_RETRY_TICKS = BUILDER
+            .comment("Ticks before retrying an unchanged failed non-emergency cover search.",
+                     "The cooldown is bypassed when the soldier, threat, objective, relocation, or blacklist context changes.",
+                     "Default: 20")
+            .defineInRange("coverSearchFailureRetryTicks", 20, 1, 200);
+
         BUILDER.pop();
 
         SPEC = BUILDER.build();
@@ -526,6 +533,10 @@ BUILDER.pop();
 
     public static int getExactPathValidationLimit() {
         return EXACT_PATH_VALIDATION_LIMIT.get();
+    }
+
+    public static int getCoverSearchFailureRetryTicks() {
+        return COVER_SEARCH_FAILURE_RETRY_TICKS.get();
     }
 
     /** Legacy compatibility hook; nearby-target snapshots are disabled. */

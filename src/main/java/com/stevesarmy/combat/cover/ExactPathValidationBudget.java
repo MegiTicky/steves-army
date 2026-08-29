@@ -20,4 +20,16 @@ public final class ExactPathValidationBudget {
     public boolean hasRemaining() {
         return used < limit;
     }
+
+    public int getUsed() {
+        return used;
+    }
+
+    public int getLimit() {
+        return limit;
+    }
+
+    public boolean isExhausted() {
+        return used >= limit;
+    }
 }

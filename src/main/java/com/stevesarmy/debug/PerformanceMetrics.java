@@ -141,6 +141,24 @@ public final class PerformanceMetrics {
     private static final LongAdder emergencyCoverRequestsStale = new LongAdder();
     private static final LongAdder emergencyCoverRequestAgeSamples = new LongAdder();
     private static final LongAdder emergencyCoverRequestAgeTicks = new LongAdder();
+    private static final LongAdder coverSearchSchedulerTicks = new LongAdder();
+    private static final LongAdder coverSearchSchedulerReady = new LongAdder();
+    private static final LongAdder coverSearchSchedulerExecuted = new LongAdder();
+    private static final LongAdder coverSearchSchedulerDeferred = new LongAdder();
+    private static final AtomicLong coverSearchSchedulerMaxReady = new AtomicLong();
+    private static final AtomicLong coverSearchSchedulerMaxPending = new AtomicLong();
+    private static final Map<String, LongAdder> coverSearchOutcomes = new ConcurrentHashMap<>();
+    private static final LongAdder coverSearchFingerprintChanges = new LongAdder();
+    private static final AtomicLong currentSeekingCover = new AtomicLong();
+    private static final AtomicLong currentRepositioningCover = new AtomicLong();
+    private static final AtomicLong currentPendingCoverSearch = new AtomicLong();
+    private static final AtomicLong currentAsyncCoverPilot = new AtomicLong();
+    private static final AtomicLong currentSeekingWithoutTarget = new AtomicLong();
+    private static final AtomicLong maxSeekingCover = new AtomicLong();
+    private static final AtomicLong maxRepositioningCover = new AtomicLong();
+    private static final AtomicLong maxPendingCoverSearch = new AtomicLong();
+    private static final AtomicLong maxAsyncCoverPilot = new AtomicLong();
+    private static final AtomicLong maxSeekingWithoutTarget = new AtomicLong();
 
     public enum Stage {
         ENTITY_QUERY,
@@ -409,6 +427,24 @@ public final class PerformanceMetrics {
         emergencyCoverRequestsStale.reset();
         emergencyCoverRequestAgeSamples.reset();
         emergencyCoverRequestAgeTicks.reset();
+        coverSearchSchedulerTicks.reset();
+        coverSearchSchedulerReady.reset();
+        coverSearchSchedulerExecuted.reset();
+        coverSearchSchedulerDeferred.reset();
+        coverSearchSchedulerMaxReady.set(0L);
+        coverSearchSchedulerMaxPending.set(0L);
+        coverSearchOutcomes.clear();
+        coverSearchFingerprintChanges.reset();
+        currentSeekingCover.set(0L);
+        currentRepositioningCover.set(0L);
+        currentPendingCoverSearch.set(0L);
+        currentAsyncCoverPilot.set(0L);
+        currentSeekingWithoutTarget.set(0L);
+        maxSeekingCover.set(0L);
+        maxRepositioningCover.set(0L);
+        maxPendingCoverSearch.set(0L);
+        maxAsyncCoverPilot.set(0L);
+        maxSeekingWithoutTarget.set(0L);
         for (LongAdder adder : stageNanos) adder.reset();
         for (LongAdder adder : stageCounts) adder.reset();
         smokeQueries.reset();
@@ -903,6 +939,74 @@ phase6Selections.reset();
         if (enabled) flankSearchFingerprintChanges.increment();
     }
 
+    public static void recordCoverSearchSchedulerTick(int pending, int ready, int executed,
+                                                       int deferred, int emergencyExecuted) {
+        if (!enabled) return;
+        coverSearchSchedulerTicks.increment();
+        coverSearchSchedulerReady.add(Math.max(0, ready));
+        coverSearchSchedulerExecuted.add(Math.max(0, executed));
+        coverSearchSchedulerDeferred.add(Math.max(0, deferred));
+        coverSearchSchedulerMaxReady.accumulateAndGet(Math.max(0, ready), Math::max);
+        coverSearchSchedulerMaxPending.accumulateAndGet(Math.max(0, pending), Math::max);
+    }
+
+    public static void recordCoverSearchOutcome(String mode, String result, String reason) {
+        recordCoverSearchOutcome(mode, result, reason, 0, false);
+    }
+
+    public static void recordCoverSearchOutcome(String mode, String result, String reason,
+                                                int pathValidations, boolean budgetExhausted) {
+        if (!enabled) return;
+        String safeMode = mode == null ? "UNKNOWN" : mode;
+        String safeResult = result == null ? "UNKNOWN" : result;
+        String safeReason = reason == null ? "unknown" : reason;
+        coverSearchOutcomes.computeIfAbsent(safeMode + ":" + safeResult + ":" + safeReason,
+            ignored -> new LongAdder()).increment();
+        if (pathValidations > 0) {
+            coverSearchOutcomes.computeIfAbsent(safeMode + ":path-validations", ignored -> new LongAdder())
+                .add(pathValidations);
+        }
+        if (budgetExhausted) {
+            coverSearchOutcomes.computeIfAbsent(safeMode + ":budget-exhausted", ignored -> new LongAdder())
+                .increment();
+        }
+    }
+
+    public static void recordCoverSearchFingerprintChange() {
+        if (enabled) coverSearchFingerprintChanges.increment();
+    }
+
+    public static void beginCoverPopulationTick() {
+        if (!enabled) return;
+        currentSeekingCover.set(0L);
+        currentRepositioningCover.set(0L);
+        currentPendingCoverSearch.set(0L);
+        currentAsyncCoverPilot.set(0L);
+        currentSeekingWithoutTarget.set(0L);
+    }
+
+    public static void recordCoverPopulation(String state, boolean pendingSearch,
+                                             boolean asyncPilot, boolean hasTargetCover) {
+        if (!enabled) return;
+        if ("SEEKING_COVER".equals(state)) {
+            currentSeekingCover.incrementAndGet();
+            if (!hasTargetCover) currentSeekingWithoutTarget.incrementAndGet();
+        } else if ("REPOSITIONING".equals(state)) {
+            currentRepositioningCover.incrementAndGet();
+        }
+        if (pendingSearch) currentPendingCoverSearch.incrementAndGet();
+        if (asyncPilot) currentAsyncCoverPilot.incrementAndGet();
+    }
+
+    public static void endCoverPopulationTick() {
+        if (!enabled) return;
+        maxSeekingCover.accumulateAndGet(currentSeekingCover.get(), Math::max);
+        maxRepositioningCover.accumulateAndGet(currentRepositioningCover.get(), Math::max);
+        maxPendingCoverSearch.accumulateAndGet(currentPendingCoverSearch.get(), Math::max);
+        maxAsyncCoverPilot.accumulateAndGet(currentAsyncCoverPilot.get(), Math::max);
+        maxSeekingWithoutTarget.accumulateAndGet(currentSeekingWithoutTarget.get(), Math::max);
+    }
+
     public static void recordStageTime(Stage stage, long nanos) {
         if (!enabled) return;
         stageNanos[stage.ordinal()].add(nanos);
@@ -1344,7 +1448,8 @@ phase6Selections.reset();
             + ", suppressed=" + coverSuppressedTicks.sum() + ")\n"
             + "  Cover paths: " + coverPathRequests.sum() + " requests, "
             + coverPathRetries.sum() + " retries, " + coverPathFailures.sum() + " failures\n"
-             + "  Cover search cooldown skips: " + coverSearchCooldownSkips.sum() + "\n"
+              + "  Cover search cooldown skips: " + coverSearchCooldownSkips.sum() + "\n"
+              + "  Cover search fingerprint changes: " + coverSearchFingerprintChanges.sum() + "\n"
               + "  Cover search queue: " + coverSearchRequestsQueued.sum() + " queued, "
               + coverSearchRequestsExecuted.sum() + " executed, "
              + coverSearchRequestsDeferred.sum() + " deferred, "
@@ -1390,10 +1495,21 @@ phase6Selections.reset();
              + emergencyCoverRequestsCoalesced.sum() + " coalesced, "
              + emergencyCoverRequestsCancelled.sum() + " cancelled, "
              + emergencyCoverRequestsStale.sum() + " stale, age avg="
-             + formatTicks(emergencyCoverRequestAgeSamples.sum() == 0 ? 0.0
-                 : emergencyCoverRequestAgeTicks.sum() / (double) emergencyCoverRequestAgeSamples.sum())
-             + " ticks\n"
-            + "  Cover maintenance: " + coverMaintenanceRuns.sum() + " runs, "
+              + formatTicks(emergencyCoverRequestAgeSamples.sum() == 0 ? 0.0
+                  : emergencyCoverRequestAgeTicks.sum() / (double) emergencyCoverRequestAgeSamples.sum())
+              + " ticks\n"
+             + "  Cover scheduler: " + coverSearchSchedulerTicks.sum() + " ticks, ready="
+             + coverSearchSchedulerReady.sum() + ", executed=" + coverSearchSchedulerExecuted.sum()
+             + ", deferred=" + coverSearchSchedulerDeferred.sum() + ", max ready="
+             + coverSearchSchedulerMaxReady.get() + ", max pending=" + coverSearchSchedulerMaxPending.get() + "\n"
+             + "  Cover search outcomes: " + formatCoverSearchOutcomes() + "\n"
+             + "  Current cover population: seeking=" + currentSeekingCover.get()
+             + " (max=" + maxSeekingCover.get() + "), repositioning=" + currentRepositioningCover.get()
+             + " (max=" + maxRepositioningCover.get() + "), pending=" + currentPendingCoverSearch.get()
+             + " (max=" + maxPendingCoverSearch.get() + "), async=" + currentAsyncCoverPilot.get()
+             + " (max=" + maxAsyncCoverPilot.get() + "), seeking without target="
+             + currentSeekingWithoutTarget.get() + " (max=" + maxSeekingWithoutTarget.get() + ")\n"
+             + "  Cover maintenance: " + coverMaintenanceRuns.sum() + " runs, "
             + coverMaintenanceSkips.sum() + " skips\n"
             + "  Cover state time: " + formatMillis(coverStateNanos.sum()) + " ms total"
             + " (seeking=" + formatMillis(coverSeekingNanos.sum())
@@ -1472,6 +1588,14 @@ phase6Selections.reset();
             if (tickWorkNanos[i] > max) max = tickWorkNanos[i];
         }
         return max;
+    }
+
+    private static String formatCoverSearchOutcomes() {
+        if (coverSearchOutcomes.isEmpty()) return "none";
+        return coverSearchOutcomes.entrySet().stream()
+            .sorted(Map.Entry.comparingByKey())
+            .map(entry -> entry.getKey() + "=" + entry.getValue().sum())
+            .collect(java.util.stream.Collectors.joining(", "));
     }
 
     private static String formatMillis(double nanos) {

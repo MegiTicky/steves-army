@@ -226,6 +226,11 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
     private int queuedAttackGeneration = -1;
     private RelocationType queuedRelocationType = RelocationType.NONE;
     private BlockPos queuedRelocationCenter;
+    private QueuedSearchMode executingSearchMode;
+    private long failedSearchFingerprint = Long.MIN_VALUE;
+    private QueuedSearchMode failedSearchMode;
+    private int nextFailedSearchTick;
+    private long blacklistRevision;
 
     private BlockPos movementAttemptTarget = null;
     private int movementAttemptCount = 0;
@@ -338,6 +343,10 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
             return;
         }
 
+        if (shouldSkipFailedSearch(mode)) {
+            return;
+        }
+
         if (coverSearchPending) {
             if (searchPriority(mode) < searchPriority(queuedSearchMode)) {
                 queuedSearchMode = mode;
@@ -383,6 +392,73 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
         if (!coverSearchPending || queuedSearchMode != mode) {
             requestCoverSearch(mode);
         }
+    }
+
+    private boolean shouldSkipFailedSearch(QueuedSearchMode mode) {
+        if (!StevesArmyConfig.isRetryPolicyEnabled() || isEmergencySearchMode(mode)
+            || relocationType != RelocationType.NONE || coverSearchPending
+            || failedSearchMode != mode || soldier.tickCount >= nextFailedSearchTick) {
+            return false;
+        }
+
+        long fingerprint = getCoverSearchFingerprint(mode);
+        if (fingerprint == failedSearchFingerprint) {
+            PerformanceMetrics.recordCoverSearchCooldownSkip();
+            return true;
+        }
+
+        failedSearchFingerprint = Long.MIN_VALUE;
+        failedSearchMode = null;
+        nextFailedSearchTick = 0;
+        PerformanceMetrics.recordCoverSearchFingerprintChange();
+        return false;
+    }
+
+    private long getCoverSearchFingerprint(QueuedSearchMode mode) {
+        long fingerprint = 0xcbf29ce484222325L;
+        fingerprint = mixFingerprint(fingerprint, mode.ordinal());
+        fingerprint = mixFingerprint(fingerprint, soldier.blockPosition().asLong());
+        fingerprint = mixFingerprint(fingerprint, soldier.getSquadMode().ordinal());
+        fingerprint = mixFingerprint(fingerprint, blacklistRevision);
+
+        BlockPos currentCover = getCoverManager().getCurrentCover() != null
+            ? getCoverManager().getCurrentCover().getPosition() : null;
+        if (currentCover != null) fingerprint = mixFingerprint(fingerprint, currentCover.asLong());
+        if (relocationCenter != null) fingerprint = mixFingerprint(fingerprint, relocationCenter.asLong());
+        if (soldier.hasValidAttackTarget()) {
+            fingerprint = mixFingerprint(fingerprint, soldier.getAttackGeneration());
+            fingerprint = mixFingerprint(fingerprint, soldier.getAttackTargetPos().asLong());
+        }
+        if (soldier.getSquadMode() == SquadMode.FOLLOW) {
+            LivingEntity owner = soldier.getOwner();
+            if (owner != null) fingerprint = mixFingerprint(fingerprint, owner.blockPosition().asLong());
+        }
+        BlockPos threatPosition = getThreats().getPrimaryThreatPosition();
+        if (threatPosition != null) fingerprint = mixFingerprint(fingerprint, threatPosition.asLong());
+        Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
+        if (threatDirection != null && threatDirection.lengthSqr() > 0.001D) {
+            fingerprint = mixFingerprint(fingerprint,
+                CoverFinder.getDirectionFromVector(threatDirection).ordinal());
+        }
+        return fingerprint;
+    }
+
+    private void recordFailedSearch(QueuedSearchMode mode, CoverMoveResult result, String phase) {
+        if (!StevesArmyConfig.isRetryPolicyEnabled() || mode == null || isEmergencySearchMode(mode)
+            || relocationType != RelocationType.NONE || pendingRetryCover != null
+            || result == CoverMoveResult.COVER_STARTED || result == CoverMoveResult.ASYNC_PENDING
+            || "reservation".equals(phase)) {
+            return;
+        }
+        failedSearchMode = mode;
+        failedSearchFingerprint = getCoverSearchFingerprint(mode);
+        nextFailedSearchTick = soldier.tickCount + StevesArmyConfig.getCoverSearchFailureRetryTicks();
+    }
+
+    private void clearFailedSearch() {
+        failedSearchFingerprint = Long.MIN_VALUE;
+        failedSearchMode = null;
+        nextFailedSearchTick = 0;
     }
 
     int getSoldierTickCount() {
@@ -433,7 +509,13 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
             return;
         }
 
-        CoverMoveResult result = findAndMoveToCover();
+        executingSearchMode = mode;
+        CoverMoveResult result;
+        try {
+            result = findAndMoveToCover();
+        } finally {
+            executingSearchMode = null;
+        }
         if (mode == QueuedSearchMode.ATTACK_SELECTING && attackPhase == AttackPhase.SELECTING_COVER) {
             handleQueuedAttackSearchResult(result);
         } else if ((mode == QueuedSearchMode.REPOSITION || relocationType != RelocationType.NONE)
@@ -1326,6 +1408,8 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
     public void tick() {
         PerformanceMetrics.recordCoverTick(getCoverManager().getState().name(), machineGunnerPipeline);
         CoverBehaviorManager.CoverState state = getCoverManager().getState();
+        PerformanceMetrics.recordCoverPopulation(state.name(), coverSearchPending, asyncPilotPending,
+            getCoverManager().getTargetCover() != null);
         getCoverManager().tickSuppression(getCoverManager().isInCover());
         trackSuppressionEpisode();
 
@@ -3141,17 +3225,36 @@ private boolean shouldExitCoverForFollow() {
 
     private void logCoverSearchPerformance(CoverFinder finder, long started,
                                             CoverMoveResult result, String phase) {
+        long totalNanos = System.nanoTime() - started;
+        String mode = getExecutingSearchMode().name();
+        PerformanceMetrics.recordCoverSearchOutcome(mode, result.name(), phase,
+            exactPathValidationBudget.getUsed(), exactPathValidationBudget.isExhausted());
+        if (result == CoverMoveResult.COVER_STARTED) {
+            clearFailedSearch();
+        } else {
+            recordFailedSearch(getExecutingSearchMode(), result, phase);
+        }
         if (!DiagnosticLogManager.isCoverPerformanceLoggingEnabled()) return;
 
-        long totalNanos = System.nanoTime() - started;
         StevesArmyMod.LOGGER.info(
-            "[CoverPerf] soldier={} name={} tick={} phase={} result={} totalMs={} discoveryMs={} scoringMs={} candidates={} evaluated={} target={} pos={}",
-            soldier.getId(), soldier.getName().getString(), soldier.tickCount, phase, result,
+            "[CoverPerf] soldier={} name={} tick={} mode={} phase={} result={} totalMs={} discoveryMs={} scoringMs={} candidates={} evaluated={} target={} pos={}",
+            soldier.getId(), soldier.getName().getString(), soldier.tickCount, mode, phase, result,
             formatMillis(totalNanos), formatMillis(finder.getCandidateDiscoveryNanos()),
             formatMillis(finder.getTacticalScoringNanos()), finder.getCandidatesDiscovered(),
             finder.getCandidatesEvaluated(),
             getCoverManager().getTargetCover() != null ? getCoverManager().getTargetCover().getPosition() : "null",
             soldier.blockPosition());
+    }
+
+    private QueuedSearchMode getExecutingSearchMode() {
+        if (executingSearchMode != null) return executingSearchMode;
+        if (suppressionRouteSearchActive) {
+            return emergencyCoverSearchActive ? QueuedSearchMode.SHOT_IN_COVER
+                : QueuedSearchMode.SUPPRESSION_REPOSITION;
+        }
+        if (relocationType == RelocationType.GO_TO) return QueuedSearchMode.REPOSITION;
+        if (relocationType == RelocationType.FOLLOW) return QueuedSearchMode.REPOSITION;
+        return soldier.hasValidAttackTarget() ? QueuedSearchMode.ATTACK_SELECTING : QueuedSearchMode.NORMAL;
     }
 
     private static String formatMillis(long nanos) {
@@ -4441,6 +4544,7 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
     private void blacklistCover(BlockPos pos, BlacklistReason reason) {
         failedCoverPositions.add(pos);
         lastFailedCover = pos;
+        blacklistRevision++;
         blacklistReasons.put(pos, new BlacklistEntry(reason, System.currentTimeMillis()));
         // Release the old target cover reservation explicitly (clearTargetCover no longer releases)
         CoverPoint oldTarget = getCoverManager().getTargetCover();

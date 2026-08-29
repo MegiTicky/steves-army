@@ -22,8 +22,9 @@ import java.util.Map;
  */
 @Mod.EventBusSubscriber(modid = StevesArmyMod.MODID)
 public final class CoverSearchScheduler {
-    public static final int MAX_SEARCHES_PER_TICK = 2;
-    public static final int MAX_EMERGENCY_SEARCHES_PER_TICK = 1;
+    // A cover search is still synchronous server-thread work. Emergency requests
+    // use the same global slot and win by priority rather than adding another slot.
+    public static final int MAX_SEARCHES_PER_TICK = 1;
     public static final int ROUTINE_STAGGER_TICKS = 6;
     private static final int PRIORITY_AGING_INTERVAL_TICKS = 40;
 
@@ -94,7 +95,12 @@ public final class CoverSearchScheduler {
 
     @SubscribeEvent
     public static void onServerTick(TickEvent.ServerTickEvent event) {
-        if (event.phase != TickEvent.Phase.END || PENDING.isEmpty()) {
+        if (event.phase != TickEvent.Phase.END) {
+            return;
+        }
+
+        if (PENDING.isEmpty()) {
+            PerformanceMetrics.recordCoverSearchSchedulerTick(0, 0, 0, 0, 0);
             return;
         }
 
@@ -106,6 +112,7 @@ public final class CoverSearchScheduler {
             }
         }
         if (ready.isEmpty()) {
+            PerformanceMetrics.recordCoverSearchSchedulerTick(PENDING.size(), 0, 0, 0, 0);
             return;
         }
 
@@ -114,30 +121,28 @@ public final class CoverSearchScheduler {
             .thenComparingLong(request -> request.sequence));
 
         int executed = 0;
+        int deferred = 0;
         int emergencyExecuted = 0;
         for (Request request : ready) {
-            if (request.emergency && emergencyExecuted >= MAX_EMERGENCY_SEARCHES_PER_TICK) {
-                PerformanceMetrics.recordEmergencyCoverRequestDeferred();
-                continue;
-            }
-            if (!request.emergency && executed >= MAX_SEARCHES_PER_TICK) {
-                if (request.goTo) {
+            if (executed >= MAX_SEARCHES_PER_TICK) {
+                deferred++;
+                if (request.emergency) {
+                    PerformanceMetrics.recordEmergencyCoverRequestDeferred();
+                } else if (request.goTo) {
                     PerformanceMetrics.recordGoToCoverSearchRequestDeferred();
                 } else {
                     PerformanceMetrics.recordCoverSearchRequestDeferred();
                 }
                 continue;
             }
-
+            if (request.emergency) {
+                emergencyExecuted++;
+            }
             // Remove before execution so a callback can safely enqueue a follow-up.
             if (PENDING.remove(request.goal) != request) {
                 continue;
             }
-            if (request.emergency) {
-                emergencyExecuted++;
-            } else {
-                executed++;
-            }
+            executed++;
             long queueAge = request.queueAge(currentTick);
             if (request.emergency) {
                 PerformanceMetrics.recordEmergencyCoverRequestAge(queueAge);
@@ -174,6 +179,8 @@ public final class CoverSearchScheduler {
                 }
             }
         }
+        PerformanceMetrics.recordCoverSearchSchedulerTick(PENDING.size(), ready.size(), executed,
+            deferred, emergencyExecuted);
     }
 
     @SubscribeEvent
