@@ -2,25 +2,19 @@ package com.stevesarmy.combat;
 
 import com.stevesarmy.StevesArmyConfig;
 import com.stevesarmy.compat.VS2Compat;
+import com.stevesarmy.combat.smoke.SmokeSourceRegistry;
 import com.stevesarmy.debug.PerformanceMetrics;
 import net.minecraft.core.BlockPos;
-import net.minecraft.core.registries.BuiltInRegistries;
-import net.minecraft.resources.ResourceLocation;
-import net.minecraft.world.entity.Entity;
-import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.shapes.VoxelShape;
 
 import java.util.HashSet;
-import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.Set;
 import java.util.WeakHashMap;
 
@@ -29,8 +23,6 @@ public final class VisibilityRay {
     private static final double MAX_CONCEALMENT = 1.0;
     private static final double LEAF_CONCEALMENT = 0.75;
 
-    private static boolean smokeTypeResolved;
-    private static EntityType<?> smokeEmitterType;
     private static final Map<Level, TraceCache> TRACE_CACHES =
         java.util.Collections.synchronizedMap(new WeakHashMap<>());
 
@@ -96,14 +88,14 @@ public final class VisibilityRay {
         for (BlockPos ignoredBlock : ignoredBlocks) {
             if (ignoredBlock != null) ignored.add(ignoredBlock);
         }
-        return traceUncached(level, from, to, observer, SmokePolicy.BLOCK, Set.copyOf(ignored), false);
+        return traceUncached(level, from, to, observer, SmokePolicy.BLOCK, Set.copyOf(ignored));
     }
 
     /** Bypasses the optimization cache for an immediate smoke-ignoring shot check. */
     public static Result traceFreshIgnoringSmoke(Level level, Vec3 from, Vec3 to,
                                                   LivingEntity observer) {
         PerformanceMetrics.recordVisibilityRay();
-        return traceUncached(level, from, to, observer, SmokePolicy.IGNORE, Set.of(), false);
+        return traceUncached(level, from, to, observer, SmokePolicy.IGNORE, Set.of());
     }
 
     private static Result trace(Level level, Vec3 from, Vec3 to, LivingEntity observer,
@@ -120,7 +112,7 @@ public final class VisibilityRay {
 
             PerformanceMetrics.recordSameTickVisibilityFrameMiss();
             PerformanceMetrics.recordVisibilityRayCacheMiss();
-            Result result = traceUncached(level, from, to, observer, smokePolicy, immutableIgnored, true);
+            Result result = traceUncached(level, from, to, observer, smokePolicy, immutableIgnored);
             SameTickPerceptionFrame.putVisibility(level, observer == null ? 0 : observer.getId(),
                 from, to, smokePolicy, immutableIgnored, result);
             return result;
@@ -129,7 +121,7 @@ public final class VisibilityRay {
         int cacheTicks = StevesArmyConfig.getPositionVisibilityCacheTicks();
         if (cacheTicks <= 0) {
             PerformanceMetrics.recordVisibilityRay();
-            return traceUncached(level, from, to, observer, smokePolicy, immutableIgnored, true);
+            return traceUncached(level, from, to, observer, smokePolicy, immutableIgnored);
         }
 
         long currentTick = level.getGameTime();
@@ -143,7 +135,7 @@ public final class VisibilityRay {
         }
 
         PerformanceMetrics.recordVisibilityRayCacheMiss();
-        Result result = traceUncached(level, from, to, observer, smokePolicy, immutableIgnored, true);
+        Result result = traceUncached(level, from, to, observer, smokePolicy, immutableIgnored);
         if (cache.results.size() >= 8192) {
             cache.results.clear();
         }
@@ -152,8 +144,7 @@ public final class VisibilityRay {
     }
 
     private static Result traceUncached(Level level, Vec3 from, Vec3 to, LivingEntity observer,
-                                         SmokePolicy smokePolicy, Set<BlockPos> ignoredBlocks,
-                                         boolean usePerceptionFrame) {
+                                         SmokePolicy smokePolicy, Set<BlockPos> ignoredBlocks) {
         if (from.distanceToSqr(to) < EPSILON) {
             return new Result(true, 0.0, Double.POSITIVE_INFINITY);
         }
@@ -233,7 +224,7 @@ public final class VisibilityRay {
         // Check for smoke clouds when smoke is not ignored.
         if (smokePolicy == SmokePolicy.BLOCK) {
             long smokeStart = System.nanoTime();
-            double smokeEntry = findSmokeIntersection(level, from, to, usePerceptionFrame);
+            double smokeEntry = findSmokeIntersection(level, from, to);
             PerformanceMetrics.recordStageTime(PerformanceMetrics.Stage.SMOKE_LOOKUP,
                 System.nanoTime() - smokeStart);
             if (smokeEntry >= 0) {
@@ -267,50 +258,18 @@ public final class VisibilityRay {
         }
     }
 
-    private static double findSmokeIntersection(Level level, Vec3 from, Vec3 to,
-                                                boolean usePerceptionFrame) {
-        EntityType<?> type = getSmokeEmitterType();
-        if (type == null) {
+    private static double findSmokeIntersection(Level level, Vec3 from, Vec3 to) {
+        if (!SmokeSourceRegistry.hasActiveSmoke(level)) {
             return -1;
         }
-        // Use a tight search box: the ray's AABB inflated by a tiny margin.
-        AABB rayBounds = new AABB(from, to).inflate(EPSILON);
-        List<? extends Entity> clouds = usePerceptionFrame
-            && StevesArmyConfig.isPerceptionFrameEnabled()
-            ? SameTickPerceptionFrame.getSmokeEntities(level, rayBounds, type)
-            : level.getEntities((Entity) null, rayBounds,
-                e -> e.getType() == type && e.isAlive());
-        PerformanceMetrics.recordSmokeQuery(clouds.size());
-        double nearest = Double.POSITIVE_INFINITY;
-        for (Entity cloud : clouds) {
-            Optional<Vec3> hit = cloud.getBoundingBox().clip(from, to);
-            if (hit.isPresent()) {
-                double entryDist = from.distanceTo(hit.get());
-                if (entryDist < nearest) {
-                    nearest = entryDist;
-                }
-            }
-        }
-        if (nearest < Double.POSITIVE_INFINITY) {
+        long smokeStart = System.nanoTime();
+        double result = SmokeSourceRegistry.findSmokeIntersection(level, from, to);
+        PerformanceMetrics.recordStageTime(PerformanceMetrics.Stage.SMOKE_LOOKUP,
+            System.nanoTime() - smokeStart);
+        if (result >= 0) {
             PerformanceMetrics.recordSmokeHit();
         }
-        return nearest < Double.POSITIVE_INFINITY ? nearest : -1;
-    }
-
-    public static EntityType<?> getSmokeEmitterType() {
-        if (!smokeTypeResolved) {
-            smokeTypeResolved = true;
-            EntityType<?> resolved = BuiltInRegistries.ENTITY_TYPE.get(
-                new ResourceLocation("createbigcannons", "smoke_emitter"));
-            smokeEmitterType = resolved != BuiltInRegistries.ENTITY_TYPE.get(
-                new ResourceLocation("air")) ? resolved : null;
-        }
-        return smokeEmitterType;
-    }
-
-    public static void resetSmokeTypeCache() {
-        smokeTypeResolved = false;
-        smokeEmitterType = null;
+        return result;
     }
 
     private static boolean intersectsBlock(Level level, BlockState state, BlockPos pos,

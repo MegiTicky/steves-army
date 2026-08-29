@@ -1,9 +1,9 @@
 package com.stevesarmy.combat;
 
 import com.stevesarmy.StevesArmyMod;
+import com.stevesarmy.combat.smoke.SmokeSourceRegistry;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.entity.Entity;
-import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraftforge.event.entity.EntityJoinLevelEvent;
 import net.minecraftforge.event.entity.EntityLeaveLevelEvent;
@@ -30,15 +30,21 @@ public final class CombatCacheInvalidationHandler {
 
     @SubscribeEvent
     public static void onEntityJoin(EntityJoinLevelEvent event) {
-        if (event.getEntity() instanceof LivingEntity || isSmokeEmitter(event.getEntity())) {
+        Entity entity = event.getEntity();
+        if (entity instanceof LivingEntity || SmokeSourceRegistry.isSmokeEntity(entity)) {
             invalidate(event.getLevel());
+            if (SmokeSourceRegistry.isSmokeEntity(entity)) {
+                SmokeSourceRegistry.onSmokeEntityJoin(event.getLevel());
+            }
         }
     }
 
     @SubscribeEvent
     public static void onEntityLeave(EntityLeaveLevelEvent event) {
-        if (isSmokeEmitter(event.getEntity())) {
+        Entity entity = event.getEntity();
+        if (SmokeSourceRegistry.isSmokeEntity(entity)) {
             invalidate(event.getLevel());
+            SmokeSourceRegistry.onSmokeEntityLeave(event.getLevel());
         }
     }
 
@@ -51,13 +57,8 @@ public final class CombatCacheInvalidationHandler {
     public static void onLevelUnload(LevelEvent.Unload event) {
         if (event.getLevel() instanceof Level level) {
             invalidate(level);
-            VisibilityRay.resetSmokeTypeCache();
+            SmokeSourceRegistry.reset();
         }
-    }
-
-    private static boolean isSmokeEmitter(Entity entity) {
-        EntityType<?> smokeType = VisibilityRay.getSmokeEmitterType();
-        return smokeType != null && entity.getType() == smokeType;
     }
 
     private static void invalidate(Level level) {

@@ -1,8 +1,6 @@
 package com.stevesarmy.combat;
 
 import com.stevesarmy.debug.PerformanceMetrics;
-import net.minecraft.world.entity.Entity;
-import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.AABB;
@@ -11,7 +9,6 @@ import net.minecraft.world.phys.Vec3;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -23,11 +20,8 @@ import java.util.WeakHashMap;
  */
 public final class SameTickPerceptionFrame {
     private static final int CELL_SIZE = 16;
-    private static final double ENTITY_CELL_MARGIN = 8.0;
     private static final int MAX_LIVING_QUERIES = 2048;
-    private static final int MAX_SMOKE_CELLS = 4096;
     private static final int MAX_VISIBILITY_RESULTS = 16384;
-    private static final int MAX_SMOKE_QUERY_CELLS = 512;
     private static final Map<Level, Frame> FRAMES =
         Collections.synchronizedMap(new WeakHashMap<>());
 
@@ -64,57 +58,12 @@ public final class SameTickPerceptionFrame {
         return result;
     }
 
-    public static List<? extends Entity> getSmokeEntities(Level level, AABB bounds,
-                                                            EntityType<?> smokeType) {
-        if (bounds.minX > bounds.maxX || bounds.minY > bounds.maxY || bounds.minZ > bounds.maxZ) {
-            return List.of();
-        }
-
-        Frame frame = getFrame(level, level.getGameTime());
-        Set<Entity> result = Collections.newSetFromMap(new IdentityHashMap<>());
-        int minX = floorCell(bounds.minX);
-        int minY = floorCell(bounds.minY);
-        int minZ = floorCell(bounds.minZ);
-        int maxX = floorCell(bounds.maxX);
-        int maxY = floorCell(bounds.maxY);
-        int maxZ = floorCell(bounds.maxZ);
-
-        long cellCount = (long) (maxX - minX + 1) * (maxY - minY + 1) * (maxZ - minZ + 1);
-        if (cellCount > MAX_SMOKE_QUERY_CELLS) {
-            return List.copyOf(new ArrayList<>(level.getEntities(
-                (Entity) null, bounds,
-                entity -> entity.getType() == smokeType && entity.isAlive())));
-        }
-
-        for (int x = minX; x <= maxX; x++) {
-            for (int y = minY; y <= maxY; y++) {
-                for (int z = minZ; z <= maxZ; z++) {
-                    SmokeCellKey key = new SmokeCellKey(x, y, z, smokeType);
-                    List<Entity> cellEntities = frame.smokeCells.get(key);
-                    if (cellEntities == null) {
-                        cellEntities = querySmokeCell(level, x, y, z, smokeType);
-                        if (frame.smokeCells.size() >= MAX_SMOKE_CELLS) {
-                            frame.smokeCells.clear();
-                        }
-                        frame.smokeCells.put(key, cellEntities);
-                        PerformanceMetrics.recordSameTickSmokeFrameMiss();
-                    } else {
-                        PerformanceMetrics.recordSameTickSmokeFrameHit();
-                    }
-                    result.addAll(cellEntities);
-                }
-            }
-        }
-        return List.copyOf(new ArrayList<>(result));
-    }
-
     public static VisibilityRay.Result getVisibility(Level level, int observerId,
                                                        Vec3 from, Vec3 to,
                                                        VisibilityRay.SmokePolicy smokePolicy,
                                                        Set<net.minecraft.core.BlockPos> ignoredBlocks) {
         Frame frame = getFrame(level, level.getGameTime());
-        VisibilityKey key = new VisibilityKey(observerId, from, to, smokePolicy,
-            Set.copyOf(ignoredBlocks));
+        VisibilityKey key = quantizedKey(observerId, from, to, smokePolicy, ignoredBlocks);
         return frame.visibilityResults.get(key);
     }
 
@@ -123,12 +72,21 @@ public final class SameTickPerceptionFrame {
                                      Set<net.minecraft.core.BlockPos> ignoredBlocks,
                                      VisibilityRay.Result result) {
         Frame frame = getFrame(level, level.getGameTime());
-        VisibilityKey key = new VisibilityKey(observerId, from, to, smokePolicy,
-            Set.copyOf(ignoredBlocks));
+        VisibilityKey key = quantizedKey(observerId, from, to, smokePolicy, ignoredBlocks);
         if (frame.visibilityResults.size() >= MAX_VISIBILITY_RESULTS) {
             frame.visibilityResults.clear();
         }
         frame.visibilityResults.put(key, result);
+    }
+
+    /** Quantizes Vec3 coordinates to half-block resolution for cache key stability. */
+    private static VisibilityKey quantizedKey(int observerId, Vec3 from, Vec3 to,
+                                               VisibilityRay.SmokePolicy smokePolicy,
+                                               Set<net.minecraft.core.BlockPos> ignoredBlocks) {
+        return new VisibilityKey(observerId,
+            (int) Math.floor(from.x * 2), (int) Math.floor(from.y * 2), (int) Math.floor(from.z * 2),
+            (int) Math.floor(to.x * 2), (int) Math.floor(to.y * 2), (int) Math.floor(to.z * 2),
+            smokePolicy, Set.copyOf(ignoredBlocks));
     }
 
     public static void invalidate(Level level) {
@@ -148,35 +106,21 @@ public final class SameTickPerceptionFrame {
         }
     }
 
-    private static List<Entity> querySmokeCell(Level level, int x, int y, int z,
-                                                EntityType<?> smokeType) {
-        double minX = x * CELL_SIZE;
-        double minY = y * CELL_SIZE;
-        double minZ = z * CELL_SIZE;
-        AABB cellBounds = new AABB(minX, minY, minZ,
-            minX + CELL_SIZE, minY + CELL_SIZE, minZ + CELL_SIZE)
-            .inflate(ENTITY_CELL_MARGIN);
-        return List.copyOf(new ArrayList<>(level.getEntities(
-            (Entity) null, cellBounds,
-            entity -> entity.getType() == smokeType && entity.isAlive())));
-    }
-
     private static int floorCell(double coordinate) {
         return (int) Math.floor(coordinate / CELL_SIZE);
     }
 
     private record CellKey(int x, int y, int z, int radius) {}
 
-    private record SmokeCellKey(int x, int y, int z, EntityType<?> type) {}
-
-    private record VisibilityKey(int observerId, Vec3 from, Vec3 to,
+    private record VisibilityKey(int observerId,
+                                 int fromX, int fromY, int fromZ,
+                                 int toX, int toY, int toZ,
                                  VisibilityRay.SmokePolicy smokePolicy,
                                  Set<net.minecraft.core.BlockPos> ignoredBlocks) {}
 
     private static final class Frame {
         private final long tick;
         private final Map<CellKey, List<LivingEntity>> livingQueries = new HashMap<>();
-        private final Map<SmokeCellKey, List<Entity>> smokeCells = new HashMap<>();
         private final Map<VisibilityKey, VisibilityRay.Result> visibilityResults = new HashMap<>();
 
         private Frame(long tick) {
