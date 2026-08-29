@@ -1892,7 +1892,7 @@ public BlockPos getPingMoveTarget() {
         } else {
             halfCoverRisePending = true;
         }
-        this.setPose(lowCrouch ? Pose.SWIMMING : Pose.CROUCHING);
+        this.setPose(lowCrouch ? Pose.SWIMMING : Pose.STANDING);
         this.refreshDimensions();
         tracePeek("low-crouch", "changed=" + wasLowCrouching + "->" + lowCrouch);
     }

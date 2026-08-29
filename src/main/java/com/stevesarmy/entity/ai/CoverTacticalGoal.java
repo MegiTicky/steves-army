@@ -66,6 +66,9 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
     private int reevaluateCounter = 0;
     private int noProgressTicks = 0;
     private int seekingTicks = 0;
+    private int repositioningTicks = 0;
+    private int consecutiveFailedSearches = 0;
+    private int searchExhaustionCooldown = 0;
     private int goToRelocationTicks = 0;
     private Vec3 lastSeekingPosition = null;
     // A prone lane is intentionally not a CoverPoint: no reservation, peek state, or cover bonus.
@@ -89,6 +92,9 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
     private static final float BACKWARD_HYSTERESIS_THRESHOLD = 0.35f;
     private static final long MIN_PEEK_INTERVAL_MS = 2000;
     private static final int MAX_SEEKING_TICKS = 200;
+    private static final int MAX_REPOSITIONING_TICKS = 200;
+    private static final int MAX_CONSECUTIVE_FAILED_SEARCHES = 4;
+    private static final int SEARCH_EXHAUSTION_COOLDOWN_TICKS = 60;
     // GO_TO must fall back to direct navigation promptly if cover search is
     // queued behind a large squad or repeatedly fails to produce a route.
     private static final int MAX_GO_TO_RELOCATION_TICKS = MAX_SEEKING_TICKS;
@@ -1505,6 +1511,12 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
         if (state != CoverBehaviorManager.CoverState.SEEKING_COVER) {
             seekingTicks = 0;
         }
+        if (state != CoverBehaviorManager.CoverState.REPOSITIONING) {
+            repositioningTicks = 0;
+        }
+        if (searchExhaustionCooldown > 0 && state != CoverBehaviorManager.CoverState.SEEKING_COVER) {
+            searchExhaustionCooldown--;
+        }
         
         if (DiagnosticLogManager.isCoverLoggingEnabled()) {
             tickLogCounter++;
@@ -1623,13 +1635,21 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
                     asyncPilotPending = false;
                     asyncPilotSubmittedTick = Long.MIN_VALUE;
                     PerformanceMetrics.recordPhase6FallbackTimeout();
+                    consecutiveFailedSearches++;
                     runAsyncPilotFallback();
                 }
                 return;
             }
+
+            // If we are in search-exhaustion cooldown, wait without re-requesting
+            if (searchExhaustionCooldown > 0) {
+                searchExhaustionCooldown--;
+                return;
+            }
+
             requestCoverSearch(soldier.hasValidAttackTarget()
                 ? QueuedSearchMode.ATTACK_SELECTING : QueuedSearchMode.NORMAL);
-            seekingTicks = 0;
+            seekingTicks++;
             noProgressTicks = 0;
             lastSeekingPosition = null;
             return;
@@ -1773,7 +1793,7 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
         int seekingTimeout = relocationType != RelocationType.NONE ? MAX_SEEKING_TICKS * 3 : MAX_SEEKING_TICKS;
         if (seekingTicks > seekingTimeout) {
             if (soldier.hasValidAttackTarget()) {
-                StevesArmyMod.LOGGER.info("[CoverNav] Soldier {} ({}) ATTACK seeking timeout, resetting. cover={}",
+                StevesArmyMod.LOGGER.info("[CoverNav] Soldier {} ({}) seeking timeout, resetting. cover={}",
                     soldier.getId(), soldier.getName().getString(), targetCover != null ? targetCover.getPosition() : "null");
             }
             getCoverManager().resetPeekState();
@@ -1783,6 +1803,8 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
             seekingTicks = 0;
             noProgressTicks = 0;
             lastSeekingPosition = null;
+            consecutiveFailedSearches = 0;
+            searchExhaustionCooldown = SEARCH_EXHAUSTION_COOLDOWN_TICKS;
         }
     }
     
@@ -1843,6 +1865,9 @@ private void tickRepositioning() {
                 getCoverManager().setState(CoverBehaviorManager.CoverState.IN_COVER);
             } else {
                 getCoverManager().setState(CoverBehaviorManager.CoverState.SEEKING_COVER);
+                // Immediately request a new search so the soldier doesn't idle
+                requestCoverSearch(soldier.hasValidAttackTarget()
+                    ? QueuedSearchMode.ATTACK_SELECTING : QueuedSearchMode.NORMAL);
             }
             return;
         }
@@ -1853,6 +1878,31 @@ private void tickRepositioning() {
         }
 
         ensureMovementAttemptTarget(targetCover);
+
+        // Repositioning timeout: if we've been repositioning too long, abort
+        if (repositioningTicks > MAX_REPOSITIONING_TICKS) {
+            if (DiagnosticLogManager.isCoverLoggingEnabled()) {
+                StevesArmyMod.LOGGER.info("[CoverNav] Soldier {} repositioning timeout after {} ticks, target={}",
+                    soldier.getId(), repositioningTicks, targetCover != null ? targetCover.getPosition() : "null");
+            }
+            if (targetCover != null) {
+                blacklistCover(targetCover.getPosition(), BlacklistReason.STUCK_REPOSITIONING);
+            }
+            getCoverManager().clearTargetCover();
+            getPositionController().clear();
+            if (currentCover != null) {
+                getCoverManager().setState(CoverBehaviorManager.CoverState.IN_COVER);
+            } else {
+                getCoverManager().setState(CoverBehaviorManager.CoverState.SEEKING_COVER);
+                requestCoverSearch(soldier.hasValidAttackTarget()
+                    ? QueuedSearchMode.ATTACK_SELECTING : QueuedSearchMode.NORMAL);
+            }
+            repositioningTicks = 0;
+            stuckTicks = 0;
+            noProgressTicks = 0;
+            lastSeekingPosition = null;
+            return;
+        }
 
         if (movementAttemptCount == 0) {
             moveToCover(targetCover);
@@ -1937,6 +1987,9 @@ private void tickRepositioning() {
                     getCoverManager().setState(CoverBehaviorManager.CoverState.IN_COVER);
                 } else {
                     getCoverManager().setState(CoverBehaviorManager.CoverState.SEEKING_COVER);
+                    // Immediately request a search so the soldier doesn't idle
+                    requestCoverSearch(soldier.hasValidAttackTarget()
+                        ? QueuedSearchMode.ATTACK_SELECTING : QueuedSearchMode.NORMAL);
                 }
                 stuckTicks = 0;
             }
@@ -4469,6 +4522,10 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
         selectedSuppressionRoute = null;
         activeSuppressionRouteMovement = RouteMovement.NORMAL;
         soldier.setLowCrouching(false);
+        // Reset search exhaustion state on successful cover acquisition
+        consecutiveFailedSearches = 0;
+        searchExhaustionCooldown = 0;
+        repositioningTicks = 0;
         // Promote target to current — releases old reservation, sets metadata
         getCoverManager().promoteTargetToCurrentCover();
         

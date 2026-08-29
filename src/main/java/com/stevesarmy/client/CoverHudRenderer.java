@@ -56,9 +56,9 @@ public class CoverHudRenderer {
             y += LINE_HEIGHT;
 
             int stateOrdinal = soldier.getSyncedCoverState();
-            CoverBehaviorManager.CoverState state = CoverBehaviorManager.CoverState.values()[stateOrdinal];
+            CoverBehaviorManager.CoverState state = CoverBehaviorManager.stateFromOrdinal(stateOrdinal);
             int peekOrdinal = soldier.getSyncedPeekState();
-            PeekController.State peekState = PeekController.State.values()[peekOrdinal];
+            PeekController.State peekState = PeekController.stateFromOrdinal(peekOrdinal);
             float suppression = soldier.getSyncedSuppressionLevel();
 
             String stateLine = String.format("  %s | Peek:%s | Supp:%.0f%% | %s",
@@ -70,7 +70,8 @@ public class CoverHudRenderer {
             if (!currentPos.equals(BlockPos.ZERO)) {
                 float quality = soldier.getSyncedCoverCurrentQuality();
                 int typeOrdinal = soldier.getSyncedCoverCurrentType();
-                CoverType type = CoverType.values()[typeOrdinal];
+                CoverType[] coverTypes = CoverType.values();
+                CoverType type = (typeOrdinal >= 0 && typeOrdinal < coverTypes.length) ? coverTypes[typeOrdinal] : CoverType.NONE;
 
                 CoverDebugManager.TopCoversDebugData top = CoverDebugManager.getSoldierTopCovers(soldier.getId());
                 int peeks = top != null ? top.peekCount : 0;

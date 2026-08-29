@@ -128,6 +128,12 @@ public class CoverBehaviorManager {
         return state;
     }
 
+    /** Bounds-safe ordinal decode for client renderers. Returns NO_COVER for unknown ordinals. */
+    public static CoverState stateFromOrdinal(int ordinal) {
+        CoverState[] values = CoverState.values();
+        return (ordinal >= 0 && ordinal < values.length) ? values[ordinal] : CoverState.NO_COVER;
+    }
+
     /** Revision used by the isolated machine-gunner support evaluator. */
     public long getTacticalRevision() {
         return tacticalRevision;
@@ -269,7 +275,7 @@ public class CoverBehaviorManager {
                 state);
         }
 
-if (currentCover != null) {
+        if (currentCover != null) {
             CoverReservationManager.release(currentCover.getPosition(), soldier);
             this.lastCover = currentCover;
             syncLastCover();
@@ -287,8 +293,8 @@ if (currentCover != null) {
         this.coverFacingDirection = null;
         this.savedPeekCount = this.peekCountSameCover;
         this.peekCountSameCover = 0;
-        this.state = CoverState.NO_COVER;
-        syncState();
+        // Route through setState so any future invariant/cleanup logic applies
+        setState(CoverState.NO_COVER);
 
         this.continuousSuppressionRepositionRequested = false;
 

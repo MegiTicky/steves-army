@@ -559,7 +559,7 @@ buffer.vertex(matrix, (float)x1, (float)y1, (float)z2).color(r, g, b, a).endVert
                 Minecraft.getInstance().player.getBoundingBox().inflate(50))) {
             
             int stateOrdinal = soldier.getSyncedCoverState();
-            CoverBehaviorManager.CoverState state = CoverBehaviorManager.CoverState.values()[stateOrdinal];
+            CoverBehaviorManager.CoverState state = CoverBehaviorManager.stateFromOrdinal(stateOrdinal);
             
             BlockPos currentPos = soldier.getSyncedCoverCurrentPos();
             BlockPos targetPos = soldier.getSyncedCoverTargetPos();
@@ -622,7 +622,7 @@ buffer.vertex(matrix, (float)x1, (float)y1, (float)z2).color(r, g, b, a).endVert
             
             BlockPos peekPos = soldier.getSyncedPeekPosition();
             int peekStateOrdinal = soldier.getSyncedPeekState();
-            PeekController.State peekState = PeekController.State.values()[peekStateOrdinal];
+            PeekController.State peekState = PeekController.stateFromOrdinal(peekStateOrdinal);
             
             if (!peekPos.equals(BlockPos.ZERO)) {
                 int peekColor = getPeekStateColor(peekState);
@@ -968,10 +968,10 @@ private static void renderSoldierCoverLabels(PoseStack poseStack, Vec3 cameraPos
                 Minecraft.getInstance().player.getBoundingBox().inflate(50))) {
             
             int stateOrdinal = soldier.getSyncedCoverState();
-            CoverBehaviorManager.CoverState state = CoverBehaviorManager.CoverState.values()[stateOrdinal];
+            CoverBehaviorManager.CoverState state = CoverBehaviorManager.stateFromOrdinal(stateOrdinal);
             
             int peekStateOrdinal = soldier.getSyncedPeekState();
-            PeekController.State peekState = PeekController.State.values()[peekStateOrdinal];
+            PeekController.State peekState = PeekController.stateFromOrdinal(peekStateOrdinal);
             
             Vec3 soldierPos = soldier.position();
             double x = soldierPos.x - cameraPos.x + 0.5;
@@ -1416,6 +1416,7 @@ private static void renderSoldierCoverLabels(PoseStack poseStack, Vec3 cameraPos
             case EXPOSED: return 0x00FF00;
             case RETURNING_TO_COVER: return 0xFF8800;
             case MOVING_TO_PEEK: return 0x00FFFF;
+            case INACTIVE: return 0x404040;
             default: return 0x808080;
         }
     }

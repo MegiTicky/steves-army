@@ -24,7 +24,8 @@ public class PeekController {
         MOVING_TO_PEEK,
         EXPOSED,
         RETURNING_TO_COVER,
-        STANDING_IN_HALF_COVER
+        STANDING_IN_HALF_COVER,
+        INACTIVE
     }
 
     private static final long EXPOSURE_TIME_MIN_MS = 3000;   // 3 seconds
@@ -59,6 +60,12 @@ public class PeekController {
     }
 
     public State getState() { return state; }
+
+    /** Bounds-safe ordinal decode for client renderers. Returns INACTIVE for unknown ordinals. */
+    public static State stateFromOrdinal(int ordinal) {
+        State[] values = State.values();
+        return (ordinal >= 0 && ordinal < values.length) ? values[ordinal] : State.INACTIVE;
+    }
 
     public long getTimeInCurrentState() {
         if (stateStartTime == 0) return 0;
@@ -129,7 +136,7 @@ public class PeekController {
     }
 
     public void reset() {
-        state = State.HIDING;
+        state = State.INACTIVE;
         stateStartTime = 0;
         currentPeekPos = null;
         returnAllowedDuringReload = false;
