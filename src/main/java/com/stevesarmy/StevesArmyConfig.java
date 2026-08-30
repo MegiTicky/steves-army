@@ -359,8 +359,8 @@ BUILDER.pop();
         ASYNC_PATHFINDING_ENABLED = BUILDER
             .comment("Run soldier A* path searches on a bounded worker pool.",
                      "World preparation, path validation, navigation, and entity movement remain on the server thread.",
-                     "Default: false")
-            .define("asyncPathfindingEnabled", false);
+                     "Default: true")
+            .define("asyncPathfindingEnabled", true);
 
         ASYNC_PATHFINDING_THREADS = BUILDER
             .comment("Maximum worker threads used for soldier A* path searches.",
