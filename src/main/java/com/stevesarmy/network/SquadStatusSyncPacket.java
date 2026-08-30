@@ -94,7 +94,7 @@ public class SquadStatusSyncPacket {
             for (ServerLevel level : player.getServer().getAllLevels()) {
                 for (var entity : level.getEntities().getAll()) {
                     if (entity instanceof SoldierEntity soldier && soldier.isOwnedBy(player)) {
-                        if (soldier.isAlive()) {
+                        if (soldier.isAlive() && !soldier.isRemoved()) {
                             loadedSoldiers.put(soldier.getUUID(), soldier);
                             registry.refresh(soldier, level);
                         } else {
@@ -106,7 +106,7 @@ public class SquadStatusSyncPacket {
             registry.pruneDeadEntries();
             for (OwnedSoldierRegistry.Entry snapshot : registry.getOwned(player.getUUID())) {
                 SoldierEntity soldier = loadedSoldiers.get(snapshot.soldierId());
-                boolean loaded = soldier != null && soldier.isAlive();
+                boolean loaded = soldier != null && soldier.isAlive() && !soldier.isRemoved();
                 int teamOrdinal = loaded ? soldier.getFireTeam().ordinal() : snapshot.fireTeam();
                 int roleOrdinal = loaded ? soldier.getRole().ordinal() : snapshot.role();
                 entries.add(new SoldierStatusEntry(

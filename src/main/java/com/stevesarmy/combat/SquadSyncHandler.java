@@ -35,7 +35,7 @@ public class SquadSyncHandler {
                 for (var entity : level.getEntities().getAll()) {
                     if (entity instanceof SoldierEntity soldier && !soldier.level().isClientSide) {
                         OwnedSoldierRegistry registry = OwnedSoldierRegistry.get(event.getServer());
-                        if (soldier.isAlive()) {
+                        if (soldier.isAlive() && !soldier.isRemoved()) {
                             registry.refresh(soldier, level);
                         } else {
                             registry.remove(soldier.getUUID());

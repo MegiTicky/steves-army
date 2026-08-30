@@ -2,6 +2,7 @@ package com.stevesarmy.entity;
 
 import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.compat.VS2Compat;
+import com.stevesarmy.squad.OwnedSoldierRegistry;
 import com.stevesarmy.combat.CombatDebugData;
 import com.stevesarmy.combat.DetectionSystem;
 import com.stevesarmy.combat.GrenadeIntegration;
@@ -1202,6 +1203,8 @@ public class SoldierEntity extends PathfinderMob implements Container {
             com.stevesarmy.combat.VpbEntityState.remove(this.getUUID());
             if (this.level() instanceof ServerLevel serverLevel) {
                 com.stevesarmy.squad.SquadManager.get(serverLevel).removeMemberFromSquad(this.getUUID());
+                OwnedSoldierRegistry.get(serverLevel.getServer()).remove(this.getUUID());
+                com.stevesarmy.squad.SquadActivityManager.removeSoldier(this.getUUID(), serverLevel.getServer());
             }
         }
         super.remove(reason);
