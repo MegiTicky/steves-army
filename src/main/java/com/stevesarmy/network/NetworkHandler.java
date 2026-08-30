@@ -117,6 +117,10 @@ public class NetworkHandler {
             SetSoldierRoleByUUIDPacket::encode,
             SetSoldierRoleByUUIDPacket::decode,
             SetSoldierRoleByUUIDPacket::handle);
+        INSTANCE.registerMessage(id++, CommandStickMovePacket.class,
+            CommandStickMovePacket::encode,
+            CommandStickMovePacket::decode,
+            CommandStickMovePacket::handle);
         if (YsmCompat.isLoaded()) {
             registerYsmPacket(id++);
         }

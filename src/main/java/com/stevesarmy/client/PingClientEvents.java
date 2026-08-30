@@ -178,6 +178,7 @@ public class PingClientEvents {
         PingWheelHandler.tick();
         FormationWheelHandler.tick();
         FireTeamWheelHandler.tick();
+        CommandStickState.get().tick();
         
         if (CombatDebugRenderer.getDebugMode() != CombatDebugRenderer.DEBUG_MODE_OFF) {
             pruneSoldierDebugData();
@@ -309,6 +310,7 @@ public class PingClientEvents {
             CombatDebugRenderer.render(event.getPoseStack(), event.getCamera(), event.getPartialTick());
             CoverDebugRenderer.render(event.getPoseStack(), event.getCamera());
             SpacingDebugRenderer.render(event.getPoseStack(), event.getCamera());
+            CommandStickRenderer.render(event.getPoseStack(), event.getCamera(), event.getPartialTick());
         }
     }
     
