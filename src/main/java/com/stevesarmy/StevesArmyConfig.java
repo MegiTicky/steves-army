@@ -596,9 +596,9 @@ BUILDER.pop();
         return 0;
     }
 
-    /** Legacy compatibility hook; exposure caching is disabled. */
+    /** Returns the number of ticks an exposure cache entry remains valid. */
     public static int getExposureCacheTicks() {
-        return 0;
+        return 1;
     }
 
     public static boolean useSharedTargetQueryCache() {
