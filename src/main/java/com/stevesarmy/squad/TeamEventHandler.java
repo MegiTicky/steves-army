@@ -120,6 +120,10 @@ public class TeamEventHandler {
             && level.getServer() != null) {
             OwnedSoldierRegistry.get(level.getServer()).remove(soldier.getUUID());
             SquadActivityManager.removeSoldier(soldier.getUUID(), level.getServer());
+            UUID ownerUUID = soldier.getOwnerUUID().orElse(null);
+            if (ownerUUID != null) {
+                FireTeamAssignment.get(level, ownerUUID).removeSoldier(soldier.getUUID());
+            }
         }
     }
 

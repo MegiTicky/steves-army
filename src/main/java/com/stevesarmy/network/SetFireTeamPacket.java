@@ -97,6 +97,7 @@ public class SetFireTeamPacket {
                     List<SoldierEntity> ownedSoldiers = new ArrayList<>();
                     for (Entity entity : serverLevel.getEntities().getAll()) {
                         if (entity instanceof SoldierEntity soldier && soldier.isOwnedBy(player)
+                            && soldier.isAlive()
                             && !(soldier instanceof com.stevesarmy.entity.GarrisonEntity)) {
                             ownedSoldiers.add(soldier);
                         }
