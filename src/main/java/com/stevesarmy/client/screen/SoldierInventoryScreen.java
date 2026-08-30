@@ -1,6 +1,7 @@
 package com.stevesarmy.client.screen;
 
 import com.stevesarmy.StevesArmyMod;
+import com.stevesarmy.client.screen.widget.RoleDropdownWidget;
 import com.stevesarmy.combat.GunIntegration;
 import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.entity.SoldierRole;
@@ -9,7 +10,6 @@ import com.stevesarmy.inventory.SoldierInventoryMenu;
 import com.stevesarmy.network.NetworkHandler;
 import com.stevesarmy.network.SetSoldierRolePacket;
 import net.minecraft.client.gui.GuiGraphics;
-import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
@@ -25,9 +25,8 @@ public class SoldierInventoryScreen extends AbstractContainerScreen<SoldierInven
     private static final ResourceLocation CONTAINER_LOCATION = 
         new ResourceLocation(StevesArmyMod.MODID, "textures/gui/soldier_inventory.png");
 
-    private Button rifleButton;
-    private Button machineGunnerButton;
-    private Button garrisonButton;
+    @Nullable
+    private RoleDropdownWidget roleWidget;
 
     public SoldierInventoryScreen(SoldierInventoryMenu menu, Inventory playerInventory, Component title) {
         super(menu, playerInventory, title);
@@ -40,44 +39,25 @@ public class SoldierInventoryScreen extends AbstractContainerScreen<SoldierInven
     @Override
     protected void init() {
         super.init();
-        this.rifleButton = this.addRenderableWidget(Button.builder(
-            Component.literal("Rifle"), button -> switchRole(SoldierRole.RIFLEMAN))
-            .bounds(this.leftPos + 48, this.topPos + 4, 46, 14)
-            .build());
-        this.machineGunnerButton = this.addRenderableWidget(Button.builder(
-            Component.literal("MG"), button -> switchRole(SoldierRole.MACHINE_GUNNER))
-            .bounds(this.leftPos + 98, this.topPos + 4, 28, 14)
-            .build());
-        this.garrisonButton = this.addRenderableWidget(Button.builder(
-            Component.literal("Garrison"), button -> switchRole(SoldierRole.GARRISON))
-            .bounds(this.leftPos + 130, this.topPos + 4, 44, 14)
-            .build());
-        refreshRoleButtons();
+        SoldierEntity soldier = resolveSoldier();
+        SoldierRole currentRole = soldier != null ? soldier.getRole() : SoldierRole.RIFLEMAN;
+        this.roleWidget = new RoleDropdownWidget(currentRole, this::switchRole);
+        refreshRoleWidget();
     }
 
     @Override
     public void containerTick() {
         super.containerTick();
-        refreshRoleButtons();
+        refreshRoleWidget();
     }
 
-    private void refreshRoleButtons() {
+    private void refreshRoleWidget() {
+        if (roleWidget == null) return;
         SoldierEntity soldier = resolveSoldier();
         SoldierRole role = soldier != null ? soldier.getRole() : null;
         boolean canConvert = soldier != null && this.minecraft != null && this.minecraft.player != null
             && (soldier.isOwnedBy(this.minecraft.player) || this.minecraft.player.getAbilities().instabuild);
-        if (this.rifleButton != null) {
-            this.rifleButton.active = canConvert && role != null && role != SoldierRole.RIFLEMAN;
-            this.rifleButton.visible = canConvert && role != null;
-        }
-        if (this.machineGunnerButton != null) {
-            this.machineGunnerButton.active = canConvert && role != null && role != SoldierRole.MACHINE_GUNNER;
-            this.machineGunnerButton.visible = canConvert && role != null;
-        }
-        if (this.garrisonButton != null) {
-            this.garrisonButton.active = canConvert && role != null && role != SoldierRole.GARRISON;
-            this.garrisonButton.visible = canConvert && role != null;
-        }
+        roleWidget.setRole(role);
     }
 
     @Nullable
@@ -89,6 +69,12 @@ public class SoldierInventoryScreen extends AbstractContainerScreen<SoldierInven
             }
         }
         return null;
+    }
+
+    private boolean canConvert() {
+        SoldierEntity soldier = resolveSoldier();
+        return soldier != null && this.minecraft != null && this.minecraft.player != null
+            && (soldier.isOwnedBy(this.minecraft.player) || this.minecraft.player.getAbilities().instabuild);
     }
 
     private void switchRole(SoldierRole role) {
@@ -105,6 +91,13 @@ public class SoldierInventoryScreen extends AbstractContainerScreen<SoldierInven
         guiGraphics.blit(CONTAINER_LOCATION, x, y, 0, 0, this.imageWidth, this.imageHeight, GUI_WIDTH, GUI_HEIGHT);
         // The texture predates the removal of the persistent offhand slot.
         guiGraphics.fill(x + 44, y + 90, x + 62, y + 108, 0xFFC6C6C6);
+
+        if (roleWidget != null) {
+            int widgetX = getRoleWidgetX();
+            int widgetY = getRoleWidgetY();
+            roleWidget.render(guiGraphics, this.font, widgetX, widgetY,
+                roleWidget.getWidth(), roleWidget.getHeight(), mouseX - widgetX, mouseY - widgetY);
+        }
     }
 
     @Override
@@ -124,6 +117,41 @@ public class SoldierInventoryScreen extends AbstractContainerScreen<SoldierInven
         this.renderBackground(guiGraphics);
         super.render(guiGraphics, mouseX, mouseY, partialTick);
         this.renderTooltip(guiGraphics, mouseX, mouseY);
+    }
+
+    @Override
+    public boolean mouseClicked(double mouseX, double mouseY, int button) {
+        if (roleWidget != null) {
+            int widgetX = getRoleWidgetX();
+            int widgetY = getRoleWidgetY();
+            boolean clicked = roleWidget.mouseClicked(mouseX - widgetX, mouseY - widgetY, button);
+            if (clicked) return true;
+        }
+        return super.mouseClicked(mouseX, mouseY, button);
+    }
+
+    @Override
+    public boolean mouseScrolled(double mouseX, double mouseY, double delta) {
+        if (roleWidget != null && roleWidget.isDropdownOpen()) {
+            return true;
+        }
+        return super.mouseScrolled(mouseX, mouseY, delta);
+    }
+
+    private int getRoleWidgetX() {
+        int titleEnd = this.leftPos + this.titleLabelX + this.font.width(this.title) + 4;
+        int widgetRight = this.leftPos + this.imageWidth - 4;
+        int totalAmmo = computeTotalAmmo();
+        if (totalAmmo >= 0) {
+            String ammoLabel = "◆" + totalAmmo;
+            int ammoStart = this.leftPos + this.imageWidth - this.font.width(ammoLabel) - 8;
+            widgetRight = ammoStart - 4;
+        }
+        return Math.min(titleEnd, widgetRight - roleWidget.getWidth());
+    }
+
+    private int getRoleWidgetY() {
+        return this.topPos + this.titleLabelY - 3;
     }
 
     private int computeTotalAmmo() {

@@ -2,6 +2,8 @@ package com.stevesarmy.client.screen;
 
 import com.stevesarmy.client.ClientSquadData;
 import com.stevesarmy.client.FireTeamScopeState;
+import com.stevesarmy.client.screen.widget.RoleDropdownWidget;
+import com.stevesarmy.entity.SoldierRole;
 import com.stevesarmy.network.BulkGarrisonPacket;
 import com.stevesarmy.network.NetworkHandler;
 import com.stevesarmy.network.DismissSoldierPacket;
@@ -9,6 +11,7 @@ import com.stevesarmy.network.OpenSoldierInventoryMessage;
 import com.stevesarmy.network.RecallPacket;
 import com.stevesarmy.network.SetFireTeamPacket;
 import com.stevesarmy.network.SetSoldierConfigPacket;
+import com.stevesarmy.network.SetSoldierRoleByUUIDPacket;
 import com.stevesarmy.network.SquadStatusSyncPacket;
 import com.stevesarmy.squad.FireDiscipline;
 import com.stevesarmy.squad.FireTeam;
@@ -40,6 +43,7 @@ public class SquadCommandScreen extends Screen {
     private static final int COL_AMMO_WIDTH = 32;
     private static final int COL_DIST_WIDTH = 50;
     private static final int COL_DISC_WIDTH = 24;
+    private static final int COL_ROLE_WIDTH = 70;
     private static final int COL_SPACING = 4;
     private static final int ACTION_BUTTON_GAP = 2;
     private static final int ACTION_BUTTON_SIZE = 20;
@@ -54,6 +58,11 @@ public class SquadCommandScreen extends Screen {
     private int scrollOffset;
     private Component hoveredActionTooltip;
     private Tab activeTab = Tab.SQUAD;
+    private int activeRoleDropdownRow = -1;
+    private int activeRoleDropdownX;
+    private int activeRoleDropdownY;
+    private RoleDropdownWidget activeRoleDropdownWidget;
+    private int bulkRoleOrdinal = SoldierRole.RIFLEMAN.ordinal();
 
     private enum Tab {
         SQUAD,
@@ -70,12 +79,14 @@ public class SquadCommandScreen extends Screen {
         ItemStack gunStack;
         FireDiscipline discipline;
         FireTeam fireTeam;
+        int roleOrdinal;
         double distance;
         int recallTicks;
         boolean loaded;
         int invButtonX;
         int recallButtonX;
         int dismissButtonX;
+        int roleColumnX;
 
         SoldierRow(SquadStatusSyncPacket.SoldierStatusEntry entry) {
             this.entityId = entry.entityId;
@@ -87,6 +98,7 @@ public class SquadCommandScreen extends Screen {
             this.gunStack = entry.gunStack;
             this.discipline = entry.getFireDiscipline();
             this.fireTeam = entry.getFireTeam();
+            this.roleOrdinal = entry.roleOrdinal;
             this.distance = entry.distance;
             this.recallTicks = entry.recallTicks;
             this.loaded = entry.loaded;
@@ -100,9 +112,14 @@ public class SquadCommandScreen extends Screen {
             this.gunStack = entry.gunStack;
             this.discipline = entry.getFireDiscipline();
             this.fireTeam = entry.getFireTeam();
+            this.roleOrdinal = entry.roleOrdinal;
             this.distance = entry.distance;
             this.recallTicks = entry.recallTicks;
             this.loaded = entry.loaded;
+        }
+
+        SoldierRole getRole() {
+            return SoldierRole.values()[roleOrdinal % SoldierRole.values().length];
         }
     }
 
@@ -142,6 +159,7 @@ public class SquadCommandScreen extends Screen {
     private void switchTab(Tab tab) {
         if (activeTab == tab) return;
         activeTab = tab;
+        closeRoleDropdown();
         rebuildRows();
         rebuildFooterButtons();
     }
@@ -167,6 +185,17 @@ public class SquadCommandScreen extends Screen {
         addRenderableWidget(Button.builder(Component.literal("Suppress"), button ->
             sendSquadWideConfig(SetSoldierConfigPacket.ConfigType.FIRE_DISCIPLINE, FireDiscipline.SUPPRESSIVE.ordinal()))
             .bounds(x, btnY, btnWidth, btnHeight).build());
+
+        x = contentX + font.width("Discipline:") + 4;
+        int roleApplyX = x + 3 * (btnWidth + 4) + 10;
+        int applyWidth = 80;
+        Button applyRoleButton = Button.builder(Component.literal("Apply Role"), button -> {
+            SoldierRole role = SoldierRole.values()[bulkRoleOrdinal % SoldierRole.values().length];
+            for (SoldierRow row : rows) {
+                NetworkHandler.INSTANCE.sendToServer(new SetSoldierRoleByUUIDPacket(row.entityId, role));
+            }
+        }).bounds(roleApplyX, btnY, applyWidth, btnHeight).build();
+        addRenderableWidget(applyRoleButton);
 
         int fireTeamRowY = footerY + 58;
         x = contentX + font.width("Teams: 4") + 4;
@@ -287,10 +316,11 @@ public class SquadCommandScreen extends Screen {
             x = drawFireTeamBadge(graphics, x, y, row.fireTeam);
             x += COL_SPACING;
 
-            int flexibleWidth = Math.max(0, actionX - x - COL_SPACING
-                - COL_AMMO_WIDTH - COL_SPACING
-                - COL_DIST_WIDTH - COL_SPACING
-                - COL_DISC_WIDTH - COL_SPACING);
+            int fixedColsWidth = COL_AMMO_WIDTH + COL_SPACING
+                + COL_DIST_WIDTH + COL_SPACING
+                + COL_DISC_WIDTH + COL_SPACING
+                + COL_ROLE_WIDTH + COL_SPACING;
+            int flexibleWidth = Math.max(0, actionX - x - COL_SPACING - fixedColsWidth);
             int nameWidth = flexibleWidth * 2 / 5;
             int gunWidth = flexibleWidth - nameWidth;
 
@@ -308,6 +338,12 @@ public class SquadCommandScreen extends Screen {
 
             x = drawDiscipline(graphics, x, y, row.discipline);
             x += COL_SPACING;
+
+            row.roleColumnX = x;
+            RoleDropdownWidget roleButton = new RoleDropdownWidget(row.getRole(), ignored -> { });
+            roleButton.render(graphics, font, x, y + 4, COL_ROLE_WIDTH, ROW_HEIGHT,
+                mouseX - x, mouseY - y - 4);
+            x += COL_ROLE_WIDTH + COL_SPACING;
 
             row.invButtonX = actionX;
             row.recallButtonX = actionX + ACTION_BUTTON_SIZE + ACTION_BUTTON_GAP;
@@ -332,6 +368,10 @@ public class SquadCommandScreen extends Screen {
         int btnY = footerY + 14;
         graphics.drawString(font, Component.literal("Discipline:"), contentX, btnY + BUTTON_TEXT_Y_OFFSET, 0xFFCCCCCC, false);
 
+        int bulkRoleLabelX = contentX + font.width("Discipline:") + 4 + 3 * (60 + 4) + 10;
+        String bulkRoleName = SoldierRole.values()[bulkRoleOrdinal % SoldierRole.values().length].getDisplayName().getString();
+        graphics.drawString(font, Component.literal("Role: " + bulkRoleName), bulkRoleLabelX, btnY + BUTTON_TEXT_Y_OFFSET, 0xFFCCCCCC, false);
+
         btnY += 30;
         String membersLabel = getFireTeamCountLabel();
         graphics.drawString(font, Component.literal("-- Fire Teams --  " + membersLabel), contentX, btnY, 0xFFAAAAAA, false);
@@ -339,9 +379,39 @@ public class SquadCommandScreen extends Screen {
         graphics.drawString(font, Component.literal("Teams: " + teamCount), contentX, fireTeamRowY + BUTTON_TEXT_Y_OFFSET, 0xFFCCCCCC, false);
 
         super.render(graphics, mouseX, mouseY, partialTick);
+
+        if (activeRoleDropdownWidget != null && activeRoleDropdownRow >= 0 && activeRoleDropdownRow < rows.size()) {
+            SoldierRow activeRow = rows.get(activeRoleDropdownRow);
+            int dropItemHeight = 12;
+            int dropBottom = activeRoleDropdownY + dropItemHeight * (1 + SoldierRole.values().length);
+            graphics.enableScissor(activeRoleDropdownX, activeRoleDropdownY,
+                activeRoleDropdownX + COL_ROLE_WIDTH, Math.min(height, dropBottom));
+            activeRoleDropdownWidget.setRole(activeRow.getRole());
+            activeRoleDropdownWidget.render(graphics, font, activeRoleDropdownX, activeRoleDropdownY,
+                COL_ROLE_WIDTH, ROW_HEIGHT, mouseX - activeRoleDropdownX, mouseY - activeRoleDropdownY);
+            graphics.disableScissor();
+        }
+
         if (hoveredActionTooltip != null) {
             graphics.renderTooltip(font, hoveredActionTooltip, mouseX, mouseY);
         }
+    }
+
+    private void openRoleDropdown(int rowIndex, int x, int y) {
+        SoldierRow row = rows.get(rowIndex);
+        activeRoleDropdownRow = rowIndex;
+        activeRoleDropdownX = x;
+        activeRoleDropdownY = y;
+        activeRoleDropdownWidget = new RoleDropdownWidget(row.getRole(), role -> {
+            NetworkHandler.INSTANCE.sendToServer(new SetSoldierRoleByUUIDPacket(row.entityId, role));
+            row.roleOrdinal = role.ordinal();
+        });
+        activeRoleDropdownWidget.openDropdown();
+    }
+
+    private void closeRoleDropdown() {
+        activeRoleDropdownRow = -1;
+        activeRoleDropdownWidget = null;
     }
 
     private String getFireTeamCountLabel() {
@@ -410,7 +480,6 @@ public class SquadCommandScreen extends Screen {
     }
 
     private int drawGunInfo(GuiGraphics graphics, int x, int y, ItemStack gunStack, int width) {
-        // Resolve the hover name on this client so TaCZ's client-only getName() is used.
         String gunStr = gunStack.isEmpty() ? "-" : gunStack.getHoverName().getString();
         int textWidth = Math.max(0, width - 12);
         if (font.width(gunStr) > textWidth) {
@@ -419,13 +488,13 @@ public class SquadCommandScreen extends Screen {
             }
             gunStr = gunStr + "...";
         }
-        graphics.drawString(font, Component.literal("🔫 " + gunStr), x, y + 6, 0xFF888888, false);
+        graphics.drawString(font, Component.literal("\uD83D\uDD2B " + gunStr), x, y + 6, 0xFF888888, false);
         return x + width;
     }
 
     private int drawAmmoInfo(GuiGraphics graphics, int x, int y, int totalAmmo) {
         String ammoStr = String.valueOf(totalAmmo);
-        graphics.drawString(font, Component.literal("◆" + ammoStr), x, y + 6, 0xFFAAAAAA, false);
+        graphics.drawString(font, Component.literal("\u25C6" + ammoStr), x, y + 6, 0xFFAAAAAA, false);
         return x + COL_AMMO_WIDTH;
     }
 
@@ -501,14 +570,36 @@ public class SquadCommandScreen extends Screen {
 
     @Override
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
+        if (activeRoleDropdownWidget != null && activeRoleDropdownRow >= 0 && activeRoleDropdownRow < rows.size()) {
+            int i = activeRoleDropdownRow;
+            SoldierRow row = rows.get(i);
+
+            boolean clicked = activeRoleDropdownWidget.mouseClicked(
+                mouseX - activeRoleDropdownX, mouseY - activeRoleDropdownY, button);
+            if (clicked) {
+                if (!activeRoleDropdownWidget.isDropdownOpen()) {
+                    closeRoleDropdown();
+                }
+                return true;
+            } else {
+                closeRoleDropdown();
+            }
+        }
+
         if (super.mouseClicked(mouseX, mouseY, button)) return true;
 
-        if (mouseY >= ROW_START_Y && mouseY < getListBottom()) {
+        if (mouseY >= ROW_START_Y && mouseY < getListBottom() && button == 0) {
             int rowIndex = scrollOffset + (int) ((mouseY - ROW_START_Y) / ROW_HEIGHT);
             if (rowIndex < rows.size()) {
                 SoldierRow row = rows.get(rowIndex);
                 int rowY = ROW_START_Y + (rowIndex - scrollOffset) * ROW_HEIGHT;
                 int localMouseY = (int)(mouseY - rowY);
+
+                if (mouseX >= row.roleColumnX && mouseX < row.roleColumnX + COL_ROLE_WIDTH
+                    && localMouseY >= 4 && localMouseY < 16) {
+                    openRoleDropdown(rowIndex, row.roleColumnX, rowY + 4);
+                    return true;
+                }
 
                 if (tryClickInventoryButton(row, mouseX, localMouseY)) return true;
                 if (tryClickRecallButton(mouseX, row.recallButtonX, localMouseY, row.entityId, row.recallTicks)) return true;
@@ -550,6 +641,9 @@ public class SquadCommandScreen extends Screen {
 
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double delta) {
+        if (activeRoleDropdownRow >= 0) {
+            closeRoleDropdown();
+        }
         if (mouseY >= ROW_START_Y && mouseY < getListBottom() && getMaxScrollOffset() > 0) {
             scrollOffset -= (int) Math.signum(delta);
             clampScrollOffset();

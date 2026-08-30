@@ -2,6 +2,7 @@ package com.stevesarmy.network;
 
 import com.stevesarmy.client.ClientSquadData;
 import com.stevesarmy.entity.SoldierEntity;
+import com.stevesarmy.entity.SoldierRole;
 import com.stevesarmy.inventory.SoldierInventory;
 import com.stevesarmy.squad.FireDiscipline;
 import com.stevesarmy.squad.FireTeam;
@@ -46,12 +47,13 @@ public class SquadStatusSyncPacket {
             int squadModeOrdinal = buf.readVarInt();
             int fireDisciplineOrdinal = buf.readVarInt();
             int fireTeamOrdinal = buf.readVarInt();
+            int roleOrdinal = buf.readVarInt();
             int coverState = buf.readVarInt();
             double distance = buf.readDouble();
             int recallTicks = buf.readVarInt();
             boolean loaded = buf.readBoolean();
             entries.add(new SoldierStatusEntry(entityId, entityIntId, name, health, maxHealth, totalAmmo, gunStack,
-                squadModeOrdinal, fireDisciplineOrdinal, fireTeamOrdinal, coverState, distance, recallTicks, loaded));
+                squadModeOrdinal, fireDisciplineOrdinal, fireTeamOrdinal, roleOrdinal, coverState, distance, recallTicks, loaded));
         }
         return new SquadStatusSyncPacket(entries);
     }
@@ -69,6 +71,7 @@ public class SquadStatusSyncPacket {
             buf.writeVarInt(entry.squadModeOrdinal);
             buf.writeVarInt(entry.fireDisciplineOrdinal);
             buf.writeVarInt(entry.fireTeamOrdinal);
+            buf.writeVarInt(entry.roleOrdinal);
             buf.writeVarInt(entry.coverState);
             buf.writeDouble(entry.distance);
             buf.writeVarInt(entry.recallTicks);
@@ -105,6 +108,7 @@ public class SquadStatusSyncPacket {
                 SoldierEntity soldier = loadedSoldiers.get(snapshot.soldierId());
                 boolean loaded = soldier != null && soldier.isAlive();
                 int teamOrdinal = loaded ? soldier.getFireTeam().ordinal() : snapshot.fireTeam();
+                int roleOrdinal = loaded ? soldier.getRole().ordinal() : snapshot.role();
                 entries.add(new SoldierStatusEntry(
                     snapshot.soldierId(),
                     loaded ? soldier.getId() : -1,
@@ -116,6 +120,7 @@ public class SquadStatusSyncPacket {
                     loaded ? soldier.getSquadMode().ordinal() : snapshot.squadMode(),
                     loaded ? soldier.getFireDiscipline().ordinal() : snapshot.fireDiscipline(),
                     teamOrdinal,
+                    roleOrdinal,
                     loaded ? soldier.getSyncedCoverState() : snapshot.coverState(),
                     loaded ? soldier.distanceTo(player) : -1.0D,
                     loaded ? soldier.getRecallTicks() : snapshot.recallTicks(),
@@ -136,6 +141,7 @@ public class SquadStatusSyncPacket {
         public final int squadModeOrdinal;
         public final int fireDisciplineOrdinal;
         public final int fireTeamOrdinal;
+        public final int roleOrdinal;
         public final int coverState;
         public final double distance;
         public final int recallTicks;
@@ -143,7 +149,7 @@ public class SquadStatusSyncPacket {
 
         public SoldierStatusEntry(UUID entityId, int entityIntId, String name, float health, float maxHealth,
                                     int totalAmmo, ItemStack gunStack, int squadModeOrdinal,
-                                   int fireDisciplineOrdinal, int fireTeamOrdinal,
+                                   int fireDisciplineOrdinal, int fireTeamOrdinal, int roleOrdinal,
                                    int coverState, double distance, int recallTicks, boolean loaded) {
             this.entityId = entityId;
             this.entityIntId = entityIntId;
@@ -155,6 +161,7 @@ public class SquadStatusSyncPacket {
             this.squadModeOrdinal = squadModeOrdinal;
             this.fireDisciplineOrdinal = fireDisciplineOrdinal;
             this.fireTeamOrdinal = fireTeamOrdinal;
+            this.roleOrdinal = roleOrdinal;
             this.coverState = coverState;
             this.distance = distance;
             this.recallTicks = recallTicks;
@@ -164,5 +171,6 @@ public class SquadStatusSyncPacket {
         public SquadMode getSquadMode() { return SquadMode.values()[squadModeOrdinal % SquadMode.values().length]; }
         public FireDiscipline getFireDiscipline() { return FireDiscipline.values()[fireDisciplineOrdinal % FireDiscipline.values().length]; }
         public FireTeam getFireTeam() { return FireTeam.values()[fireTeamOrdinal % FireTeam.values().length]; }
+        public SoldierRole getRole() { return SoldierRole.values()[roleOrdinal % SoldierRole.values().length]; }
     }
 }

@@ -3,6 +3,8 @@ package com.stevesarmy.squad;
 import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.entity.EnemySoldierEntity;
 import com.stevesarmy.entity.SoldierEntity;
+import com.stevesarmy.entity.SoldierRole;
+import com.stevesarmy.entity.SoldierRoleHandler;
 import com.stevesarmy.entity.TeamGarrisonEntity;
 import com.stevesarmy.network.FireTeamScopeSyncPacket;
 import com.stevesarmy.network.NetworkHandler;
@@ -52,11 +54,24 @@ public class TeamEventHandler {
                 }
                 StevesArmyMod.LOGGER.info("TeamEventHandler: assigned team garrison {} to team {}", teamGarrison.getName().getString(), teamName);
             } else if (entity instanceof SoldierEntity soldier) {
-                if (OwnedSoldierRegistry.get(((ServerLevel) level).getServer()).isDismissed(soldier.getUUID())) {
+                OwnedSoldierRegistry registry = OwnedSoldierRegistry.get(((ServerLevel) level).getServer());
+                if (registry.isDismissed(soldier.getUUID())) {
                     soldier.discard();
                     return;
                 }
-                OwnedSoldierRegistry.get(((ServerLevel) level).getServer()).refresh(soldier, (ServerLevel) level);
+                registry.refresh(soldier, (ServerLevel) level);
+
+                OwnedSoldierRegistry.Entry entry = registry.get(soldier.getUUID());
+                if (entry != null && entry.pendingRole() >= 0) {
+                    SoldierRole[] roles = SoldierRole.values();
+                    int pendingOrdinal = entry.pendingRole();
+                    registry.clearPendingRole(soldier.getUUID());
+                    if (pendingOrdinal < roles.length && soldier.getRole() != roles[pendingOrdinal]) {
+                        SoldierRoleHandler.convertSoldier(soldier, roles[pendingOrdinal]);
+                        return;
+                    }
+                }
+
                 UUID ownerUUID = soldier.getOwnerUUID().orElseGet(() -> {
                     StevesArmyMod.LOGGER.warn("TeamEventHandler: soldier {} has no owner UUID, using random fallback", soldier.getName().getString());
                     return UUID.randomUUID();

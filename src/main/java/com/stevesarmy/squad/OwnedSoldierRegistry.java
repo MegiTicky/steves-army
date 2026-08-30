@@ -1,6 +1,7 @@
 package com.stevesarmy.squad;
 
 import com.stevesarmy.entity.SoldierEntity;
+import com.stevesarmy.entity.SoldierRole;
 import com.stevesarmy.inventory.SoldierInventory;
 import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
@@ -79,6 +80,22 @@ public class OwnedSoldierRegistry extends SavedData {
         }
     }
 
+    public void setPendingRole(UUID soldierId, SoldierRole role) {
+        Entry entry = entries.get(soldierId);
+        if (entry != null) {
+            entry.pendingRole = role.ordinal();
+            setDirty();
+        }
+    }
+
+    public void clearPendingRole(UUID soldierId) {
+        Entry entry = entries.get(soldierId);
+        if (entry != null && entry.pendingRole >= 0) {
+            entry.pendingRole = -1;
+            setDirty();
+        }
+    }
+
     @Nullable
     public Entry get(UUID soldierId) {
         return entries.get(soldierId);
@@ -128,6 +145,8 @@ public class OwnedSoldierRegistry extends SavedData {
         private int squadMode;
         private int fireDiscipline;
         private int fireTeam;
+        private int role;
+        private int pendingRole = -1;
         private int coverState;
         private int recallTicks;
 
@@ -147,6 +166,7 @@ public class OwnedSoldierRegistry extends SavedData {
             this.squadMode = soldier.getSquadMode().ordinal();
             this.fireDiscipline = soldier.getFireDiscipline().ordinal();
             this.fireTeam = soldier.getFireTeam().ordinal();
+            this.role = soldier.getRole().ordinal();
             this.coverState = soldier.getSyncedCoverState();
             this.recallTicks = soldier.getRecallTicks();
         }
@@ -165,6 +185,8 @@ public class OwnedSoldierRegistry extends SavedData {
             entry.squadMode = tag.getInt("SquadMode");
             entry.fireDiscipline = tag.getInt("FireDiscipline");
             entry.fireTeam = tag.getInt("FireTeam");
+            entry.role = tag.contains("Role") ? tag.getInt("Role") : 0;
+            entry.pendingRole = tag.contains("PendingRole") ? tag.getInt("PendingRole") : -1;
             entry.coverState = tag.getInt("CoverState");
             entry.recallTicks = tag.getInt("RecallTicks");
             return entry;
@@ -184,6 +206,8 @@ public class OwnedSoldierRegistry extends SavedData {
             tag.putInt("SquadMode", squadMode);
             tag.putInt("FireDiscipline", fireDiscipline);
             tag.putInt("FireTeam", fireTeam);
+            tag.putInt("Role", role);
+            if (pendingRole >= 0) tag.putInt("PendingRole", pendingRole);
             tag.putInt("CoverState", coverState);
             tag.putInt("RecallTicks", recallTicks);
             return tag;
@@ -201,6 +225,8 @@ public class OwnedSoldierRegistry extends SavedData {
         public int squadMode() { return squadMode; }
         public int fireDiscipline() { return fireDiscipline; }
         public int fireTeam() { return fireTeam; }
+        public int role() { return role; }
+        public int pendingRole() { return pendingRole; }
         public int coverState() { return coverState; }
         public int recallTicks() { return recallTicks; }
     }

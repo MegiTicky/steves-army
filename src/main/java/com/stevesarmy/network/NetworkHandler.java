@@ -113,6 +113,10 @@ public class NetworkHandler {
             BulkGarrisonPacket::encode,
             BulkGarrisonPacket::decode,
             BulkGarrisonPacket::handle);
+        INSTANCE.registerMessage(id++, SetSoldierRoleByUUIDPacket.class,
+            SetSoldierRoleByUUIDPacket::encode,
+            SetSoldierRoleByUUIDPacket::decode,
+            SetSoldierRoleByUUIDPacket::handle);
         if (YsmCompat.isLoaded()) {
             registerYsmPacket(id++);
         }
