@@ -268,6 +268,15 @@ public final class VisibilityRay {
         nearestObstruction = Math.min(nearestObstruction, shipObstruction);
 
         if (contactOnly) {
+            if (smokePolicy == SmokePolicy.BLOCK) {
+                long smokeStart = System.nanoTime();
+                double smokeEntry = findSmokeIntersection(level, from, to);
+                PerformanceMetrics.recordStageTime(PerformanceMetrics.Stage.SMOKE_LOOKUP,
+                    System.nanoTime() - smokeStart);
+                if (smokeEntry >= 0) {
+                    return new Result(false, 0.0, smokeEntry);
+                }
+            }
             return new Result(true, 0.0, Double.POSITIVE_INFINITY);
         }
 
