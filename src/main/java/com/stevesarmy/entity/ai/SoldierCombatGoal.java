@@ -432,27 +432,43 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
         
         List<LivingEntity> potentialTargets = getPotentialTargets();
         boolean detectionRefreshed = shouldRefreshDetection();
+        DetectionSystem.DetectionScanResult scanResult = null;
         if (detectionRefreshed) {
-            detectionSystem.tick(soldier, potentialTargets, getSquadIntel());
+            scanResult = detectionSystem.tick(soldier, potentialTargets, getSquadIntel());
             lastDetectionTick = soldier.level().getGameTime();
         } else {
             detectionSystem.advanceWithoutScan(soldier.level().getGameTime());
         }
-        
-        // Feed detected entities into ThreatAwareness
+
+        // Feed detected entities into ThreatAwareness using the scan result
         ThreatAwareness threats = soldier.getThreatAwareness();
         for (LivingEntity potential : potentialTargets) {
-            boolean hasLineOfSight = TargetAcquisition.isValidTarget(soldier, potential)
-                && detectionSystem.wasTargetInLOS(potential);
-            if (detectionSystem.isTargetDetected(potential)) {
+            boolean hasLineOfSight = false;
+            boolean isDetected = false;
+            if (scanResult != null) {
+                var obs = scanResult.find(potential);
+                if (obs.isPresent()) {
+                    hasLineOfSight = obs.get().visible();
+                    isDetected = obs.get().detected();
+                } else {
+                    // Candidate was filtered by isValidTarget or was duplicate
+                    hasLineOfSight = TargetAcquisition.isValidTarget(soldier, potential)
+                        && detectionSystem.wasTargetInLOS(potential);
+                    isDetected = detectionSystem.isTargetDetected(potential);
+                }
+            } else {
+                hasLineOfSight = TargetAcquisition.isValidTarget(soldier, potential)
+                    && detectionSystem.wasTargetInLOS(potential);
+                isDetected = detectionSystem.isTargetDetected(potential);
+            }
+
+            if (isDetected) {
                 threats.onEntityDetected(potential, soldier.position());
                 if (hasLineOfSight && detectionRefreshed) {
                     reportThreatToSquadIntel(potential, 1.0f);
                 }
             }
 
-            // Player-facing contact pings represent every valid enemy the soldier
-            // can currently see, not only the target selected for direct fire.
             if (hasLineOfSight && detectionRefreshed) {
                 EnemyContactTracker.reportContact(soldier, potential);
             }
@@ -1692,39 +1708,39 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
             : soldier.level().getEntitiesOfClass(
                 LivingEntity.class, soldier.getBoundingBox().inflate(maxRange));
 
-        // Query living entities once, then preserve the original target-type ordering.
-        net.minecraft.world.phys.AABB searchBox = soldier.getBoundingBox().inflate(maxRange);
-        if (StevesArmyConfig.shouldTargetMonsters()) {
-            for (LivingEntity entity : nearby) {
-                if (entity instanceof Monster monster && entity.getBoundingBox().intersects(searchBox)
-                    && TargetAcquisition.isValidTarget(soldier, monster) && !soldier.isFriendlyTo(monster)) {
-                    potentialTargets.add(monster);
+        // Single-pass classification with disjoint category buckets to avoid
+        // duplicate entities matching multiple instanceof checks.
+        List<LivingEntity> monsters = new ArrayList<>();
+        List<LivingEntity> targetEntities = new ArrayList<>();
+        List<LivingEntity> players = new ArrayList<>();
+        List<LivingEntity> soldiers = new ArrayList<>();
+
+        for (LivingEntity entity : nearby) {
+            if (entity == soldier) continue;
+            if (entity.getBoundingBox().intersects(soldier.getBoundingBox().inflate(maxRange))
+                && TargetAcquisition.isValidTarget(soldier, entity)
+                && !soldier.isFriendlyTo(entity)) {
+                if (entity instanceof SoldierEntity otherSoldier && otherSoldier != soldier) {
+                    soldiers.add(entity);
+                } else if (entity instanceof TargetEntity) {
+                    targetEntities.add(entity);
+                } else if (entity instanceof Player) {
+                    players.add(entity);
+                } else if (entity instanceof Monster) {
+                    monsters.add(entity);
                 }
             }
+        }
+
+        // Preserve original category ordering
+        if (StevesArmyConfig.shouldTargetMonsters()) {
+            potentialTargets.addAll(monsters);
         }
         if (StevesArmyConfig.shouldTargetTargetEntities()) {
-            for (LivingEntity entity : nearby) {
-                if (entity instanceof TargetEntity targetEntity && entity.getBoundingBox().intersects(searchBox)
-                    && TargetAcquisition.isValidTarget(soldier, targetEntity)
-                    && !soldier.isFriendlyTo(targetEntity)) {
-                    potentialTargets.add(targetEntity);
-                }
-            }
+            potentialTargets.addAll(targetEntities);
         }
-        for (LivingEntity entity : nearby) {
-            if (entity instanceof Player player && entity.getBoundingBox().intersects(searchBox)
-                && TargetAcquisition.isValidTarget(soldier, player) && !soldier.isFriendlyTo(player)) {
-                potentialTargets.add(player);
-            }
-        }
-        for (LivingEntity entity : nearby) {
-            if (entity instanceof SoldierEntity otherSoldier && otherSoldier != soldier
-                && entity.getBoundingBox().intersects(searchBox)
-                && TargetAcquisition.isValidTarget(soldier, otherSoldier)
-                && !soldier.isFriendlyTo(otherSoldier)) {
-                potentialTargets.add(otherSoldier);
-            }
-        }
+        potentialTargets.addAll(players);
+        potentialTargets.addAll(soldiers);
 
         PerformanceMetrics.recordStageTime(PerformanceMetrics.Stage.ENTITY_QUERY,
             System.nanoTime() - queryStart);

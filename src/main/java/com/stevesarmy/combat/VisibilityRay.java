@@ -13,7 +13,6 @@ import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.shapes.VoxelShape;
 
-import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 import java.util.WeakHashMap;
@@ -30,16 +29,16 @@ public final class VisibilityRay {
 
     public enum SmokePolicy { BLOCK, IGNORE }
 
+    public enum TracePurpose {
+        FULL_VISIBILITY,
+        CONTACT_ONLY
+    }
+
     public record Result(boolean clear, double concealment, double blockedDistance) {
         public boolean hasContact() {
             return clear && concealment < MAX_CONCEALMENT;
         }
 
-        /**
-         * Scores whether this ray is useful as a tactical firing lane. This is
-         * intentionally separate from hasContact(): foliage is penetrable, but
-         * a heavily concealed lane should not be preferred for cover or peeking.
-         */
         public double firingLaneQuality() {
             return clear ? Math.max(0.0, 1.0 - concealment) : 0.0;
         }
@@ -55,7 +54,7 @@ public final class VisibilityRay {
 
     public static Result trace(Level level, Vec3 from, Vec3 to, LivingEntity observer,
                                BlockPos... ignoredBlocks) {
-        Set<BlockPos> ignored = new HashSet<>();
+        Set<BlockPos> ignored = new java.util.HashSet<>();
         for (BlockPos ignoredBlock : ignoredBlocks) {
             if (ignoredBlock != null) {
                 ignored.add(ignoredBlock);
@@ -75,27 +74,50 @@ public final class VisibilityRay {
         return trace(level, from, to, observer, SmokePolicy.IGNORE, Set.of());
     }
 
-    /** Bypasses the optimization cache for immediate firing validation. */
     public static Result traceFresh(Level level, Vec3 from, Vec3 to, LivingEntity observer) {
         return traceFresh(level, from, to, observer, new BlockPos[0]);
     }
 
-    /** Bypasses the optimization cache while preserving cover-peek exclusions. */
     public static Result traceFresh(Level level, Vec3 from, Vec3 to, LivingEntity observer,
                                     BlockPos... ignoredBlocks) {
         PerformanceMetrics.recordVisibilityRay();
-        Set<BlockPos> ignored = new HashSet<>();
+        Set<BlockPos> ignored = new java.util.HashSet<>();
         for (BlockPos ignoredBlock : ignoredBlocks) {
             if (ignoredBlock != null) ignored.add(ignoredBlock);
         }
-        return traceUncached(level, from, to, observer, SmokePolicy.BLOCK, Set.copyOf(ignored));
+        return traceUncached(level, from, to, observer, SmokePolicy.BLOCK,
+            Set.copyOf(ignored), TracePurpose.FULL_VISIBILITY);
     }
 
-    /** Bypasses the optimization cache for an immediate smoke-ignoring shot check. */
     public static Result traceFreshIgnoringSmoke(Level level, Vec3 from, Vec3 to,
                                                   LivingEntity observer) {
         PerformanceMetrics.recordVisibilityRay();
-        return traceUncached(level, from, to, observer, SmokePolicy.IGNORE, Set.of());
+        return traceUncached(level, from, to, observer, SmokePolicy.IGNORE,
+            Set.of(), TracePurpose.FULL_VISIBILITY);
+    }
+
+    public static Result traceContactOnly(Level level, Vec3 from, Vec3 to, LivingEntity observer) {
+        if (StevesArmyConfig.isPerceptionFrameEnabled()) {
+            Set<BlockPos> empty = Set.of();
+            Result cached = SameTickPerceptionFrame.getVisibility(level,
+                observer == null ? 0 : observer.getId(), from, to,
+                SmokePolicy.BLOCK, empty);
+            if (cached != null) {
+                PerformanceMetrics.recordSameTickVisibilityFrameHit();
+                PerformanceMetrics.recordVisibilityRayCacheHit();
+                return cached;
+            }
+            PerformanceMetrics.recordSameTickVisibilityFrameMiss();
+            PerformanceMetrics.recordVisibilityRayCacheMiss();
+            Result result = traceUncached(level, from, to, observer,
+                SmokePolicy.BLOCK, empty, TracePurpose.CONTACT_ONLY);
+            SameTickPerceptionFrame.putVisibility(level, observer == null ? 0 : observer.getId(),
+                from, to, SmokePolicy.BLOCK, empty, result);
+            return result;
+        }
+
+        return traceUncached(level, from, to, observer,
+            SmokePolicy.BLOCK, Set.of(), TracePurpose.CONTACT_ONLY);
     }
 
     private static Result trace(Level level, Vec3 from, Vec3 to, LivingEntity observer,
@@ -112,7 +134,8 @@ public final class VisibilityRay {
 
             PerformanceMetrics.recordSameTickVisibilityFrameMiss();
             PerformanceMetrics.recordVisibilityRayCacheMiss();
-            Result result = traceUncached(level, from, to, observer, smokePolicy, immutableIgnored);
+            Result result = traceUncached(level, from, to, observer, smokePolicy,
+                immutableIgnored, TracePurpose.FULL_VISIBILITY);
             SameTickPerceptionFrame.putVisibility(level, observer == null ? 0 : observer.getId(),
                 from, to, smokePolicy, immutableIgnored, result);
             return result;
@@ -121,7 +144,8 @@ public final class VisibilityRay {
         int cacheTicks = StevesArmyConfig.getPositionVisibilityCacheTicks();
         if (cacheTicks <= 0) {
             PerformanceMetrics.recordVisibilityRay();
-            return traceUncached(level, from, to, observer, smokePolicy, immutableIgnored);
+            return traceUncached(level, from, to, observer, smokePolicy,
+                immutableIgnored, TracePurpose.FULL_VISIBILITY);
         }
 
         long currentTick = level.getGameTime();
@@ -135,7 +159,8 @@ public final class VisibilityRay {
         }
 
         PerformanceMetrics.recordVisibilityRayCacheMiss();
-        Result result = traceUncached(level, from, to, observer, smokePolicy, immutableIgnored);
+        Result result = traceUncached(level, from, to, observer, smokePolicy,
+            immutableIgnored, TracePurpose.FULL_VISIBILITY);
         if (cache.results.size() >= 8192) {
             cache.results.clear();
         }
@@ -144,7 +169,8 @@ public final class VisibilityRay {
     }
 
     private static Result traceUncached(Level level, Vec3 from, Vec3 to, LivingEntity observer,
-                                         SmokePolicy smokePolicy, Set<BlockPos> ignoredBlocks) {
+                                         SmokePolicy smokePolicy, Set<BlockPos> ignoredBlocks,
+                                         TracePurpose purpose) {
         if (from.distanceToSqr(to) < EPSILON) {
             return new Result(true, 0.0, Double.POSITIVE_INFINITY);
         }
@@ -152,8 +178,16 @@ public final class VisibilityRay {
         Vec3 direction = to.subtract(from);
         double length = direction.length();
         Vec3 unit = direction.scale(1.0 / length);
-        double shipObstruction = VS2Compat.getShipAwareBlockHitDistance(level, from, to, observer);
-        Set<BlockPos> visited = new HashSet<>();
+
+        final boolean contactOnly = (purpose == TracePurpose.CONTACT_ONLY);
+
+        double shipObstruction;
+        if (contactOnly && !VS2Compat.isEnabled()) {
+            shipObstruction = Double.POSITIVE_INFINITY;
+        } else {
+            shipObstruction = VS2Compat.getShipAwareBlockHitDistance(level, from, to, observer);
+        }
+
         double concealment = 0.0;
         double nearestObstruction = Double.POSITIVE_INFINITY;
 
@@ -166,29 +200,41 @@ public final class VisibilityRay {
 
         long blockStart = System.nanoTime();
         double t = 0.0;
+        BlockPos.MutableBlockPos mutablePos = new BlockPos.MutableBlockPos();
+
         while (t <= length + EPSILON) {
-            BlockPos pos = new BlockPos(x, y, z);
-            if (visited.add(pos)) {
-                BlockState state = level.getBlockState(pos);
-                if (ignoredBlocks.contains(pos)) {
-                    // Cover-peek callers explicitly ignore the cover block.
-                } else if (isLeaf(state)) {
-                    if (outlineIntersectsRay(level, state, pos, from, to)) {
+            mutablePos.set(x, y, z);
+            BlockState state = level.getBlockState(mutablePos);
+
+            if (ignoredBlocks.contains(mutablePos)) {
+                // Skip - cover-peek callers explicitly ignore this block.
+            } else if (contactOnly) {
+                // Fast path: any solid collision blocks the ray immediately.
+                if (!isLeaf(state) && !isTransparent(state) && !isConcealment(state)) {
+                    VoxelShape shape = state.getCollisionShape(level, mutablePos);
+                    if (!shape.isEmpty() && shape.clip(from, to, mutablePos) != null) {
+                        PerformanceMetrics.recordStageTime(
+                            PerformanceMetrics.Stage.LOS_BLOCK_TRAVERSAL,
+                            System.nanoTime() - blockStart);
+                        return new Result(false, 0.0, Math.min(shipObstruction, shipObstruction));
+                    }
+                }
+            } else {
+                // Full path: accumulate concealment, track nearest obstruction.
+                if (isLeaf(state)) {
+                    if (outlineIntersectsRay(level, state, mutablePos, from, to)) {
                         concealment = Math.min(MAX_CONCEALMENT, concealment + LEAF_CONCEALMENT);
                     }
                 } else if (isTransparent(state)) {
-                    // Cover-peek callers explicitly ignore the cover block. Glass is
-                    // transparent both to the AI and to TaCZ through its block tag.
+                    // Transparent blocks are ignored.
                 } else if (isConcealment(state)) {
-                    if (outlineIntersectsRay(level, state, pos, from, to)) {
+                    if (outlineIntersectsRay(level, state, mutablePos, from, to)) {
                         concealment = Math.min(MAX_CONCEALMENT, concealment + concealmentWeight(state));
                     }
-                } else if (intersectsBlock(level, state, pos, from, to)) {
-                    BlockHitResult hit = blockHit(level, state, pos, from, to);
+                } else if (intersectsBlock(level, state, mutablePos, from, to)) {
+                    BlockHitResult hit = blockHit(level, state, mutablePos, from, to);
                     double blocked = hit == null ? from.distanceTo(to) : from.distanceTo(hit.getLocation());
                     nearestObstruction = Math.min(nearestObstruction, blocked);
-                    // If smoke is blocking, we still need to find the nearest obstruction.
-                    // If smoke is ignored, we return immediately on solid block hit.
                     if (smokePolicy == SmokePolicy.IGNORE) {
                         PerformanceMetrics.recordStageTime(
                             PerformanceMetrics.Stage.LOS_BLOCK_TRAVERSAL,
@@ -221,18 +267,19 @@ public final class VisibilityRay {
 
         nearestObstruction = Math.min(nearestObstruction, shipObstruction);
 
-        // Check for smoke clouds when smoke is not ignored.
+        if (contactOnly) {
+            return new Result(true, 0.0, Double.POSITIVE_INFINITY);
+        }
+
         if (smokePolicy == SmokePolicy.BLOCK) {
             long smokeStart = System.nanoTime();
             double smokeEntry = findSmokeIntersection(level, from, to);
             PerformanceMetrics.recordStageTime(PerformanceMetrics.Stage.SMOKE_LOOKUP,
                 System.nanoTime() - smokeStart);
             if (smokeEntry >= 0) {
-                // If smoke is closer than nearestObstruction, the smoke wins.
                 if (smokeEntry < nearestObstruction) {
                     return new Result(false, MAX_CONCEALMENT, smokeEntry);
                 }
-                // Otherwise the solid block is closer, so report that.
                 return new Result(false, concealment, nearestObstruction);
             }
         }

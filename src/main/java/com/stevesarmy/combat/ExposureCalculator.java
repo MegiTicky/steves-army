@@ -1,30 +1,24 @@
 package com.stevesarmy.combat;
 
 import com.stevesarmy.StevesArmyConfig;
-import com.stevesarmy.StevesArmyMod;
-import com.stevesarmy.debug.DiagnosticLogManager;
 import com.stevesarmy.debug.PerformanceMetrics;
-import net.minecraft.core.BlockPos;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.Vec3;
-import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.WeakHashMap;
 import java.util.concurrent.ConcurrentHashMap;
 
 public class ExposureCalculator {
-    /** Full exposure is reused according to the server profile when geometry is unchanged. */
     private static final Map<Level, TickExposureCache> exposureCaches =
         Collections.synchronizedMap(new WeakHashMap<>());
     private static final Map<Level, AimPointCache> aimPointCaches =
         Collections.synchronizedMap(new WeakHashMap<>());
-    
+
     public enum AimPointType {
         HEAD(4, "HEAD"),
         NECK(3, "NECK"),
@@ -34,23 +28,23 @@ public class ExposureCalculator {
         HIP(5, "HIP"),
         FEET(3, "FEET"),
         FALLBACK(0, "FALLBACK");
-        
+
         public final int priority;
         public final String displayName;
-        
+
         AimPointType(int priority, String displayName) {
             this.priority = priority;
             this.displayName = displayName;
         }
     }
-    
+
     public static class AimPointResult {
         public final Vec3 position;
         public final AimPointType type;
         public final boolean bulletPathClear;
         public final boolean pointVisible;
         public final double concealment;
-        
+
         public AimPointResult(Vec3 position, AimPointType type, boolean bulletPathClear,
                               boolean pointVisible, double concealment) {
             this.position = position;
@@ -59,12 +53,12 @@ public class ExposureCalculator {
             this.pointVisible = pointVisible;
             this.concealment = concealment;
         }
-        
+
         public boolean canShoot() {
             return pointVisible && bulletPathClear;
         }
     }
-    
+
     public static int calculateExposure(LivingEntity observer, LivingEntity target) {
         if (observer.level() != target.level()) return 0;
 
@@ -107,22 +101,25 @@ public class ExposureCalculator {
         if (observer.level() != target.level()) return 0;
 
         PerformanceMetrics.recordExposureCalculation();
-        
+
         Level level = observer.level();
         Vec3 observerEye = observer.getEyePosition();
-        
+
         Vec3[] targetPoints = getTargetPoints(target);
-        
+
         long exposureStart = System.nanoTime();
         int visiblePoints = 0;
         for (Vec3 point : targetPoints) {
-            if (getVisibility(level, observerEye, point, observer).hasContact()) {
+            if (VisibilityRay.traceContactOnly(level, observerEye, point, observer).hasContact()) {
+                PerformanceMetrics.recordDetectionExposureRay(false);
                 visiblePoints++;
+            } else {
+                PerformanceMetrics.recordDetectionExposureRay(true);
             }
         }
         PerformanceMetrics.recordStageTime(PerformanceMetrics.Stage.EXPOSURE,
             System.nanoTime() - exposureStart);
-        
+
         return visiblePoints;
     }
 
@@ -170,18 +167,17 @@ public class ExposureCalculator {
     private record CachedExposure(int visiblePoints, Vec3 observerEye, Vec3 targetPosition,
                                   net.minecraft.world.entity.Pose targetPose,
                                   float targetWidth, float targetHeight, long expiresAt) {}
-    
+
     public static double getExposureFactor(LivingEntity observer, LivingEntity target) {
         int visiblePoints = calculateExposure(observer, target);
         return Math.sqrt(visiblePoints / 8.0);
     }
-    
+
     public static AimPointResult getBestAimPoint(LivingEntity observer, LivingEntity target) {
         return getBestAimPoint(observer, target, null);
     }
 
-    /** Returns the first visible head point, independent of combat aim-point priority. */
-    @Nullable
+    @javax.annotation.Nullable
     public static Vec3 getVisibleHeadPoint(LivingEntity observer, LivingEntity target) {
         if (observer.level() != target.level()) {
             return null;
@@ -199,14 +195,12 @@ public class ExposureCalculator {
         return null;
     }
 
-    public static AimPointResult getBestAimPoint(LivingEntity observer, LivingEntity target, BlockPos skipBlock) {
+    public static AimPointResult getBestAimPoint(LivingEntity observer, LivingEntity target,
+                                                 net.minecraft.core.BlockPos skipBlock) {
         if (observer.level() != target.level()) {
-            if (DiagnosticLogManager.isDamageLoggingEnabled()) {
-                StevesArmyMod.LOGGER.info("[DAMAGE_DEBUG] getBestAimPoint: different levels, returning FALLBACK");
-            }
             return new AimPointResult(target.getEyePosition(), AimPointType.FALLBACK, false, false, 1.0);
         }
-        
+
         int cacheTicks = StevesArmyConfig.getAimPointCacheTicks();
         Vec3 observerEye = observer.getEyePosition();
         Vec3 targetPosition = target.position();
@@ -236,19 +230,10 @@ public class ExposureCalculator {
         return result;
     }
 
-    /**
-     * Finds the best directly visible target point from a hypothetical firing origin.
-     * Cover scoring uses this to assess a candidate peek or exposed half-cover eye.
-     */
     public static AimPointResult getBestAimPointFrom(Vec3 observerEye, LivingEntity target) {
         return getBestAimPointFrom(observerEye, target, null, null);
     }
 
-    /**
-     * Tests whether any exposed target point is reachable from an origin. Unlike the
-     * full aim-point query, this exits on the first visible point because callers only
-     * need lane availability, not the point priority.
-     */
     public static boolean hasAnyAimPointFrom(Vec3 observerEye, LivingEntity target) {
         if (target == null || !target.isAlive()) {
             return false;
@@ -262,10 +247,6 @@ public class ExposureCalculator {
         return false;
     }
 
-    /**
-     * Returns the best concealment-adjusted lane quality to any exposed target
-     * point without changing normal aim-point or target-acquisition semantics.
-     */
     public static double getBestFiringLaneQualityFrom(Vec3 observerEye, LivingEntity target) {
         if (target == null || !target.isAlive()) {
             return 0.0;
@@ -280,13 +261,13 @@ public class ExposureCalculator {
     }
 
     private static AimPointResult getBestAimPointFrom(Vec3 observerEye, LivingEntity target,
-                                                       LivingEntity observer, BlockPos skipBlock) {
-        Level level = target.level();
-        
+                                                       LivingEntity observer, net.minecraft.core.BlockPos skipBlock) {
+        net.minecraft.world.level.Level level = target.level();
+
         TargetPoint[] targetPoints = getTargetPointsWithPriority(target);
-        
+
         TargetPoint bestVisible = null;
-        
+
         for (TargetPoint point : targetPoints) {
             VisibilityRay.Result visibility = getVisibility(level, observerEye, point.position, observer, skipBlock);
             if (visibility.hasContact()) {
@@ -295,33 +276,21 @@ public class ExposureCalculator {
                 }
             }
         }
-        
+
         if (bestVisible != null) {
-            if (DiagnosticLogManager.isDamageLoggingEnabled()) {
-                StevesArmyMod.LOGGER.info("[DAMAGE_DEBUG] getBestAimPoint: FOUND aimpoint type={} pos=({},{},{})",
-                    bestVisible.type.displayName,
-                    String.format("%.2f", bestVisible.position.x),
-                    String.format("%.2f", bestVisible.position.y),
-                    String.format("%.2f", bestVisible.position.z));
-            }
             VisibilityRay.Result visibility = getVisibility(
                 level, observerEye, bestVisible.position, observer, skipBlock);
             return new AimPointResult(bestVisible.position, bestVisible.type, true, true, visibility.concealment());
         }
-        
-        if (DiagnosticLogManager.isDamageLoggingEnabled()) {
-            StevesArmyMod.LOGGER.info("[DAMAGE_DEBUG] getBestAimPoint: NO visible aimpoint, returning FALLBACK. observer=({},{},{}) target=({},{},{})",
-                String.format("%.2f", observerEye.x), String.format("%.2f", observerEye.y), String.format("%.2f", observerEye.z),
-                String.format("%.2f", target.getX()), String.format("%.2f", target.getY()), String.format("%.2f", target.getZ()));
-        }
+
         return new AimPointResult(target.getEyePosition(), AimPointType.FALLBACK, false, false, 1.0);
     }
-    
+
     private static TargetPoint[] getTargetPointsWithPriority(LivingEntity target) {
         Vec3 basePos = target.position();
         float height = target.getBbHeight();
         float width = target.getBbWidth();
-        
+
         double headY = basePos.y + height * 0.92;
         double neckY = basePos.y + height * 0.82;
         double midTorsoY = basePos.y + height * 0.55;
@@ -329,10 +298,10 @@ public class ExposureCalculator {
         double lowerTorsoY = basePos.y + height * 0.40;
         double hipY = basePos.y + height * 0.25;
         double feetY = basePos.y + height * 0.10;
-        
+
         double halfWidth = width * 0.35;
         double quarterWidth = width * 0.15;
-        
+
         return new TargetPoint[] {
             new TargetPoint(new Vec3(basePos.x, headY, basePos.z), AimPointType.HEAD),
             new TargetPoint(new Vec3(basePos.x, neckY, basePos.z), AimPointType.NECK),
@@ -350,19 +319,19 @@ public class ExposureCalculator {
             new TargetPoint(new Vec3(basePos.x + halfWidth, feetY, basePos.z), AimPointType.FEET),
         };
     }
-    
+
     private static Vec3[] getTargetPoints(LivingEntity target) {
         Vec3 basePos = target.position();
         float height = target.getBbHeight();
         float width = target.getBbWidth();
-        
+
         double headY = basePos.y + height * 0.85;
         double upperTorsoY = basePos.y + height * 0.65;
         double lowerTorsoY = basePos.y + height * 0.35;
         double feetY = basePos.y + height * 0.1;
-        
+
         double halfWidth = width * 0.45;
-        
+
         return new Vec3[] {
             new Vec3(basePos.x - halfWidth, headY, basePos.z),
             new Vec3(basePos.x + halfWidth, headY, basePos.z),
@@ -374,28 +343,27 @@ public class ExposureCalculator {
             new Vec3(basePos.x + halfWidth, feetY, basePos.z)
         };
     }
-    
-    private static VisibilityRay.Result getVisibility(Level level, Vec3 from, Vec3 to,
-                                                       LivingEntity observer, BlockPos skipBlock) {
+
+    private static VisibilityRay.Result getVisibility(net.minecraft.world.level.Level level, Vec3 from, Vec3 to,
+                                                       LivingEntity observer, net.minecraft.core.BlockPos skipBlock) {
         if (skipBlock == null) {
             return VisibilityRay.trace(level, from, to, observer);
         }
 
-        // Cover peeks intentionally ignore the selected cover block and the block above it.
-        BlockPos first = skipBlock;
-        BlockPos second = skipBlock.above();
+        net.minecraft.core.BlockPos first = skipBlock;
+        net.minecraft.core.BlockPos second = skipBlock.above();
         return VisibilityRay.trace(level, from, to, observer, first, second);
     }
 
-    private static VisibilityRay.Result getVisibility(Level level, Vec3 from, Vec3 to,
+    private static VisibilityRay.Result getVisibility(net.minecraft.world.level.Level level, Vec3 from, Vec3 to,
                                                        LivingEntity observer) {
         return VisibilityRay.trace(level, from, to, observer);
     }
-    
+
     private static class TargetPoint {
         final Vec3 position;
         final AimPointType type;
-        
+
         TargetPoint(Vec3 position, AimPointType type) {
             this.position = position;
             this.type = type;
@@ -406,7 +374,7 @@ public class ExposureCalculator {
                                Vec3 observerEye, Vec3 targetPosition,
                                net.minecraft.world.entity.Pose targetPose,
                                float targetWidth, float targetHeight,
-                               BlockPos skipBlock) {}
+                               net.minecraft.core.BlockPos skipBlock) {}
 
     private record CachedAimPoint(AimPointResult result, long expiresAt) {}
 

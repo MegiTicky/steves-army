@@ -40,6 +40,17 @@ public final class PerformanceMetrics {
     private static final LongAdder visibilityRays = new LongAdder();
     private static final LongAdder visibilityRayCacheHits = new LongAdder();
     private static final LongAdder visibilityRayCacheMisses = new LongAdder();
+    private static final LongAdder detectionPrimaryRayRequests = new LongAdder();
+    private static final LongAdder detectionPrimaryRayHits = new LongAdder();
+    private static final LongAdder detectionPrimaryRayMisses = new LongAdder();
+    private static final LongAdder detectionExposureRayRequests = new LongAdder();
+    private static final LongAdder detectionExposureRayHits = new LongAdder();
+    private static final LongAdder detectionExposureRayMisses = new LongAdder();
+    private static final LongAdder detectionSkippedCapped = new LongAdder();
+    private static final LongAdder detectionSkippedOutOfRange = new LongAdder();
+    private static final LongAdder detectionSkippedOutOfFOV = new LongAdder();
+    private static final LongAdder detectionDuplicateCandidates = new LongAdder();
+
     private static final LongAdder visibilityRayRequests = new LongAdder();
     private static final LongAdder aimPointCacheHits = new LongAdder();
     private static final LongAdder aimPointCacheMisses = new LongAdder();
@@ -310,6 +321,16 @@ public final class PerformanceMetrics {
         exposureCalculations.reset();
         detectionTicks.reset();
         detectionCandidates.reset();
+        detectionPrimaryRayRequests.reset();
+        detectionPrimaryRayHits.reset();
+        detectionPrimaryRayMisses.reset();
+        detectionExposureRayRequests.reset();
+        detectionExposureRayHits.reset();
+        detectionExposureRayMisses.reset();
+        detectionSkippedCapped.reset();
+        detectionSkippedOutOfRange.reset();
+        detectionSkippedOutOfFOV.reset();
+        detectionDuplicateCandidates.reset();
         targetRefreshes.reset();
         targetCandidates.reset();
         coverSearches.reset();
@@ -1102,6 +1123,36 @@ phase6Selections.reset();
         detectionCandidates.add(candidates);
     }
 
+    public static void recordDetectionPrimaryRay(boolean cached) {
+        if (!enabled) return;
+        detectionPrimaryRayRequests.increment();
+        if (cached) detectionPrimaryRayHits.increment();
+        else detectionPrimaryRayMisses.increment();
+    }
+
+    public static void recordDetectionExposureRay(boolean cached) {
+        if (!enabled) return;
+        detectionExposureRayRequests.increment();
+        if (cached) detectionExposureRayHits.increment();
+        else detectionExposureRayMisses.increment();
+    }
+
+    public static void recordDetectionSkippedCapped() {
+        if (enabled) detectionSkippedCapped.increment();
+    }
+
+    public static void recordDetectionSkippedOutOfRange() {
+        if (enabled) detectionSkippedOutOfRange.increment();
+    }
+
+    public static void recordDetectionSkippedOutOfFOV() {
+        if (enabled) detectionSkippedOutOfFOV.increment();
+    }
+
+    public static void recordDetectionDuplicateCandidate() {
+        if (enabled) detectionDuplicateCandidates.increment();
+    }
+
     public static void recordTargetRefresh(int candidates) {
         if (!enabled) return;
         targetRefreshes.increment();
@@ -1479,6 +1530,16 @@ phase6Selections.reset();
             + formatMillis(asyncPathWorkerNanos.sum()) + " ms worker\n"
             + "  Detection ticks: " + detectionTicks.sum() + "\n"
             + "  Detection candidates: " + detectionCandidates.sum() + "\n"
+            + "  Detection duplicate candidates: " + detectionDuplicateCandidates.sum() + "\n"
+            + "  Detection primary rays: " + detectionPrimaryRayRequests.sum()
+            + " (" + detectionPrimaryRayHits.sum() + " cached, "
+            + detectionPrimaryRayMisses.sum() + " traced)\n"
+            + "  Detection exposure rays: " + detectionExposureRayRequests.sum()
+            + " (" + detectionExposureRayHits.sum() + " cached, "
+            + detectionExposureRayMisses.sum() + " traced)\n"
+            + "  Detection skipped: capped=" + detectionSkippedCapped.sum()
+            + ", out-of-range=" + detectionSkippedOutOfRange.sum()
+            + ", out-of-FOV=" + detectionSkippedOutOfFOV.sum() + "\n"
             + "  Target refreshes: " + targetRefreshes.sum() + "\n"
             + "  Target candidates: " + targetCandidates.sum() + "\n"
             + "  Cover searches: " + searches + "\n"
