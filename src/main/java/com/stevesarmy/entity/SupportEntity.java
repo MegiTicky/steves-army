@@ -1,7 +1,6 @@
 package com.stevesarmy.entity;
 
 import com.stevesarmy.entity.ai.SupportCoverGoal;
-import com.stevesarmy.entity.ai.SupportTaskGoal;
 import com.stevesarmy.entity.ai.SoldierCombatGoal;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.ai.goal.Goal;
@@ -22,7 +21,6 @@ public class SupportEntity extends SoldierEntity {
     @Override
     protected void registerGoals() {
         super.registerGoals();
-        this.goalSelector.addGoal(1, new SupportTaskGoal(this));
     }
 
     @Override
