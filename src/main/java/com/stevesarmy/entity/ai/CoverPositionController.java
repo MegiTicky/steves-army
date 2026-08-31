@@ -89,6 +89,10 @@ public class CoverPositionController extends MoveControl {
         beginMove(pos, tolerance, speed, source, reason, true);
     }
 
+    public void reassertControlledReturn() {
+        this.controlledReturnToCover = true;
+    }
+
     private void beginMove(Vec3 pos, double tolerance, double speed, String source, String reason,
                            boolean controlledReturn) {
         if (HazardBlockHelper.sweptPathCrossesHazard(this.mob, this.mob.position(), pos)) {

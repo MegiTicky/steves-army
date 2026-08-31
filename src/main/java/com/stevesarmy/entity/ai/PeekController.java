@@ -247,6 +247,13 @@ public class PeekController {
             returnAllowedDuringReload = true;
             if (cover.getType() == CoverType.FULL) {
                 coverReturnTarget = CoverTacticalGoal.getCoverStandingPositionStatic(cover.getPosition());
+                CoverPositionController.MovementResult r = mover.getLastResult();
+                Vec3 cur = mover.getDebugTargetPos();
+                boolean sameTarget = cur != null && cur.distanceToSqr(coverReturnTarget) < 1e-4;
+                if (r == CoverPositionController.MovementResult.IN_PROGRESS && sameTarget) {
+                    mover.reassertControlledReturn();
+                    return;
+                }
                 mover.returnToCoverDuringReload(coverReturnTarget, RETURN_TOLERANCE, RETURN_SPEED,
                     "PeekController", "return to cover during reload");
             }
@@ -453,6 +460,23 @@ public class PeekController {
 
         // Full cover: check movement
         CoverPositionController.MovementResult result = mover.getLastResult();
+
+        if (getTimeInCurrentState() > 4000) {
+            double dx = coverReturnTarget.x - soldier.getX();
+            double dz = coverReturnTarget.z - soldier.getZ();
+            double dist = Math.sqrt(dx * dx + dz * dz);
+            soldier.tracePeek("return-timeout", "durationMs=" + getTimeInCurrentState() + ", result=" + result + ", dist=" + String.format("%.2f", dist));
+            if (CoverTacticalGoal.isDebugLoggingEnabled()) {
+                StevesArmyMod.LOGGER.info("[PeekController] Soldier {} RETURNING timeout after {}ms (result={}, dist={}), forcing complete",
+                    soldier.getId(), getTimeInCurrentState(), result, String.format("%.2f", dist));
+            }
+            mover.clear();
+            if (dist > RETURN_TOLERANCE + 0.5) {
+                soldier.getCoverBehaviorManager().requestReposition();
+            }
+            completeReturn(soldier, cover);
+            return;
+        }
 
         if (result == CoverPositionController.MovementResult.REACHED_TARGET) {
             completeReturn(soldier, cover);
