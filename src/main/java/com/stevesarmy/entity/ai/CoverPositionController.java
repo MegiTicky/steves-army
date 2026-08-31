@@ -50,7 +50,7 @@ public class CoverPositionController extends MoveControl {
     private static final double COVER_ANCHOR_MAX_SPEED = 0.18;
     private static final double COVER_ANCHOR_RESPONSE = 0.75;
     private static final double APPROACH_SLOWDOWN_DISTANCE = 0.35;
-    private static final double MIN_APPROACH_SPEED_FACTOR = 0.08;
+    private static final double MIN_APPROACH_SPEED_FACTOR = 0.20;
     private static final double TARGET_PROGRESS_EPSILON = 0.002;
 
     public CoverPositionController(Mob mob) {
@@ -336,7 +336,7 @@ public class CoverPositionController extends MoveControl {
             stuckTicks = 0;
         } else {
             stuckTicks++;
-            if (stuckTicks > 40) {
+            if (stuckTicks > 60) {
                 failWithReason(FailureReason.NO_PROGRESS, false);
                 return;
             }
@@ -352,6 +352,7 @@ public class CoverPositionController extends MoveControl {
         float previousHeadYaw = this.mob.getYHeadRot();
         super.tick();
         traceMoveControlRotation(debugMoveSource, previousYaw, previousBodyYaw, previousHeadYaw);
+        applyCoverAnchorVelocity(anchorTarget);
         this.debugLastSetVelocity = this.mob.getDeltaMovement();
     }
 
