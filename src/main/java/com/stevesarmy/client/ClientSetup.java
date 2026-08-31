@@ -21,6 +21,7 @@ public class ClientSetup {
     public static void registerEntityRenderers(EntityRenderersEvent.RegisterRenderers event) {
         event.registerEntityRenderer(ModEntities.SOLDIER.get(), SoldierRenderer::new);
         event.registerEntityRenderer(ModEntities.MACHINE_GUNNER.get(), SoldierRenderer::new);
+        event.registerEntityRenderer(ModEntities.SUPPORT.get(), SoldierRenderer::new);
         event.registerEntityRenderer(ModEntities.GARRISON.get(), SoldierRenderer::new);
         event.registerEntityRenderer(ModEntities.TEAM_GARRISON.get(), SoldierRenderer::new);
         event.registerEntityRenderer(ModEntities.TARGET.get(), TargetRenderer::new);

@@ -5,6 +5,7 @@ import com.stevesarmy.entity.EnemySoldierEntity;
 import com.stevesarmy.entity.GarrisonEntity;
 import com.stevesarmy.entity.MachineGunnerEntity;
 import com.stevesarmy.entity.SoldierEntity;
+import com.stevesarmy.entity.SupportEntity;
 import com.stevesarmy.entity.TargetEntity;
 import com.stevesarmy.entity.TeamGarrisonEntity;
 import net.minecraft.world.entity.EntityType;
@@ -61,6 +62,15 @@ public class ModEntities {
             .build(StevesArmyMod.MODID + ":machine_gunner")
     );
 
+    public static final RegistryObject<EntityType<SupportEntity>> SUPPORT = ENTITIES.register(
+        "support",
+        () -> EntityType.Builder.of(SupportEntity::new, MobCategory.CREATURE)
+            .sized(0.6F, 1.8F)
+            .clientTrackingRange(10)
+            .updateInterval(3)
+            .build(StevesArmyMod.MODID + ":support")
+    );
+
     public static final RegistryObject<EntityType<GarrisonEntity>> GARRISON = ENTITIES.register(
         "garrison_soldier",
         () -> EntityType.Builder.of(GarrisonEntity::new, MobCategory.CREATURE)
@@ -100,6 +110,14 @@ public class ModEntities {
             .build());
 
         event.put(MACHINE_GUNNER.get(), Monster.createMonsterAttributes()
+            .add(Attributes.MAX_HEALTH, 20.0D)
+            .add(Attributes.MOVEMENT_SPEED, 0.35D)
+            .add(Attributes.ARMOR, 4.0D)
+            .add(Attributes.ATTACK_DAMAGE, 3.0D)
+            .add(Attributes.FOLLOW_RANGE, 32.0D)
+            .build());
+
+        event.put(SUPPORT.get(), Monster.createMonsterAttributes()
             .add(Attributes.MAX_HEALTH, 20.0D)
             .add(Attributes.MOVEMENT_SPEED, 0.35D)
             .add(Attributes.ARMOR, 4.0D)

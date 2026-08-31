@@ -59,6 +59,11 @@ public class ModItems {
         () -> new com.stevesarmy.item.MachineGunnerSpawnEggItem(ModEntities.MACHINE_GUNNER, 0x4A7C59, 0x8B8B00, new Item.Properties())
     );
 
+    public static final RegistryObject<Item> SUPPORT_SPAWN_EGG = ITEMS.register(
+        "support_spawn_egg",
+        () -> new com.stevesarmy.item.SupportSpawnEggItem(ModEntities.SUPPORT, 0x4A7C59, 0xFF6B6B, new Item.Properties())
+    );
+
     public static final RegistryObject<Item> GARRISON_SPAWN_EGG = ITEMS.register(
         "garrison_spawn_egg",
         () -> new com.stevesarmy.item.GarrisonSpawnEggItem(ModEntities.GARRISON, 0x4A7C59, 0x2E4053, new Item.Properties())

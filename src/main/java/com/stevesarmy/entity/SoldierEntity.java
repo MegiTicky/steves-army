@@ -468,6 +468,11 @@ public class SoldierEntity extends PathfinderMob implements Container {
         return SoldierRole.RIFLEMAN;
     }
 
+    /** True when this role should never peek from cover. Override for roles like support. */
+    public boolean isPeekDisabled() {
+        return false;
+    }
+
     /**
      * Optional direction that a role prefers for cover evaluation. Riflemen keep
      * the default threat-based evaluation direction.
@@ -569,6 +574,7 @@ public class SoldierEntity extends PathfinderMob implements Container {
             case RIFLEMAN -> ModItems.SOLDIER_SPAWN_EGG.get();
             case MACHINE_GUNNER -> ModItems.MACHINE_GUNNER_SPAWN_EGG.get();
             case GARRISON -> ModItems.GARRISON_SPAWN_EGG.get();
+            case SUPPORT -> ModItems.SUPPORT_SPAWN_EGG.get();
         };
     }
 

@@ -25,6 +25,7 @@ public final class SoldierRoleHandler {
             case RIFLEMAN -> ModEntities.SOLDIER.get();
             case MACHINE_GUNNER -> ModEntities.MACHINE_GUNNER.get();
             case GARRISON -> ModEntities.GARRISON.get();
+            case SUPPORT -> ModEntities.SUPPORT.get();
         };
     }
 

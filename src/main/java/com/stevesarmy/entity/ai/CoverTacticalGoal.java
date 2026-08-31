@@ -13,6 +13,7 @@ import com.stevesarmy.debug.DiagnosticLogManager;
 import com.stevesarmy.debug.PerformanceMetrics;
 import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.entity.MachineGunnerEntity;
+import com.stevesarmy.entity.SupportEntity;
 import com.stevesarmy.squad.SquadCoverContext;
 import com.stevesarmy.squad.SquadManager;
 import com.stevesarmy.squad.SquadMode;
@@ -882,19 +883,21 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
     }
 
     /**
-     * Uses a small rearward squad anchor for MG cover searches in FOLLOW and
-     * ATTACK. Other roles and HOLD mode retain the existing search centers.
+     * Uses a small rearward squad anchor for MG and Support cover searches in
+     * FOLLOW and ATTACK. Other roles and HOLD mode retain the existing search
+     * centers.
      */
     private BlockPos getMachineGunnerSearchCenter() {
-        if (!(soldier instanceof MachineGunnerEntity machineGunner)) {
+        if (!(soldier instanceof MachineGunnerEntity) && !(soldier instanceof SupportEntity)) {
             return null;
         }
         if (!soldier.hasValidAttackTarget() && soldier.getSquadMode() != SquadMode.FOLLOW) {
             return null;
         }
         BlockPos target = soldier.hasValidAttackTarget()
-            ? soldier.getAttackTargetPos() : machineGunner.getSuppressionCenter();
-        return SupportPositionFinder.findRearAnchor(machineGunner, target);
+            ? soldier.getAttackTargetPos()
+            : soldier instanceof MachineGunnerEntity mg ? mg.getSuppressionCenter() : null;
+        return SupportPositionFinder.findRearAnchor(soldier, target);
     }
 
     /**
@@ -2175,7 +2178,9 @@ private void tickRepositioning() {
             if (tryStartHealing(currentCover)) {
                 return;
             }
-            getPeekController().tick(soldier, currentCover, getPositionController());
+            if (!soldier.isPeekDisabled()) {
+                getPeekController().tick(soldier, currentCover, getPositionController());
+            }
             maintainCoverAnchorIfHiding(currentCover);
         }
 
@@ -2294,13 +2299,13 @@ private void tickRepositioning() {
             return;
         }
 
-        if (!coverManager.isPinned() && peekCtrl.isHiding()) {
+        if (!coverManager.isPinned() && peekCtrl.isHiding() && !soldier.isPeekDisabled()) {
             boolean allowPressuredPeek = shouldAllowPressuredPeek();
             if (currentCover != null && currentCover.getType() == CoverType.HALF) {
                 soldier.setLowCrouching(!allowPressuredPeek);
             }
             peekCtrl.tick(soldier, currentCover, getPositionController(), allowPressuredPeek);
-        } else if (!coverManager.isPinned()) {
+        } else if (!coverManager.isPinned() && peekCtrl.isReturning()) {
             peekCtrl.tick(soldier, currentCover, getPositionController());
         }
     }

@@ -6,6 +6,7 @@ import com.stevesarmy.combat.cover.ExactPathValidationBudget;
 import com.stevesarmy.debug.DiagnosticLogManager;
 import com.stevesarmy.entity.MachineGunnerEntity;
 import com.stevesarmy.entity.SoldierEntity;
+import com.stevesarmy.entity.SupportEntity;
 import com.stevesarmy.squad.SquadData;
 import com.stevesarmy.squad.SquadManager;
 import net.minecraft.core.BlockPos;
@@ -47,14 +48,14 @@ public final class SupportPositionFinder {
      * forcing the MG into a fixed formation slot.
      */
     @Nullable
-    public static BlockPos findRearAnchor(MachineGunnerEntity mg, @Nullable BlockPos forwardTarget) {
-        Vec3 line = lineAnchor(mg);
+    public static BlockPos findRearAnchor(SoldierEntity soldier, @Nullable BlockPos forwardTarget) {
+        Vec3 line = lineAnchor(soldier);
         if (line == null) {
             return null;
         }
 
         if (forwardTarget == null) {
-            LivingEntity owner = mg.getOwner();
+            LivingEntity owner = soldier.getOwner();
             if (owner == null) {
                 return null;
             }
@@ -67,7 +68,7 @@ public final class SupportPositionFinder {
         }
         Vec3 rearDirection = new Vec3(-towardTarget.x, 0.0, -towardTarget.z).normalize();
         Vec3 anchor = line.add(rearDirection.scale(REAR_ANCHOR_OFFSET_BLOCKS));
-        return snapToGround(mg.level(), BlockPos.containing(anchor));
+        return snapToGround(soldier.level(), BlockPos.containing(anchor));
     }
 
     @Nullable
@@ -115,23 +116,23 @@ public final class SupportPositionFinder {
         return selected.position();
     }
 
-    private static void addCandidate(List<AnchorCandidate> candidates, MachineGunnerEntity mg,
+    private static void addCandidate(List<AnchorCandidate> candidates, SoldierEntity soldier,
                                      Vec3 threatPos, Vec3 rearAxis,
                                      Vec3 lateral, double lateralOffset,
                                      ExactPathValidationBudget pathBudget) {
         Vec3 target = rearAxis.add(lateral.scale(lateralOffset));
-        BlockPos position = snapToGround(mg.level(), BlockPos.containing(target));
-        boolean terrainValid = isValidAnchorCell(mg.level(), position);
-        Path path = !terrainValid || position.equals(mg.blockPosition()) || !pathBudget.tryAcquire()
-            ? null : mg.getNavigation().createPath(position, 0);
+        BlockPos position = snapToGround(soldier.level(), BlockPos.containing(target));
+        boolean terrainValid = isValidAnchorCell(soldier.level(), position);
+        Path path = !terrainValid || position.equals(soldier.blockPosition()) || !pathBudget.tryAcquire()
+            ? null : soldier.getNavigation().createPath(position, 0);
         boolean reachable = terrainValid
-            && (position.equals(mg.blockPosition()) || (path != null && path.canReach()));
+            && (position.equals(soldier.blockPosition()) || (path != null && path.canReach()));
 
         Vec3 eye = position.getCenter().add(0.0, 1.6, 0.0);
         VisibilityRay.Result visibility = VisibilityRay.traceIgnoringSmoke(
-            mg.level(), eye, threatPos, mg);
-        double masking = friendlyMasking(mg, position, threatPos);
-        double movement = Math.sqrt(mg.position().distanceToSqr(position.getCenter()));
+            soldier.level(), eye, threatPos, soldier);
+        double masking = friendlyMasking(soldier, position, threatPos);
+        double movement = Math.sqrt(soldier.position().distanceToSqr(position.getCenter()));
         double score = (reachable ? PATH_WEIGHT : -PATH_WEIGHT * 2.0)
             + LOS_WEIGHT * visibility.firingLaneQuality()
             - MASKING_WEIGHT * masking
@@ -141,9 +142,9 @@ public final class SupportPositionFinder {
             visibility.firingLaneQuality(), reachable));
     }
 
-    private static double friendlyMasking(MachineGunnerEntity mg, BlockPos position,
+    private static double friendlyMasking(SoldierEntity soldier, BlockPos position,
                                           Vec3 threatPos) {
-        List<SoldierEntity> riflemen = riflemen(mg);
+        List<SoldierEntity> riflemen = riflemen(soldier);
         if (riflemen.isEmpty()) {
             return 0.0;
         }
@@ -191,27 +192,27 @@ public final class SupportPositionFinder {
 
     /** Average position of the squad's riflemen; falls back to the owner. */
     @Nullable
-    private static Vec3 lineAnchor(MachineGunnerEntity mg) {
-        List<SoldierEntity> riflemen = riflemen(mg);
+    private static Vec3 lineAnchor(SoldierEntity soldier) {
+        List<SoldierEntity> riflemen = riflemen(soldier);
         if (!riflemen.isEmpty()) {
             double x = 0.0;
             double y = 0.0;
             double z = 0.0;
-            for (SoldierEntity soldier : riflemen) {
-                x += soldier.getX();
-                y += soldier.getY();
-                z += soldier.getZ();
+            for (SoldierEntity s : riflemen) {
+                x += s.getX();
+                y += s.getY();
+                z += s.getZ();
             }
             return new Vec3(x / riflemen.size(), y / riflemen.size(), z / riflemen.size());
         }
 
-        LivingEntity owner = mg.getOwner();
+        LivingEntity owner = soldier.getOwner();
         return owner != null ? owner.position() : null;
     }
 
-    private static List<SoldierEntity> riflemen(MachineGunnerEntity mg) {
-        Level level = mg.level();
-        UUID squadId = mg.getSquadId();
+    private static List<SoldierEntity> riflemen(SoldierEntity soldier) {
+        Level level = soldier.level();
+        UUID squadId = soldier.getSquadId();
         if (squadId == null || !(level instanceof ServerLevel serverLevel)) {
             return List.of();
         }
@@ -221,12 +222,13 @@ public final class SupportPositionFinder {
         }
         List<SoldierEntity> riflemen = new ArrayList<>();
         for (UUID memberId : squad.getMemberIds()) {
-            if (memberId.equals(mg.getUUID())) {
+            if (memberId.equals(soldier.getUUID())) {
                 continue;
             }
-            if (serverLevel.getEntity(memberId) instanceof SoldierEntity soldier
-                && !(soldier instanceof MachineGunnerEntity)) {
-                riflemen.add(soldier);
+            if (serverLevel.getEntity(memberId) instanceof SoldierEntity s
+                && !(s instanceof MachineGunnerEntity)
+                && !(s instanceof SupportEntity)) {
+                riflemen.add(s);
             }
         }
         return riflemen;

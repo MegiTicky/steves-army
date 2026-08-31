@@ -7,7 +7,8 @@ import net.minecraft.network.chat.Component;
 public enum SoldierRole {
     RIFLEMAN,
     MACHINE_GUNNER,
-    GARRISON;
+    GARRISON,
+    SUPPORT;
 
     public Component getDisplayName() {
         return Component.translatable("role.steves_army." + name().toLowerCase());

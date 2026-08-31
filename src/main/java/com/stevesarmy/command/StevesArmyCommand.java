@@ -9,6 +9,7 @@ import com.stevesarmy.entity.EnemySoldierEntity;
 import com.stevesarmy.entity.GarrisonEntity;
 import com.stevesarmy.entity.MachineGunnerEntity;
 import com.stevesarmy.entity.SoldierEntity;
+import com.stevesarmy.entity.SupportEntity;
 import com.stevesarmy.entity.SoldierSpawner;
 import com.stevesarmy.entity.TeamGarrisonEntity;
 import com.stevesarmy.entity.ai.CoverTacticalGoal;
@@ -54,6 +55,7 @@ public class StevesArmyCommand {
                     "  /stevesarmy loadout save <rifleman> - Copy a rifleman inventory loadout\n" +
                     "  /stevesarmy spawn rifleman <owner> <position> [yaw] [pitch] [loadout_nbt]\n" +
                     "  /stevesarmy spawn machine_gunner <owner> <position> [yaw] [pitch] [loadout_nbt]\n" +
+                    "  /stevesarmy spawn support <owner> <position> [yaw] [pitch] [loadout_nbt]\n" +
                     "  /stevesarmy spawn garrison <owner> <position> [yaw] [pitch] [loadout_nbt]\n" +
                     "  /stevesarmy spawn team_garrison <team> <position> [yaw] [pitch] [loadout_nbt]\n" +
                     "  /stevesarmy spawn enemy <position> [yaw] [pitch] [loadout_nbt]"
@@ -80,6 +82,7 @@ public class StevesArmyCommand {
             .then(Commands.literal("spawn")
                 .then(createOwnedSpawnBranch("rifleman", ModEntities.SOLDIER.get()))
                 .then(createOwnedSpawnBranch("machine_gunner", ModEntities.MACHINE_GUNNER.get()))
+                .then(createOwnedSpawnBranch("support", ModEntities.SUPPORT.get()))
                 .then(createOwnedSpawnBranch("garrison", ModEntities.GARRISON.get()))
                 .then(Commands.literal("team_garrison")
                     .then(Commands.argument("team", StringArgumentType.word())
@@ -236,6 +239,7 @@ public class StevesArmyCommand {
         String loadoutDescription = loadout == null ? "empty loadout" : "provided loadout";
         String entityName = soldier instanceof MachineGunnerEntity
             ? "machine gunner"
+            : soldier instanceof SupportEntity ? "support"
             : soldier instanceof EnemySoldierEntity ? "enemy soldier"
             : soldier instanceof TeamGarrisonEntity ? "team garrison"
             : soldier instanceof GarrisonEntity ? "garrison" : "rifleman";
