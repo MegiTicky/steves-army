@@ -176,8 +176,21 @@ public class CoverFinder {
         if (coverPoints.isEmpty()) {
             return Optional.empty();
         }
+
+        if (threatDirection != null && threatDirection.lengthSqr() > 0.001) {
+            List<CoverPoint> protectedCovers = coverPoints.stream()
+                .filter(cp -> cp.getType() != CoverType.NONE)
+                .filter(cp -> isDirectionProtected(cp, threatDirection))
+                .collect(java.util.stream.Collectors.toList());
+            if (!protectedCovers.isEmpty()) {
+                return protectedCovers.stream()
+                    .max(Comparator.comparingDouble(cp -> calculateThreatAwareScore(cp, center, threat, threatDirection)));
+            }
+            return Optional.empty();
+        }
         
         return coverPoints.stream()
+            .filter(cp -> cp.getType() != CoverType.NONE)
             .max(Comparator.comparingDouble(cp -> calculateThreatAwareScore(cp, center, threat, threatDirection)));
     }
     
@@ -208,9 +221,10 @@ public class CoverFinder {
             }
 
             if (com.stevesarmy.entity.ai.CoverTacticalGoal.isDebugLoggingEnabled()) {
-                StevesArmyMod.LOGGER.info("[CoverFinder] No physically protected covers available for source={}, using best scored cover",
+                StevesArmyMod.LOGGER.info("[CoverFinder] No physically protected covers available for source={}, returning empty",
                     resolveProtectionContext(soldier, threatDirection).source());
             }
+            return Optional.empty();
         }
         
         return Optional.of(all.get(0).cover);
@@ -234,6 +248,7 @@ public class CoverFinder {
             if (!protectedCovers.isEmpty()) {
                 return Optional.of(protectedCovers.get(0).cover);
             }
+            return Optional.empty();
         }
 
         return Optional.of(all.get(0).cover);
@@ -252,6 +267,7 @@ public class CoverFinder {
             if (!protectedCovers.isEmpty()) {
                 return protectedCovers.subList(0, Math.min(count, protectedCovers.size()));
             }
+            return Collections.emptyList();
         }
         
         return all.subList(0, Math.min(count, all.size()));

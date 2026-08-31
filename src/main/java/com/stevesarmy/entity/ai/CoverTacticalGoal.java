@@ -3040,9 +3040,15 @@ private boolean shouldExitCoverForFollow() {
                 soldier, threatDirection, threats, searchRadius, true, squadCtx);
             runPureCoverShadow(threatDirection, threats, squadCtx, reusableScored,
                 searchCenter, searchRadius);
+            if (finder.hasPrimaryThreat(soldier, threatDirection)) {
+                List<CoverFinder.ScoredCover> protectedCovers = reusableScored.stream()
+                    .filter(sc -> finder.isPrimaryThreatProtected(sc.cover, soldier, threatDirection))
+                    .collect(java.util.stream.Collectors.toList());
+                reusableScored = protectedCovers;
+            }
             bestCover = selectPreferredCover(reusableScored);
             if (bestCover.isEmpty()) {
-                bestCover = selectBestAvailableCover(reusableScored, threatDirection);
+                bestCover = selectBestAvailableCover(finder, reusableScored, threatDirection);
             }
 
             if (bestCover.isEmpty()) {
@@ -3215,24 +3221,22 @@ private boolean shouldExitCoverForFollow() {
         return CoverMoveResult.NO_COVER_FOUND;
     }
 
-    private Optional<CoverPoint> selectBestAvailableCover(List<CoverFinder.ScoredCover> scored,
+    private Optional<CoverPoint> selectBestAvailableCover(CoverFinder finder,
+                                                            List<CoverFinder.ScoredCover> scored,
                                                             Vec3 threatDirection) {
         if (scored == null || scored.isEmpty()) {
             return Optional.empty();
         }
 
-        Direction threatDir = threatDirection != null && threatDirection.lengthSqr() > 0.001
-            ? CoverFinder.getDirectionFromVector(threatDirection) : null;
-
-        if (threatDir != null) {
-            Optional<CoverPoint> protectedCover = scored.stream()
+        if (getThreats().hasActiveThreat() && threatDirection != null && threatDirection.lengthSqr() > 0.001) {
+            List<CoverFinder.ScoredCover> protectedCovers = scored.stream()
                 .filter(sc -> CoverReservationManager.isAvailable(sc.cover.getPosition()))
-                .filter(sc -> sc.cover.getProtectedDirections().contains(threatDir))
-                .map(sc -> sc.cover)
-                .findFirst();
-            if (protectedCover.isPresent()) {
-                return protectedCover;
+                .filter(sc -> finder.isPrimaryThreatProtected(sc.cover, soldier, threatDirection))
+                .toList();
+            if (!protectedCovers.isEmpty()) {
+                return Optional.of(protectedCovers.get(0).cover);
             }
+            return Optional.empty();
         }
 
         return scored.stream()
