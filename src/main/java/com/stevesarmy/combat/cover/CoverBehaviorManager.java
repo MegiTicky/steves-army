@@ -298,7 +298,7 @@ public class CoverBehaviorManager {
 
         this.continuousSuppressionRepositionRequested = false;
 
-        soldier.getPeekController().reset();
+        soldier.getPeekController().resetToInactive(soldier);
         // Preserve suppression during cover transitions - don't reset
         soldier.setLowCrouching(false);
         soldier.cancelHalfCoverRise();

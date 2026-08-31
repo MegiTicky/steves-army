@@ -156,6 +156,27 @@ public class PeekController {
         }
     }
 
+    public void resetToInactive(SoldierEntity soldier) {
+        setState(soldier, State.INACTIVE);
+        stateStartTime = 0;
+        currentPeekPos = null;
+        returnAllowedDuringReload = false;
+        nonPeekableTicks = 0;
+        blindPeekTicks = 0;
+        currentMaxExposureTime = getRandomExposureTime();
+    }
+
+    public void resetForNewCover(SoldierEntity soldier, BlockPos coverPosition) {
+        reset(soldier);
+        if (coverPosition != null && coverPosition.equals(lastCoverPosition)) {
+            peekCountSameCover = Math.max(peekCountSameCover, 0);
+        } else {
+            peekCountSameCover = 0;
+        }
+        lastCoverPosition = coverPosition;
+    }
+
+    @Deprecated
     public void resetForNewCover(BlockPos coverPosition) {
         reset();
         if (coverPosition != null && coverPosition.equals(lastCoverPosition)) {
@@ -204,6 +225,10 @@ public class PeekController {
                 break;
             case RETURNING_TO_COVER:
                 tickReturning(soldier, cover, mover);
+                break;
+            case INACTIVE:
+                enterHiding(soldier);
+                tickHiding(soldier, cover, mover, allowPeekStart);
                 break;
         }
     }
@@ -259,6 +284,19 @@ public class PeekController {
         }
 
         Vec3 threatDir = soldier.getThreatAwareness().getPrimaryDirection(soldier.position());
+
+        if (threatDir == null || threatDir.lengthSqr() <= 0.001) {
+            LivingEntity peekTargetEntity = soldier.getTarget();
+            if (peekTargetEntity != null && peekTargetEntity.isAlive()) {
+                Vec3 toTarget = peekTargetEntity.position().subtract(soldier.position());
+                if (toTarget.lengthSqr() > 0.001) {
+                    toTarget = toTarget.normalize();
+                    if (toTarget.lengthSqr() > 0.001) {
+                        threatDir = toTarget;
+                    }
+                }
+            }
+        }
         
         if ((threatDir == null || threatDir.lengthSqr() <= 0.001) && soldier.hasValidPingSuppressPos()) {
             BlockPos suppressPos = soldier.getPingSuppressPos();

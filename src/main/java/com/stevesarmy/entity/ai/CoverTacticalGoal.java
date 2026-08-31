@@ -4554,7 +4554,7 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
         
         // Reset peek controller for new cover and seed the peek cooldown
         // so soldier settles before peeking — prevents immediate "jump out"
-        getPeekController().resetForNewCover(cover.getPosition());
+        getPeekController().resetForNewCover(soldier, cover.getPosition());
         getPeekController().setLastPeekEndTime(System.currentTimeMillis());
         resetSuppressionEpisodes();
         
