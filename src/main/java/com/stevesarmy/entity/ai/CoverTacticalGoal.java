@@ -184,6 +184,8 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
     private boolean recoverySafetyPeekDone = false;
     private boolean recoverySafetyPeekInProgress = false;
     private int routineCoverWaitTicks = 0;
+    private int softCoverCacheTick = -1;
+    private boolean softCoverCacheResult = false;
 
     // Fallback advance state (no cover found — walk forward and re-search)
     private BlockPos fallbackAdvanceTarget = null;
@@ -3813,6 +3815,7 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
         attackExpectedCover = null;
         attackDwellEligible = false;
         attackHasPeekedThisCover = false;
+        softCoverCacheTick = -1;
         attackBestObjectiveDist = Double.MAX_VALUE;
         attackFrontierDistance = Double.MAX_VALUE;
 
@@ -3835,6 +3838,47 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
         }
     }
 
+    /** Attack phase ordinal used by the debug overlay. */
+    public int getAttackPhaseOrdinal() {
+        return attackPhase.ordinal();
+    }
+
+    /** Fraction of the minimum dwell elapsed (0-1+) used by the debug overlay. */
+    public float getAttackDwellFraction() {
+        if (attackPhase != AttackPhase.OCCUPYING_COVER || attackCoverArrivalTime <= 0) return 0.0f;
+        long dwellTime = System.currentTimeMillis() - attackCoverArrivalTime;
+        float ftLevel = FireTeamSuppressionTracker.getLevel(soldier);
+        float dwellMult = (1.0f + ftLevel * 1.5f) * groupCohesionDwellMult();
+        long minDwell = (long)(ATTACK_MIN_DWELL_MS * dwellMult);
+        return minDwell > 0 ? (float) dwellTime / minDwell : 1.0f;
+    }
+
+    public boolean isRecoverySafetyPeekDone() {
+        return recoverySafetyPeekDone;
+    }
+
+    public boolean isPeeking() {
+        PeekController peekCtrl = getPeekController();
+        return peekCtrl.isExposed() || peekCtrl.isMovingToPeek() || peekCtrl.isReturning();
+    }
+
+    public boolean isAttackHasPeekedThisCover() {
+        return attackHasPeekedThisCover;
+    }
+
+    public boolean isAttackDwellMet() {
+        if (attackPhase != AttackPhase.OCCUPYING_COVER || attackCoverArrivalTime <= 0) return false;
+        long dwellTime = System.currentTimeMillis() - attackCoverArrivalTime;
+        float ftLevel = FireTeamSuppressionTracker.getLevel(soldier);
+        float dwellMult = (1.0f + ftLevel * 1.5f) * groupCohesionDwellMult();
+        long minDwell = (long)(ATTACK_MIN_DWELL_MS * dwellMult);
+        return dwellTime >= minDwell;
+    }
+
+    public boolean isSoftCoverAllowed() {
+        return softCoverCacheTick == soldier.tickCount && softCoverCacheResult;
+    }
+
     private void initAttackPhase() {
         int gen = soldier.getAttackGeneration();
         if (attackCommandGeneration != gen) {
@@ -3845,6 +3889,7 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
             attackExpectedCover = null;
             attackDwellEligible = false;
             attackHasPeekedThisCover = false;
+            softCoverCacheTick = -1;
             attackBestObjectiveDist = Double.MAX_VALUE;
             attackFrontierDistance = Double.MAX_VALUE;
             fallbackAdvanceTarget = null;
@@ -3962,6 +4007,7 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
                     attackExpectedCover = null;
                     attackDwellEligible = false;
                     attackHasPeekedThisCover = false;
+                    softCoverCacheTick = -1;
                     updateAttackProgress(objective);
                     if (attackDebugLog()) {
                         StevesArmyMod.LOGGER.info("[AttackPhase] Soldier {} ({}) MOVING_TO_COVER -> OCCUPYING_COVER: cover state {} at {}",
@@ -3988,6 +4034,7 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
                     attackExpectedCover = null;
                     attackDwellEligible = false;
                     attackHasPeekedThisCover = false;
+                    softCoverCacheTick = -1;
                     updateAttackProgress(objective);
                     if (attackDebugLog()) {
                         StevesArmyMod.LOGGER.info("[AttackPhase] Soldier {} MOVING_TO_COVER -> OCCUPYING_COVER: reached cover {}, dwell timer starts",
@@ -4072,8 +4119,21 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
                 // remains an unconditional escape for the P0 emergency override.
                 boolean heavyHold = StevesArmyConfig.isFireteamHeavyHoldReposition()
                     && FireTeamSuppressionTracker.isHeavilySuppressed(soldier);
+
+                // Cache softCoverAllows once per advance evaluation so the stochastic
+                // roll doesn't silently re-block every tick. Once allowed, stays
+                // allowed until the soldier re-enters cover or resets.
+                boolean softAllowed;
+                if (softCoverCacheTick == soldier.tickCount) {
+                    softAllowed = softCoverCacheResult;
+                } else {
+                    softAllowed = softCoverAllows();
+                    softCoverCacheTick = soldier.tickCount;
+                    softCoverCacheResult = softAllowed;
+                }
+
                 boolean canAdvance = dwellMet && recovered && !peeking && !fireteamPinned
-                    && !heavyHold && softCoverAllows();
+                    && !heavyHold && softAllowed;
 
                 // The next bound must begin from cover. A delayed peek ducks back
                 // at maximum dwell instead of blocking attack progression forever.
@@ -4090,7 +4150,17 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
                         String.format("%.2f", getCoverManager().getSuppressionTracker().getSuppressionLevel()));
                 }
 
-                if (maxDwellReached || (canAdvance && attackHasPeekedThisCover)) {
+                // Advance triggers when:
+                //  1. maxDwellReached: unconditional safety escape — always advance
+                //  2. canAdvance && attackHasPeekedThisCover: normal path — peeked first
+                //  3. canAdvance && dwellTime >= minDwell * 2: peek-latch bypass — if
+                //     the soldier never completed a peek (no threat, non-peekable cover,
+                //     half-cover stance), allow advance after double the minimum dwell.
+                //     This prevents permanent stalls where attackHasPeekedThisCover
+                //     can never become true.
+                boolean peekLatchBypass = canAdvance && !attackHasPeekedThisCover
+                    && dwellTime >= (long)(minDwell * 2);
+                if (maxDwellReached || (canAdvance && attackHasPeekedThisCover) || peekLatchBypass) {
                     // The next forward-cover search is budgeted just like the
                     // initial attack search. Waiting here must not be treated
                     // as a failed search and trigger exposed fallback travel.

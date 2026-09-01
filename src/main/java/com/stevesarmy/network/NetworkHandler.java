@@ -129,6 +129,10 @@ public class NetworkHandler {
             FireTeamSuppressionSyncPacket::encode,
             FireTeamSuppressionSyncPacket::new,
             FireTeamSuppressionSyncPacket::handle);
+        INSTANCE.registerMessage(id++, AttackDebugPacket.class,
+            AttackDebugPacket::encode,
+            AttackDebugPacket::new,
+            AttackDebugPacket::handle);
         if (YsmCompat.isLoaded()) {
             registerYsmPacket(id++);
         }

@@ -18,6 +18,7 @@ import com.stevesarmy.combat.cover.CoverQualityEvaluator;
 import com.stevesarmy.combat.cover.CoverReservationManager;
 import com.stevesarmy.combat.cover.FiringPosition;
 import com.stevesarmy.combat.cover.FiringPositionFinder;
+import com.stevesarmy.combat.SquadSyncHandler;
 import com.stevesarmy.debug.DiagnosticLogManager;
 import com.stevesarmy.debug.PerformanceMetrics;
 import com.stevesarmy.entity.SoldierEntity;
@@ -194,6 +195,8 @@ public class CombatDebugCommand {
                         .executes(CombatDebugCommand::setUntargeted)))
                 .then(Commands.literal("spacing")
                     .executes(CombatDebugCommand::toggleSpacingVisualization))
+                .then(Commands.literal("fireteam_suppression")
+                    .executes(CombatDebugCommand::toggleFireteamSuppressionDebug))
                 .then(Commands.literal("status")
                     .executes(CombatDebugCommand::renderStatus))
             )
@@ -635,6 +638,19 @@ public class CombatDebugCommand {
             sendSpacingDebugPacket(context);
         }
 
+        return 1;
+    }
+
+    private static int toggleFireteamSuppressionDebug(CommandContext<CommandSourceStack> context) {
+        ServerPlayer player = context.getSource().getPlayer();
+        if (player == null) {
+            context.getSource().sendFailure(Component.literal("This debug overlay requires a player source."));
+            return 0;
+        }
+        boolean enabled = SquadSyncHandler.toggleAttackDebug(player);
+        context.getSource().sendSuccess(() -> Component.literal(
+            "Fireteam suppression debug: " + (enabled ? "ON" : "OFF")
+        ), true);
         return 1;
     }
 

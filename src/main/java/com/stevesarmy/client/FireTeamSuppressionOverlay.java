@@ -5,8 +5,15 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 
 public final class FireTeamSuppressionOverlay {
+    private static boolean visible = false;
+
+    public static boolean isVisible() { return visible; }
+    public static void setVisible(boolean v) { visible = v; }
+    public static void toggle() { visible = !visible; }
+
     private FireTeamSuppressionOverlay() {}
     public static void render(GuiGraphics g) {
+        if (!visible) return;
         Minecraft mc = Minecraft.getInstance();
         if (mc.player == null) return;
         var entries = ClientFireTeamSuppressionData.INSTANCE.getEntries();

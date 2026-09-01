@@ -311,6 +311,7 @@ public class PingClientEvents {
             CombatDebugRenderer.render(event.getPoseStack(), event.getCamera(), event.getPartialTick());
             CoverDebugRenderer.render(event.getPoseStack(), event.getCamera());
             SpacingDebugRenderer.render(event.getPoseStack(), event.getCamera());
+            FireTeamSuppressionDebugRenderer.render(event.getPoseStack(), event.getCamera());
             CommandStickRenderer.render(event.getPoseStack(), event.getCamera(), event.getPartialTick());
         }
     }
@@ -336,7 +337,7 @@ public class PingClientEvents {
             EnemyContactOverlay.render(event.getGuiGraphics(), lastWorldRenderContext);
             PingOverlayRenderer.render(event.getGuiGraphics(), lastWorldRenderContext);
             SquadActivityOverlayRenderer.render(event.getGuiGraphics(), lastWorldRenderContext);
-            if (CombatDebugRenderer.getDebugMode() != CombatDebugRenderer.DEBUG_MODE_OFF) {
+            if (FireTeamSuppressionOverlay.isVisible()) {
                 FireTeamSuppressionOverlay.render(event.getGuiGraphics());
             }
             
