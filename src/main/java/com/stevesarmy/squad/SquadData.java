@@ -11,6 +11,8 @@ import java.util.*;
 
 public class SquadData {
     private static final long NO_GRENADE_THROW = Long.MIN_VALUE;
+    public static final java.util.regex.Pattern CALLSIGN_PATTERN = java.util.regex.Pattern.compile("[a-z][a-z0-9_-]{0,15}");
+    public static final java.util.regex.Pattern CALLSIGN_PATTERN_WITH_DASH = java.util.regex.Pattern.compile("[a-z][a-z0-9_-]{0,15}|-");
 
     private UUID squadId;
     private UUID leaderId;
@@ -24,10 +26,60 @@ public class SquadData {
     private UUID grenadeReservationOwner;
     private long grenadeReservationUntilTick = NO_GRENADE_THROW;
     private transient SquadCoverPeekabilityCache coverPeekabilityCache = new SquadCoverPeekabilityCache();
+    @Nullable
+    private String callsign;
+    @Nullable
+    private String displayCallsign;
 
     public SquadData(UUID leaderId) {
         this.squadId = UUID.randomUUID();
         this.leaderId = leaderId;
+    }
+
+    public SquadData(UUID leaderId, String callsign) {
+        this.squadId = UUID.randomUUID();
+        this.leaderId = leaderId;
+        setCallsign(callsign);
+    }
+
+    public static String normalizeCallsign(String raw) {
+        return raw.toLowerCase(java.util.Locale.ROOT);
+    }
+
+    public static boolean isValidCallsign(String raw) {
+        if (raw == null) return false;
+        if (raw.equals("-")) return false;
+        return CALLSIGN_PATTERN.matcher(raw).matches() || CALLSIGN_PATTERN.matcher(normalizeCallsign(raw)).matches();
+    }
+
+    public static boolean isValidCallsignNormalized(String normalized) {
+        return normalized != null && CALLSIGN_PATTERN.matcher(normalized).matches();
+    }
+
+    @Nullable
+    public String getCallsign() {
+        return callsign;
+    }
+
+    @Nullable
+    public String getDisplayCallsign() {
+        return displayCallsign;
+    }
+
+    public boolean hasCallsign() {
+        return callsign != null;
+    }
+
+    public void setCallsign(String raw) {
+        if (raw == null || raw.equals("-")) {
+            this.callsign = null;
+            this.displayCallsign = null;
+            return;
+        }
+        String n = normalizeCallsign(raw);
+        if (!CALLSIGN_PATTERN.matcher(n).matches()) throw new IllegalArgumentException("Invalid callsign: " + raw);
+        this.callsign = n;
+        this.displayCallsign = raw;
     }
 
     public UUID getSquadId() {
@@ -218,6 +270,10 @@ public class SquadData {
         tag.putBoolean("CQB", cqbMode);
         tag.putString("Formation", formation.name());
         tag.putLong("LastGrenadeTick", lastGrenadeTick);
+        if (callsign != null) {
+            tag.putString("Callsign", callsign);
+            if (displayCallsign != null) tag.putString("DisplayCallsign", displayCallsign);
+        }
         
         tag.put("ThreatIntel", threatIntel.toNBT());
         
@@ -248,6 +304,13 @@ public class SquadData {
         
         if (tag.contains("ThreatIntel")) {
             data.threatIntel = SquadThreatIntel.fromNBT(tag.getCompound("ThreatIntel"));
+        }
+        if (tag.contains("Callsign")) {
+            String cs = tag.getString("Callsign");
+            if (CALLSIGN_PATTERN.matcher(cs).matches()) {
+                data.callsign = cs;
+                data.displayCallsign = tag.contains("DisplayCallsign") ? tag.getString("DisplayCallsign") : cs;
+            }
         }
         
         ListTag membersList = tag.getList("Members", Tag.TAG_COMPOUND);

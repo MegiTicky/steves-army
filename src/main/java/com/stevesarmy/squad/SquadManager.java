@@ -17,6 +17,7 @@ public class SquadManager extends SavedData {
     private final Map<UUID, SquadData> squadsByLeader = new HashMap<>();
     private final Map<UUID, SquadData> squadsByMember = new HashMap<>();
     private final Map<UUID, SquadData> squadsById = new HashMap<>();
+    private final Map<String, SquadData> squadsByCallsign = new HashMap<>();
 
     public SquadData createSquad(UUID leaderId) {
         if (squadsByLeader.containsKey(leaderId)) {
@@ -28,6 +29,46 @@ public class SquadManager extends SavedData {
         squadsById.put(squad.getSquadId(), squad);
         this.setDirty();
         return squad;
+    }
+
+    public SquadData createCallsignSquad(UUID leaderId, String rawCallsign) {
+        String n = SquadData.normalizeCallsign(rawCallsign);
+        if (!SquadData.isValidCallsignNormalized(n)) throw new IllegalArgumentException("Invalid callsign: " + rawCallsign);
+        SquadData existing = squadsByCallsign.get(n);
+        if (existing != null) throw new IllegalStateException("Callsign already exists: " + rawCallsign);
+        SquadData squad = new SquadData(leaderId, rawCallsign);
+        squadsByCallsign.put(n, squad);
+        squadsById.put(squad.getSquadId(), squad);
+        squadsByLeader.putIfAbsent(leaderId, squad);
+        this.setDirty();
+        return squad;
+    }
+
+    public Optional<SquadData> getSquadByCallsign(String raw) {
+        if (raw == null) return Optional.empty();
+        String n = SquadData.normalizeCallsign(raw);
+        return Optional.ofNullable(squadsByCallsign.get(n));
+    }
+
+    public SquadData getOrCreateCallsignSquad(String rawCallsign, UUID leaderId) {
+        String n = SquadData.normalizeCallsign(rawCallsign);
+        if (!SquadData.isValidCallsignNormalized(n)) throw new IllegalArgumentException("Invalid callsign: " + rawCallsign);
+        SquadData existing = squadsByCallsign.get(n);
+        if (existing != null) return existing;
+        return createCallsignSquad(leaderId, rawCallsign);
+    }
+
+    public boolean disbandByCallsign(String raw) {
+        String n = SquadData.normalizeCallsign(raw);
+        SquadData squad = squadsByCallsign.remove(n);
+        if (squad == null) return false;
+        for (UUID memberId : squad.getMemberIds()) {
+            squadsByMember.remove(memberId);
+        }
+        squadsById.remove(squad.getSquadId());
+        squadsByLeader.entrySet().removeIf(e -> e.getValue() == squad);
+        this.setDirty();
+        return true;
     }
 
     public Optional<SquadData> getSquadByLeader(UUID leaderId) {
@@ -69,6 +110,7 @@ public class SquadManager extends SavedData {
                 squadsByMember.remove(memberId);
             }
             squadsById.remove(squad.getSquadId());
+            if (squad.getCallsign() != null) squadsByCallsign.remove(squad.getCallsign());
             this.setDirty();
         }
     }
@@ -183,7 +225,8 @@ public class SquadManager extends SavedData {
             CompoundTag squadTag = squadsList.getCompound(i);
             SquadData squad = SquadData.fromNBT(squadTag);
             manager.squadsById.put(squad.getSquadId(), squad);
-            manager.squadsByLeader.put(squad.getLeaderId(), squad);
+            manager.squadsByLeader.putIfAbsent(squad.getLeaderId(), squad);
+            if (squad.getCallsign() != null) manager.squadsByCallsign.put(squad.getCallsign(), squad);
             for (UUID memberId : squad.getMemberIds()) {
                 manager.squadsByMember.put(memberId, squad);
             }

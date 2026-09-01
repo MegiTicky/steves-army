@@ -50,9 +50,17 @@ public class GarrisonEntity extends SoldierEntity {
         return SoldierRole.GARRISON;
     }
 
-    /** Garrisons never respond to any ping. */
     @Override
     public void receivePing(PingType type, net.minecraft.world.phys.Vec3 position) {
+        if (this.level().isClientSide) return;
+        if (this.getSquadId() != null && this.level() instanceof net.minecraft.server.level.ServerLevel sl) {
+            var mgr = com.stevesarmy.squad.SquadManager.get(sl);
+            var squad = mgr.getSquadById(this.getSquadId());
+            if (squad.isPresent() && squad.get().hasCallsign()) {
+                super.receivePing(type, position);
+                return;
+            }
+        }
     }
 
     @Override

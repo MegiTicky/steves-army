@@ -15,7 +15,10 @@ import com.stevesarmy.entity.TeamGarrisonEntity;
 import com.stevesarmy.entity.ai.CoverTacticalGoal;
 import com.stevesarmy.entity.ai.GrenadeTacticalController;
 import com.stevesarmy.inventory.SoldierInventory;
+import com.stevesarmy.ping.PingType;
 import com.stevesarmy.registry.ModEntities;
+import com.stevesarmy.squad.SquadData;
+import com.stevesarmy.squad.SquadManager;
 import com.mojang.brigadier.arguments.FloatArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import net.minecraft.commands.CommandSourceStack;
@@ -29,12 +32,14 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.network.chat.Style;
 import net.minecraft.ChatFormatting;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.phys.Vec3;
 
+import java.util.UUID;
 import java.util.function.Function;
 
 public class StevesArmyCommand {
@@ -53,12 +58,17 @@ public class StevesArmyCommand {
                     "  /stevesarmy debug - Enable all debug (shortcut for /stevesarmy_debug all)\n" +
                     "  /stevesarmy grenade <soldier> <target> - Force a safe grenade throw and report the reason if blocked\n" +
                     "  /stevesarmy loadout save <rifleman> - Copy a rifleman inventory loadout\n" +
-                    "  /stevesarmy spawn rifleman <owner> <position> [yaw] [pitch] [loadout_nbt]\n" +
-                    "  /stevesarmy spawn machine_gunner <owner> <position> [yaw] [pitch] [loadout_nbt]\n" +
-                    "  /stevesarmy spawn support <owner> <position> [yaw] [pitch] [loadout_nbt]\n" +
-                    "  /stevesarmy spawn garrison <owner> <position> [yaw] [pitch] [loadout_nbt]\n" +
-                    "  /stevesarmy spawn team_garrison <team> <position> [yaw] [pitch] [loadout_nbt]\n" +
-                    "  /stevesarmy spawn enemy <position> [yaw] [pitch] [loadout_nbt]"
+                    "  /stevesarmy spawn rifleman <owner> [squad <callsign>] <position> [yaw] [pitch] [loadout_nbt]\n" +
+                    "  /stevesarmy spawn machine_gunner <owner> [squad <callsign>] <position> [yaw] [pitch] [loadout_nbt]\n" +
+                    "  /stevesarmy spawn support <owner> [squad <callsign>] <position> [yaw] [pitch] [loadout_nbt]\n" +
+                    "  /stevesarmy spawn garrison <owner> [squad <callsign>] <position> [yaw] [pitch] [loadout_nbt]\n" +
+                    "  /stevesarmy spawn team_garrison <team> [squad <callsign>] <position> [yaw] [pitch] [loadout_nbt]\n" +
+                    "  /stevesarmy spawn enemy [squad <callsign>] <position> [yaw] [pitch] [loadout_nbt]\n" +
+                    "  /stevesarmy squad create <callsign> [owner|team <team>|enemy]\n" +
+                    "  /stevesarmy squad list\n" +
+                    "  /stevesarmy squad info <callsign>\n" +
+                    "  /stevesarmy squad disband <callsign>\n" +
+                    "  /stevesarmy squad order <callsign> <goto|send|attack|threat|suppress|hold|follow> [pos|player]"
                 ), false);
                 return 1;
             })
@@ -86,10 +96,220 @@ public class StevesArmyCommand {
                 .then(createOwnedSpawnBranch("garrison", ModEntities.GARRISON.get()))
                 .then(Commands.literal("team_garrison")
                     .then(Commands.argument("team", StringArgumentType.word())
-                        .then(createTeamGarrisonSpawnArguments())))
+                        .then(Commands.literal("squad")
+                            .then(Commands.argument("callsign", CallsignArgument.callsign())
+                                .then(createTeamGarrisonSquadSpawnArgs())))
+                        .then(createTeamGarrisonSpawnArgs())))
                 .then(Commands.literal("enemy")
+                    .then(Commands.literal("squad")
+                        .then(Commands.argument("callsign", CallsignArgument.callsign())
+                            .then(createEnemySquadSpawnArgs())))
                     .then(createSpawnArguments(ModEntities.ENEMY_SOLDIER.get(), false)))
+            )
+            .then(Commands.literal("squad")
+                .then(Commands.literal("create")
+                    .then(Commands.argument("callsign", CallsignArgument.callsign())
+                        .executes(ctx -> squadCreate(ctx, CallsignArgument.getCallsign(ctx, "callsign"), null, null))
+                        .then(Commands.argument("owner", EntityArgument.player())
+                            .executes(ctx -> squadCreate(ctx, CallsignArgument.getCallsign(ctx, "callsign"), EntityArgument.getPlayer(ctx, "owner").getUUID(), null)))
+                        .then(Commands.literal("team")
+                            .then(Commands.argument("team", StringArgumentType.word())
+                                .executes(ctx -> {
+                                    String cs = CallsignArgument.getCallsign(ctx, "callsign");
+                                    String team = StringArgumentType.getString(ctx, "team");
+                                    return squadCreate(ctx, cs, SoldierSpawner.teamLeaderId(team), team);
+                                })))
+                        .then(Commands.literal("enemy")
+                            .executes(ctx -> {
+                                String cs = CallsignArgument.getCallsign(ctx, "callsign");
+                                return squadCreate(ctx, cs, SoldierSpawner.enemyLeaderId(cs), null);
+                            }))))
+                .then(Commands.literal("list")
+                    .executes(StevesArmyCommand::squadList))
+                .then(Commands.literal("info")
+                    .then(Commands.argument("callsign", CallsignArgument.callsign())
+                        .executes(ctx -> squadInfo(ctx, CallsignArgument.getCallsign(ctx, "callsign")))))
+                .then(Commands.literal("disband")
+                    .then(Commands.argument("callsign", CallsignArgument.callsign())
+                        .executes(ctx -> squadDisband(ctx, CallsignArgument.getCallsign(ctx, "callsign")))))
+                .then(Commands.literal("order")
+                    .then(Commands.argument("callsign", CallsignArgument.callsign())
+                        .then(Commands.literal("goto")
+                            .then(Commands.argument("pos", Vec3Argument.vec3())
+                                .executes(ctx -> squadOrder(ctx, StringArgumentType.getString(ctx, "callsign"), PingType.GO_TO, Vec3Argument.getVec3(ctx, "pos")))))
+                        .then(Commands.literal("go_to")
+                            .then(Commands.argument("pos", Vec3Argument.vec3())
+                                .executes(ctx -> squadOrder(ctx, StringArgumentType.getString(ctx, "callsign"), PingType.GO_TO, Vec3Argument.getVec3(ctx, "pos")))))
+                        .then(Commands.literal("send")
+                            .then(Commands.argument("pos", Vec3Argument.vec3())
+                                .executes(ctx -> squadOrder(ctx, StringArgumentType.getString(ctx, "callsign"), PingType.SEND, Vec3Argument.getVec3(ctx, "pos")))))
+                        .then(Commands.literal("attack")
+                            .then(Commands.argument("pos", Vec3Argument.vec3())
+                                .executes(ctx -> squadOrder(ctx, StringArgumentType.getString(ctx, "callsign"), PingType.ATTACK, Vec3Argument.getVec3(ctx, "pos")))))
+                        .then(Commands.literal("threat")
+                            .then(Commands.argument("pos", Vec3Argument.vec3())
+                                .executes(ctx -> squadOrder(ctx, StringArgumentType.getString(ctx, "callsign"), PingType.THREAT_DIRECTION, Vec3Argument.getVec3(ctx, "pos")))))
+                        .then(Commands.literal("suppress")
+                            .then(Commands.argument("pos", Vec3Argument.vec3())
+                                .executes(ctx -> squadOrder(ctx, StringArgumentType.getString(ctx, "callsign"), PingType.SUPPRESS_AREA, Vec3Argument.getVec3(ctx, "pos")))))
+                        .then(Commands.literal("hold")
+                            .executes(ctx -> squadOrderHold(ctx, StringArgumentType.getString(ctx, "callsign"), null))
+                            .then(Commands.argument("pos", Vec3Argument.vec3())
+                                .executes(ctx -> squadOrderHold(ctx, StringArgumentType.getString(ctx, "callsign"), Vec3Argument.getVec3(ctx, "pos")))))
+                        .then(Commands.literal("follow")
+                            .executes(ctx -> squadOrderFollow(ctx, StringArgumentType.getString(ctx, "callsign"), null))
+                            .then(Commands.argument("player", EntityArgument.player())
+                                .executes(ctx -> squadOrderFollow(ctx, StringArgumentType.getString(ctx, "callsign"), EntityArgument.getPlayer(ctx, "player")))))))
             );
+    }
+
+    private static int squadCreate(CommandContext<CommandSourceStack> ctx, String rawCallsign, UUID leaderId, String teamName) {
+        ServerLevel level = ctx.getSource().getLevel();
+        String n = rawCallsign.toLowerCase(java.util.Locale.ROOT);
+        if (!SquadData.CALLSIGN_PATTERN.matcher(n).matches()) {
+            ctx.getSource().sendFailure(Component.literal("Invalid callsign '" + rawCallsign + "': must match [a-z0-9_-]{1,16}"));
+            return 0;
+        }
+        SquadManager mgr = SquadManager.get(level);
+        if (mgr.getSquadByCallsign(n).isPresent()) {
+            ctx.getSource().sendFailure(Component.literal("Callsign already exists: " + n));
+            return 0;
+        }
+        UUID leader = leaderId;
+        if (leader == null) {
+            try {
+                Entity src = ctx.getSource().getEntity();
+                if (src instanceof Player p) leader = p.getUUID();
+            } catch (Exception ignored) {}
+            if (leader == null) {
+                ctx.getSource().sendFailure(Component.literal("Must specify owner, team <name> or enemy when creating squad from non-player (CC)"));
+                return 0;
+            }
+        }
+        try {
+            SquadData squad = mgr.createCallsignSquad(leader, rawCallsign);
+            String desc = teamName != null ? " team " + teamName : " leader " + leader.toString().substring(0, 8);
+            ctx.getSource().sendSuccess(() -> Component.literal("Created squad '" + squad.getCallsign() + "' (" + squad.getDisplayCallsign() + ") for" + desc + " id " + squad.getSquadId()), false);
+            return 1;
+        } catch (Exception e) {
+            ctx.getSource().sendFailure(Component.literal("Failed to create squad: " + e.getMessage()));
+            return 0;
+        }
+    }
+
+    private static int squadList(CommandContext<CommandSourceStack> ctx) {
+        SquadManager mgr = SquadManager.get(ctx.getSource().getLevel());
+        var squads = mgr.getAllSquads().stream().filter(SquadData::hasCallsign).toList();
+        if (squads.isEmpty()) {
+            ctx.getSource().sendSuccess(() -> Component.literal("No callsign squads"), false);
+            return 1;
+        }
+        StringBuilder sb = new StringBuilder("Squads (" + squads.size() + "):\n");
+        for (SquadData s : squads) {
+            sb.append("  ").append(s.getCallsign()).append(" [").append(s.getDisplayCallsign()).append("] members=").append(s.getMemberCount()).append(" leader=").append(s.getLeaderId().toString().substring(0, 8)).append("\n");
+        }
+        ctx.getSource().sendSuccess(() -> Component.literal(sb.toString()), false);
+        return 1;
+    }
+
+    private static int squadInfo(CommandContext<CommandSourceStack> ctx, String raw) {
+        ServerLevel level = ctx.getSource().getLevel();
+        SquadManager mgr = SquadManager.get(level);
+        var opt = mgr.getSquadByCallsign(raw);
+        if (opt.isEmpty()) {
+            ctx.getSource().sendFailure(Component.literal("Unknown squad: " + raw));
+            return 0;
+        }
+        SquadData squad = opt.get();
+        StringBuilder sb = new StringBuilder("Squad '" + squad.getCallsign() + "' (" + squad.getDisplayCallsign() + ") id " + squad.getSquadId() + " leader " + squad.getLeaderId() + " members " + squad.getMemberCount() + " mode " + squad.getMode() + "\n");
+        for (UUID id : squad.getMemberIds()) {
+            Entity e = level.getEntity(id);
+            if (e == null) sb.append("  ").append(id.toString().substring(0, 8)).append(" <unloaded>\n");
+            else if (e instanceof LivingEntity le) sb.append("  ").append(id.toString().substring(0, 8)).append(" ").append(e.getType().toString()).append(" pos ").append(e.blockPosition().toShortString()).append(" hp ").append(String.format("%.0f/%.0f", le.getHealth(), le.getMaxHealth())).append(le.isAlive() ? "" : " DEAD").append("\n");
+            else sb.append("  ").append(id.toString().substring(0, 8)).append(" ").append(e.blockPosition().toShortString()).append("\n");
+        }
+        ctx.getSource().sendSuccess(() -> Component.literal(sb.toString()), false);
+        return 1;
+    }
+
+    private static int squadDisband(CommandContext<CommandSourceStack> ctx, String raw) {
+        SquadManager mgr = SquadManager.get(ctx.getSource().getLevel());
+        if (!mgr.disbandByCallsign(raw)) {
+            ctx.getSource().sendFailure(Component.literal("Unknown squad: " + raw));
+            return 0;
+        }
+        ctx.getSource().sendSuccess(() -> Component.literal("Disbanded squad '" + raw.toLowerCase(java.util.Locale.ROOT) + "'"), false);
+        return 1;
+    }
+
+    private static int squadOrder(CommandContext<CommandSourceStack> ctx, String raw, PingType type, Vec3 pos) {
+        ServerLevel level = ctx.getSource().getLevel();
+        SquadManager mgr = SquadManager.get(level);
+        var opt = mgr.getSquadByCallsign(raw);
+        if (opt.isEmpty()) {
+            ctx.getSource().sendFailure(Component.literal("Unknown squad: " + raw));
+            return 0;
+        }
+        SquadData squad = opt.get();
+        int count = 0;
+        for (UUID id : squad.getMemberIds()) {
+            Entity e = level.getEntity(id);
+            if (e instanceof SoldierEntity soldier && soldier.isAlive() && !soldier.isRemoved()) {
+                soldier.receivePing(type, pos);
+                count++;
+            }
+        }
+        int finalCount = count;
+        Vec3 p = pos;
+        ctx.getSource().sendSuccess(() -> Component.literal("Ordered squad '" + squad.getCallsign() + "' " + type.name() + " -> " + p + " (" + finalCount + " soldiers)"), false);
+        return finalCount > 0 ? 1 : 0;
+    }
+
+    private static int squadOrderHold(CommandContext<CommandSourceStack> ctx, String raw, Vec3 pos) {
+        ServerLevel level = ctx.getSource().getLevel();
+        SquadManager mgr = SquadManager.get(level);
+        var opt = mgr.getSquadByCallsign(raw);
+        if (opt.isEmpty()) {
+            ctx.getSource().sendFailure(Component.literal("Unknown squad: " + raw));
+            return 0;
+        }
+        SquadData squad = opt.get();
+        int count = 0;
+        for (UUID id : squad.getMemberIds()) {
+            Entity e = level.getEntity(id);
+            if (e instanceof SoldierEntity soldier && soldier.isAlive() && !soldier.isRemoved()) {
+                Vec3 p = pos != null ? pos : new Vec3(soldier.getX(), soldier.getY(), soldier.getZ());
+                soldier.receivePing(PingType.HOLD, p);
+                if (pos != null) soldier.setHoldPosition(net.minecraft.core.BlockPos.containing(pos));
+                count++;
+            }
+        }
+        int finalCount = count;
+        ctx.getSource().sendSuccess(() -> Component.literal("Ordered squad '" + squad.getCallsign() + "' HOLD" + (pos != null ? " -> " + pos : "") + " (" + finalCount + ")"), false);
+        return finalCount > 0 ? 1 : 0;
+    }
+
+    private static int squadOrderFollow(CommandContext<CommandSourceStack> ctx, String raw, Player target) {
+        ServerLevel level = ctx.getSource().getLevel();
+        SquadManager mgr = SquadManager.get(level);
+        var opt = mgr.getSquadByCallsign(raw);
+        if (opt.isEmpty()) {
+            ctx.getSource().sendFailure(Component.literal("Unknown squad: " + raw));
+            return 0;
+        }
+        SquadData squad = opt.get();
+        int count = 0;
+        Vec3 dummy = target != null ? target.position() : new Vec3(0, 0, 0);
+        for (UUID id : squad.getMemberIds()) {
+            Entity e = level.getEntity(id);
+            if (e instanceof SoldierEntity soldier && soldier.isAlive() && !soldier.isRemoved()) {
+                soldier.receivePing(PingType.FOLLOW, dummy);
+                count++;
+            }
+        }
+        int finalCount = count;
+        ctx.getSource().sendSuccess(() -> Component.literal("Ordered squad '" + squad.getCallsign() + "' FOLLOW" + (target != null ? " -> " + target.getName().getString() : "") + " (" + finalCount + ")"), false);
+        return finalCount > 0 ? 1 : 0;
     }
 
     private static int forceGrenadeThrow(CommandContext<CommandSourceStack> context) {
@@ -129,13 +349,51 @@ public class StevesArmyCommand {
     ) {
         return Commands.literal(name)
             .then(Commands.argument("owner", EntityArgument.player())
+                .then(Commands.literal("squad")
+                    .then(Commands.argument("callsign", CallsignArgument.callsign())
+                        .then(createOwnedSquadSpawnArguments(entityType))))
                 .then(createSpawnArguments(entityType, true)));
     }
 
-    private static ArgumentBuilder<CommandSourceStack, ?> createTeamGarrisonSpawnArguments() {
+    private static ArgumentBuilder<CommandSourceStack, ?> createTeamGarrisonSpawnArgs() {
         Function<CommandContext<CommandSourceStack>, Integer> execute = context ->
             spawnTeamGarrison(context, StringArgumentType.getString(context, "team"));
+        var position = Commands.argument("position", Vec3Argument.vec3())
+            .executes(execute::apply)
+            .then(Commands.argument("loadout", CompoundTagArgument.compoundTag())
+                .executes(execute::apply));
+        var yaw = Commands.argument("yaw", FloatArgumentType.floatArg())
+            .executes(execute::apply);
+        var pitch = Commands.argument("pitch", FloatArgumentType.floatArg())
+            .executes(execute::apply)
+            .then(Commands.argument("loadout", CompoundTagArgument.compoundTag())
+                .executes(execute::apply));
+        yaw.then(pitch);
+        position.then(yaw);
+        return position;
+    }
 
+    private static ArgumentBuilder<CommandSourceStack, ?> createTeamGarrisonSquadSpawnArgs() {
+        Function<CommandContext<CommandSourceStack>, Integer> execute = context ->
+            spawnTeamGarrisonWithCallsign(context, StringArgumentType.getString(context, "team"), CallsignArgument.getCallsign(context, "callsign"));
+        var position = Commands.argument("position", Vec3Argument.vec3())
+            .executes(execute::apply)
+            .then(Commands.argument("loadout", CompoundTagArgument.compoundTag())
+                .executes(execute::apply));
+        var yaw = Commands.argument("yaw", FloatArgumentType.floatArg())
+            .executes(execute::apply);
+        var pitch = Commands.argument("pitch", FloatArgumentType.floatArg())
+            .executes(execute::apply)
+            .then(Commands.argument("loadout", CompoundTagArgument.compoundTag())
+                .executes(execute::apply));
+        yaw.then(pitch);
+        position.then(yaw);
+        return position;
+    }
+
+    private static ArgumentBuilder<CommandSourceStack, ?> createEnemySquadSpawnArgs() {
+        Function<CommandContext<CommandSourceStack>, Integer> execute = context ->
+            spawnEnemyWithCallsign(context, CallsignArgument.getCallsign(context, "callsign"));
         var position = Commands.argument("position", Vec3Argument.vec3())
             .executes(execute::apply)
             .then(Commands.argument("loadout", CompoundTagArgument.compoundTag())
@@ -158,6 +416,26 @@ public class StevesArmyCommand {
         Function<CommandContext<CommandSourceStack>, Integer> execute = context ->
             spawnEntity(context, entityType, ownerRequired);
 
+        var position = Commands.argument("position", Vec3Argument.vec3())
+            .executes(execute::apply)
+            .then(Commands.argument("loadout", CompoundTagArgument.compoundTag())
+                .executes(execute::apply));
+        var yaw = Commands.argument("yaw", FloatArgumentType.floatArg())
+            .executes(execute::apply);
+        var pitch = Commands.argument("pitch", FloatArgumentType.floatArg())
+            .executes(execute::apply)
+            .then(Commands.argument("loadout", CompoundTagArgument.compoundTag())
+                .executes(execute::apply));
+        yaw.then(pitch);
+        position.then(yaw);
+        return position;
+    }
+
+    private static ArgumentBuilder<CommandSourceStack, ?> createOwnedSquadSpawnArguments(
+        EntityType<? extends SoldierEntity> entityType
+    ) {
+        Function<CommandContext<CommandSourceStack>, Integer> execute = context ->
+            spawnEntityWithCallsign(context, entityType, true, CallsignArgument.getCallsign(context, "callsign"));
         var position = Commands.argument("position", Vec3Argument.vec3())
             .executes(execute::apply)
             .then(Commands.argument("loadout", CompoundTagArgument.compoundTag())
@@ -250,6 +528,47 @@ public class StevesArmyCommand {
         return 1;
     }
 
+    private static int spawnEntityWithCallsign(
+        CommandContext<CommandSourceStack> context,
+        EntityType<? extends SoldierEntity> entityType,
+        boolean ownerRequired,
+        String callsign
+    ) {
+        CommandSourceStack source = context.getSource();
+        Player owner;
+        try {
+            owner = ownerRequired ? EntityArgument.getPlayer(context, "owner") : null;
+        } catch (Exception e) {
+            source.sendFailure(Component.literal("Could not resolve owner: " + e.getMessage()));
+            return 0;
+        }
+        if (callsign.equals("-")) callsign = null;
+        else {
+            String n = callsign.toLowerCase(java.util.Locale.ROOT);
+            if (!SquadData.CALLSIGN_PATTERN.matcher(n).matches()) {
+                source.sendFailure(Component.literal("Invalid callsign: " + callsign));
+                return 0;
+            }
+        }
+        float yaw = optionalFloat(context, "yaw", 0.0F);
+        float pitch = optionalFloat(context, "pitch", 0.0F);
+        CompoundTag loadout = optionalLoadout(context);
+        Vec3 position = Vec3Argument.getVec3(context, "position");
+        SoldierSpawner.SpawnResult result;
+        if (callsign != null) result = SoldierSpawner.spawnWithCallsign(source.getLevel(), entityType, owner, callsign, position, yaw, pitch, loadout);
+        else result = SoldierSpawner.spawn(source.getLevel(), entityType, owner, position, yaw, pitch, loadout);
+        if (!result.success()) {
+            source.sendFailure(Component.literal(result.message()));
+            return 0;
+        }
+        SoldierEntity soldier = result.soldier();
+        String entityName = soldier instanceof MachineGunnerEntity ? "machine gunner" : soldier instanceof SupportEntity ? "support" : soldier instanceof GarrisonEntity ? "garrison" : "rifleman";
+        String extra = callsign != null ? " into squad '" + callsign.toLowerCase(java.util.Locale.ROOT) + "'" : "";
+        String ownerDescription = owner == null ? "without an owner" : "for " + owner.getName().getString();
+        source.sendSuccess(() -> Component.literal("Spawned " + entityName + " " + soldier.getUUID() + " " + ownerDescription + extra + "."), false);
+        return 1;
+    }
+
     private static int spawnTeamGarrison(CommandContext<CommandSourceStack> context, String teamName) {
         CommandSourceStack source = context.getSource();
         float yaw = optionalFloat(context, "yaw", 0.0F);
@@ -286,6 +605,48 @@ public class StevesArmyCommand {
 
         source.sendSuccess(() -> Component.literal(
             "Spawned team garrison " + garrison.getUUID() + " for team " + teamName + "."), false);
+        return 1;
+    }
+
+    private static int spawnTeamGarrisonWithCallsign(CommandContext<CommandSourceStack> context, String teamName, String callsign) {
+        CommandSourceStack source = context.getSource();
+        float yaw = optionalFloat(context, "yaw", 0.0F);
+        float pitch = optionalFloat(context, "pitch", 0.0F);
+        CompoundTag loadout = optionalLoadout(context);
+        Vec3 position = Vec3Argument.getVec3(context, "position");
+        if (loadout != null) {
+            var validation = SoldierSpawner.validateLoadout(loadout);
+            if (validation.isPresent()) { source.sendFailure(Component.literal(validation.get())); return 0; }
+        }
+        if (!callsign.equals("-")) {
+            String n = callsign.toLowerCase(java.util.Locale.ROOT);
+            if (!SquadData.CALLSIGN_PATTERN.matcher(n).matches()) { source.sendFailure(Component.literal("Invalid callsign: " + callsign)); return 0; }
+        }
+        TeamGarrisonEntity garrison = ModEntities.TEAM_GARRISON.get().create(source.getLevel());
+        if (garrison == null) { source.sendFailure(Component.literal("Failed to create team garrison")); return 0; }
+        garrison.moveTo(position.x, position.y, position.z, yaw, pitch);
+        garrison.setTeamName(teamName);
+        if (loadout != null) { SoldierInventory inv = garrison.getSoldierInventory(); inv.load(loadout); inv.syncArmorToEntity(garrison); }
+        SoldierSpawner.SpawnResult result;
+        if (callsign.equals("-")) result = SoldierSpawner.finishSpawn(source.getLevel(), garrison, null, false);
+        else result = SoldierSpawner.finishSpawnWithCallsign(source.getLevel(), garrison, null, false, callsign, SoldierSpawner.teamLeaderId(teamName));
+        if (!result.success()) { source.sendFailure(Component.literal(result.message())); return 0; }
+        String extra = callsign.equals("-") ? "" : " into squad '" + callsign.toLowerCase(java.util.Locale.ROOT) + "'";
+        source.sendSuccess(() -> Component.literal("Spawned team garrison " + garrison.getUUID() + " for team " + teamName + extra + "."), false);
+        return 1;
+    }
+
+    private static int spawnEnemyWithCallsign(CommandContext<CommandSourceStack> context, String callsign) {
+        CommandSourceStack source = context.getSource();
+        String n = callsign.toLowerCase(java.util.Locale.ROOT);
+        if (!SquadData.CALLSIGN_PATTERN.matcher(n).matches()) { source.sendFailure(Component.literal("Invalid callsign: " + callsign)); return 0; }
+        float yaw = optionalFloat(context, "yaw", 0.0F);
+        float pitch = optionalFloat(context, "pitch", 0.0F);
+        CompoundTag loadout = optionalLoadout(context);
+        Vec3 position = Vec3Argument.getVec3(context, "position");
+        SoldierSpawner.SpawnResult result = SoldierSpawner.spawnWithCallsign(source.getLevel(), ModEntities.ENEMY_SOLDIER.get(), null, callsign, position, yaw, pitch, loadout);
+        if (!result.success()) { source.sendFailure(Component.literal(result.message())); return 0; }
+        source.sendSuccess(() -> Component.literal("Spawned enemy soldier " + result.soldier().getUUID() + " into squad '" + n + "'."), false);
         return 1;
     }
 
