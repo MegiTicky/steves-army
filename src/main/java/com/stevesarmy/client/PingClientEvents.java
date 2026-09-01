@@ -336,7 +336,9 @@ public class PingClientEvents {
             EnemyContactOverlay.render(event.getGuiGraphics(), lastWorldRenderContext);
             PingOverlayRenderer.render(event.getGuiGraphics(), lastWorldRenderContext);
             SquadActivityOverlayRenderer.render(event.getGuiGraphics(), lastWorldRenderContext);
-            FireTeamSuppressionOverlay.render(event.getGuiGraphics());
+            if (CombatDebugRenderer.getDebugMode() != CombatDebugRenderer.DEBUG_MODE_OFF) {
+                FireTeamSuppressionOverlay.render(event.getGuiGraphics());
+            }
             
             CoverHudRenderer.render(event.getGuiGraphics());
         }
