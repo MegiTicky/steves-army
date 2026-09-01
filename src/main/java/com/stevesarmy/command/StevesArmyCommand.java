@@ -97,43 +97,43 @@ public class StevesArmyCommand {
                 .then(Commands.literal("team_garrison")
                     .then(Commands.argument("team", StringArgumentType.word())
                         .then(Commands.literal("squad")
-                            .then(Commands.argument("callsign", CallsignArgument.callsign())
+                            .then(Commands.argument("callsign", StringArgumentType.word())
                                 .then(createTeamGarrisonSquadSpawnArgs())))
                         .then(createTeamGarrisonSpawnArgs())))
                 .then(Commands.literal("enemy")
                     .then(Commands.literal("squad")
-                        .then(Commands.argument("callsign", CallsignArgument.callsign())
+                        .then(Commands.argument("callsign", StringArgumentType.word())
                             .then(createEnemySquadSpawnArgs())))
                     .then(createSpawnArguments(ModEntities.ENEMY_SOLDIER.get(), false)))
             )
             .then(Commands.literal("squad")
                 .then(Commands.literal("create")
-                    .then(Commands.argument("callsign", CallsignArgument.callsign())
-                        .executes(ctx -> squadCreate(ctx, CallsignArgument.getCallsign(ctx, "callsign"), null, null))
+                    .then(Commands.argument("callsign", StringArgumentType.word())
+                        .executes(ctx -> squadCreate(ctx, StringArgumentType.getString(ctx, "callsign"), null, null))
                         .then(Commands.argument("owner", EntityArgument.player())
-                            .executes(ctx -> squadCreate(ctx, CallsignArgument.getCallsign(ctx, "callsign"), EntityArgument.getPlayer(ctx, "owner").getUUID(), null)))
+                            .executes(ctx -> squadCreate(ctx, StringArgumentType.getString(ctx, "callsign"), EntityArgument.getPlayer(ctx, "owner").getUUID(), null)))
                         .then(Commands.literal("team")
                             .then(Commands.argument("team", StringArgumentType.word())
                                 .executes(ctx -> {
-                                    String cs = CallsignArgument.getCallsign(ctx, "callsign");
+                                    String cs = StringArgumentType.getString(ctx, "callsign");
                                     String team = StringArgumentType.getString(ctx, "team");
                                     return squadCreate(ctx, cs, SoldierSpawner.teamLeaderId(team), team);
                                 })))
                         .then(Commands.literal("enemy")
                             .executes(ctx -> {
-                                String cs = CallsignArgument.getCallsign(ctx, "callsign");
+                                String cs = StringArgumentType.getString(ctx, "callsign");
                                 return squadCreate(ctx, cs, SoldierSpawner.enemyLeaderId(cs), null);
                             }))))
                 .then(Commands.literal("list")
                     .executes(StevesArmyCommand::squadList))
                 .then(Commands.literal("info")
-                    .then(Commands.argument("callsign", CallsignArgument.callsign())
-                        .executes(ctx -> squadInfo(ctx, CallsignArgument.getCallsign(ctx, "callsign")))))
+                    .then(Commands.argument("callsign", StringArgumentType.word())
+                        .executes(ctx -> squadInfo(ctx, StringArgumentType.getString(ctx, "callsign")))))
                 .then(Commands.literal("disband")
-                    .then(Commands.argument("callsign", CallsignArgument.callsign())
-                        .executes(ctx -> squadDisband(ctx, CallsignArgument.getCallsign(ctx, "callsign")))))
+                    .then(Commands.argument("callsign", StringArgumentType.word())
+                        .executes(ctx -> squadDisband(ctx, StringArgumentType.getString(ctx, "callsign")))))
                 .then(Commands.literal("order")
-                    .then(Commands.argument("callsign", CallsignArgument.callsign())
+                    .then(Commands.argument("callsign", StringArgumentType.word())
                         .then(Commands.literal("goto")
                             .then(Commands.argument("pos", Vec3Argument.vec3())
                                 .executes(ctx -> squadOrder(ctx, StringArgumentType.getString(ctx, "callsign"), PingType.GO_TO, Vec3Argument.getVec3(ctx, "pos")))))
@@ -350,7 +350,7 @@ public class StevesArmyCommand {
         return Commands.literal(name)
             .then(Commands.argument("owner", EntityArgument.player())
                 .then(Commands.literal("squad")
-                    .then(Commands.argument("callsign", CallsignArgument.callsign())
+                    .then(Commands.argument("callsign", StringArgumentType.word())
                         .then(createOwnedSquadSpawnArguments(entityType))))
                 .then(createSpawnArguments(entityType, true)));
     }
@@ -375,7 +375,7 @@ public class StevesArmyCommand {
 
     private static ArgumentBuilder<CommandSourceStack, ?> createTeamGarrisonSquadSpawnArgs() {
         Function<CommandContext<CommandSourceStack>, Integer> execute = context ->
-            spawnTeamGarrisonWithCallsign(context, StringArgumentType.getString(context, "team"), CallsignArgument.getCallsign(context, "callsign"));
+            spawnTeamGarrisonWithCallsign(context, StringArgumentType.getString(context, "team"), StringArgumentType.getString(context, "callsign"));
         var position = Commands.argument("position", Vec3Argument.vec3())
             .executes(execute::apply)
             .then(Commands.argument("loadout", CompoundTagArgument.compoundTag())
@@ -393,7 +393,7 @@ public class StevesArmyCommand {
 
     private static ArgumentBuilder<CommandSourceStack, ?> createEnemySquadSpawnArgs() {
         Function<CommandContext<CommandSourceStack>, Integer> execute = context ->
-            spawnEnemyWithCallsign(context, CallsignArgument.getCallsign(context, "callsign"));
+            spawnEnemyWithCallsign(context, StringArgumentType.getString(context, "callsign"));
         var position = Commands.argument("position", Vec3Argument.vec3())
             .executes(execute::apply)
             .then(Commands.argument("loadout", CompoundTagArgument.compoundTag())
@@ -435,7 +435,7 @@ public class StevesArmyCommand {
         EntityType<? extends SoldierEntity> entityType
     ) {
         Function<CommandContext<CommandSourceStack>, Integer> execute = context ->
-            spawnEntityWithCallsign(context, entityType, true, CallsignArgument.getCallsign(context, "callsign"));
+            spawnEntityWithCallsign(context, entityType, true, StringArgumentType.getString(context, "callsign"));
         var position = Commands.argument("position", Vec3Argument.vec3())
             .executes(execute::apply)
             .then(Commands.argument("loadout", CompoundTagArgument.compoundTag())

@@ -39,25 +39,29 @@ public class ResupplyPouchRenderer extends EntityRenderer<ResupplyPouchEntity> {
         vertex.vertex(pose, -1.0F, -1.0F, 0.0F)
             .color(255, 255, 255, 255)
             .uv(0.0F, 1.0F)
-            .uv2(packedLight, OverlayTexture.NO_OVERLAY)
+            .overlayCoords(OverlayTexture.NO_OVERLAY)
+            .uv2(packedLight)
             .normal(normal, 0.0F, 1.0F, 0.0F)
             .endVertex();
         vertex.vertex(pose, -1.0F, 1.0F, 0.0F)
             .color(255, 255, 255, 255)
             .uv(0.0F, 0.0F)
-            .uv2(packedLight, OverlayTexture.NO_OVERLAY)
+            .overlayCoords(OverlayTexture.NO_OVERLAY)
+            .uv2(packedLight)
             .normal(normal, 0.0F, 1.0F, 0.0F)
             .endVertex();
         vertex.vertex(pose, 1.0F, 1.0F, 0.0F)
             .color(255, 255, 255, 255)
             .uv(1.0F, 0.0F)
-            .uv2(packedLight, OverlayTexture.NO_OVERLAY)
+            .overlayCoords(OverlayTexture.NO_OVERLAY)
+            .uv2(packedLight)
             .normal(normal, 0.0F, 1.0F, 0.0F)
             .endVertex();
         vertex.vertex(pose, 1.0F, -1.0F, 0.0F)
             .color(255, 255, 255, 255)
             .uv(1.0F, 1.0F)
-            .uv2(packedLight, OverlayTexture.NO_OVERLAY)
+            .overlayCoords(OverlayTexture.NO_OVERLAY)
+            .uv2(packedLight)
             .normal(normal, 0.0F, 1.0F, 0.0F)
             .endVertex();
 
