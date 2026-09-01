@@ -64,6 +64,17 @@ public class StevesArmyConfig {
     public static final ForgeConfigSpec.IntValue EXACT_PATH_VALIDATION_LIMIT;
     public static final ForgeConfigSpec.IntValue COVER_SEARCH_FAILURE_RETRY_TICKS;
 
+    public static final ForgeConfigSpec.BooleanValue FIRETEAM_SUPPRESSION_ENABLED;
+    public static final ForgeConfigSpec.DoubleValue FIRETEAM_RISE_RATE;
+    public static final ForgeConfigSpec.DoubleValue FIRETEAM_FALL_RATE;
+    public static final ForgeConfigSpec.DoubleValue FIRETEAM_SUPPRESSION_IMPULSE;
+    public static final ForgeConfigSpec.DoubleValue FIRETEAM_CASUALTY_BUMP;
+    public static final ForgeConfigSpec.DoubleValue FIRETEAM_SUPPRESSION_THRESHOLD;
+    public static final ForgeConfigSpec.DoubleValue FIRETEAM_HEAVY_THRESHOLD;
+    public static final ForgeConfigSpec.DoubleValue FIRETEAM_PEEK_BLOCK_THRESHOLD;
+    public static final ForgeConfigSpec.IntValue FIRETEAM_HOLD_NOTIFY_TICKS;
+    public static final ForgeConfigSpec.IntValue FIRETEAM_NOTIFY_COOLDOWN_TICKS;
+
     static {
         BUILDER.push("aim_quality");
         
@@ -393,6 +404,60 @@ BUILDER.pop();
 
         BUILDER.pop();
 
+        BUILDER.push("fireteam_suppression");
+
+        FIRETEAM_SUPPRESSION_ENABLED = BUILDER
+            .comment("Enable fireteam-level suppression tracking (slow EMA of member suppression).",
+                     "Default: true")
+            .define("enabled", true);
+
+        FIRETEAM_RISE_RATE = BUILDER
+            .comment("EMA rise rate per tick for fireteam suppression (0.0 to 1.0).",
+                     "Default: 0.01 (~11s to 90% of target)")
+            .defineInRange("riseRate", 0.01, 0.0001, 1.0);
+
+        FIRETEAM_FALL_RATE = BUILDER
+            .comment("EMA fall rate per tick for fireteam suppression (0.0 to 1.0).",
+                     "Default: 0.002 (~25s half-life)")
+            .defineInRange("fallRate", 0.002, 0.0001, 1.0);
+
+        FIRETEAM_SUPPRESSION_IMPULSE = BUILDER
+            .comment("Instant impulse added per member newly suppressed (CLEAR->PRESSURED/PINNED).",
+                     "Default: 0.08")
+            .defineInRange("suppressionImpulse", 0.08, 0.0, 1.0);
+
+        FIRETEAM_CASUALTY_BUMP = BUILDER
+            .comment("One-time bump added when a fireteam member dies.",
+                     "Default: 0.35")
+            .defineInRange("casualtyBump", 0.35, 0.0, 1.0);
+
+        FIRETEAM_SUPPRESSION_THRESHOLD = BUILDER
+            .comment("Fireteam level threshold for SUPPRESSED state (0.0 to 1.0).",
+                     "Default: 0.30")
+            .defineInRange("suppressionThreshold", 0.30, 0.0, 1.0);
+
+        FIRETEAM_HEAVY_THRESHOLD = BUILDER
+            .comment("Fireteam level threshold for HEAVY state (0.0 to 1.0).",
+                     "Default: 0.60")
+            .defineInRange("heavyThreshold", 0.60, 0.0, 1.0);
+
+        FIRETEAM_PEEK_BLOCK_THRESHOLD = BUILDER
+            .comment("Fireteam level at which HOLD pressured peeks are hard-blocked.",
+                     "Default: 0.45")
+            .defineInRange("peekBlockThreshold", 0.45, 0.0, 1.0);
+
+        FIRETEAM_HOLD_NOTIFY_TICKS = BUILDER
+            .comment("Ticks HEAVY must be sustained before chat alert (ticks).",
+                     "Default: 120 (6s)")
+            .defineInRange("holdNotifyTicks", 120, 0, 10000);
+
+        FIRETEAM_NOTIFY_COOLDOWN_TICKS = BUILDER
+            .comment("Cooldown between repeated HEAVY alerts per fireteam (ticks).",
+                     "Default: 600 (30s)")
+            .defineInRange("notifyCooldownTicks", 600, 0, 100000);
+
+        BUILDER.pop();
+
         SPEC = BUILDER.build();
     }
     
@@ -579,6 +644,46 @@ BUILDER.pop();
 
     public static int getCoverSearchFailureRetryTicks() {
         return COVER_SEARCH_FAILURE_RETRY_TICKS.get();
+    }
+
+    public static boolean isFireteamSuppressionEnabled() {
+        return FIRETEAM_SUPPRESSION_ENABLED.get();
+    }
+
+    public static float getFireteamRiseRate() {
+        return FIRETEAM_RISE_RATE.get().floatValue();
+    }
+
+    public static float getFireteamFallRate() {
+        return FIRETEAM_FALL_RATE.get().floatValue();
+    }
+
+    public static float getFireteamSuppressionImpulse() {
+        return FIRETEAM_SUPPRESSION_IMPULSE.get().floatValue();
+    }
+
+    public static float getFireteamCasualtyBump() {
+        return FIRETEAM_CASUALTY_BUMP.get().floatValue();
+    }
+
+    public static float getFireteamSuppressionThreshold() {
+        return FIRETEAM_SUPPRESSION_THRESHOLD.get().floatValue();
+    }
+
+    public static float getFireteamHeavyThreshold() {
+        return FIRETEAM_HEAVY_THRESHOLD.get().floatValue();
+    }
+
+    public static float getFireteamPeekBlockThreshold() {
+        return FIRETEAM_PEEK_BLOCK_THRESHOLD.get().floatValue();
+    }
+
+    public static int getFireteamHoldNotifyTicks() {
+        return FIRETEAM_HOLD_NOTIFY_TICKS.get();
+    }
+
+    public static int getFireteamNotifyCooldownTicks() {
+        return FIRETEAM_NOTIFY_COOLDOWN_TICKS.get();
     }
 
     /** Legacy compatibility hook; nearby-target snapshots are disabled. */

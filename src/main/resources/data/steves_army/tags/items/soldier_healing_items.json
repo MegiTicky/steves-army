@@ -3,6 +3,7 @@
   "values": [
     {"id": "combatgear:bandages", "required": false},
     {"id": "combatgear:bandagerealistic", "required": false},
-    {"id": "combatgear:medpack", "required": false}
+    {"id": "combatgear:medpack", "required": false},
+    {"id": "minecraft:golden_apple", "required": false}
   ]
 }

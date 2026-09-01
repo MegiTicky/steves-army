@@ -73,8 +73,8 @@ public final class SupportCoverGoal extends Goal implements CoverGoalController 
         if (phase == SupportPhase.DUTY) {
             CoverBehaviorManager manager = soldier.getCoverBehaviorManager();
             manager.tickSuppression(false);
-            if (manager.isSuppressed() || soldier.isPreparingOrReloading()
-                || soldier.isRecalling() || soldier.isHealing() || soldier.isUsingItem()) {
+            if (manager.isSuppressed() || soldier.isRecalling()
+                || soldier.isHealing() || soldier.isUsingItem()) {
                 supportDuty.stop();
                 phase = SupportPhase.COVER;
                 resumeCover();
@@ -92,11 +92,10 @@ public final class SupportCoverGoal extends Goal implements CoverGoalController 
         coverController.tick();
 
         CoverBehaviorManager manager = soldier.getCoverBehaviorManager();
-        if (manager.getState() == CoverBehaviorManager.CoverState.IN_COVER
+        if (manager.isInCover()
             && !manager.isSuppressed()
             && supportDuty.tryStartDuty()) {
             phase = SupportPhase.DUTY;
-            // Stop delegated cover work before support navigation takes over.
             coverController.stop();
             manager.clearCover();
             supportDuty.start();

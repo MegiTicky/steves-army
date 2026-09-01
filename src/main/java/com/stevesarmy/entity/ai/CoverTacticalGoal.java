@@ -5,6 +5,7 @@ import com.stevesarmy.StevesArmyConfig;
 import com.stevesarmy.combat.ThreatAwareness;
 import com.stevesarmy.combat.VisibilityRay;
 import com.stevesarmy.combat.cover.*;
+import com.stevesarmy.squad.FireTeamSuppressionTracker;
 import com.stevesarmy.combat.cover.pure.CoverSearchResult;
 import com.stevesarmy.combat.cover.pure.AsyncCoverShadowService;
 import com.stevesarmy.combat.cover.pure.CoverSnapshotCapture;
@@ -2423,6 +2424,14 @@ private void tickRepositioning() {
     }
 
     private boolean shouldAllowPressuredPeek() {
+        float ftLevel = FireTeamSuppressionTracker.getLevel(soldier);
+        if (ftLevel >= StevesArmyConfig.getFireteamPeekBlockThreshold()) {
+            if (DiagnosticLogManager.isCoverLoggingEnabled()) {
+                StevesArmyMod.LOGGER.info("[SuppressionPeek] Soldier {} fireteam blocked peek: ftLevel={}",
+                    soldier.getId(), String.format("%.2f", ftLevel));
+            }
+            return false;
+        }
         if (soldier.tickCount < nextPressuredPeekDecisionTick) {
             return false;
         }
@@ -2431,14 +2440,15 @@ private void tickRepositioning() {
         float suppression = getCoverManager().getSuppressionTracker().getSuppressionLevel();
         float recovery = Math.max(0.0f, Math.min(1.0f, (0.90f - suppression) / 0.40f));
         int nearbyPeekers = countNearbyPeekers();
-        float chance = calculatePressuredPeekChance(suppression, nearbyPeekers);
+        float baseChance = calculatePressuredPeekChance(suppression, nearbyPeekers);
+        float chance = baseChance * (1.0f - ftLevel * 0.8f);
         float roll = soldier.getRandom().nextFloat();
         boolean allowed = roll < chance;
 
         if (DiagnosticLogManager.isCoverLoggingEnabled()) {
-            StevesArmyMod.LOGGER.info("[SuppressionPeek] Soldier {} pressured peek: suppression={}, recovery={}, nearby={}, chance={}, roll={}, allowed={}",
+            StevesArmyMod.LOGGER.info("[SuppressionPeek] Soldier {} pressured peek: suppression={}, recovery={}, nearby={}, baseChance={}, ftLevel={}, chance={}, roll={}, allowed={}",
                 soldier.getId(), String.format("%.2f", suppression), String.format("%.2f", recovery),
-                nearbyPeekers, String.format("%.2f", chance), String.format("%.2f", roll), allowed);
+                nearbyPeekers, String.format("%.2f", baseChance), String.format("%.2f", ftLevel), String.format("%.2f", chance), String.format("%.2f", roll), allowed);
         }
         return allowed;
     }
@@ -3890,6 +3900,8 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
                 boolean recovered = getCoverManager().getSuppressionTracker().isRecovered();
                 PeekController peekCtrl = getPeekController();
                 boolean peeking = peekCtrl.isExposed() || peekCtrl.isMovingToPeek() || peekCtrl.isReturning();
+                float ftLevel = FireTeamSuppressionTracker.getLevel(soldier);
+                boolean fireteamPinned = FireTeamSuppressionTracker.shouldPauseAttack(soldier);
 
                 // Check if we've completed a peek cycle
                 if (!attackHasPeekedThisCover && !peeking && peekCtrl.isIdleInCover()
@@ -3903,12 +3915,12 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
                     }
                 }
 
-                // Advance only when fully recovered from suppression, not peeking, and dwell met
-                long minDwell = ATTACK_MIN_DWELL_MS;
-                long maxDwell = ATTACK_MAX_DWELL_MS + (attackAdvanceStaggerTicks * 50L);
+                float dwellMult = 0.6f + ftLevel * 1.2f;
+                long minDwell = (long)(ATTACK_MIN_DWELL_MS * dwellMult);
+                long maxDwell = (long)(ATTACK_MAX_DWELL_MS * dwellMult) + (attackAdvanceStaggerTicks * 50L);
                 boolean dwellMet = dwellTime >= minDwell;
-                boolean maxDwellReached = dwellTime >= maxDwell && recovered && !peeking;
-                boolean canAdvance = dwellMet && recovered && !peeking;
+                boolean maxDwellReached = dwellTime >= maxDwell && recovered && !peeking && !fireteamPinned;
+                boolean canAdvance = dwellMet && recovered && !peeking && !fireteamPinned;
 
                 // The next bound must begin from cover. A delayed peek ducks back
                 // at maximum dwell instead of blocking attack progression forever.

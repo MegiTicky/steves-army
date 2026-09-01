@@ -34,5 +34,6 @@
     "ping.steves_army.hold": "Hold",
     "ping.steves_army.cqb": "CQB",
     "ping.steves_army.suppress_area": "Suppress",
-    "ping.steves_army.attack": "Attack"
+    "ping.steves_army.attack": "Attack",
+    "item.steves_army.resupply_pouch": "Resupply Pouch"
 }

@@ -14,7 +14,7 @@ import java.util.function.Function;
 import java.util.function.Supplier;
 
 public class NetworkHandler {
-    private static final String PROTOCOL_VERSION = "6";
+    private static final String PROTOCOL_VERSION = "7";
     
     public static final SimpleChannel INSTANCE = NetworkRegistry.newSimpleChannel(
         new ResourceLocation(StevesArmyMod.MODID, "main"),
@@ -117,10 +117,18 @@ public class NetworkHandler {
             SetSoldierRoleByUUIDPacket::encode,
             SetSoldierRoleByUUIDPacket::decode,
             SetSoldierRoleByUUIDPacket::handle);
+        INSTANCE.registerMessage(id++, SetResupplyConfigPacket.class,
+            SetResupplyConfigPacket::encode,
+            SetResupplyConfigPacket::decode,
+            SetResupplyConfigPacket::handle);
         INSTANCE.registerMessage(id++, CommandStickMovePacket.class,
             CommandStickMovePacket::encode,
             CommandStickMovePacket::decode,
             CommandStickMovePacket::handle);
+        INSTANCE.registerMessage(id++, FireTeamSuppressionSyncPacket.class,
+            FireTeamSuppressionSyncPacket::encode,
+            FireTeamSuppressionSyncPacket::new,
+            FireTeamSuppressionSyncPacket::handle);
         if (YsmCompat.isLoaded()) {
             registerYsmPacket(id++);
         }

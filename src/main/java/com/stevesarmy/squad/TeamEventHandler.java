@@ -118,6 +118,7 @@ public class TeamEventHandler {
     public static void onLivingDeath(LivingDeathEvent event) {
         if (event.getEntity() instanceof SoldierEntity soldier && soldier.level() instanceof ServerLevel level
             && level.getServer() != null) {
+            FireTeamSuppressionTracker.recordCasualty(soldier);
             OwnedSoldierRegistry.get(level.getServer()).remove(soldier.getUUID());
             SquadActivityManager.removeSoldier(soldier.getUUID(), level.getServer());
             UUID ownerUUID = soldier.getOwnerUUID().orElse(null);

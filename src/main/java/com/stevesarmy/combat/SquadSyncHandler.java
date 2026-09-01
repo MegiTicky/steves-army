@@ -26,6 +26,7 @@ public class SquadSyncHandler {
         if (event.phase != TickEvent.Phase.END) return;
 
         SquadActivityManager.tick(event.getServer());
+        com.stevesarmy.squad.FireTeamSuppressionTracker.tick(event.getServer());
 
         tickCounter++;
         if (tickCounter >= 20) {
@@ -48,6 +49,7 @@ public class SquadSyncHandler {
                 SquadStatusSyncPacket packet = SquadStatusSyncPacket.createForPlayer(player);
                 NetworkHandler.sendTo(player, packet);
                 SquadActivityManager.sync(player);
+                com.stevesarmy.squad.FireTeamSuppressionTracker.syncToPlayer(player);
             }
         }
 

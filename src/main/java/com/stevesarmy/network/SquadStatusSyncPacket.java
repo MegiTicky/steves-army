@@ -24,16 +24,28 @@ import java.util.function.Supplier;
 
 public class SquadStatusSyncPacket {
     private final List<SoldierStatusEntry> entries;
+    private final com.stevesarmy.squad.ResupplyConfig resupplyConfig;
 
     public SquadStatusSyncPacket(List<SoldierStatusEntry> entries) {
+        this(entries, com.stevesarmy.squad.ResupplyConfig.DEFAULT);
+    }
+
+    public SquadStatusSyncPacket(List<SoldierStatusEntry> entries, com.stevesarmy.squad.ResupplyConfig resupplyConfig) {
         this.entries = entries;
+        this.resupplyConfig = resupplyConfig;
     }
 
     public List<SoldierStatusEntry> getEntries() {
         return entries;
     }
 
+    public com.stevesarmy.squad.ResupplyConfig getResupplyConfig() {
+        return resupplyConfig;
+    }
+
     public static SquadStatusSyncPacket decode(FriendlyByteBuf buf) {
+        com.stevesarmy.squad.ResupplyConfig config = new com.stevesarmy.squad.ResupplyConfig(
+            buf.readVarInt(), buf.readVarInt(), buf.readVarInt(), buf.readVarInt());
         int count = buf.readVarInt();
         List<SoldierStatusEntry> entries = new ArrayList<>(count);
         for (int i = 0; i < count; i++) {
@@ -55,10 +67,14 @@ public class SquadStatusSyncPacket {
             entries.add(new SoldierStatusEntry(entityId, entityIntId, name, health, maxHealth, totalAmmo, gunStack,
                 squadModeOrdinal, fireDisciplineOrdinal, fireTeamOrdinal, roleOrdinal, coverState, distance, recallTicks, loaded));
         }
-        return new SquadStatusSyncPacket(entries);
+        return new SquadStatusSyncPacket(entries, config);
     }
 
     public void encode(FriendlyByteBuf buf) {
+        buf.writeVarInt(resupplyConfig.ammoThreshold());
+        buf.writeVarInt(resupplyConfig.healingThreshold());
+        buf.writeVarInt(resupplyConfig.resupplyToAmmo());
+        buf.writeVarInt(resupplyConfig.resupplyToHeals());
         buf.writeVarInt(entries.size());
         for (SoldierStatusEntry entry : entries) {
             buf.writeUUID(entry.entityId);
@@ -81,15 +97,16 @@ public class SquadStatusSyncPacket {
 
     public void handle(Supplier<NetworkEvent.Context> ctx) {
         ctx.get().enqueueWork(() -> {
-            ClientSquadData.INSTANCE.update(entries);
+            ClientSquadData.INSTANCE.update(entries, resupplyConfig);
         });
         ctx.get().setPacketHandled(true);
     }
 
     public static SquadStatusSyncPacket createForPlayer(ServerPlayer player) {
         List<SoldierStatusEntry> entries = new ArrayList<>();
-        if (player.getServer() != null) {
-            OwnedSoldierRegistry registry = OwnedSoldierRegistry.get(player.getServer());
+        OwnedSoldierRegistry registry = player.getServer() != null
+            ? OwnedSoldierRegistry.get(player.getServer()) : null;
+        if (player.getServer() != null && registry != null) {
             Map<UUID, SoldierEntity> loadedSoldiers = new java.util.HashMap<>();
             for (ServerLevel level : player.getServer().getAllLevels()) {
                 for (var entity : level.getEntities().getAll()) {
@@ -127,7 +144,8 @@ public class SquadStatusSyncPacket {
                     loaded));
             }
         }
-        return new SquadStatusSyncPacket(entries);
+        return new SquadStatusSyncPacket(entries,
+            registry != null ? registry.getResupplyConfig(player.getUUID()) : com.stevesarmy.squad.ResupplyConfig.DEFAULT);
     }
 
     public static class SoldierStatusEntry {

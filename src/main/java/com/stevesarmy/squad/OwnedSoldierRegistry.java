@@ -25,6 +25,7 @@ import java.util.UUID;
 public class OwnedSoldierRegistry extends SavedData {
     private static final String DATA_NAME = "steves_army_owned_soldiers";
     private final Map<UUID, Entry> entries = new HashMap<>();
+    private final Map<UUID, ResupplyConfig> resupplyConfigs = new HashMap<>();
     private final java.util.Set<UUID> dismissed = new java.util.HashSet<>();
 
     public static OwnedSoldierRegistry get(MinecraftServer server) {
@@ -40,6 +41,14 @@ public class OwnedSoldierRegistry extends SavedData {
         for (int i = 0; i < list.size(); i++) {
             Entry entry = Entry.load(list.getCompound(i));
             if (entry != null) registry.entries.put(entry.soldierId, entry);
+        }
+        ListTag configList = tag.getList("ResupplyConfigs", Tag.TAG_COMPOUND);
+        for (int i = 0; i < configList.size(); i++) {
+            CompoundTag configTag = configList.getCompound(i);
+            if (configTag.hasUUID("Owner")) {
+                UUID ownerId = configTag.getUUID("Owner");
+                registry.resupplyConfigs.put(ownerId, ResupplyConfig.fromNbt(configTag));
+            }
         }
         ListTag dismissedList = tag.getList("Dismissed", Tag.TAG_INT_ARRAY);
         for (int i = 0; i < dismissedList.size(); i++) {
@@ -88,6 +97,16 @@ public class OwnedSoldierRegistry extends SavedData {
         }
     }
 
+    /** Squad-wide resupply config for an owner. Falls back to defaults. */
+    public ResupplyConfig getResupplyConfig(UUID ownerId) {
+        return resupplyConfigs.getOrDefault(ownerId, ResupplyConfig.DEFAULT);
+    }
+
+    public void setResupplyConfig(UUID ownerId, ResupplyConfig config) {
+        resupplyConfigs.put(ownerId, config);
+        setDirty();
+    }
+
     public void clearPendingRole(UUID soldierId) {
         Entry entry = entries.get(soldierId);
         if (entry != null && entry.pendingRole >= 0) {
@@ -126,6 +145,13 @@ public class OwnedSoldierRegistry extends SavedData {
         ListTag list = new ListTag();
         for (Entry entry : entries.values()) list.add(entry.save());
         tag.put("Soldiers", list);
+        ListTag configList = new ListTag();
+        for (Map.Entry<UUID, ResupplyConfig> configEntry : resupplyConfigs.entrySet()) {
+            CompoundTag configTag = configEntry.getValue().toNbt();
+            configTag.putUUID("Owner", configEntry.getKey());
+            configList.add(configTag);
+        }
+        tag.put("ResupplyConfigs", configList);
         ListTag dismissedList = new ListTag();
         for (UUID soldierId : dismissed) dismissedList.add(net.minecraft.nbt.NbtUtils.createUUID(soldierId));
         tag.put("Dismissed", dismissedList);

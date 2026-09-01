@@ -290,6 +290,13 @@ public class SoldierEntity extends PathfinderMob implements Container {
     public void beginCqbEngagement() {
         if (cqbEngagementHold) return;
         cqbEngagementHold = true;
+        // A full-cover peek return is the safety-critical movement here. Do not
+        // clear it when close-range LOS is acquired during the duck-back.
+        boolean returningToFullCover = getPeekController().isReturning()
+            && getCoverBehaviorManager().getCurrentCover() != null
+            && getCoverBehaviorManager().getCurrentCover().getType() == CoverType.FULL;
+        if (returningToFullCover) return;
+
         getNavigation().stop();
         cancelCoverMovement();
         setZza(0.0F);

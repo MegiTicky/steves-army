@@ -126,6 +126,7 @@ public class PingClientEvents {
             soldierDebugDataMap.clear();
             EnemyContactOverlay.clear();
             ClientSquadActivityData.INSTANCE.clear();
+            ClientFireTeamSuppressionData.INSTANCE.clear();
         }
     }
 
@@ -335,6 +336,7 @@ public class PingClientEvents {
             EnemyContactOverlay.render(event.getGuiGraphics(), lastWorldRenderContext);
             PingOverlayRenderer.render(event.getGuiGraphics(), lastWorldRenderContext);
             SquadActivityOverlayRenderer.render(event.getGuiGraphics(), lastWorldRenderContext);
+            FireTeamSuppressionOverlay.render(event.getGuiGraphics());
             
             CoverHudRenderer.render(event.getGuiGraphics());
         }

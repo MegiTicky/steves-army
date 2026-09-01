@@ -74,6 +74,11 @@ public class ModItems {
         () -> new com.stevesarmy.item.TeamGarrisonSpawnEggItem(ModEntities.TEAM_GARRISON, 0x4A7C59, 0x55FFFF, new Item.Properties())
     );
 
+    public static final RegistryObject<Item> RESUPPLY_POUCH = ITEMS.register(
+        "resupply_pouch",
+        () -> new Item(new Item.Properties().stacksTo(16))
+    );
+
     public static void register(IEventBus eventBus) {
         ITEMS.register(eventBus);
     }

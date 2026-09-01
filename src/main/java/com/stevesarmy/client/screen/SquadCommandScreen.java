@@ -12,9 +12,11 @@ import com.stevesarmy.network.RecallPacket;
 import com.stevesarmy.network.SetFireTeamPacket;
 import com.stevesarmy.network.SetSoldierConfigPacket;
 import com.stevesarmy.network.SetSoldierRoleByUUIDPacket;
+import com.stevesarmy.network.SetResupplyConfigPacket;
 import com.stevesarmy.network.SquadStatusSyncPacket;
 import com.stevesarmy.squad.FireDiscipline;
 import com.stevesarmy.squad.FireTeam;
+import com.stevesarmy.squad.ResupplyConfig;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.screens.Screen;
@@ -63,10 +65,12 @@ public class SquadCommandScreen extends Screen {
     private int activeRoleDropdownY;
     private RoleDropdownWidget activeRoleDropdownWidget;
     private int bulkRoleOrdinal = SoldierRole.RIFLEMAN.ordinal();
+    private com.stevesarmy.squad.ResupplyConfig draftConfig = com.stevesarmy.squad.ResupplyConfig.DEFAULT;
 
     private enum Tab {
         SQUAD,
-        GARRISON
+        GARRISON,
+        RESUPPLY
     }
 
     private static class SoldierRow {
@@ -135,13 +139,17 @@ public class SquadCommandScreen extends Screen {
     }
 
     private boolean matchesTab(FireTeam fireTeam) {
-        return activeTab == Tab.GARRISON ? fireTeam == FireTeam.GARRISON : fireTeam != FireTeam.GARRISON;
+        return switch (activeTab) {
+            case GARRISON -> fireTeam == FireTeam.GARRISON;
+            case RESUPPLY -> false;
+            default -> fireTeam != FireTeam.GARRISON;
+        };
     }
 
     private void rebuildTabButtons() {
         int tabWidth = 60;
         int tabHeight = 14;
-        int x = width - PANEL_LEFT - tabWidth * 2 - 4;
+        int x = width - PANEL_LEFT - tabWidth * 3 - 8;
         int y = 6;
 
         Button squadTab = Button.builder(Component.literal("Squad"), button -> switchTab(Tab.SQUAD))
@@ -154,18 +162,32 @@ public class SquadCommandScreen extends Screen {
             .bounds(x, y, tabWidth, tabHeight).build();
         garrisonTab.active = activeTab != Tab.GARRISON;
         addRenderableWidget(garrisonTab);
+
+        x += tabWidth + 4;
+        Button resupplyTab = Button.builder(Component.literal("Resupply"), button -> switchTab(Tab.RESUPPLY))
+            .bounds(x, y, tabWidth, tabHeight).build();
+        resupplyTab.active = activeTab != Tab.RESUPPLY;
+        addRenderableWidget(resupplyTab);
     }
 
     private void switchTab(Tab tab) {
         if (activeTab == tab) return;
         activeTab = tab;
         closeRoleDropdown();
+        if (tab == Tab.RESUPPLY) {
+            draftConfig = ClientSquadData.INSTANCE.getResupplyConfig();
+        }
         rebuildRows();
         rebuildFooterButtons();
     }
-
     private void rebuildFooterButtons() {
         clearWidgets();
+
+        if (activeTab == Tab.RESUPPLY) {
+            rebuildResupplyButtons();
+            rebuildTabButtons();
+            return;
+        }
 
         int contentX = PANEL_LEFT + 4;
         int footerY = getFooterY();
@@ -238,6 +260,56 @@ public class SquadCommandScreen extends Screen {
         rebuildTabButtons();
     }
 
+    private void rebuildResupplyButtons() {
+        int btnHeight = VANILLA_BUTTON_HEIGHT;
+        int btnW = 20;
+        int contentX = PANEL_LEFT + 4;
+        int rowY = ROW_START_Y + 6;
+        int spacing = 26;
+
+        String[] labels = {"Ammo Threshold", "Heal Threshold", "Resupply Ammo To", "Resupply Heals To"};
+        int[] values = {
+            draftConfig.ammoThreshold(),
+            draftConfig.healingThreshold(),
+            draftConfig.resupplyToAmmo(),
+            draftConfig.resupplyToHeals()
+        };
+        int labelMaxW = font.width("Resupply Heals To");
+
+        for (int i = 0; i < 4; i++) {
+            int labelEnd = contentX + labelMaxW + 8;
+            int minusX = labelEnd;
+            int valueX = minusX + btnW + 6;
+            int plusX = valueX + 30;
+            final int idx = i;
+            addRenderableWidget(Button.builder(Component.literal("-"), b -> {
+                ResupplyConfig cfg = draftConfig;
+                draftConfig = switch (idx) {
+                    case 0 -> cfg.withAmmoThreshold(Math.max(0, cfg.ammoThreshold() - 5));
+                    case 1 -> cfg.withHealingThreshold(Math.max(0, cfg.healingThreshold() - 1));
+                    case 2 -> cfg.withResupplyToAmmo(Math.max(0, cfg.resupplyToAmmo() - 5));
+                    case 3 -> cfg.withResupplyToHeals(Math.max(0, cfg.resupplyToHeals() - 1));
+                    default -> cfg;
+                };
+                NetworkHandler.INSTANCE.sendToServer(new SetResupplyConfigPacket(draftConfig));
+                rebuildFooterButtons();
+            }).bounds(minusX, rowY, btnW, btnHeight).build());
+            addRenderableWidget(Button.builder(Component.literal("+"), b -> {
+                ResupplyConfig cfg = draftConfig;
+                draftConfig = switch (idx) {
+                    case 0 -> cfg.withAmmoThreshold(cfg.ammoThreshold() + 5);
+                    case 1 -> cfg.withHealingThreshold(cfg.healingThreshold() + 1);
+                    case 2 -> cfg.withResupplyToAmmo(cfg.resupplyToAmmo() + 5);
+                    case 3 -> cfg.withResupplyToHeals(cfg.resupplyToHeals() + 1);
+                    default -> cfg;
+                };
+                NetworkHandler.INSTANCE.sendToServer(new SetResupplyConfigPacket(draftConfig));
+                rebuildFooterButtons();
+            }).bounds(plusX, rowY, btnW, btnHeight).build());
+            rowY += spacing;
+        }
+    }
+
     private void rebuildRows() {
         rows.clear();
         for (SquadStatusSyncPacket.SoldierStatusEntry entry : ClientSquadData.INSTANCE.getAllEntries()) {
@@ -283,7 +355,9 @@ public class SquadCommandScreen extends Screen {
     public void tick() {
         super.tick();
         teamCount = FireTeamScopeState.INSTANCE.getTeamCount();
-        updateRows();
+        if (activeTab != Tab.RESUPPLY) {
+            updateRows();
+        }
     }
 
     @Override
@@ -292,6 +366,12 @@ public class SquadCommandScreen extends Screen {
         hoveredActionTooltip = null;
 
         graphics.drawString(font, Component.literal("Squad Command"), PANEL_LEFT + 4, 6, 0xFFFFFFFF, false);
+
+        if (activeTab == Tab.RESUPPLY) {
+            renderResupplyPanel(graphics);
+            super.render(graphics, mouseX, mouseY, partialTick);
+            return;
+        }
 
         int contentX = PANEL_LEFT + 4;
         int contentWidth = width - 2 * PANEL_LEFT - 8;
@@ -517,6 +597,33 @@ public class SquadCommandScreen extends Screen {
         };
         graphics.drawString(font, Component.literal(discLabel), x, y + 6, 0xFF777777, false);
         return x + COL_DISC_WIDTH;
+    }
+
+    private void renderResupplyPanel(GuiGraphics graphics) {
+        int contentX = PANEL_LEFT + 4;
+        int rowY = ROW_START_Y + 6;
+        int spacing = 26;
+        int labelMaxW = font.width("Resupply Heals To");
+
+        String[] labels = {"Ammo Threshold", "Heal Threshold", "Resupply Ammo To", "Resupply Heals To"};
+        int[] values = {
+            draftConfig.ammoThreshold(),
+            draftConfig.healingThreshold(),
+            draftConfig.resupplyToAmmo(),
+            draftConfig.resupplyToHeals()
+        };
+
+        graphics.drawString(font, Component.literal("-- Resupply Settings --"), contentX, ROW_START_Y - 4, 0xFFAAAAAA, false);
+
+        for (int i = 0; i < 4; i++) {
+            graphics.drawString(font, Component.literal(labels[i]), contentX, rowY + 6, 0xFFCCCCCC, false);
+            int valueX = contentX + labelMaxW + 8 + 26;
+            graphics.drawString(font, Component.literal(String.valueOf(values[i])), valueX, rowY + 6, 0xFFFFFFFF, false);
+            rowY += spacing;
+        }
+
+        int hintY = rowY + 4;
+        graphics.drawString(font, Component.literal("Applies to all squad members and you."), contentX, hintY, 0xFF888888, false);
     }
 
     private void drawIconButton(GuiGraphics graphics, int x, int y, ItemStack icon, boolean enabled,

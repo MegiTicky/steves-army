@@ -1,17 +1,23 @@
 package com.stevesarmy.entity.ai;
 
 import com.stevesarmy.compat.PlayerReviveCompat;
+import com.stevesarmy.combat.GunIntegration;
+import com.stevesarmy.entity.ResupplyPouchEntity;
 import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.entity.SupportEntity;
 import com.stevesarmy.inventory.SoldierInventory;
 import com.stevesarmy.network.NetworkHandler;
 import com.stevesarmy.network.SyncSoldierInventoryPacket;
 import com.stevesarmy.registry.ModItemTags;
+import com.stevesarmy.squad.OwnedSoldierRegistry;
+import com.stevesarmy.squad.ResupplyConfig;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.Vec3;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -23,18 +29,22 @@ import java.util.UUID;
 /**
  * Server-side support work used only by {@link SupportCoverGoal}.
  *
- * This is deliberately not a Goal. The support cover wrapper remains the
- * support's single movement owner, so duty work cannot compete with cover or
- * leave a task claimed when GoalSelector rejects a goal start.
+ * Supports two task types:
+ * <ul>
+ *   <li>REVIVING – navigates to a downed PlayerRevive player and revives them.</li>
+ *   <li>RESUPPLY – navigates toward targets and throws a homing pouch once
+ *       within throw range of a friendly soldier or player whose ammo or
+ *       healing items are below the squad-wide threshold.</li>
+ * </ul>
  */
 public final class SupportDutyController {
     private static final double TASK_RADIUS = 32.0;
-    private static final double ARRIVE_DISTANCE = 3.0;
+    private static final double THROW_RANGE = 16.0;
+    private static final double THROW_ARRIVE_DISTANCE = 3.0;
     private static final double MOVE_SPEED = 1.0;
-    private static final float LOW_HEALTH_THRESHOLD = 0.50F;
-    private static final int RESUPPLY_COOLDOWN_TICKS = 200;
-    private static final int HEAL_COOLDOWN_TICKS = 100;
-    private static final int LOW_AMMO_THRESHOLD = 20;
+    private static final int RESUPPLY_COOLDOWN_TICKS = 80;
+    private static final int REVIVE_COOLDOWN_TICKS = 200;
+    private static final int THROW_WINDUP_TICKS = 10;
     private static final long CLAIM_TIMEOUT_MS = 15000L;
     private static final int MAX_DUTY_TICKS = 600;
     private static final int SEARCH_RETRY_TICKS = 20;
@@ -47,6 +57,8 @@ public final class SupportDutyController {
     private int pathRecalcTicks;
     private int reviveProgressTicks;
     private int dutyTicks;
+    private int throwWindupTicks;
+    private ResupplyConfig currentConfig;
 
     private record ClaimEntry(UUID claimerId, long timestamp) {}
     private record TaskSelection(SupportTask task, LivingEntity target) {}
@@ -56,9 +68,7 @@ public final class SupportDutyController {
     private enum SupportTask {
         IDLE,
         REVIVING,
-        HEALING,
-        RESUPPLY_AMMO,
-        RESUPPLY_MEDICAL
+        RESUPPLY
     }
 
     public enum DutyResult {
@@ -71,7 +81,6 @@ public final class SupportDutyController {
         this.soldier = soldier;
     }
 
-    /** Finds and claims one task after the cover wrapper has committed to duty. */
     public boolean tryStartDuty() {
         if (isActive() || !canWork()) {
             return false;
@@ -86,13 +95,14 @@ public final class SupportDutyController {
         }
 
         TaskSelection selection = findTask();
-        if (selection == null) {
+        if (selection == null || selection.target() == null) {
             searchCooldownTicks = SEARCH_RETRY_TICKS;
             return false;
         }
 
         currentTask = selection.task();
         currentTarget = selection.target();
+        currentConfig = loadConfig();
         claim(currentTarget);
         return true;
     }
@@ -105,6 +115,7 @@ public final class SupportDutyController {
         pathRecalcTicks = 0;
         reviveProgressTicks = 0;
         dutyTicks = 0;
+        throwWindupTicks = 0;
         navigateToTarget();
     }
 
@@ -113,8 +124,7 @@ public final class SupportDutyController {
             return DutyResult.ABORTED;
         }
         if (!soldier.isAlive() || currentTarget == null || !currentTarget.isAlive()
-            || soldier.isPreparingOrReloading() || soldier.isRecalling()
-            || soldier.isHealing() || soldier.isUsingItem()) {
+            || soldier.isRecalling() || soldier.isHealing() || soldier.isUsingItem()) {
             finish(0);
             return DutyResult.ABORTED;
         }
@@ -123,25 +133,9 @@ public final class SupportDutyController {
             return DutyResult.ABORTED;
         }
 
-        double distance = soldier.distanceTo(currentTarget);
-        if (distance > ARRIVE_DISTANCE) {
-            if (++pathRecalcTicks >= 20) {
-                pathRecalcTicks = 0;
-                navigateToTarget();
-            }
-            return DutyResult.RUNNING;
-        }
-
-        soldier.getNavigation().stop();
-        soldier.getLookControl().setLookAt(
-            currentTarget.getX(), currentTarget.getEyeY(), currentTarget.getZ(),
-            30.0F, 30.0F);
-
         return switch (currentTask) {
             case REVIVING -> tickRevive();
-            case HEALING -> tickHeal();
-            case RESUPPLY_AMMO -> tickResupplyAmmo();
-            case RESUPPLY_MEDICAL -> tickResupplyMedical();
+            case RESUPPLY -> tickResupply();
             default -> DutyResult.ABORTED;
         };
     }
@@ -152,7 +146,9 @@ public final class SupportDutyController {
         }
         currentTask = SupportTask.IDLE;
         currentTarget = null;
+        currentConfig = null;
         reviveProgressTicks = 0;
+        throwWindupTicks = 0;
         dutyTicks = 0;
     }
 
@@ -165,22 +161,24 @@ public final class SupportDutyController {
             && !soldier.isRecalling();
     }
 
+    private ResupplyConfig loadConfig() {
+        if (soldier.getServer() == null) return ResupplyConfig.DEFAULT;
+        UUID ownerId = soldier.getOwnerUUID().orElse(null);
+        if (ownerId == null) return ResupplyConfig.DEFAULT;
+        return OwnedSoldierRegistry.get(soldier.getServer()).getResupplyConfig(ownerId);
+    }
+
+    // ── Task finding ─────────────────────────────────────────────────────
+
     private TaskSelection findTask() {
+        ResupplyConfig config = loadConfig();
+
         TaskSelection revive = findReviveTask();
         if (revive != null) return revive;
 
-        TaskSelection heal = findHealTask();
-        if (heal != null) return heal;
+        TaskSelection resupply = findResupplyTask(config);
+        if (resupply != null) return resupply;
 
-        for (SoldierEntity target : findSoldiersNeedingResupply()) {
-            if (isClaimed(target)) continue;
-            if (needsAmmo(target) && hasAmmo()) {
-                return new TaskSelection(SupportTask.RESUPPLY_AMMO, target);
-            }
-            if (needsMedical(target) && hasHealingItems()) {
-                return new TaskSelection(SupportTask.RESUPPLY_MEDICAL, target);
-            }
-        }
         return null;
     }
 
@@ -194,17 +192,163 @@ public final class SupportDutyController {
         return null;
     }
 
-    private TaskSelection findHealTask() {
-        if (!hasHealingItems()) return null;
-        for (SoldierEntity target : findWoundedSoldiers()) {
+    private TaskSelection findResupplyTask(ResupplyConfig config) {
+        List<LivingEntity> candidates = findTargetsNeedingResupply(config);
+        for (LivingEntity target : candidates) {
             if (!isClaimed(target)) {
-                return new TaskSelection(SupportTask.HEALING, target);
+                return new TaskSelection(SupportTask.RESUPPLY, target);
             }
         }
         return null;
     }
 
+    // ── Target searching ─────────────────────────────────────────────────
+
+    private List<ServerPlayer> findBleedingPlayers() {
+        if (!(soldier.level() instanceof ServerLevel level)) return List.of();
+        AABB box = soldier.getBoundingBox().inflate(TASK_RADIUS);
+        List<ServerPlayer> result = new ArrayList<>();
+        for (ServerPlayer player : level.players()) {
+            if (player.isAlive() && PlayerReviveCompat.isPlayerBleeding(player)
+                && box.contains(player.position()) && soldier.isFriendlyTo(player)) {
+                result.add(player);
+            }
+        }
+        result.sort(Comparator.comparingDouble(soldier::distanceTo));
+        return result;
+    }
+
+    private List<LivingEntity> findTargetsNeedingResupply(ResupplyConfig config) {
+        if (!(soldier.level() instanceof ServerLevel level)) return List.of();
+        AABB box = soldier.getBoundingBox().inflate(TASK_RADIUS);
+        List<LivingEntity> result = new ArrayList<>();
+
+        for (SoldierEntity target : level.getEntitiesOfClass(SoldierEntity.class, box,
+            t -> t.isAlive() && t != soldier && soldier.isFriendlyTo(t))) {
+            if (needsResupply(target, config)) {
+                result.add(target);
+            }
+        }
+        for (ServerPlayer player : level.players()) {
+            if (player.isAlive() && soldier.isFriendlyTo(player)
+                && box.contains(player.position())
+                && needsResupplyPlayer(player, config)) {
+                result.add(player);
+            }
+        }
+
+        result.sort(Comparator.comparingDouble(soldier::distanceTo));
+        return result;
+    }
+
+    // ── Resupply need checks ────────────────────────────────────────────
+
+    private boolean needsResupply(LivingEntity target, ResupplyConfig config) {
+        if (config.ammoThreshold() > 0 && countTotalAmmo(target) < config.ammoThreshold()) return true;
+        if (config.healingThreshold() > 0 && countHealingItems(target) < config.healingThreshold()) return true;
+        return false;
+    }
+
+    private boolean needsResupplyPlayer(Player player, ResupplyConfig config) {
+        if (config.ammoThreshold() > 0) {
+            ItemStack gun = player.getMainHandItem();
+            int total = GunIntegration.getCurrentAmmo(player);
+            for (int i = 0; i < player.getInventory().getContainerSize(); i++) {
+                total += GunIntegration.getAmmoCountForGun(gun, player.getInventory().getItem(i));
+            }
+            if (total < config.ammoThreshold()) return true;
+        }
+        if (config.healingThreshold() > 0 && countHealingItemsPlayer(player) < config.healingThreshold()) return true;
+        return false;
+    }
+
+    /** Checks whether the SUPPORT has items it could give to this target. */
+    private boolean supportHasPayloadFor(LivingEntity target, ResupplyConfig config) {
+        if (supportHasCompatibleAmmoFor(target)) return true;
+        return supportHasHealingItems();
+    }
+
+    // ── Ammo / healing counts ───────────────────────────────────────────
+
+    private int countTotalAmmo(LivingEntity target) {
+        if (target instanceof SoldierEntity soldier && soldier.getCombatGoal() != null) {
+            return soldier.getCombatGoal().getTotalAmmo();
+        }
+        if (target instanceof Player player) {
+            ItemStack gun = player.getMainHandItem();
+            int total = GunIntegration.getCurrentAmmo(player);
+            for (int i = 0; i < player.getInventory().getContainerSize(); i++) {
+                total += GunIntegration.getAmmoCountForGun(gun, player.getInventory().getItem(i));
+            }
+            return total;
+        }
+        return 0;
+    }
+
+    private int countHealingItems(LivingEntity target) {
+        if (target instanceof SoldierEntity soldier) {
+            SoldierInventory inv = soldier.getSoldierInventory();
+            int count = 0;
+            for (int slot = SoldierInventory.SLOT_GENERAL_START; slot < SoldierInventory.INVENTORY_SIZE; slot++) {
+                if (inv.getItem(slot).is(ModItemTags.SOLDIER_HEALING_ITEMS)) {
+                    count += inv.getItem(slot).getCount();
+                }
+            }
+            return count;
+        }
+        if (target instanceof Player player) {
+            return countHealingItemsPlayer(player);
+        }
+        return 0;
+    }
+
+    private int countHealingItemsPlayer(Player player) {
+        int count = 0;
+        for (int i = 0; i < player.getInventory().getContainerSize(); i++) {
+            if (player.getInventory().getItem(i).is(ModItemTags.SOLDIER_HEALING_ITEMS)) {
+                count += player.getInventory().getItem(i).getCount();
+            }
+        }
+        return count;
+    }
+
+    // ── Support inventory checks ────────────────────────────────────────
+
+    private boolean supportHasCompatibleAmmoFor(LivingEntity target) {
+        ItemStack targetGun = getTargetGunStack(target);
+        if (targetGun.isEmpty()) return false;
+        SoldierInventory inv = soldier.getSoldierInventory();
+        for (int slot = SoldierInventory.SLOT_GENERAL_START; slot < SoldierInventory.INVENTORY_SIZE; slot++) {
+            if (GunIntegration.getAmmoCountForGun(targetGun, inv.getItem(slot)) > 0) return true;
+        }
+        return false;
+    }
+
+    private boolean supportHasHealingItems() {
+        SoldierInventory inv = soldier.getSoldierInventory();
+        for (int slot = SoldierInventory.SLOT_GENERAL_START; slot < SoldierInventory.INVENTORY_SIZE; slot++) {
+            if (inv.getItem(slot).is(ModItemTags.SOLDIER_HEALING_ITEMS)) return true;
+        }
+        return false;
+    }
+
+    // ── Revive logic ────────────────────────────────────────────────────
+
     private DutyResult tickRevive() {
+        double distance = soldier.distanceTo(currentTarget);
+        if (distance > THROW_ARRIVE_DISTANCE) {
+            if (++pathRecalcTicks >= 20) {
+                pathRecalcTicks = 0;
+                navigateToTarget();
+            }
+            return DutyResult.RUNNING;
+        }
+
+        soldier.getNavigation().stop();
+        soldier.getLookControl().setLookAt(
+            currentTarget.getX(), currentTarget.getEyeY(), currentTarget.getZ(),
+            30.0F, 30.0F);
+
         if (!(currentTarget instanceof ServerPlayer player)
             || !PlayerReviveCompat.isLoaded()
             || !PlayerReviveCompat.isPlayerBleeding(player)) {
@@ -215,206 +359,163 @@ public final class SupportDutyController {
         if (++reviveProgressTicks % 5 == 0
             && !PlayerReviveCompat.addReviveProgress(player,
                 PlayerReviveCompat.getProgressPerPlayer() * 5)) {
-            finish(RESUPPLY_COOLDOWN_TICKS);
+            finish(REVIVE_COOLDOWN_TICKS);
             return DutyResult.ABORTED;
         }
         return DutyResult.RUNNING;
     }
 
-    private DutyResult tickHeal() {
-        if (!(currentTarget instanceof SoldierEntity target)
-            || !target.isAlive()
-            || target.getHealth() / target.getMaxHealth() >= LOW_HEALTH_THRESHOLD) {
+    // ── Resupply throw logic ────────────────────────────────────────────
+
+    private DutyResult tickResupply() {
+        double distanceSq = soldier.distanceToSqr(currentTarget);
+
+        if (distanceSq > THROW_RANGE * THROW_RANGE) {
+            if (++pathRecalcTicks >= 20) {
+                pathRecalcTicks = 0;
+                navigateToTarget();
+            }
+            return DutyResult.RUNNING;
+        }
+
+        soldier.getNavigation().stop();
+
+        if (soldier.isPreparingOrReloading()) {
+            return DutyResult.RUNNING;
+        }
+
+        ResupplyConfig config = currentConfig != null ? currentConfig : loadConfig();
+        if (!needsResupply(currentTarget, config)) {
             finish(0);
             return DutyResult.COMPLETE;
         }
 
-        ItemStack healItem = findFirstHealingItem();
-        if (healItem.isEmpty()) {
-            finish(HEAL_COOLDOWN_TICKS);
-            return DutyResult.ABORTED;
+        soldier.getLookControl().setLookAt(
+            currentTarget.getX(), currentTarget.getEyeY(), currentTarget.getZ(),
+            30.0F, 30.0F);
+
+        if (++throwWindupTicks < THROW_WINDUP_TICKS) {
+            return DutyResult.RUNNING;
         }
 
-        target.setHealth(Math.min(target.getMaxHealth(), target.getHealth() + 4.0F));
-        healItem.shrink(1);
-        syncInventory();
-        finish(HEAL_COOLDOWN_TICKS);
-        return DutyResult.COMPLETE;
-    }
-
-    private DutyResult tickResupplyAmmo() {
-        if (!(currentTarget instanceof SoldierEntity target) || !target.isAlive()) {
-            finish(0);
-            return DutyResult.ABORTED;
-        }
-        boolean transferred = transferCompatibleAmmo(target);
-        finish(RESUPPLY_COOLDOWN_TICKS);
-        return transferred ? DutyResult.COMPLETE : DutyResult.ABORTED;
-    }
-
-    private DutyResult tickResupplyMedical() {
-        if (!(currentTarget instanceof SoldierEntity target) || !target.isAlive()) {
-            finish(0);
-            return DutyResult.ABORTED;
-        }
-
-        ItemStack item = findFirstHealingItem();
-        if (item.isEmpty()) {
+        List<ItemStack> payload = buildPayload(currentTarget, config);
+        if (payload.isEmpty()) {
             finish(RESUPPLY_COOLDOWN_TICKS);
             return DutyResult.ABORTED;
         }
 
-        ItemStack toInsert = item.copy();
-        toInsert.setCount(1);
-        if (!insertItem(target.getSoldierInventory(), toInsert)) {
-            finish(RESUPPLY_COOLDOWN_TICKS);
-            return DutyResult.ABORTED;
-        }
-
-        item.shrink(1);
+        spawnPouch(currentTarget, payload);
         syncInventory();
-        NetworkHandler.sendToTracking(target,
-            new SyncSoldierInventoryPacket(target.getId(), target.getSoldierInventory().save()));
         finish(RESUPPLY_COOLDOWN_TICKS);
         return DutyResult.COMPLETE;
     }
 
-    private List<ServerPlayer> findBleedingPlayers() {
-        if (!(soldier.level() instanceof ServerLevel level)) return List.of();
-        AABB box = soldier.getBoundingBox().inflate(TASK_RADIUS);
-        List<ServerPlayer> result = new ArrayList<>();
-        for (ServerPlayer player : level.players()) {
-            if (player.isAlive() && PlayerReviveCompat.isPlayerBleeding(player)
-                && box.contains(player.position())) {
-                result.add(player);
+    // ── Payload building ────────────────────────────────────────────────
+
+    private List<ItemStack> buildPayload(LivingEntity target, ResupplyConfig config) {
+        List<ItemStack> payload = new ArrayList<>();
+
+        if (config.resupplyToAmmo() > 0 && config.ammoThreshold() > 0) {
+            int currentAmmo = countTotalAmmo(target);
+            int ammoDeficit = Math.max(0, config.resupplyToAmmo() - currentAmmo);
+            if (ammoDeficit > 0) {
+                ItemStack gunStack = getTargetGunStack(target);
+                takeCompatibleAmmo(gunStack, ammoDeficit, payload);
             }
         }
-        result.sort(Comparator.comparingDouble(soldier::distanceTo));
-        return result;
-    }
 
-    private List<SoldierEntity> findWoundedSoldiers() {
-        if (!(soldier.level() instanceof ServerLevel level)) return List.of();
-        AABB box = soldier.getBoundingBox().inflate(TASK_RADIUS);
-        List<SoldierEntity> result = level.getEntitiesOfClass(SoldierEntity.class, box,
-            target -> target.isAlive() && target != soldier
-                && target.getHealth() / target.getMaxHealth() < LOW_HEALTH_THRESHOLD
-                && soldier.isFriendlyTo(target));
-        result.sort(Comparator.comparingDouble(soldier::distanceTo));
-        return result;
-    }
-
-    private List<SoldierEntity> findSoldiersNeedingResupply() {
-        if (!(soldier.level() instanceof ServerLevel level)) return List.of();
-        AABB box = soldier.getBoundingBox().inflate(TASK_RADIUS);
-        List<SoldierEntity> result = level.getEntitiesOfClass(SoldierEntity.class, box,
-            target -> target.isAlive() && target != soldier && soldier.isFriendlyTo(target)
-                && (needsAmmo(target) || needsMedical(target)));
-        result.sort(Comparator.comparingDouble(soldier::distanceTo));
-        return result;
-    }
-
-    private boolean needsAmmo(SoldierEntity target) {
-        return countTotalAmmo(target) < LOW_AMMO_THRESHOLD;
-    }
-
-    private boolean needsMedical(SoldierEntity target) {
-        return !hasHealingItem(target);
-    }
-
-    private boolean hasHealingItem(SoldierEntity target) {
-        SoldierInventory inventory = target.getSoldierInventory();
-        for (int slot = SoldierInventory.SLOT_GENERAL_START; slot < SoldierInventory.INVENTORY_SIZE; slot++) {
-            if (inventory.getItem(slot).is(ModItemTags.SOLDIER_HEALING_ITEMS)) return true;
+        if (config.resupplyToHeals() > 0 && config.healingThreshold() > 0) {
+            int currentHeals = countHealingItems(target);
+            int healDeficit = Math.max(0, config.resupplyToHeals() - currentHeals);
+            if (healDeficit > 0) {
+                takeHealingItems(healDeficit, payload);
+            }
         }
-        return false;
+
+        return payload;
     }
 
-    private boolean hasHealingItems() {
-        return !findFirstHealingItem().isEmpty();
-    }
-
-    private boolean hasAmmo() {
-        SoldierInventory inventory = soldier.getSoldierInventory();
-        for (int slot = SoldierInventory.SLOT_GENERAL_START; slot < SoldierInventory.INVENTORY_SIZE; slot++) {
-            ItemStack stack = inventory.getItem(slot);
-            if (!stack.isEmpty() && isAmmo(stack)) return true;
+    private ItemStack getTargetGunStack(LivingEntity target) {
+        if (target instanceof SoldierEntity soldier) {
+            return soldier.getSoldierInventory().getItem(SoldierInventory.SLOT_MAIN_HAND);
         }
-        return false;
-    }
-
-    private ItemStack findFirstHealingItem() {
-        SoldierInventory inventory = soldier.getSoldierInventory();
-        for (int slot = SoldierInventory.SLOT_GENERAL_START; slot < SoldierInventory.INVENTORY_SIZE; slot++) {
-            ItemStack stack = inventory.getItem(slot);
-            if (stack.is(ModItemTags.SOLDIER_HEALING_ITEMS) && stack.getCount() > 0) return stack;
+        if (target instanceof Player player) {
+            return player.getMainHandItem();
         }
         return ItemStack.EMPTY;
     }
 
-    private int countTotalAmmo(SoldierEntity target) {
-        SoldierInventory inventory = target.getSoldierInventory();
-        int total = 0;
-        for (int slot = SoldierInventory.SLOT_GENERAL_START; slot < SoldierInventory.INVENTORY_SIZE; slot++) {
-            ItemStack stack = inventory.getItem(slot);
-            if (!stack.isEmpty() && isAmmo(stack)) total += stack.getCount();
+    private void takeCompatibleAmmo(ItemStack gunStack, int want, List<ItemStack> payload) {
+        SoldierInventory inv = soldier.getSoldierInventory();
+        int remaining = want;
+
+        for (int slot = SoldierInventory.SLOT_GENERAL_START; slot < SoldierInventory.INVENTORY_SIZE && remaining > 0; slot++) {
+            ItemStack stack = inv.getItem(slot);
+            if (stack.isEmpty() || GunIntegration.getAmmoCountForGun(gunStack, stack) <= 0) continue;
+
+            int take = Math.min(stack.getCount(), remaining);
+            ItemStack split = stack.split(take);
+            mergeInto(payload, split);
+            remaining -= take;
         }
-        return total;
     }
 
-    private boolean isAmmo(ItemStack stack) {
-        return stack.is(net.minecraft.tags.ItemTags.create(
-            new net.minecraft.resources.ResourceLocation("tacz", "ammo")));
+    private void takeHealingItems(int want, List<ItemStack> payload) {
+        SoldierInventory inv = soldier.getSoldierInventory();
+        int remaining = want;
+
+        for (int slot = SoldierInventory.SLOT_GENERAL_START; slot < SoldierInventory.INVENTORY_SIZE && remaining > 0; slot++) {
+            ItemStack stack = inv.getItem(slot);
+            if (stack.isEmpty() || !stack.is(ModItemTags.SOLDIER_HEALING_ITEMS)) continue;
+
+            int take = Math.min(stack.getCount(), remaining);
+            ItemStack split = stack.split(take);
+            mergeInto(payload, split);
+            remaining -= take;
+        }
     }
 
-    private boolean transferCompatibleAmmo(SoldierEntity target) {
-        SoldierInventory source = soldier.getSoldierInventory();
-        SoldierInventory destination = target.getSoldierInventory();
-        boolean transferred = false;
-
-        for (int slot = SoldierInventory.SLOT_GENERAL_START; slot < SoldierInventory.INVENTORY_SIZE; slot++) {
-            ItemStack sourceStack = source.getItem(slot);
-            if (sourceStack.isEmpty() || !isAmmo(sourceStack)) continue;
-
-            int amount = Math.min(sourceStack.getCount(), 16);
-            ItemStack splitStack = sourceStack.split(amount);
-            if (!insertItem(destination, splitStack)) {
-                sourceStack.grow(splitStack.getCount());
-            }
-            transferred |= splitStack.getCount() < amount;
-            if (countTotalAmmo(target) >= LOW_AMMO_THRESHOLD) break;
-        }
-
-        if (transferred) {
-            syncInventory();
-            NetworkHandler.sendToTracking(target,
-                new SyncSoldierInventoryPacket(target.getId(), destination.save()));
-        }
-        return transferred;
-    }
-
-    private boolean insertItem(SoldierInventory inventory, ItemStack stack) {
-        if (stack.isEmpty()) return true;
-
-        for (int slot = SoldierInventory.SLOT_GENERAL_START; slot < SoldierInventory.INVENTORY_SIZE; slot++) {
-            ItemStack existing = inventory.getItem(slot);
-            if (!existing.isEmpty() && ItemStack.isSameItemSameTags(existing, stack)
-                && existing.getCount() < existing.getMaxStackSize()) {
-                int amount = Math.min(stack.getCount(), existing.getMaxStackSize() - existing.getCount());
-                existing.grow(amount);
-                stack.shrink(amount);
-                if (stack.isEmpty()) return true;
+    private void mergeInto(List<ItemStack> payload, ItemStack toAdd) {
+        if (toAdd.isEmpty()) return;
+        for (ItemStack existing : payload) {
+            if (ItemStack.isSameItemSameTags(existing, toAdd)) {
+                int space = existing.getMaxStackSize() - existing.getCount();
+                int add = Math.min(toAdd.getCount(), space);
+                existing.grow(add);
+                toAdd.shrink(add);
+                if (toAdd.isEmpty()) return;
             }
         }
-
-        for (int slot = SoldierInventory.SLOT_GENERAL_START; slot < SoldierInventory.INVENTORY_SIZE; slot++) {
-            if (inventory.getItem(slot).isEmpty()) {
-                inventory.setItem(slot, stack);
-                return true;
-            }
+        if (!toAdd.isEmpty()) {
+            payload.add(toAdd);
         }
-        return false;
     }
+
+    // ── Pouch spawning ──────────────────────────────────────────────────
+
+    private void spawnPouch(LivingEntity target, List<ItemStack> payload) {
+        if (!(soldier.level() instanceof ServerLevel level)) return;
+
+        Vec3 origin = soldier.getEyePosition();
+        ResupplyPouchEntity pouch = ResupplyPouchEntity.forTarget(level, origin, target, payload);
+
+        Vec3 targetPos = target.getEyePosition();
+        Vec3 dir = targetPos.subtract(origin).normalize();
+        double dist = origin.distanceTo(targetPos);
+        double speed = Math.min(1.6, 0.4 + dist * 0.05);
+        pouch.setDeltaMovement(dir.scale(speed).add(0, 0.15, 0));
+
+        level.addFreshEntity(pouch);
+    }
+
+    // ── Inventory sync ──────────────────────────────────────────────────
+
+    private void syncInventory() {
+        NetworkHandler.sendToTracking(soldier,
+            new SyncSoldierInventoryPacket(soldier.getId(), soldier.getSoldierInventory().save()));
+    }
+
+    // ── Navigation ──────────────────────────────────────────────────────
 
     private void navigateToTarget() {
         if (currentTarget != null) {
@@ -423,10 +524,7 @@ public final class SupportDutyController {
         }
     }
 
-    private void syncInventory() {
-        NetworkHandler.sendToTracking(soldier,
-            new SyncSoldierInventoryPacket(soldier.getId(), soldier.getSoldierInventory().save()));
-    }
+    // ── Claim management ────────────────────────────────────────────────
 
     private boolean isClaimed(LivingEntity target) {
         ClaimEntry entry = CLAIMS.get(target.getUUID());
@@ -456,8 +554,10 @@ public final class SupportDutyController {
         }
         currentTask = SupportTask.IDLE;
         currentTarget = null;
+        currentConfig = null;
         taskCooldownTicks = cooldown;
         reviveProgressTicks = 0;
+        throwWindupTicks = 0;
         dutyTicks = 0;
     }
 }
