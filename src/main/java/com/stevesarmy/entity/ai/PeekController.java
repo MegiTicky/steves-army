@@ -663,7 +663,16 @@ public class PeekController {
         currentPeekPos = null;
         returnAllowedDuringReload = false;
         soldier.refreshDimensions();
-        
+
+        // Explicitly notify the attack system that a peek cycle completed
+        CoverGoalController goalCtrl = soldier.getCoverTacticalGoal();
+        if (goalCtrl instanceof CoverTacticalGoal tactical) {
+            tactical.onPeekCycleCompleted();
+        }
+        // Synchronize CoverBehaviorManager timestamp so attack logic reads
+        // the real peek-end time instead of a stale zero.
+        soldier.getCoverBehaviorManager().setLastPeekEndTime(lastPeekEndTime);
+
         if (CoverTacticalGoal.isDebugLoggingEnabled()) {
             StevesArmyMod.LOGGER.info("[PeekController] Soldier {} state: RETURNING_TO_COVER -> {}",
                 soldier.getId(), state);

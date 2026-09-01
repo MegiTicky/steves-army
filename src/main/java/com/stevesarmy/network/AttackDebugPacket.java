@@ -34,7 +34,11 @@ public class AttackDebugPacket {
         Vec3 position,
         boolean attackHasPeeked,
         boolean dwellMet,
-        boolean softCoverAllowed
+        boolean softCoverAllowed,
+        boolean peekCompleted,
+        boolean canAdvance,
+        float dwellElapsedMs,
+        float requiredDwellMs
     ) {}
 
     public AttackDebugPacket(boolean enabled, List<Entry> entries) {
@@ -67,9 +71,13 @@ public class AttackDebugPacket {
             boolean atkPeek = buf.readBoolean();
             boolean dwMet = buf.readBoolean();
             boolean scAllowed = buf.readBoolean();
+            boolean peekComp = buf.readBoolean();
+            boolean canAdv = buf.readBoolean();
+            float dwellEl = buf.readFloat();
+            float reqDwell = buf.readFloat();
             entries.add(new Entry(uuid, ftName, ftLevel, ftState, phase, dwellFrac,
                 suppLevel, indSupp, recov, ftPinned, hvHold, safePeek, peek, hasTgt,
-                new Vec3(px, py, pz), atkPeek, dwMet, scAllowed));
+                new Vec3(px, py, pz), atkPeek, dwMet, scAllowed, peekComp, canAdv, dwellEl, reqDwell));
         }
     }
 
@@ -97,6 +105,10 @@ public class AttackDebugPacket {
             buf.writeBoolean(e.attackHasPeeked());
             buf.writeBoolean(e.dwellMet());
             buf.writeBoolean(e.softCoverAllowed());
+            buf.writeBoolean(e.peekCompleted());
+            buf.writeBoolean(e.canAdvance());
+            buf.writeFloat(e.dwellElapsedMs());
+            buf.writeFloat(e.requiredDwellMs());
         }
     }
 

@@ -96,20 +96,18 @@ public final class FireTeamSuppressionDebugRenderer {
             draw(font, line3, lineOffset, suppColor, poseStack, bufferSource);
             lineOffset += 10;
 
-            // Line 4: Gate states + advance blockers
-            String line4 = "Gates: heavy="
-                + (entry.heavyHold() ? "BLOCKED" : "ok")
-                + "  peek=" + (entry.peeking() ? "active" : "ok")
-                + "  safe=" + (entry.safetyPeekDone() ? "ok" : "pending")
-                + "  ftPinned=" + (entry.fireteamPinned() ? "YES" : "no");
-            int gateColor = (entry.heavyHold() || entry.fireteamPinned())
-                ? 0xFFFF5555 : 0xFF55FF55;
+            // Line 4: All six canAdvance predicates as individual V/X flags
+            String line4 = "AdvGate: dw=" + (entry.dwellMet() ? "V" : "X")
+                + " rc=" + (entry.recovered() ? "V" : "X")
+                + " pk=" + (entry.peeking() ? "X" : "V")
+                + " fp=" + (entry.fireteamPinned() ? "X" : "V")
+                + " hh=" + (entry.heavyHold() ? "X" : "V")
+                + " sc=" + (entry.softCoverAllowed() ? "V" : "X");
+            int gateColor = entry.canAdvance() ? 0xFF55FF55 : 0xFFFFAA00;
             draw(font, line4, lineOffset, gateColor, poseStack, bufferSource);
             lineOffset += 10;
 
-            // Line 5: Advance reason — shows why soldier can/cannot move
-            boolean canNormalAdvance = entry.dwellMet() && entry.recovered() && !entry.peeking()
-                && !entry.fireteamPinned() && !entry.heavyHold() && entry.softCoverAllowed();
+            // Line 5: Advance reason + peek latch + dwell progress
             String advanceReason;
             if (!entry.dwellMet()) {
                 advanceReason = "WAIT_DWELL";
@@ -123,16 +121,18 @@ public final class FireTeamSuppressionDebugRenderer {
                 advanceReason = "HEAVY_HOLD";
             } else if (!entry.softCoverAllowed()) {
                 advanceReason = "WAITING_COVER";
-            } else if (!entry.attackHasPeeked()) {
+            } else if (!entry.peekCompleted()) {
                 advanceReason = "NO_PEEK_LATCH";
             } else {
                 advanceReason = "CAN_ADVANCE";
             }
-            int advColor = canNormalAdvance || advanceReason.equals("CAN_ADVANCE")
-                ? 0xFF55FF55 : 0xFFFFAA00;
+            int advDwellPct = entry.requiredDwellMs() > 0
+                ? (int) Math.min(200, entry.dwellElapsedMs() / entry.requiredDwellMs() * 100)
+                : (int) Math.min(200, entry.dwellFraction() * 100);
+            int advColor = entry.canAdvance() ? 0xFF55FF55 : 0xFFFFAA00;
             String line5 = "Adv: " + advanceReason
-                + "  peekLatch=" + (entry.attackHasPeeked() ? "V" : "X")
-                + "  soft=" + (entry.softCoverAllowed() ? "V" : "X");
+                + "  pkDone=" + (entry.peekCompleted() ? "V" : "X")
+                + "  dwell=" + advDwellPct + "%";
             draw(font, line5, lineOffset, advColor, poseStack, bufferSource);
             lineOffset += 10;
 
