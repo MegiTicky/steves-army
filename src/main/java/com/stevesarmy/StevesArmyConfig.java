@@ -75,6 +75,14 @@ public class StevesArmyConfig {
     public static final ForgeConfigSpec.IntValue FIRETEAM_HOLD_NOTIFY_TICKS;
     public static final ForgeConfigSpec.IntValue FIRETEAM_NOTIFY_COOLDOWN_TICKS;
 
+    public static final ForgeConfigSpec.IntValue RECOVERY_SAFETY_PEEK_MS;
+    public static final ForgeConfigSpec.DoubleValue COVER_SOFT_FACTOR;
+    public static final ForgeConfigSpec.IntValue COVER_WAIT_TIMEOUT_TICKS;
+    public static final ForgeConfigSpec.BooleanValue FIRETEAM_HEAVY_HOLD_REPOSITION;
+    public static final ForgeConfigSpec.DoubleValue GROUP_COHESION_BAND_BLOCKS;
+    public static final ForgeConfigSpec.DoubleValue GROUP_AHEAD_DWELL_MULT;
+    public static final ForgeConfigSpec.DoubleValue GROUP_BEHIND_DWELL_MULT;
+
     static {
         BUILDER.push("aim_quality");
         
@@ -458,6 +466,49 @@ BUILDER.pop();
 
         BUILDER.pop();
 
+        BUILDER.push("tactical_coordination");
+
+        RECOVERY_SAFETY_PEEK_MS = BUILDER
+            .comment("After recovering from suppression in cover, soldier must complete a",
+                     "safety peek (no new suppression event during the peek) before it may",
+                     "start a routine reposition/advance. Max time to wait for that peek.",
+                     "Default: 2000 (2s)")
+            .defineInRange("recoverySafetyPeekMs", 2000, 0, 20000);
+
+        COVER_SOFT_FACTOR = BUILDER
+            .comment("Soft covering-fire requirement: when no nearby teammate is peeking/exposed",
+                     "to cover, multiply the chance to start a routine reposition by this factor",
+                     "(0.0 = never advance un-covered, 1.0 = no penalty). Default: 0.5")
+            .defineInRange("coverSoftFactor", 0.5, 0.0, 1.0);
+
+        COVER_WAIT_TIMEOUT_TICKS = BUILDER
+            .comment("How long a soldier waits (with reduced move chance) for a teammate to",
+                     "cover before advancing anyway without cover. Default: 120 (6s)")
+            .defineInRange("coverWaitTimeoutTicks", 120, 0, 1000);
+
+        FIRETEAM_HEAVY_HOLD_REPOSITION = BUILDER
+            .comment("When the fireteam is HEAVILY suppressed (level >= heavyThreshold), keep",
+                     "routine reposition requests pending until the team drops below HEAVY.",
+                     "Default: true")
+            .define("fireteamHeavyHoldReposition", true);
+
+        GROUP_COHESION_BAND_BLOCKS = BUILDER
+            .comment("Distance band (blocks) beyond the fireteam centroid that counts as",
+                     "'ahead' or 'behind' the group for dynamic dwell scaling. Default: 8.0")
+            .defineInRange("groupCohesionBandBlocks", 8.0, 1.0, 64.0);
+
+        GROUP_AHEAD_DWELL_MULT = BUILDER
+            .comment("Dwell multiplier when a soldier is far ahead of the group and close to",
+                     "the enemy: wait for the fireteam to catch up. Default: 1.6")
+            .defineInRange("groupAheadDwellMult", 1.6, 1.0, 5.0);
+
+        GROUP_BEHIND_DWELL_MULT = BUILDER
+            .comment("Dwell multiplier when a soldier is far behind the group: catch up quickly.",
+                     "Default: 0.6")
+            .defineInRange("groupBehindDwellMult", 0.6, 0.2, 1.0);
+
+        BUILDER.pop();
+
         SPEC = BUILDER.build();
     }
     
@@ -685,6 +736,35 @@ BUILDER.pop();
     public static int getFireteamNotifyCooldownTicks() {
         return FIRETEAM_NOTIFY_COOLDOWN_TICKS.get();
     }
+
+    public static int getRecoverySafetyPeekMs() {
+        return RECOVERY_SAFETY_PEEK_MS.get();
+    }
+
+    public static float getCoverSoftFactor() {
+        return COVER_SOFT_FACTOR.get().floatValue();
+    }
+
+    public static int getCoverWaitTimeoutTicks() {
+        return COVER_WAIT_TIMEOUT_TICKS.get();
+    }
+
+    public static boolean isFireteamHeavyHoldReposition() {
+        return FIRETEAM_HEAVY_HOLD_REPOSITION.get();
+    }
+
+    public static float getGroupCohesionBandBlocks() {
+        return GROUP_COHESION_BAND_BLOCKS.get().floatValue();
+    }
+
+    public static float getGroupAheadDwellMult() {
+        return GROUP_AHEAD_DWELL_MULT.get().floatValue();
+    }
+
+    public static float getGroupBehindDwellMult() {
+        return GROUP_BEHIND_DWELL_MULT.get().floatValue();
+    }
+
 
     /** Legacy compatibility hook; nearby-target snapshots are disabled. */
     public static int getTargetCandidateCacheTicks() {

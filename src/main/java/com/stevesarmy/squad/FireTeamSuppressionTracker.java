@@ -190,6 +190,15 @@ public final class FireTeamSuppressionTracker {
         return getState(soldier) == FireTeamSuppressionState.HEAVY;
     }
 
+    public static Vec3 getCentroid(SoldierEntity soldier) {
+        Optional<UUID> ownerOpt = soldier.getOwnerUUID();
+        if (ownerOpt.isEmpty()) return null;
+        EnumMap<FireTeam, Entry> map = DATA.get(ownerOpt.get());
+        if (map == null) return null;
+        Entry e = map.get(soldier.getFireTeam());
+        return e == null ? null : e.centroid;
+    }
+
     public static void syncToPlayer(ServerPlayer player) {
         if (!StevesArmyConfig.isFireteamSuppressionEnabled()) return;
         UUID ownerId = player.getUUID();
