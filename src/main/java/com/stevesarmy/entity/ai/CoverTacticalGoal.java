@@ -3894,10 +3894,13 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
                     break;
                 }
 
-                long dwellTime = System.currentTimeMillis() - attackCoverArrivalTime;
                 boolean suppressed = getCoverManager().isSuppressed();
                 boolean pinned = getCoverManager().isPinned();
                 boolean recovered = getCoverManager().getSuppressionTracker().isRecovered();
+                if (!recovered) {
+                    attackCoverArrivalTime = System.currentTimeMillis();
+                }
+                long dwellTime = System.currentTimeMillis() - attackCoverArrivalTime;
                 PeekController peekCtrl = getPeekController();
                 boolean peeking = peekCtrl.isExposed() || peekCtrl.isMovingToPeek() || peekCtrl.isReturning();
                 float ftLevel = FireTeamSuppressionTracker.getLevel(soldier);
