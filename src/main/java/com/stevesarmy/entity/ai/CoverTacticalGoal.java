@@ -3915,7 +3915,7 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
                     }
                 }
 
-                float dwellMult = 0.6f + ftLevel * 1.2f;
+                float dwellMult = 1.0f + ftLevel * 1.5f;
                 long minDwell = (long)(ATTACK_MIN_DWELL_MS * dwellMult);
                 long maxDwell = (long)(ATTACK_MAX_DWELL_MS * dwellMult) + (attackAdvanceStaggerTicks * 50L);
                 boolean dwellMet = dwellTime >= minDwell;
