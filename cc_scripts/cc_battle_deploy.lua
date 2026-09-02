@@ -37,12 +37,9 @@ local LOADOUT = '{Items:['..
 ']}'
 
 local function run(cmd)
-  local results = {commands.exec(cmd)}
-  local ok = results[1]
-  local out = results[2] or ""
-  if type(out) == "table" then out = table.concat(out, " ") end
-  if not ok then print("[FAIL] " .. cmd .. "\n" .. tostring(out)) end
-  return ok, out
+  local ok = commands.exec(cmd)
+  if not ok then print("[FAIL] " .. cmd) end
+  return ok
 end
 
 print("[1/3] Creating callsign squads...")
@@ -60,8 +57,8 @@ for i, cs in ipairs(SQUADS) do
     local z = spawnZ + (j - math.ceil(SOLDIERS_PER_SQUAD / 2)) * 3
     print("    Spawn " .. cs .. " #" .. j .. " at " .. SPAWN_X .. " " .. SPAWN_Y .. " " .. math.floor(z))
     run(string.format(
-      "stevesarmy spawn enemy squad %s %d %d %d %s",
-      cs, SPAWN_X, SPAWN_Y, math.floor(z), LOADOUT))
+      "stevesarmy spawn enemy %d %d %d 0 0 %s",
+      SPAWN_X, SPAWN_Y, math.floor(z), LOADOUT))
   end
 end
 
