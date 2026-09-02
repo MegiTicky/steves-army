@@ -4185,6 +4185,19 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
                 boolean canAdvance = dwellMet && recovered && !fireteamPinned
                     && !heavyHold;
 
+                // Hard watchdog: if stuck with all gates passed for >10s, force
+                // advance regardless of peek state or any flickering conditions.
+                if (dwellMet && canAdvance && dwellTime > 10000) {
+                    lastAdvanceTriggerTime = System.currentTimeMillis();
+                    if (attackDebugLog()) {
+                        StevesArmyMod.LOGGER.info("[AttackPhase] Soldier {} OCCUPYING watchdog: stuck {}ms with all gates pass, forcing advance",
+                            soldier.getId(), dwellTime);
+                    }
+                    attackPhase = AttackPhase.SELECTING_COVER;
+                    requestCoverSearch(QueuedSearchMode.ATTACK_SELECTING);
+                    break;
+                }
+
                 // The next bound must begin from cover. A delayed peek ducks back
                 // at maximum dwell instead of blocking attack progression forever.
                 if (dwellTime >= maxDwell && recovered && peeking) {
