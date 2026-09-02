@@ -182,6 +182,15 @@ public final class FireTeamSuppressionDebugRenderer {
             draw(font, line10, lineOffset, phaseAgeColor, poseStack, bufferSource);
             lineOffset += 10;
 
+            // Line 11: Fire superiority + member/incoming pressure
+            int supColor = entry.fireSuperiority() > 0.6f ? 0xFF55FF55
+                : entry.fireSuperiority() < 0.4f ? 0xFFFF5555 : 0xFFFFAA00;
+            String line11 = "Super: " + String.format("%.2f", entry.fireSuperiority())
+                + "  mP=" + String.format("%.2f", entry.memberPressure())
+                + "  iP=" + String.format("%.2f", entry.incomingPressure());
+            draw(font, line11, lineOffset, supColor, poseStack, bufferSource);
+            lineOffset += 10;
+
             poseStack.popPose();
         }
 

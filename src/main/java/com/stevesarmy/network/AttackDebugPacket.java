@@ -45,7 +45,10 @@ public class AttackDebugPacket {
         boolean coverSearchPending,
         boolean fallbackAdvanceActive,
         long phaseAgeMs,
-        long lastAdvanceTriggerAgeMs
+        long lastAdvanceTriggerAgeMs,
+        float memberPressure,
+        float incomingPressure,
+        float fireSuperiority
     ) {}
 
     public AttackDebugPacket(boolean enabled, List<Entry> entries) {
@@ -92,10 +95,13 @@ public class AttackDebugPacket {
             boolean fbActive = buf.readBoolean();
             long phaseAge = buf.readLong();
             long lastAdvAge = buf.readLong();
+            float memberP = buf.readFloat();
+            float incomingP = buf.readFloat();
+            float fireSup = buf.readFloat();
             entries.add(new Entry(uuid, ftName, ftLevel, ftState, phase, dwellFrac,
                 suppLevel, indSupp, recov, ftPinned, hvHold, safePeek, peek, hasTgt,
                 new Vec3(px, py, pz), atkPeek, dwMet, peekComp, canAdv, dwellEl, reqDwell, suppDwellMult, cohMult, centroid,
-                coverSt, searchPend, fbActive, phaseAge, lastAdvAge));
+                coverSt, searchPend, fbActive, phaseAge, lastAdvAge, memberP, incomingP, fireSup));
         }
     }
 
@@ -137,6 +143,9 @@ public class AttackDebugPacket {
             buf.writeBoolean(e.fallbackAdvanceActive());
             buf.writeLong(e.phaseAgeMs());
             buf.writeLong(e.lastAdvanceTriggerAgeMs());
+            buf.writeFloat(e.memberPressure());
+            buf.writeFloat(e.incomingPressure());
+            buf.writeFloat(e.fireSuperiority());
         }
     }
 

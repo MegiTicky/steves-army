@@ -30,10 +30,11 @@ public final class FireTeamSuppressionTracker {
         long lastNotifyTick = Long.MIN_VALUE;
         float pendingImpulse = 0.0f;
         Vec3 centroid = null;
+        float incomingPressure = 0.0f;
+        float memberPressure = 0.0f;
     }
 
     private static final Map<UUID, EnumMap<FireTeam, Entry>> DATA = new HashMap<>();
-    private static final Map<UUID, SuppressionTracker.SuppressionState> PREV_MEMBER_STATE = new HashMap<>();
     private static long serverTick = 0;
 
     private FireTeamSuppressionTracker() {}
@@ -41,11 +42,13 @@ public final class FireTeamSuppressionTracker {
     public static void tick(MinecraftServer server) {
         if (!StevesArmyConfig.isFireteamSuppressionEnabled()) return;
         serverTick++;
+        FireTeamFireSuperiorityTracker.tick();
         float riseRate = StevesArmyConfig.getFireteamRiseRate();
         float fallRate = StevesArmyConfig.getFireteamFallRate();
-        float impulsePerSuppressed = StevesArmyConfig.getFireteamSuppressionImpulse();
         float suppressionThreshold = StevesArmyConfig.getFireteamSuppressionThreshold();
         float heavyThreshold = StevesArmyConfig.getFireteamHeavyThreshold();
+        float incomingDecay = StevesArmyConfig.getFireteamIncomingPressureDecay();
+        float supDampening = StevesArmyConfig.getFireteamSuperiorityDampening();
 
         Set<UUID> seenOwners = new HashSet<>();
         for (ServerPlayer player : server.getPlayerList().getPlayers()) {
@@ -65,7 +68,8 @@ public final class FireTeamSuppressionTracker {
                 Vec3 sum = Vec3.ZERO;
                 int count = 0;
                 float sumSuppression = 0.0f;
-                int newlySuppressed = 0;
+                int pressured = 0;
+                int pinned = 0;
                 for (UUID sid : ids) {
                     SoldierEntity soldier = findSoldier(server, sid);
                     if (soldier == null || !soldier.isAlive() || soldier.isRemoved()) continue;
@@ -74,38 +78,63 @@ public final class FireTeamSuppressionTracker {
                     sum = sum.add(soldier.position());
                     count++;
                     float lvl = 0.0f;
-                    try {
-                        lvl = soldier.getCoverBehaviorManager().getSuppressionTracker().getSuppressionLevel();
-                    } catch (Exception ignored) {}
-                    sumSuppression += Mth.clamp(lvl, 0.0f, 1.0f);
                     SuppressionTracker.SuppressionState cur = SuppressionTracker.SuppressionState.CLEAR;
                     try {
+                        lvl = soldier.getCoverBehaviorManager().getSuppressionTracker().getSuppressionLevel();
                         cur = soldier.getCoverBehaviorManager().getSuppressionTracker().getState();
                     } catch (Exception ignored) {}
-                    SuppressionTracker.SuppressionState prev = PREV_MEMBER_STATE.get(sid);
-                    if ((prev == null || prev == SuppressionTracker.SuppressionState.CLEAR) && cur != SuppressionTracker.SuppressionState.CLEAR) {
-                        newlySuppressed++;
-                    }
-                    PREV_MEMBER_STATE.put(sid, cur);
+                    sumSuppression += Mth.clamp(lvl, 0.0f, 1.0f);
+                    if (cur == SuppressionTracker.SuppressionState.PRESSURED) pressured++;
+                    if (cur == SuppressionTracker.SuppressionState.PINNED) pinned++;
                 }
                 if (count == 0) {
                     EnumMap<FireTeam, Entry> map = DATA.get(ownerId);
                     if (map != null) map.remove(ft);
                     continue;
                 }
-                float target = sumSuppression / count;
+
                 Vec3 centroid = sum.scale(1.0 / count);
 
                 EnumMap<FireTeam, Entry> map = DATA.computeIfAbsent(ownerId, k -> new EnumMap<>(FireTeam.class));
                 Entry entry = map.computeIfAbsent(ft, k -> new Entry());
                 entry.centroid = centroid;
 
-                float impulse = newlySuppressed * impulsePerSuppressed + entry.pendingImpulse;
-                entry.pendingImpulse = 0.0f;
+                // --- memberPressure: slow composite of individual states ---
+                float avgSuppression = sumSuppression / count;
+                float pressuredFraction = (float) pressured / count;
+                float pinnedFraction = (float) pinned / count;
+                entry.memberPressure = 0.65f * avgSuppression
+                    + 0.25f * pressuredFraction
+                    + 0.10f * pinnedFraction;
 
-                float delta = target - entry.level;
-                float rate = delta > 0 ? riseRate : fallRate;
-                entry.level = Mth.clamp(entry.level + delta * rate + impulse, 0.0f, 1.0f);
+                // --- incomingPressure: deduplicated hostile fire events ---
+                // Decay each tick
+                entry.incomingPressure *= incomingDecay;
+                // Add casualty bump as pending impulse
+                if (entry.pendingImpulse > 0.0f) {
+                    entry.incomingPressure = Math.min(
+                        entry.incomingPressure + entry.pendingImpulse, 1.0f);
+                    entry.pendingImpulse = 0.0f;
+                }
+
+                // --- fire superiority ---
+                float superiority = 0.5f;
+                if (!living.isEmpty()) {
+                    superiority = FireTeamFireSuperiorityTracker.getSuperiority(living.get(0));
+                }
+
+                // --- final target ---
+                float target = 0.75f * entry.memberPressure
+                    + 0.25f * entry.incomingPressure;
+                // superiority dampening: 0.0 → target * 1.2 (enemy dominates),
+                // 1.0 → target * 0.8 (we dominate)
+                target *= Mth.lerp(superiority, 1.2f, 0.8f);
+                target = Mth.clamp(target, 0.0f, 1.0f);
+
+                // --- asymmetric EMA ---
+                float rate = target > entry.level ? riseRate : fallRate;
+                entry.level = Mth.clamp(
+                    entry.level + (target - entry.level) * rate, 0.0f, 1.0f);
 
                 FireTeamSuppressionState newState;
                 if (entry.level >= heavyThreshold) newState = FireTeamSuppressionState.HEAVY;
@@ -137,7 +166,6 @@ public final class FireTeamSuppressionTracker {
         Set<UUID> toRemove = new HashSet<>();
         for (UUID oid : DATA.keySet()) if (!seenOwners.contains(oid)) toRemove.add(oid);
         for (UUID oid : toRemove) DATA.remove(oid);
-        PREV_MEMBER_STATE.keySet().removeIf(id -> findSoldier(server, id) == null);
     }
 
     private static SoldierEntity findSoldier(MinecraftServer server, UUID id) {
@@ -158,6 +186,33 @@ public final class FireTeamSuppressionTracker {
         EnumMap<FireTeam, Entry> map = DATA.computeIfAbsent(ownerId, k -> new EnumMap<>(FireTeam.class));
         Entry entry = map.computeIfAbsent(ft, k -> new Entry());
         entry.pendingImpulse = Math.min(entry.pendingImpulse + StevesArmyConfig.getFireteamCasualtyBump(), 1.0f);
+    }
+
+    /**
+     * Called once per enemy bullet burst (deduplicated by IncomingFireHandler).
+     * affectedCount = number of team members whose near-miss search box was hit.
+     * teamSize = total living members in the fireteam.
+     * eventPressure = weaponThreat * proximity * sqrt(affectedCount / teamSize).
+     */
+    public static void onHostileFireEvent(SoldierEntity victim, float weaponThreat,
+                                          int affectedCount, int teamSize) {
+        if (!StevesArmyConfig.isFireteamSuppressionEnabled()) return;
+        if (victim == null) return;
+        Optional<UUID> ownerOpt = victim.getOwnerUUID();
+        if (ownerOpt.isEmpty()) return;
+        UUID ownerId = ownerOpt.get();
+        FireTeam ft = victim.getFireTeam();
+        if (ft == FireTeam.GARRISON || ft == FireTeam.ALL) return;
+
+        float fraction = (float) affectedCount / Math.max(teamSize, 1);
+        float eventPressure = weaponThreat * (float) Math.sqrt(fraction);
+        eventPressure = Mth.clamp(eventPressure, 0.0f, 1.0f);
+
+        EnumMap<FireTeam, Entry> map = DATA.computeIfAbsent(ownerId, k -> new EnumMap<>(FireTeam.class));
+        Entry entry = map.computeIfAbsent(ft, k -> new Entry());
+        // Blend: 70% existing + 30% new event, capped at 1.0
+        entry.incomingPressure = Mth.clamp(
+            0.7f * entry.incomingPressure + 0.3f * eventPressure, 0.0f, 1.0f);
     }
 
     public static float getLevel(SoldierEntity soldier) {
@@ -191,12 +246,30 @@ public final class FireTeamSuppressionTracker {
     }
 
     public static Vec3 getCentroid(SoldierEntity soldier) {
+        Entry e = getEntry(soldier);
+        return e == null ? null : e.centroid;
+    }
+
+    public static float getMemberPressure(SoldierEntity soldier) {
+        Entry e = getEntry(soldier);
+        return e == null ? 0.0f : e.memberPressure;
+    }
+
+    public static float getIncomingPressure(SoldierEntity soldier) {
+        Entry e = getEntry(soldier);
+        return e == null ? 0.0f : e.incomingPressure;
+    }
+
+    public static float getFireSuperiority(SoldierEntity soldier) {
+        return FireTeamFireSuperiorityTracker.getSuperiority(soldier);
+    }
+
+    private static Entry getEntry(SoldierEntity soldier) {
         Optional<UUID> ownerOpt = soldier.getOwnerUUID();
         if (ownerOpt.isEmpty()) return null;
         EnumMap<FireTeam, Entry> map = DATA.get(ownerOpt.get());
         if (map == null) return null;
-        Entry e = map.get(soldier.getFireTeam());
-        return e == null ? null : e.centroid;
+        return map.get(soldier.getFireTeam());
     }
 
     public static void syncToPlayer(ServerPlayer player) {

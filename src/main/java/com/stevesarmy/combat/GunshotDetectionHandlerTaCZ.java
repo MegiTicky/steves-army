@@ -1,6 +1,7 @@
 package com.stevesarmy.combat;
 
 import com.stevesarmy.entity.SoldierEntity;
+import com.stevesarmy.squad.FireTeamFireSuperiorityTracker;
 import com.tacz.guns.api.event.common.GunShootEvent;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraftforge.eventbus.api.EventPriority;
@@ -18,6 +19,11 @@ public final class GunshotDetectionHandlerTaCZ {
 
         LivingEntity shooter = event.getShooter();
         if (shooter == null || !shooter.isAlive()) return;
+
+        // Track friendly outgoing fire for fire superiority
+        if (shooter instanceof SoldierEntity soldier && soldier.getOwnerUUID().isPresent()) {
+            FireTeamFireSuperiorityTracker.onFriendlyShot(soldier);
+        }
 
         GunIntegration.GunshotSignature signature = GunIntegration.getGunshotSignature(shooter);
         for (SoldierEntity observer : shooter.level().getEntitiesOfClass(

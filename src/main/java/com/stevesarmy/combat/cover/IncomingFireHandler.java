@@ -8,6 +8,9 @@ import com.stevesarmy.entity.ai.CoverTacticalGoal;
 import com.stevesarmy.entity.ai.CombatGoalController;
 import com.stevesarmy.squad.SquadData;
 import com.stevesarmy.squad.SquadManager;
+import com.stevesarmy.squad.FireTeamFireSuperiorityTracker;
+import com.stevesarmy.squad.FireTeamSuppressionTracker;
+import com.stevesarmy.squad.FireTeam;
 import com.stevesarmy.squad.SquadThreatIntel;
 import com.tacz.guns.entity.EntityKineticBullet;
 import net.minecraft.server.level.ServerLevel;
@@ -189,6 +192,7 @@ public class IncomingFireHandler {
         );
 
         int matchCount = 0;
+        SoldierEntity firstAffected = null;
         for (SoldierEntity soldier : level.getEntitiesOfClass(SoldierEntity.class, searchBox)) {
             if (shooter != null && soldier == shooter) continue;
 
@@ -211,7 +215,27 @@ public class IncomingFireHandler {
                 } else {
                     coverManager.onNearMiss(closestPoint, soldier, bulletSpeed, shooter, firingOrigin);
                 }
+                if (firstAffected == null) firstAffected = soldier;
                 matchCount++;
+            }
+        }
+
+        // One deduplicated fire event per bullet burst, not per soldier.
+        if (shooter != null && matchCount > 0 && firstAffected != null) {
+            boolean isFriendly = shooter instanceof SoldierEntity s && s.getOwnerUUID().isPresent();
+            if (!isFriendly) {
+                FireTeamFireSuperiorityTracker.onEnemyShotDetected(firstAffected);
+                // Weapon threat: map bullet speed (blocks/tick) to 0..1 range
+                float weaponThreat = Mth.clamp(bulletSpeed / 4.0f, 0.2f, 1.0f);
+                FireTeam ft = firstAffected.getFireTeam();
+                int teamSize = 0;
+                try {
+                    var fta = com.stevesarmy.squad.FireTeamAssignment.get(
+                        (ServerLevel) firstAffected.level(), firstAffected.getOwnerUUID().orElse(null));
+                    teamSize = fta.getSoldiersInTeam(ft).size();
+                } catch (Exception ignored) {}
+                FireTeamSuppressionTracker.onHostileFireEvent(
+                    firstAffected, weaponThreat, matchCount, Math.max(teamSize, 1));
             }
         }
 

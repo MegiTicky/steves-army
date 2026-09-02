@@ -98,7 +98,10 @@ public class SquadSyncHandler {
                 goal != null && goal.isCoverSearchPending(),
                 goal != null && goal.isFallbackAdvanceActive(),
                 goal == null ? 0 : goal.getAttackPhaseAgeMs(),
-                goal == null ? Long.MAX_VALUE : goal.getLastAdvanceTriggerAgeMs()));
+                goal == null ? Long.MAX_VALUE : goal.getLastAdvanceTriggerAgeMs(),
+                com.stevesarmy.squad.FireTeamSuppressionTracker.getMemberPressure(soldier),
+                com.stevesarmy.squad.FireTeamSuppressionTracker.getIncomingPressure(soldier),
+                com.stevesarmy.squad.FireTeamSuppressionTracker.getFireSuperiority(soldier)));
         }
         return entries;
     }

@@ -69,6 +69,8 @@ public class StevesArmyConfig {
     public static final ForgeConfigSpec.DoubleValue FIRETEAM_FALL_RATE;
     public static final ForgeConfigSpec.DoubleValue FIRETEAM_SUPPRESSION_IMPULSE;
     public static final ForgeConfigSpec.DoubleValue FIRETEAM_CASUALTY_BUMP;
+    public static final ForgeConfigSpec.DoubleValue FIRETEAM_INCOMING_PRESSURE_DECAY;
+    public static final ForgeConfigSpec.DoubleValue FIRETEAM_SUPERIORITY_DAMPENING;
     public static final ForgeConfigSpec.DoubleValue FIRETEAM_SUPPRESSION_THRESHOLD;
     public static final ForgeConfigSpec.DoubleValue FIRETEAM_HEAVY_THRESHOLD;
     public static final ForgeConfigSpec.DoubleValue FIRETEAM_PEEK_BLOCK_THRESHOLD;
@@ -439,6 +441,16 @@ BUILDER.pop();
                      "Default: 0.35")
             .defineInRange("casualtyBump", 0.35, 0.0, 1.0);
 
+        FIRETEAM_INCOMING_PRESSURE_DECAY = BUILDER
+            .comment("Per-tick decay multiplier for incoming fire pressure (0.8-1.0).",
+                     "Lower = faster decay. Default: 0.97")
+            .defineInRange("incomingPressureDecay", 0.97, 0.8, 1.0);
+
+        FIRETEAM_SUPERIORITY_DAMPENING = BUILDER
+            .comment("How much fire superiority dampens suppression rise.",
+                     "0.0 = no effect, 1.0 = full effect. Default: 0.7")
+            .defineInRange("superiorityDampening", 0.7, 0.0, 1.0);
+
         FIRETEAM_SUPPRESSION_THRESHOLD = BUILDER
             .comment("Fireteam level threshold for SUPPRESSED state (0.0 to 1.0).",
                      "Default: 0.30")
@@ -715,6 +727,14 @@ BUILDER.pop();
 
     public static float getFireteamCasualtyBump() {
         return FIRETEAM_CASUALTY_BUMP.get().floatValue();
+    }
+
+    public static float getFireteamIncomingPressureDecay() {
+        return FIRETEAM_INCOMING_PRESSURE_DECAY.get().floatValue();
+    }
+
+    public static float getFireteamSuperiorityDampening() {
+        return FIRETEAM_SUPERIORITY_DAMPENING.get().floatValue();
     }
 
     public static float getFireteamSuppressionThreshold() {
