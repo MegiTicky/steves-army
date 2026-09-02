@@ -185,9 +185,6 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
     private long recoverySafetyPeekSeqSnapshot = -1L;
     private boolean recoverySafetyPeekDone = false;
     private boolean recoverySafetyPeekInProgress = false;
-    private int routineCoverWaitTicks = 0;
-    private int softCoverCacheTick = -1;
-    private boolean softCoverCacheResult = false;
 
     // Fallback advance state (no cover found — walk forward and re-search)
     private BlockPos fallbackAdvanceTarget = null;
@@ -2546,26 +2543,6 @@ private void tickRepositioning() {
     }
 
     /**
-     * Applies the soft covering-fire chance penalty and wait timeout. Used by
-     * callers that own the actual move decision (return false to keep pending).
-     */
-    private boolean softCoverAllows() {
-        if (countNearbyPeekers() >= 1) {
-            routineCoverWaitTicks = 0;
-            return true;
-        }
-        routineCoverWaitTicks++;
-        if (routineCoverWaitTicks >= StevesArmyConfig.getCoverWaitTimeoutTicks()) {
-            return true;
-        }
-        float softFactor = StevesArmyConfig.getCoverSoftFactor();
-        if (softFactor >= 1.0f) {
-            return true;
-        }
-        return soldier.getRandom().nextFloat() < softFactor;
-    }
-
-    /**
      * Multipler applied to routine-advance dwell to keep the squad cohesive:
      * far-ahead isolated soldiers wait for the fireteam to catch up; far-behind
      * soldiers catch up quickly.
@@ -2615,7 +2592,6 @@ private void tickRepositioning() {
         recoverySafetyPeekSeqSnapshot = -1L;
         recoverySafetyPeekDone = false;
         recoverySafetyPeekInProgress = false;
-        routineCoverWaitTicks = 0;
     }
 
     /**
@@ -2650,15 +2626,12 @@ private void tickRepositioning() {
         }
 
 // Non-peekable cover reposition request (routine P1 advance: fireteam
-        // HEAVY hold, post-recovery safety peek, and soft covering-fire apply).
+        // HEAVY hold and post-recovery safety peek apply).
         if (getCoverManager().isRepositionRequested()) {
             if (!canLeaveCoverNow()) {
                 return PendingRepositionResult.BLOCKED;
             }
             if (!routineRepositionGateAllows()) {
-                return PendingRepositionResult.BLOCKED;
-            }
-            if (!softCoverAllows()) {
                 return PendingRepositionResult.BLOCKED;
             }
             if (soldier.tickCount < nextSuppressionRouteSearchTick) {
@@ -3818,7 +3791,6 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
         attackDwellEligible = false;
         attackHasPeekedThisCover = false;
         peekCompletedThisCover = false;
-        softCoverCacheTick = -1;
         attackBestObjectiveDist = Double.MAX_VALUE;
         attackFrontierDistance = Double.MAX_VALUE;
 
@@ -3931,10 +3903,6 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
         return dwellTime >= minDwell;
     }
 
-    public boolean isSoftCoverAllowed() {
-        return softCoverCacheTick == soldier.tickCount && softCoverCacheResult;
-    }
-
     private void initAttackPhase() {
         int gen = soldier.getAttackGeneration();
         if (attackCommandGeneration != gen) {
@@ -3946,7 +3914,6 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
             attackDwellEligible = false;
             attackHasPeekedThisCover = false;
             peekCompletedThisCover = false;
-            softCoverCacheTick = -1;
             attackBestObjectiveDist = Double.MAX_VALUE;
             attackFrontierDistance = Double.MAX_VALUE;
             fallbackAdvanceTarget = null;
@@ -4065,7 +4032,6 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
                     attackDwellEligible = false;
                     attackHasPeekedThisCover = false;
                     peekCompletedThisCover = false;
-                    softCoverCacheTick = -1;
                     updateAttackProgress(objective);
                     if (attackDebugLog()) {
                         StevesArmyMod.LOGGER.info("[AttackPhase] Soldier {} ({}) MOVING_TO_COVER -> OCCUPYING_COVER: cover state {} at {}",
@@ -4093,7 +4059,6 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
                     attackDwellEligible = false;
                     attackHasPeekedThisCover = false;
                     peekCompletedThisCover = false;
-                    softCoverCacheTick = -1;
                     updateAttackProgress(objective);
                     if (attackDebugLog()) {
                         StevesArmyMod.LOGGER.info("[AttackPhase] Soldier {} MOVING_TO_COVER -> OCCUPYING_COVER: reached cover {}, dwell timer starts",
@@ -4179,20 +4144,8 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
                 boolean heavyHold = StevesArmyConfig.isFireteamHeavyHoldReposition()
                     && FireTeamSuppressionTracker.isHeavilySuppressed(soldier);
 
-                // Cache softCoverAllows once per advance evaluation so the stochastic
-                // roll doesn't silently re-block every tick. Once allowed, stays
-                // allowed until the soldier re-enters cover or resets.
-                boolean softAllowed;
-                if (softCoverCacheTick == soldier.tickCount) {
-                    softAllowed = softCoverCacheResult;
-                } else {
-                    softAllowed = softCoverAllows();
-                    softCoverCacheTick = soldier.tickCount;
-                    softCoverCacheResult = softAllowed;
-                }
-
-                boolean canAdvance = dwellMet && recovered && !peeking && !fireteamPinned
-                    && !heavyHold && softAllowed;
+                boolean canAdvance = dwellMet && recovered && !fireteamPinned
+                    && !heavyHold;
 
                 // The next bound must begin from cover. A delayed peek ducks back
                 // at maximum dwell instead of blocking attack progression forever.
@@ -4203,9 +4156,9 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
                     break;
                 }
 
-                if (attackDebugLog() && dwellMet && (!recovered || peeking)) {
-                    StevesArmyMod.LOGGER.info("[AttackPhase] Soldier {} dwell met but blocked: recovered={}, peeking={}, suppression={}",
-                        soldier.getId(), recovered, peeking,
+                if (attackDebugLog() && dwellMet && !recovered) {
+                    StevesArmyMod.LOGGER.info("[AttackPhase] Soldier {} dwell met but blocked: recovered={}, suppression={}",
+                        soldier.getId(), recovered,
                         String.format("%.2f", getCoverManager().getSuppressionTracker().getSuppressionLevel()));
                 }
 
@@ -4214,8 +4167,8 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
                 //  2. maxDwellReached: unconditional safety escape — always advance
                 //  3. canAdvance && peekCompletedThisCover: normal path — peeked first
                 //  4. canAdvance && dwellTime >= minDwell * 2: peek-latch bypass —
-                //     independent of softAllowed, only requires tactical readiness
-                boolean peekLatchBypass = dwellMet && recovered && !peeking
+                //     for soldiers who never completed a peek (no threat, non-peekable cover)
+                boolean peekLatchBypass = dwellMet && recovered
                     && !fireteamPinned && !heavyHold
                     && !peekCompletedThisCover && dwellTime >= (long)(minDwell * 2);
                 if (hardTimeout || maxDwellReached || (canAdvance && peekCompletedThisCover) || peekLatchBypass) {
@@ -4228,10 +4181,9 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
                 }
 
                 // Handle non-peekable cover reposition (only when recovered; gated by
-                // routine safety: fireteam HEAVY hold, post-recovery safety peek,
-                // and soft covering-fire).
+                // routine safety: fireteam HEAVY hold, post-recovery safety peek).
                 if (getCoverManager().isRepositionRequested() && recovered
-                    && routineRepositionGateAllows() && softCoverAllows()) {
+                    && routineRepositionGateAllows()) {
                     if (attackDebugLog()) {
                         StevesArmyMod.LOGGER.info("[AttackPhase] Soldier {} OCCUPYING_COVER -> SELECTING_COVER: reposition requested, dwell={}ms",
                             soldier.getId(), dwellTime);

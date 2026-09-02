@@ -77,11 +77,10 @@ public class SquadSyncHandler {
                 soldier.position(),
                 goal != null && goal.isAttackHasPeekedThisCover(),
                 goal != null && goal.isAttackDwellMet(),
-                goal != null && goal.isSoftCoverAllowed(),
                 goal != null && goal.isPeekCompletedThisCover(),
                 goal != null && goal.isAttackDwellMet() && goal.isAttackRecovered()
                     && !goal.isAttackPeeking() && !goal.isAttackFireteamPinned()
-                    && !goal.isAttackHeavyHold() && goal.isSoftCoverAllowed(),
+                    && !goal.isAttackHeavyHold(),
                 goal == null ? 0.0f : goal.getAttackDwellElapsedMs(),
                 goal == null ? 0.0f : goal.getAttackRequiredDwellMs()));
         }

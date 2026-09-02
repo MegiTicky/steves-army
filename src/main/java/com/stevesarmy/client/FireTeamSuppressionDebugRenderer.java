@@ -96,13 +96,11 @@ public final class FireTeamSuppressionDebugRenderer {
             draw(font, line3, lineOffset, suppColor, poseStack, bufferSource);
             lineOffset += 10;
 
-            // Line 4: All six canAdvance predicates as individual V/X flags
+            // Line 4: All four canAdvance predicates as individual V/X flags
             String line4 = "AdvGate: dw=" + (entry.dwellMet() ? "V" : "X")
                 + " rc=" + (entry.recovered() ? "V" : "X")
-                + " pk=" + (entry.peeking() ? "X" : "V")
                 + " fp=" + (entry.fireteamPinned() ? "X" : "V")
-                + " hh=" + (entry.heavyHold() ? "X" : "V")
-                + " sc=" + (entry.softCoverAllowed() ? "V" : "X");
+                + " hh=" + (entry.heavyHold() ? "X" : "V");
             int gateColor = entry.canAdvance() ? 0xFF55FF55 : 0xFFFFAA00;
             draw(font, line4, lineOffset, gateColor, poseStack, bufferSource);
             lineOffset += 10;
@@ -113,14 +111,10 @@ public final class FireTeamSuppressionDebugRenderer {
                 advanceReason = "WAIT_DWELL";
             } else if (!entry.recovered()) {
                 advanceReason = "WAIT_RECOVERY";
-            } else if (entry.peeking()) {
-                advanceReason = "CURRENTLY_PEEKING";
             } else if (entry.fireteamPinned()) {
                 advanceReason = "FIRETEAM_PINNED";
             } else if (entry.heavyHold()) {
                 advanceReason = "HEAVY_HOLD";
-            } else if (!entry.softCoverAllowed()) {
-                advanceReason = "WAITING_COVER";
             } else if (!entry.peekCompleted()) {
                 advanceReason = "NO_PEEK_LATCH";
             } else {
