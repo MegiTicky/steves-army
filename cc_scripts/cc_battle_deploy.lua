@@ -37,8 +37,11 @@ local LOADOUT = '{Items:['..
 ']}'
 
 local function run(cmd)
-  local ok, out = commands.exec(cmd)
-  if not ok then print("[FAIL] " .. cmd .. "\n" .. (out or "")) end
+  local results = {commands.exec(cmd)}
+  local ok = results[1]
+  local out = results[2] or ""
+  if type(out) == "table" then out = table.concat(out, " ") end
+  if not ok then print("[FAIL] " .. cmd .. "\n" .. tostring(out)) end
   return ok, out
 end
 
