@@ -57,8 +57,8 @@ for i, cs in ipairs(SQUADS) do
     local z = spawnZ + (j - math.ceil(SOLDIERS_PER_SQUAD / 2)) * 3
     print("    Spawn " .. cs .. " #" .. j .. " at " .. SPAWN_X .. " " .. SPAWN_Y .. " " .. math.floor(z))
     run(string.format(
-      "stevesarmy spawn enemy %d %d %d 0 0 %s",
-      SPAWN_X, SPAWN_Y, math.floor(z), LOADOUT))
+      "stevesarmy spawn enemy squad %s %d %d %d 0 0 %s",
+      cs, SPAWN_X, SPAWN_Y, math.floor(z), LOADOUT))
   end
 end
 
