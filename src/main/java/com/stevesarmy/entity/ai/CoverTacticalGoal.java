@@ -169,6 +169,7 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
     private int attackAdvanceStaggerTicks = 0;
     private boolean attackHasPeekedThisCover = false;
     private boolean peekCompletedThisCover = false;
+    private long lastAdvanceTriggerTime = 0;
 
     // Attack progress tracking: best (closest) distance to objective this command
     private double attackBestObjectiveDist = Double.MAX_VALUE;
@@ -2578,10 +2579,12 @@ private void tickRepositioning() {
         }
         float band = StevesArmyConfig.getGroupCohesionBandBlocks();
         if (offset > band) {
-            return StevesArmyConfig.getGroupAheadDwellMult();
+            // Centroid is ahead → soldier is behind group → catch up quickly
+            return StevesArmyConfig.getGroupBehindDwellMult();
         }
         if (offset < -band) {
-            return StevesArmyConfig.getGroupBehindDwellMult();
+            // Centroid is behind → soldier is ahead of group → wait for group
+            return StevesArmyConfig.getGroupAheadDwellMult();
         }
         return 1.0f;
     }
@@ -3879,6 +3882,41 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
         return (long)(ATTACK_MIN_DWELL_MS * dwellMult);
     }
 
+    public float getSuppressionDwellMult() {
+        float ftLevel = FireTeamSuppressionTracker.getLevel(soldier);
+        return 1.0f + ftLevel * 1.5f;
+    }
+
+    public float getGroupCohesionDwellMultValue() {
+        return groupCohesionDwellMult();
+    }
+
+    public net.minecraft.world.phys.Vec3 getFireteamCentroid() {
+        return FireTeamSuppressionTracker.getCentroid(soldier);
+    }
+
+    public int getAttackCoverState() {
+        return getCoverManager().getState().ordinal();
+    }
+
+    public boolean isCoverSearchPending() {
+        return coverSearchPending;
+    }
+
+    public boolean isFallbackAdvanceActive() {
+        return fallbackAdvanceTarget != null;
+    }
+
+    public long getAttackPhaseAgeMs() {
+        if (attackPhaseStartTime <= 0) return 0;
+        return System.currentTimeMillis() - attackPhaseStartTime;
+    }
+
+    public long getLastAdvanceTriggerAgeMs() {
+        if (lastAdvanceTriggerTime <= 0) return Long.MAX_VALUE;
+        return System.currentTimeMillis() - lastAdvanceTriggerTime;
+    }
+
     /**
      * Called by PeekController.completeReturn() to explicitly signal that a
      * peek cycle finished. Replaces the fragile inferred-latch approach.
@@ -4172,6 +4210,7 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
                     && !fireteamPinned && !heavyHold
                     && !peekCompletedThisCover && dwellTime >= (long)(minDwell * 2);
                 if (hardTimeout || maxDwellReached || (canAdvance && peekCompletedThisCover) || peekLatchBypass) {
+                    lastAdvanceTriggerTime = System.currentTimeMillis();
                     if (attackDebugLog() && hardTimeout) {
                         StevesArmyMod.LOGGER.info("[AttackPhase] Soldier {} hard occupancy timeout after {}ms, forcing advance",
                             soldier.getId(), dwellTime);

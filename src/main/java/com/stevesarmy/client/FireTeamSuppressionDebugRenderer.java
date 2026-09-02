@@ -71,7 +71,7 @@ public final class FireTeamSuppressionDebugRenderer {
             draw(font, line1, lineOffset, ftColor, poseStack, bufferSource);
             lineOffset += 10;
 
-            // Line 2: Attack phase + dwell
+            // Line 2: Attack phase
             String phaseName = switch (entry.attackPhase()) {
                 case 1 -> "SELECTING";
                 case 2 -> "MOVING";
@@ -79,30 +79,38 @@ public final class FireTeamSuppressionDebugRenderer {
                 case 4 -> "COMPLETE";
                 default -> "NONE";
             };
-            int dwellPct = (int) Math.min(200, entry.dwellFraction() * 100);
             int dwellColor = entry.dwellFraction() >= 1.0f ? 0xFF55FF55 : 0xFFFFFF55;
-            String line2 = "Phase: " + phaseName + "  dwell: " + dwellPct + "%";
+            String line2 = "Phase: " + phaseName;
             draw(font, line2, lineOffset, dwellColor, poseStack, bufferSource);
             lineOffset += 10;
 
-            // Line 3: Individual suppression
+            // Line 3: Dwell breakdown
+            int dwellMs = (int) entry.dwellElapsedMs();
+            int reqMs = (int) entry.requiredDwellMs();
+            String line3 = "Dwell: " + dwellMs + "/" + reqMs + "ms"
+                + " (base 4000 x" + String.format("%.1f", entry.suppressionDwellMult())
+                + " supp x" + String.format("%.1f", entry.groupCohesionMult()) + " coh)";
+            draw(font, line3, lineOffset, dwellColor, poseStack, bufferSource);
+            lineOffset += 10;
+
+            // Line 4: Individual suppression
             String suppState = entry.suppressionLevel() >= 0.9f ? "PINNED"
                 : entry.suppressionLevel() >= 0.5f ? "SUPP" : "CLEAR";
             int suppColor = entry.suppressionLevel() >= 0.9f ? 0xFFFF5555
                 : entry.suppressionLevel() >= 0.5f ? 0xFFFFAA00 : 0xFF55FF55;
-            String line3 = "Supp: " + String.format("%.2f", entry.suppressionLevel())
+            String line4 = "Supp: " + String.format("%.2f", entry.suppressionLevel())
                 + " " + suppState + (entry.individualSuppressed() ? " [pressured]" : "")
                 + (entry.recovered() ? " rec=V" : " rec=X");
-            draw(font, line3, lineOffset, suppColor, poseStack, bufferSource);
+            draw(font, line4, lineOffset, suppColor, poseStack, bufferSource);
             lineOffset += 10;
 
-            // Line 4: All four canAdvance predicates as individual V/X flags
-            String line4 = "AdvGate: dw=" + (entry.dwellMet() ? "V" : "X")
+            // Line 5: All four canAdvance predicates as individual V/X flags
+            String line5 = "AdvGate: dw=" + (entry.dwellMet() ? "V" : "X")
                 + " rc=" + (entry.recovered() ? "V" : "X")
                 + " fp=" + (entry.fireteamPinned() ? "X" : "V")
                 + " hh=" + (entry.heavyHold() ? "X" : "V");
             int gateColor = entry.canAdvance() ? 0xFF55FF55 : 0xFFFFAA00;
-            draw(font, line4, lineOffset, gateColor, poseStack, bufferSource);
+            draw(font, line5, lineOffset, gateColor, poseStack, bufferSource);
             lineOffset += 10;
 
             // Line 5: Advance reason + peek latch + dwell progress
@@ -120,20 +128,59 @@ public final class FireTeamSuppressionDebugRenderer {
             } else {
                 advanceReason = "CAN_ADVANCE";
             }
-            int advDwellPct = entry.requiredDwellMs() > 0
-                ? (int) Math.min(200, entry.dwellElapsedMs() / entry.requiredDwellMs() * 100)
-                : (int) Math.min(200, entry.dwellFraction() * 100);
             int advColor = entry.canAdvance() ? 0xFF55FF55 : 0xFFFFAA00;
-            String line5 = "Adv: " + advanceReason
-                + "  pkDone=" + (entry.peekCompleted() ? "V" : "X")
-                + "  dwell=" + advDwellPct + "%";
-            draw(font, line5, lineOffset, advColor, poseStack, bufferSource);
+            String line6 = "Adv: " + advanceReason
+                + "  pkDone=" + (entry.peekCompleted() ? "V" : "X");
+            draw(font, line6, lineOffset, advColor, poseStack, bufferSource);
             lineOffset += 10;
 
-            // Line 6: Target + position
-            String line6 = "Tgt: " + (entry.hasTarget() ? "yes" : "no")
-                + "  pos: " + formatPos(entry.position());
-            draw(font, line6, lineOffset, 0xAAAAAA, poseStack, bufferSource);
+            // Line 7: Target + position + centroid offset
+            Vec3 pos = entry.position();
+            Vec3 cent = entry.centroidPos();
+            String line7 = "Tgt: " + (entry.hasTarget() ? "yes" : "no")
+                + "  pos: " + formatPos(pos);
+            draw(font, line7, lineOffset, 0xAAAAAA, poseStack, bufferSource);
+            lineOffset += 10;
+
+            if (cent != null && (entry.attackPhase() == 3 || entry.attackPhase() == 1)) {
+                // Show centroid offset only during attack (OCCUPYING or SELECTING)
+                double dx = cent.x - pos.x;
+                double dz = cent.z - pos.z;
+                double dist = Math.sqrt(dx * dx + dz * dz);
+                String side;
+                // Project onto objective direction is complex; just show raw distance
+                side = String.format("%.0f blocks from centroid", dist);
+                int cohColor = entry.groupCohesionMult() > 1.0f ? 0xFFFFAA00
+                    : entry.groupCohesionMult() < 1.0f ? 0xFF55FF55 : 0xAAAAAA;
+                String line8 = "Cohesion: " + side;
+                draw(font, line8, lineOffset, cohColor, poseStack, bufferSource);
+            }
+            lineOffset += 10;
+
+            // Diagnostic line: cover state + search + fallback
+            String coverStateName = switch (entry.coverState()) {
+                case 1 -> "SEEKING";
+                case 2 -> "IN_COVER";
+                case 3 -> "SUPP_COVER";
+                case 4 -> "REPOS";
+                default -> "NO_COVER";
+            };
+            String line9 = "Cover: " + coverStateName
+                + " | srch=" + (entry.coverSearchPending() ? "V" : "X")
+                + " | fb=" + (entry.fallbackAdvanceActive() ? "V" : "X");
+            draw(font, line9, lineOffset, 0xAAAAAA, poseStack, bufferSource);
+            lineOffset += 10;
+
+            // Diagnostic line: phase age + last advance trigger age
+            long phaseAge = entry.phaseAgeMs();
+            long advAge = entry.lastAdvanceTriggerAgeMs();
+            String advAgeStr = advAge == Long.MAX_VALUE ? "never" : advAge + "ms";
+            int phaseAgeColor = phaseAge > 10000 ? 0xFFFF5555 : phaseAge > 5000 ? 0xFFFFAA00 : 0xFF55FF55;
+            int advAgeColor = advAge > 5000 ? 0xFFFF5555 : advAge > 2000 ? 0xFFFFAA00 : 0xFF55FF55;
+            String line10 = "PhaseAge: " + phaseAge + "ms"
+                + "  LastAdv: " + advAgeStr;
+            draw(font, line10, lineOffset, phaseAgeColor, poseStack, bufferSource);
+            lineOffset += 10;
 
             poseStack.popPose();
         }

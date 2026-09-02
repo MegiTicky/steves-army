@@ -7,6 +7,7 @@ import com.stevesarmy.network.AttackDebugPacket;
 import com.stevesarmy.network.SquadStatusSyncPacket;
 import com.stevesarmy.entity.ai.CoverGoalController;
 import com.stevesarmy.entity.ai.CoverTacticalGoal;
+import com.stevesarmy.entity.ai.MachineGunnerSupportGoal;
 import com.stevesarmy.squad.FireTeam;
 import com.stevesarmy.squad.OwnedSoldierRegistry;
 import com.stevesarmy.squad.SquadActivityManager;
@@ -55,7 +56,14 @@ public class SquadSyncHandler {
             var cover = soldier.getCoverBehaviorManager();
             var tracker = cover.getSuppressionTracker();
             CoverGoalController controller = soldier.getCoverTacticalGoal();
-            CoverTacticalGoal goal = controller instanceof CoverTacticalGoal tactical ? tactical : null;
+            CoverTacticalGoal goal;
+            if (controller instanceof CoverTacticalGoal t) {
+                goal = t;
+            } else if (controller instanceof MachineGunnerSupportGoal mg) {
+                goal = mg.getCoverController();
+            } else {
+                goal = null;
+            }
             FireTeam fireTeam = soldier.getFireTeam();
             float fireteamLevel = com.stevesarmy.squad.FireTeamSuppressionTracker.getLevel(soldier);
             int fireteamState = com.stevesarmy.squad.FireTeamSuppressionTracker.getState(soldier).ordinal();
@@ -82,7 +90,15 @@ public class SquadSyncHandler {
                     && !goal.isAttackPeeking() && !goal.isAttackFireteamPinned()
                     && !goal.isAttackHeavyHold(),
                 goal == null ? 0.0f : goal.getAttackDwellElapsedMs(),
-                goal == null ? 0.0f : goal.getAttackRequiredDwellMs()));
+                goal == null ? 0.0f : goal.getAttackRequiredDwellMs(),
+                goal == null ? 1.0f : goal.getSuppressionDwellMult(),
+                goal == null ? 1.0f : goal.getGroupCohesionDwellMultValue(),
+                goal == null ? null : goal.getFireteamCentroid(),
+                goal == null ? 0 : goal.getAttackCoverState(),
+                goal != null && goal.isCoverSearchPending(),
+                goal != null && goal.isFallbackAdvanceActive(),
+                goal == null ? 0 : goal.getAttackPhaseAgeMs(),
+                goal == null ? Long.MAX_VALUE : goal.getLastAdvanceTriggerAgeMs()));
         }
         return entries;
     }

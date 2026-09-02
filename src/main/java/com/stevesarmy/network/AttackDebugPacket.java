@@ -37,7 +37,15 @@ public class AttackDebugPacket {
         boolean peekCompleted,
         boolean canAdvance,
         float dwellElapsedMs,
-        float requiredDwellMs
+        float requiredDwellMs,
+        float suppressionDwellMult,
+        float groupCohesionMult,
+        Vec3 centroidPos,
+        int coverState,
+        boolean coverSearchPending,
+        boolean fallbackAdvanceActive,
+        long phaseAgeMs,
+        long lastAdvanceTriggerAgeMs
     ) {}
 
     public AttackDebugPacket(boolean enabled, List<Entry> entries) {
@@ -73,9 +81,21 @@ public class AttackDebugPacket {
             boolean canAdv = buf.readBoolean();
             float dwellEl = buf.readFloat();
             float reqDwell = buf.readFloat();
+            float suppDwellMult = buf.readFloat();
+            float cohMult = buf.readFloat();
+            double cx = buf.readDouble();
+            double cy = buf.readDouble();
+            double cz = buf.readDouble();
+            Vec3 centroid = (cx == 0 && cy == 0 && cz == 0) ? null : new Vec3(cx, cy, cz);
+            int coverSt = buf.readVarInt();
+            boolean searchPend = buf.readBoolean();
+            boolean fbActive = buf.readBoolean();
+            long phaseAge = buf.readLong();
+            long lastAdvAge = buf.readLong();
             entries.add(new Entry(uuid, ftName, ftLevel, ftState, phase, dwellFrac,
                 suppLevel, indSupp, recov, ftPinned, hvHold, safePeek, peek, hasTgt,
-                new Vec3(px, py, pz), atkPeek, dwMet, peekComp, canAdv, dwellEl, reqDwell));
+                new Vec3(px, py, pz), atkPeek, dwMet, peekComp, canAdv, dwellEl, reqDwell, suppDwellMult, cohMult, centroid,
+                coverSt, searchPend, fbActive, phaseAge, lastAdvAge));
         }
     }
 
@@ -106,6 +126,17 @@ public class AttackDebugPacket {
             buf.writeBoolean(e.canAdvance());
             buf.writeFloat(e.dwellElapsedMs());
             buf.writeFloat(e.requiredDwellMs());
+            buf.writeFloat(e.suppressionDwellMult());
+            buf.writeFloat(e.groupCohesionMult());
+            Vec3 c = e.centroidPos();
+            buf.writeDouble(c != null ? c.x : 0);
+            buf.writeDouble(c != null ? c.y : 0);
+            buf.writeDouble(c != null ? c.z : 0);
+            buf.writeVarInt(e.coverState());
+            buf.writeBoolean(e.coverSearchPending());
+            buf.writeBoolean(e.fallbackAdvanceActive());
+            buf.writeLong(e.phaseAgeMs());
+            buf.writeLong(e.lastAdvanceTriggerAgeMs());
         }
     }
 

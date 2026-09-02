@@ -26,6 +26,10 @@ public final class MachineGunnerSupportGoal extends Goal implements CoverGoalCon
     @Nullable
     private FiringPositionFinder.EvaluationReport latestDebugReport;
 
+    public CoverTacticalGoal getCoverController() {
+        return coverController;
+    }
+
     public MachineGunnerSupportGoal(SoldierEntity soldier) {
         if (!(soldier instanceof MachineGunnerEntity machineGunner)) {
             throw new IllegalArgumentException("MachineGunnerSupportGoal requires a machine gunner");
