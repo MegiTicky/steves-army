@@ -10,7 +10,8 @@ local Z_SPREAD             = 60.0
 local SQUADS               = {"en-north", "en-center", "en-south"}
 local SOLDIERS_PER_SQUAD   = 6
 
--- USSR.rifleman loadout (from riverbend_coldwar.json)
+-- Simplified loadout for Test instance: armor + AK + ammo only
+-- (cgm, smallarm, and other kit mods are not installed on Test)
 local LOADOUT = '{Items:['..
   '{Slot:0,Count:1b,tag:{Damage:0},id:"combatgear:ssh_helmet"},'..
   '{Slot:1,Count:1b,tag:{Damage:0},id:"combatgear:wwi_chestplate"},'..
@@ -25,15 +26,7 @@ local LOADOUT = '{Items:['..
   '{Slot:10,Count:60b,tag:{AmmoId:"tacz:762x39"},id:"tacz:ammo"},'..
   '{Slot:11,Count:60b,tag:{AmmoId:"tacz:762x39"},id:"tacz:ammo"},'..
   '{Slot:12,Count:60b,tag:{AmmoId:"tacz:762x39"},id:"tacz:ammo"},'..
-  '{Slot:13,Count:60b,tag:{AmmoId:"tacz:762x39"},id:"tacz:ammo"},'..
-  '{Slot:14,Count:5b,id:"cgm:grenade"},'..
-  '{Slot:15,Count:1b,tag:{Damage:0},id:"minecraft:flint_and_steel"},'..
-  '{Slot:16,Count:2b,id:"smallarm:smoke_grenade"},'..
-  '{Slot:17,Count:5b,id:"combatgear:rations"},'..
-  '{Slot:18,Count:3b,id:"minecraft:tnt"},'..
-  '{Slot:19,Count:9b,id:"minecraft:oak_planks"},'..
-  '{Slot:20,Count:1b,id:"minecraft:chest"},'..
-  '{Slot:21,Count:1b,tag:{Damage:0},id:"minecraft:iron_shovel"}'..
+  '{Slot:13,Count:60b,tag:{AmmoId:"tacz:762x39"},id:"tacz:ammo"}'..
 ']}'
 
 local function run(cmd)
