@@ -3816,6 +3816,65 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
         }
     }
 
+    /**
+     * The cover-to-cover advance is finished: the objective radius has been
+     * reached. End the attack command on this tick instead of letting the 60s
+     * attack memory keep attack logic alive, so a soldier caught in the open
+     * starts a hold-style cover search immediately — the same immediacy a
+     * GO_TO order gets — rather than waiting on suppression or the routine
+     * in-cover reevaluation.
+     */
+    private void completeAttackAtObjective() {
+        // Pending attack searches are stale by definition: the corridor filter
+        // rejects every cover inside the objective radius.
+        CoverSearchScheduler.cancel(this);
+        coverSearchPending = false;
+        asyncPilotPending = false;
+        asyncPilotSubmittedTick = Long.MIN_VALUE;
+        queuedSearchMode = null;
+        queuedAttackGeneration = -1;
+        queuedRelocationType = RelocationType.NONE;
+        queuedRelocationCenter = null;
+
+        // Attack-phase movement ownership ends here; do not keep driving an
+        // open-ground fallback bound past the objective.
+        fallbackAdvanceTarget = null;
+        fallbackStuckTicks = 0;
+        fallbackLastPosition = null;
+        fallbackNoProgressResets = 0;
+        pendingRetryCover = null;
+        isRetryAttempt = false;
+        attackExpectedCover = null;
+        consecutiveFailedSearches = 0;
+        searchExhaustionCooldown = 0;
+
+        if (getCoverManager().getState() == CoverBehaviorManager.CoverState.NO_COVER) {
+            if (getCoverManager().getTargetCover() != null) {
+                // A cover was already selected; its movement handlers continue.
+                getCoverManager().setState(CoverBehaviorManager.CoverState.SEEKING_COVER);
+            } else if (getCoverManager().getCurrentCover() == null) {
+                // Exposed: request a hold-style search before the attack target
+                // is released so this goal keeps running instead of stopping
+                // into its restart cooldown.
+                navigation.stop();
+                getPositionController().clear();
+                getCoverManager().setState(CoverBehaviorManager.CoverState.SEEKING_COVER);
+                requestCoverSearch(QueuedSearchMode.NORMAL);
+            }
+        }
+
+        soldier.clearAttackTarget();
+        attackPhase = AttackPhase.NONE;
+        attackBestObjectiveDist = Double.MAX_VALUE;
+        attackFrontierDistance = Double.MAX_VALUE;
+
+        if (attackDebugLog()) {
+            StevesArmyMod.LOGGER.info("[AttackPhase] Soldier {} objective complete -> hold at {} (exposed={}, searchQueued={})",
+                soldier.getId(), soldier.getHoldPosition(),
+                getCoverManager().getCurrentCover() == null, coverSearchPending);
+        }
+    }
+
     /** Attack phase ordinal used by the debug overlay. */
     public int getAttackPhaseOrdinal() {
         return attackPhase.ordinal();
@@ -3998,6 +4057,7 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
                 if (attackDebugLog()) {
                     StevesArmyMod.LOGGER.info("[AttackPhase] Soldier {} objective reached, completing", soldier.getId());
                 }
+                completeAttackAtObjective();
             }
             return;
         }

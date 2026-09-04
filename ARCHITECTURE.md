@@ -141,6 +141,8 @@ stateDiagram-v2
     SUPPRESSED_IN_COVER --> NO_COVER: abandoned
 ```
 
+When an ATTACK advance reaches its objective radius, `CoverTacticalGoal.completeAttackAtObjective()` ends the attack command the same tick: pending attack-corridor searches are cancelled (they would reject every cover inside the objective radius anyway), the attack target is released, and an exposed soldier immediately requests a hold-style `NORMAL` cover search centered on the hold position — the same immediacy a GO_TO order gets. Soldiers already in valid cover keep it.
+
 ### 2.2 Cover Scoring Weights
 
 Calculated in `CoverFinder.calculateThreatAwareScore()`
