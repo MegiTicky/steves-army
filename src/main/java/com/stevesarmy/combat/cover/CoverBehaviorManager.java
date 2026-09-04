@@ -296,7 +296,12 @@ public class CoverBehaviorManager {
         // Route through setState so any future invariant/cleanup logic applies
         setState(CoverState.NO_COVER);
 
+        // All reposition latches are tied to the abandoned cover. Stale requests
+        // must never survive into the next cover, where they would blacklist a
+        // fresh position on its first tick.
         this.continuousSuppressionRepositionRequested = false;
+        this.repositionRequested = false;
+        this.shotInCoverRepositionRequested = false;
 
         soldier.getPeekController().resetToInactive(soldier);
         // Preserve suppression during cover transitions - don't reset

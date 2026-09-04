@@ -19,4 +19,12 @@ public interface CoverGoalController {
 
     default void rejectAsyncCoverPilot() {
     }
+
+    /** Entity-level anti-stuck watchdog hook: cancel all pending cover work and re-decide. */
+    default void resetFromStuckWatchdog() {
+    }
+
+    /** Counts a hostile hit taken while peeking/exposed at the occupied cover. */
+    default void noteHitWhilePeekingAtCover() {
+    }
 }

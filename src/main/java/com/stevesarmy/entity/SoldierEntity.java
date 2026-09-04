@@ -1188,6 +1188,14 @@ public class SoldierEntity extends PathfinderMob implements Container {
 
     @Override
     protected void customServerAiStep() {
+        // Suppression decay runs from the entity tick, not the cover goal, so it
+        // continues while CoverTacticalGoal is preempted or on its restart
+        // cooldown — a suppressed soldier must always converge back to reacting.
+        if (coverBehaviorManager != null) {
+            coverBehaviorManager.tickSuppression(coverBehaviorManager.isInCover());
+        }
+        tickCoverStuckWatchdog();
+
         long gameTime = level().getGameTime();
         if (VS2Compat.prepareSoldierAi(this)) {
             if (shouldTickGrenadeController(gameTime)) {
@@ -1201,6 +1209,55 @@ public class SoldierEntity extends PathfinderMob implements Container {
             return;
         }
         super.customServerAiStep();
+    }
+
+    // --- Cover anti-stuck watchdog -----------------------------------------
+
+    private static final int COVER_WATCHDOG_STILL_TICKS = 100;
+    private static final double COVER_WATCHDOG_MOVE_EPSILON = 0.5D;
+    private Vec3 coverWatchdogLastPos = null;
+    private int coverWatchdogStillTicks = 0;
+
+    /**
+     * Safety net for untraced stuck states: a soldier sitting in SEEKING_COVER
+     * or REPOSITIONING with no active path and no position change for several
+     * seconds has nothing driving its legs. Reset the cover machine so it
+     * re-decides, instead of standing exposed forever. Intended stillness
+     * (occupied cover, CQB hold, reload, healing) is exempt.
+     */
+    private void tickCoverStuckWatchdog() {
+        if (coverBehaviorManager == null || !this.isAlive()) {
+            return;
+        }
+        CoverBehaviorManager.CoverState state = coverBehaviorManager.getState();
+        boolean movingState = state == CoverBehaviorManager.CoverState.SEEKING_COVER
+            || state == CoverBehaviorManager.CoverState.REPOSITIONING;
+        if (!movingState || isCqbEngagementHold() || isPreparingOrReloading() || isHealing()) {
+            coverWatchdogStillTicks = 0;
+            coverWatchdogLastPos = position();
+            return;
+        }
+
+        Vec3 pos = position();
+        if (coverWatchdogLastPos == null
+            || pos.distanceTo(coverWatchdogLastPos) > COVER_WATCHDOG_MOVE_EPSILON) {
+            coverWatchdogStillTicks = 0;
+            coverWatchdogLastPos = pos;
+            return;
+        }
+
+        // A path is being followed; the goal's own progress watchdogs own
+        // path-level failures. Only a pathless standstill is ours to reset.
+        if (!getNavigation().isDone()) {
+            return;
+        }
+
+        coverWatchdogStillTicks++;
+        if (coverWatchdogStillTicks >= COVER_WATCHDOG_STILL_TICKS) {
+            coverWatchdogStillTicks = 0;
+            coverWatchdogLastPos = pos;
+            coverTacticalGoal.resetFromStuckWatchdog();
+        }
     }
     
     @Override
@@ -1297,11 +1354,16 @@ public class SoldierEntity extends PathfinderMob implements Container {
                 if (attacker != null && attacker != this && !isFriendlyTo(attacker)) {
                     coverBehaviorManager.onIncomingFire(attacker);
 
-                    // A hostile hit while fully hidden proves this position no longer protects us.
-                    if ((preState == CoverBehaviorManager.CoverState.IN_COVER ||
-                         preState == CoverBehaviorManager.CoverState.SUPPRESSED_IN_COVER) &&
-                        prePeekState == PeekController.State.HIDING) {
-                        coverBehaviorManager.requestShotInCoverReposition();
+                    if (preState == CoverBehaviorManager.CoverState.IN_COVER ||
+                        preState == CoverBehaviorManager.CoverState.SUPPRESSED_IN_COVER) {
+                        // A hostile hit while fully hidden proves this position no longer protects us.
+                        if (prePeekState == PeekController.State.HIDING) {
+                            coverBehaviorManager.requestShotInCoverReposition();
+                        } else {
+                            // Hits while peeking are expected exposure, not proof of
+                            // compromise — but repeated ones still rotate the cover.
+                            coverTacticalGoal.noteHitWhilePeekingAtCover();
+                        }
                     }
                 }
                 

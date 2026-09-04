@@ -69,10 +69,20 @@ public final class SupportCoverGoal extends Goal implements CoverGoalController 
     }
 
     @Override
+    public void resetFromStuckWatchdog() {
+        coverController.resetFromStuckWatchdog();
+    }
+
+    @Override
+    public void noteHitWhilePeekingAtCover() {
+        coverController.noteHitWhilePeekingAtCover();
+    }
+
+    @Override
     public void tick() {
         if (phase == SupportPhase.DUTY) {
+            // Decay runs from SoldierEntity's server tick; no goal-level call here.
             CoverBehaviorManager manager = soldier.getCoverBehaviorManager();
-            manager.tickSuppression(false);
             if (manager.isSuppressed() || soldier.isRecalling()
                 || soldier.isHealing() || soldier.isUsingItem()) {
                 supportDuty.stop();
