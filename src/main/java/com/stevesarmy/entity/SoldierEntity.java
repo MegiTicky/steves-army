@@ -651,9 +651,10 @@ public class SoldierEntity extends PathfinderMob implements Container {
 
     @Override
     public InteractionResult mobInteract(Player player, InteractionHand hand) {
-        // Let the surgical knife's item interaction open the YSM editor before the
-        // generic owned-soldier interaction consumes the click.
-        if (player.getItemInHand(hand).is(ModItems.SURGICAL_KNIFE.get())) {
+        // Knives handle their own interaction on the item (YSM editor, skin menu);
+        // pass so the held item always receives the click.
+        if (player.getItemInHand(hand).is(ModItems.SURGICAL_KNIFE.get())
+            || player.getItemInHand(hand).is(ModItems.SKIN_KNIFE.get())) {
             return InteractionResult.PASS;
         }
         // Creative players may inspect the inventory of any soldier, regardless of ownership.
@@ -665,13 +666,6 @@ public class SoldierEntity extends PathfinderMob implements Container {
                 net.minecraftforge.network.NetworkHooks.openScreen(serverPlayer,
                     provider,
                     provider::writeExtraData);
-            }
-            return InteractionResult.sidedSuccess(this.level().isClientSide);
-        }
-        if (isOwnedBy(player)) {
-            if (!this.level().isClientSide) {
-                // Right-click behavior reserved for future use
-                // HOLD/FOLLOW modes are now set via ping wheel exclusively
             }
             return InteractionResult.sidedSuccess(this.level().isClientSide);
         }

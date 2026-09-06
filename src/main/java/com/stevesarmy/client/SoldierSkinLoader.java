@@ -37,6 +37,8 @@ public final class SoldierSkinLoader {
     private static final Set<String> FOLDER_SKINS = new HashSet<>();
     /** Cached resource-pack texture lookups (empty Optional = not present). */
     private static final Map<String, Optional<ResourceLocation>> RESOURCE_PACK_CACHE = new HashMap<>();
+    /** Skin names already tried via lazy load this session (prevents per-frame retries). */
+    private static final Set<String> LAZY_ATTEMPTED = new HashSet<>();
 
     private SoldierSkinLoader() {}
 
@@ -54,6 +56,7 @@ public final class SoldierSkinLoader {
     public static synchronized void reload() {
         FOLDER_SKINS.clear();
         RESOURCE_PACK_CACHE.clear();
+        LAZY_ATTEMPTED.clear();
         SoldierSkinManager.reload();
         for (String name : SoldierSkinManager.getSkinNames()) {
             Path file = SoldierSkinManager.getSkinFolder().resolve(name + ".png");
@@ -88,7 +91,42 @@ public final class SoldierSkinLoader {
         if (FOLDER_SKINS.contains(skinName)) {
             return folderTextureId(skinName);
         }
-        return resourcePackTexture(skinName).orElse(null);
+        ResourceLocation packTexture = resourcePackTexture(skinName).orElse(null);
+        if (packTexture != null) {
+            return packTexture;
+        }
+        // The file may have been dropped into the folder after startup;
+        // try to load it on demand (once per name per session).
+        return lazyLoad(skinName);
+    }
+
+    /** One-time attempt to load a folder skin that was not present at startup. */
+    private static synchronized ResourceLocation lazyLoad(String name) {
+        if (LAZY_ATTEMPTED.contains(name)) {
+            return null;
+        }
+        LAZY_ATTEMPTED.add(name);
+        Path file = SoldierSkinManager.getSkinFolder().resolve(name + ".png");
+        if (!Files.isRegularFile(file)) {
+            return null;
+        }
+        try (InputStream in = Files.newInputStream(file)) {
+            NativeImage image = NativeImage.read(in);
+            if (!isSupportedSize(image.getWidth(), image.getHeight())) {
+                StevesArmyMod.LOGGER.warn("[Skins] Skipping '{}': {}x{} is unsupported (need 64x64 or 64x32)",
+                    name, image.getWidth(), image.getHeight());
+                image.close();
+                return null;
+            }
+            Minecraft.getInstance().getTextureManager()
+                .register(folderTextureId(name), new DynamicTexture(image));
+            FOLDER_SKINS.add(name);
+            StevesArmyMod.LOGGER.info("[Skins] Lazy-loaded '{}'", name);
+            return folderTextureId(name);
+        } catch (Exception e) {
+            StevesArmyMod.LOGGER.warn("[Skins] Failed to load '{}': {}", name, e.toString());
+            return null;
+        }
     }
 
     private static Optional<ResourceLocation> resourcePackTexture(String name) {
@@ -105,6 +143,11 @@ public final class SoldierSkinLoader {
 
     private static ResourceLocation folderTextureId(String name) {
         return new ResourceLocation(StevesArmyMod.MODID, "skins/" + name.toLowerCase(Locale.ROOT));
+    }
+
+    /** Texture id under which a folder skin is (or would be) registered. */
+    public static ResourceLocation folderTexture(String name) {
+        return folderTextureId(name);
     }
 
     private static boolean isSupportedSize(int width, int height) {
