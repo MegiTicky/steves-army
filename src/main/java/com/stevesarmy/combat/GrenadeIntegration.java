@@ -37,6 +37,10 @@ public final class GrenadeIntegration {
     private static final String THROWABLE_ITEM_ID = MOD_ID + ":throwable";
     private static final String THROWABLE_ID_TAG = "ThrowableId";
     private static final Set<String> SUPPORTED_IDS = Set.of("lrtactical:m67", "lrtactical:rgn");
+    private static final Set<String> SUPPORTED_SMOKE_IDS = Set.of("lrtactical:smoke_grenade");
+    private static final Set<String> GRENADE_ENTITY_CLASSES = Set.of(
+        "me.xjqsh.lrtactical.entity.GrenadeEntity",
+        "me.xjqsh.lrtactical.entity.SmokeGrenadeEntity");
     private static boolean initialized;
     private static boolean available;
     private static boolean failureLogged;
@@ -48,6 +52,19 @@ public final class GrenadeIntegration {
     private static final Map<UUID, GrenadeDiagnostic> GRENADE_DIAGNOSTICS = new HashMap<>();
 
     private GrenadeIntegration() {}
+
+    /** Supported throwable categories; both live on the same generic LesRaisins item. */
+    public enum Category { EXPLOSIVE, SMOKE }
+
+    private static Set<String> supportedIds(Category category) {
+        return category == Category.SMOKE ? SUPPORTED_SMOKE_IDS : SUPPORTED_IDS;
+    }
+
+    private static String unsupportedReason(Category category) {
+        return category == Category.SMOKE
+            ? "throwable ID is not a smoke grenade"
+            : "throwable ID is not an explosive grenade";
+    }
 
     public record SupportInfo(boolean supported, String itemId, int count,
                               @Nullable String throwableId, String failureReason) {}
@@ -104,11 +121,15 @@ public final class GrenadeIntegration {
 
     public static String supportedItemDescription() {
         return THROWABLE_ITEM_ID + " with NBT " + THROWABLE_ID_TAG
-            + "=lrtactical:m67 or lrtactical:rgn";
+            + "=lrtactical:m67 or lrtactical:rgn (explosive), or =lrtactical:smoke_grenade (smoke)";
     }
 
     public static BallisticResult inspectBallistics(@Nullable ItemStack stack) {
-        SupportInfo support = inspect(stack);
+        return inspectBallistics(stack, Category.EXPLOSIVE);
+    }
+
+    public static BallisticResult inspectBallistics(@Nullable ItemStack stack, Category category) {
+        SupportInfo support = inspect(stack, category);
         if (!support.supported()) {
             return new BallisticResult(null, "unsupported throwable: " + support.failureReason());
         }
@@ -162,7 +183,7 @@ public final class GrenadeIntegration {
             onThrow = Class.forName("me.xjqsh.lrtactical.item.ThrowableItem")
                 .getMethod("onThrow", Level.class, LivingEntity.class, ItemStack.class, indexClass);
             available = true;
-            StevesArmyMod.LOGGER.info("LesRaisins Tactical Equipments detected - explosive grenade AI enabled");
+            StevesArmyMod.LOGGER.info("LesRaisins Tactical Equipments detected - grenade and smoke AI enabled");
         } catch (ReflectiveOperationException | LinkageError exception) {
             logFailure(exception);
         }
@@ -177,7 +198,15 @@ public final class GrenadeIntegration {
         return inspect(stack).supported();
     }
 
+    public static boolean isSmokeSupported(ItemStack stack) {
+        return inspect(stack, Category.SMOKE).supported();
+    }
+
     public static SupportInfo inspect(@Nullable ItemStack stack) {
+        return inspect(stack, Category.EXPLOSIVE);
+    }
+
+    public static SupportInfo inspect(@Nullable ItemStack stack, Category category) {
         String itemId = itemId(stack);
         int count = stack == null ? 0 : stack.getCount();
         if (stack == null || stack.isEmpty()) {
@@ -192,10 +221,10 @@ public final class GrenadeIntegration {
             if (throwable == null) {
                 String taggedId = readTaggedThrowableId(stack);
                 if (taggedId != null) {
-                    boolean supported = SUPPORTED_IDS.contains(taggedId);
+                    boolean supported = supportedIds(category).contains(taggedId);
                     return new SupportInfo(supported, itemId, count, taggedId,
                         supported ? "supported via ThrowableId NBT fallback"
-                            : "ThrowableId is not an explosive grenade");
+                            : unsupportedReason(category));
                 }
                 return new SupportInfo(false, itemId, count, null,
                     "LesRaisins returned no throwable handler");
@@ -206,9 +235,9 @@ public final class GrenadeIntegration {
                 return new SupportInfo(false, itemId, count, null,
                     "LesRaisins returned no throwable ID");
             }
-            boolean supported = SUPPORTED_IDS.contains(throwableId);
+            boolean supported = supportedIds(category).contains(throwableId);
             return new SupportInfo(supported, itemId, count, throwableId,
-                supported ? "supported" : "throwable ID is not an explosive grenade");
+                supported ? "supported" : unsupportedReason(category));
         } catch (ReflectiveOperationException | RuntimeException exception) {
             return new SupportInfo(false, itemId, count, null, describeFailure(exception));
         }
@@ -220,6 +249,16 @@ public final class GrenadeIntegration {
         for (int slot = SoldierInventory.SLOT_GENERAL_START;
              slot < inventory.getContainerSize(); slot++) {
             if (inspect(inventory.getItem(slot)).supported()) return slot;
+        }
+        return -1;
+    }
+
+    /** Resolves only the general inventory slots carrying a supported smoke grenade. */
+    public static int findSmokeSlot(SoldierInventory inventory) {
+        if (inventory == null) return -1;
+        for (int slot = SoldierInventory.SLOT_GENERAL_START;
+             slot < inventory.getContainerSize(); slot++) {
+            if (inspect(inventory.getItem(slot), Category.SMOKE).supported()) return slot;
         }
         return -1;
     }
@@ -265,7 +304,10 @@ public final class GrenadeIntegration {
                                                     @Nullable Vec3 launchOrigin,
                                                     @Nullable Vec3 appliedVelocity) {
         int before = stack == null ? 0 : stack.getCount();
-        if (!isSupported(stack) || owner == null || owner.level().isClientSide) {
+        boolean supportedStack = stack != null
+            && (inspect(stack, Category.EXPLOSIVE).supported()
+                || inspect(stack, Category.SMOKE).supported());
+        if (!supportedStack || owner == null || owner.level().isClientSide) {
             return new ThrowResult(false, before, before, null, appliedVelocity, false,
                 null,
                 "unsupported stack, missing owner, or client-side throw");
@@ -422,7 +464,7 @@ public final class GrenadeIntegration {
     public static boolean isGrenadeEntity(@Nullable Entity entity) {
         init();
         return available && entity != null
-            && entity.getClass().getName().equals("me.xjqsh.lrtactical.entity.GrenadeEntity");
+            && GRENADE_ENTITY_CLASSES.contains(entity.getClass().getName());
     }
 
     @Nullable

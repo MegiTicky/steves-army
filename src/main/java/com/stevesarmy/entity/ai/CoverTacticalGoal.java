@@ -6,6 +6,7 @@ import com.stevesarmy.combat.ThreatAwareness;
 import com.stevesarmy.combat.VisibilityRay;
 import com.stevesarmy.combat.cover.*;
 import com.stevesarmy.squad.FireTeamSuppressionTracker;
+import com.stevesarmy.squad.SmokeDeploymentCoordinator;
 import com.stevesarmy.combat.cover.pure.CoverSearchResult;
 import com.stevesarmy.combat.cover.pure.AsyncCoverShadowService;
 import com.stevesarmy.combat.cover.pure.CoverSnapshotCapture;
@@ -4185,6 +4186,10 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
             return;
         }
 
+        // Smoke evaluation runs in every attack phase: a fireteam pinned while
+        // bounding between covers needs the screen as much as one holding it.
+        SmokeDeploymentCoordinator.maybeDeploySmoke(soldier);
+
         // Detect new attack command while goal is already running
         int currentGen = soldier.getAttackGeneration();
         if (attackCommandGeneration != currentGen) {
@@ -4371,6 +4376,11 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
                 boolean peeking = peekCtrl.isExposed() || peekCtrl.isMovingToPeek() || peekCtrl.isReturning();
                 float ftLevel = FireTeamSuppressionTracker.getLevel(soldier);
                 boolean fireteamPinned = FireTeamSuppressionTracker.shouldPauseAttack(soldier);
+                // An active smoke screen substitutes for personal recovery: bullets
+                // through smoke still suppress, but the enemy can no longer observe
+                // the advance route, so the team may bound forward through it.
+                boolean smokeAdvance = StevesArmyConfig.isSmokeAdvanceUnderSmoke()
+                    && SmokeDeploymentCoordinator.isScreenActive(soldier);
 
                 // Explicit peek-completion event: set by PeekController via the
                 // soldier when completeReturn() runs. No inference needed.
@@ -4390,13 +4400,14 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
                 long minDwell = (long)(ATTACK_MIN_DWELL_MS * dwellMult);
                 long maxDwell = (long)(ATTACK_MAX_DWELL_MS * dwellMult) + (attackAdvanceStaggerTicks * 50L);
                 boolean dwellMet = dwellTime >= minDwell;
-                boolean maxDwellReached = dwellTime >= maxDwell && recovered && !peeking && !fireteamPinned;
+                boolean maxDwellReached = dwellTime >= maxDwell && (recovered || smokeAdvance)
+                    && !peeking && (!fireteamPinned || smokeAdvance);
                 boolean hardTimeout = dwellTime >= ATTACK_HARD_OCCUPANCY_TIMEOUT_MS;
                 boolean heavyHold = StevesArmyConfig.isFireteamHeavyHoldReposition()
                     && FireTeamSuppressionTracker.isHeavilySuppressed(soldier);
 
-                boolean canAdvance = dwellMet && recovered && !fireteamPinned
-                    && !heavyHold;
+                boolean canAdvance = dwellMet && (recovered || smokeAdvance)
+                    && (!fireteamPinned || smokeAdvance) && (!heavyHold || smokeAdvance);
 
                 // Hard watchdog: if stuck with all gates passed for >10s, force
                 // advance regardless of peek state or any flickering conditions.
@@ -4432,8 +4443,8 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
                 //  3. canAdvance && peekCompletedThisCover: normal path — peeked first
                 //  4. canAdvance && dwellTime >= minDwell * 2: peek-latch bypass —
                 //     for soldiers who never completed a peek (no threat, non-peekable cover)
-                boolean peekLatchBypass = dwellMet && recovered
-                    && !fireteamPinned && !heavyHold
+                boolean peekLatchBypass = dwellMet && (recovered || smokeAdvance)
+                    && (!fireteamPinned || smokeAdvance) && (!heavyHold || smokeAdvance)
                     && !peekCompletedThisCover && dwellTime >= (long)(minDwell * 2);
                 if (hardTimeout || maxDwellReached || (canAdvance && peekCompletedThisCover) || peekLatchBypass) {
                     lastAdvanceTriggerTime = System.currentTimeMillis();

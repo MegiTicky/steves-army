@@ -46,6 +46,14 @@ public class StevesArmyConfig {
     public static final ForgeConfigSpec.DoubleValue GRENADE_OVERTHROW_DISTANCE;
     public static final ForgeConfigSpec.DoubleValue GRENADE_THROW_POWER_SCALE;
 
+    public static final ForgeConfigSpec.BooleanValue SMOKE_DEPLOYMENT_ENABLED;
+    public static final ForgeConfigSpec.IntValue SMOKE_TRIGGER_HOLD_TICKS;
+    public static final ForgeConfigSpec.IntValue SMOKE_FIRETEAM_COOLDOWN_TICKS;
+    public static final ForgeConfigSpec.DoubleValue SMOKE_SCREEN_FRACTION;
+    public static final ForgeConfigSpec.BooleanValue SMOKE_ADVANCE_UNDER_SMOKE;
+    public static final ForgeConfigSpec.IntValue SMOKE_SCREEN_DURATION_TICKS;
+    public static final ForgeConfigSpec.IntValue SMOKE_GRENADES_PER_SCREEN;
+    public static final ForgeConfigSpec.DoubleValue SMOKE_FALL_RATE_MULTIPLIER;
 
     public static final ForgeConfigSpec.BooleanValue VS2_COMPAT_ENABLED;
     public static final ForgeConfigSpec.BooleanValue SKIN_RANDOMIZE_ON_SPAWN;
@@ -315,6 +323,58 @@ BUILDER.pop();
                      "soldier throws travel further (e.g. 1.7 reaches roughly 50 blocks).",
                      "Default: 1.0")
             .defineInRange("throwPowerScale", 1.0, 0.1, 3.0);
+
+        BUILDER.pop();
+
+        BUILDER.push("smoke");
+
+        SMOKE_DEPLOYMENT_ENABLED = BUILDER
+            .comment("Allow heavily suppressed attacking fireteams to deploy a LesRaisins",
+                     "smoke screen. Requires grenades.enabled and the LesRaisins Tactical",
+                     "Equipments mod. Soldiers throw a smoke grenade carried in their",
+                     "general inventory (lrtactical:throwable with",
+                     "ThrowableId=lrtactical:smoke_grenade). Default: true")
+            .define("enabled", true);
+
+        SMOKE_TRIGGER_HOLD_TICKS = BUILDER
+            .comment("How long a fireteam must stay heavily suppressed during an attack",
+                     "before a member deploys smoke. Default: 60 (3 seconds).")
+            .defineInRange("triggerHoldTicks", 60, 0, 1200);
+
+        SMOKE_FIRETEAM_COOLDOWN_TICKS = BUILDER
+            .comment("Minimum ticks between smoke deployments by one fireteam.",
+                     "Default: 600 (30 seconds).")
+            .defineInRange("fireteamCooldownTicks", 600, 0, 24000);
+
+        SMOKE_SCREEN_FRACTION = BUILDER
+            .comment("Where the smoke screen lands on the line from the fireteam centroid",
+                     "to the incoming-fire position (0.0 = on the team, 1.0 = on the enemy).",
+                     "Default: 1.0 (blind the enemy position directly).")
+            .defineInRange("screenFraction", 1.0, 0.1, 1.0);
+
+        SMOKE_ADVANCE_UNDER_SMOKE = BUILDER
+            .comment("While a smoke screen is active, the pinned fireteam may advance",
+                     "through it despite heavy suppression. Default: true")
+            .define("advanceUnderSmoke", true);
+
+        SMOKE_SCREEN_DURATION_TICKS = BUILDER
+            .comment("How long a smoke screen keeps enabling the advance after the throw.",
+                     "Default: 300 (15 seconds).")
+            .defineInRange("screenDurationTicks", 300, 40, 1200);
+
+        SMOKE_GRENADES_PER_SCREEN = BUILDER
+            .comment("Smoke grenades thrown per deployment, spread perpendicular to the",
+                     "team-to-enemy line to build a screen instead of a single puff.",
+                     "Each grenade comes from a different fireteam member's inventory;",
+                     "fewer are thrown if fewer members carry smoke. Default: 3.")
+            .defineInRange("grenadesPerScreen", 3, 1, 6);
+
+        SMOKE_FALL_RATE_MULTIPLIER = BUILDER
+            .comment("Multiplier on the fireteam suppression fall rate while that",
+                     "fireteam's smoke screen is active: smoke cuts the enemy's",
+                     "observation, so pressure should drop in seconds, not half",
+                     "a minute. Default: 5.0")
+            .defineInRange("fallRateMultiplier", 5.0, 1.0, 20.0);
 
         BUILDER.pop();
 
@@ -613,10 +673,6 @@ BUILDER.pop();
         return SPACING_DISTANCE.get();
     }
 
-    public static boolean isSkinRandomizeOnSpawn() {
-        return SKIN_RANDOMIZE_ON_SPAWN.get();
-    }
-
     public static float getExplosionSuppressionStrength() {
         return EXPLOSION_SUPPRESSION_STRENGTH.get().floatValue();
     }
@@ -675,6 +731,42 @@ BUILDER.pop();
 
     public static double getGrenadeThrowPowerScale() {
         return GRENADE_THROW_POWER_SCALE.get();
+    }
+
+    public static boolean isSmokeDeploymentEnabled() {
+        return SMOKE_DEPLOYMENT_ENABLED.get();
+    }
+
+    public static int getSmokeTriggerHoldTicks() {
+        return SMOKE_TRIGGER_HOLD_TICKS.get();
+    }
+
+    public static int getSmokeFireteamCooldownTicks() {
+        return SMOKE_FIRETEAM_COOLDOWN_TICKS.get();
+    }
+
+    public static double getSmokeScreenFraction() {
+        return SMOKE_SCREEN_FRACTION.get();
+    }
+
+    public static boolean isSmokeAdvanceUnderSmoke() {
+        return SMOKE_ADVANCE_UNDER_SMOKE.get();
+    }
+
+    public static int getSmokeScreenDurationTicks() {
+        return SMOKE_SCREEN_DURATION_TICKS.get();
+    }
+
+    public static int getSmokeGrenadesPerScreen() {
+        return SMOKE_GRENADES_PER_SCREEN.get();
+    }
+
+    public static double getSmokeFallRateMultiplier() {
+        return SMOKE_FALL_RATE_MULTIPLIER.get().doubleValue();
+    }
+
+    public static boolean isSkinRandomizeOnSpawn() {
+        return SKIN_RANDOMIZE_ON_SPAWN.get();
     }
 
 

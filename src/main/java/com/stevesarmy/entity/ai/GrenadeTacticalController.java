@@ -52,6 +52,9 @@ public final class GrenadeTacticalController {
     private static final double ARC_PITCH_CORRECTION_DEGREES = 3.0;
     private static final double PREMATURE_IMPACT_SCORE_PENALTY = 3.0;
     private static final double PHYSICAL_RANGE_DRAG_FACTOR = 0.96;
+    private static final double SMOKE_MIN_SCREEN_DISTANCE = 3.0;
+    private static final double SMOKE_RANGE_CLAMP_FRACTION = 0.95;
+    private static final double SMOKE_LANDING_FRIENDLY_RADIUS = 6.5;
 
     private final SoldierEntity soldier;
     private State state = State.IDLE;
@@ -86,7 +89,8 @@ public final class GrenadeTacticalController {
     private enum TargetSource {
         LIVE_ENTITY,
         THREAT_INTEL,
-        SUPPRESSION_INTEL
+        SUPPRESSION_INTEL,
+        SMOKE_SCREEN
     }
 
     private record Candidate(@Nullable LivingEntity entity, UUID targetId, Vec3 targetPoint,
@@ -132,6 +136,7 @@ public final class GrenadeTacticalController {
         private final List<PitchCandidate> candidates;
         private final PathSafetyContext safety;
         private final boolean collectPath;
+        private final boolean smokeMode;
         private int nextCandidate;
 
         private ArcSearchState(GrenadeIntegration.BallisticProfile profile,
@@ -139,7 +144,7 @@ public final class GrenadeTacticalController {
                                 LaunchOrigin launchOrigin, float yaw, float losPitch,
                                 List<PitchCandidate> candidates,
                                 PathSafetyContext safety,
-                                boolean collectPath) {
+                                boolean collectPath, boolean smokeMode) {
             this.profile = profile;
             this.target = target;
             this.aimPoint = aimPoint;
@@ -150,6 +155,7 @@ public final class GrenadeTacticalController {
             this.candidates = candidates;
             this.safety = safety;
             this.collectPath = collectPath;
+            this.smokeMode = smokeMode;
         }
     }
 
@@ -257,6 +263,16 @@ public final class GrenadeTacticalController {
 
     public boolean isActive() {
         return state != State.IDLE;
+    }
+
+    /**
+     * True only while a throw is mid-preparation and must not be interrupted.
+     * WAITING_FOR_ARC is NOT blocking for smoke requests: every frag-carrying
+     * soldier re-enters it every evaluation tick and queues behind the shared
+     * arc scheduler, so treating it as busy would starve coordinated throws.
+     */
+    public boolean isSmokeRequestBlocked() {
+        return state == State.PREPARING;
     }
 
     /** Returns the candidate score used by the shared squad arbitration pass. */
@@ -374,6 +390,114 @@ public final class GrenadeTacticalController {
             formatThrowResult(throwResult)));
     }
 
+    /** Outcome of a coordinator smoke throw request, with the rejection reason. */
+    public record SmokeRequestResult(boolean accepted, String reason) {
+        public static SmokeRequestResult ok() {
+            return new SmokeRequestResult(true, "accepted");
+        }
+
+        public static SmokeRequestResult rejected(String reason) {
+            return new SmokeRequestResult(false, reason);
+        }
+    }
+
+    /**
+     * Plans and begins a smoke screen throw at a fixed ground position for
+     * SmokeDeploymentCoordinator. Synchronous so the caller learns the outcome
+     * immediately; skips squad arbitration and the squad grenade reservation
+     * because pacing is owned by the fireteam coordinator. A queued but
+     * unevaluated explosive candidate is cancelled in favor of the coordinated
+     * smoke throw; it re-evaluates next cycle.
+     */
+    public SmokeRequestResult requestSmokeScreen(@Nullable Vec3 screenPoint) {
+        if (soldier.level().isClientSide || !GrenadeIntegration.isAvailable()) {
+            return SmokeRequestResult.rejected(
+                "client-side or LesRaisins integration unavailable");
+        }
+        if (!StevesArmyConfig.isSmokeDeploymentEnabled()) {
+            return SmokeRequestResult.rejected("smoke deployment disabled in config");
+        }
+        if (state == State.PREPARING) {
+            return SmokeRequestResult.rejected("grenade preparation already in progress");
+        }
+        if (state == State.WAITING_FOR_ARC) {
+            cancel("smoke takeover");
+        }
+        if (!soldier.isAlive() || soldier.isHealing() || soldier.isPassenger()
+            || soldier.isNavigationTraversalLocked()) {
+            return SmokeRequestResult.rejected(
+                "soldier unavailable (dead/healing/passenger/navigation-locked)");
+        }
+        // No personal-cooldown gate here: that cooldown paces frag throws. Smoke
+        // is paced at fireteam level by SmokeDeploymentCoordinator, and this
+        // throw still calls markGrenadeUsed, which paces frags afterward.
+        int slot = GrenadeIntegration.findSmokeSlot(soldier.getSoldierInventory());
+        if (slot < 0) {
+            return SmokeRequestResult.rejected("no smoke grenade in general inventory");
+        }
+        ItemStack stack = soldier.getSoldierInventory().getItem(slot);
+        GrenadeIntegration.BallisticResult ballistic = GrenadeIntegration.inspectBallistics(
+            stack, GrenadeIntegration.Category.SMOKE);
+        if (!ballistic.available()) {
+            return SmokeRequestResult.rejected(
+                "ballistic profile unavailable: " + ballistic.reason());
+        }
+        Vec3 targetPoint = clampSmokeScreenPoint(screenPoint, ballistic.profile());
+        if (targetPoint == null) {
+            return SmokeRequestResult.rejected("screen point missing or out of reach");
+        }
+        Arc arc = findArcVariant(targetPoint, targetPoint, ballistic.profile(), true, true);
+        if (arc == null) {
+            return SmokeRequestResult.rejected(noArcReason());
+        }
+        Candidate candidate = new Candidate(null, soldier.getUUID(), targetPoint, targetPoint,
+            true, TargetSource.SMOKE_SCREEN, null, 2);
+        Plan plan = new Plan(stack, slot, candidate, arc, ballistic.profile(), null,
+            nextPlanId++);
+        logDecision("smoke plan began slot=" + slot + " screenPoint=" + targetPoint
+            + " " + formatArc(arc, ballistic.profile()));
+        beginPlan(plan, null, null, soldier.level().getGameTime());
+        return SmokeRequestResult.ok();
+    }
+
+    @Nullable
+    private Vec3 clampSmokeScreenPoint(@Nullable Vec3 screenPoint,
+                                       GrenadeIntegration.BallisticProfile profile) {
+        if (screenPoint == null) return null;
+        Vec3 horizontal = screenPoint.subtract(soldier.position()).multiply(1.0, 0.0, 1.0);
+        double distance = horizontal.length();
+        if (distance < SMOKE_MIN_SCREEN_DISTANCE) return null;
+        double maxRange = smokeThrowReach(profile);
+        if (distance > maxRange) {
+            horizontal = horizontal.scale((maxRange * SMOKE_RANGE_CLAMP_FRACTION) / distance);
+        }
+        Vec3 clamped = soldier.position().add(horizontal);
+        if (soldier.level() instanceof ServerLevel level) {
+            double y = level.getHeight(net.minecraft.world.level.levelgen.Heightmap.Types.MOTION_BLOCKING,
+                Mth.floor(clamped.x), Mth.floor(clamped.z)) + 0.5;
+            return new Vec3(clamped.x, y, clamped.z);
+        }
+        return clamped;
+    }
+
+    /**
+     * Realistic smoke throw reach. The bouncing-grenade physicalMaxRange
+     * assumes free flight over the full fuse (~100 blocks for smoke) and
+     * wildly overestimates: the first ground bounce bleeds most horizontal
+     * energy, so the practical landing is the ballistic range v^2/g. Aiming
+     * beyond it makes every arc fail the target-zone test blocks short.
+     */
+    private double smokeThrowReach(GrenadeIntegration.BallisticProfile profile) {
+        double speed = profile.launchSpeed(false);
+        double ballisticReach = speed * speed
+            / Math.max(0.01, profile.gravity()) * PHYSICAL_RANGE_DRAG_FACTOR;
+        return Math.min(StevesArmyConfig.getGrenadeMaxRange(), ballisticReach);
+    }
+
+    private static boolean isSmokePlan(@Nullable Plan plan) {
+        return plan != null && plan.candidate.source == TargetSource.SMOKE_SCREEN;
+    }
+
     /** Returns true while grenade preparation owns this combat tick. */
     public boolean tick(@Nullable LivingEntity target, @Nullable SquadThreatIntel intel) {
         if (soldier.level().isClientSide || !GrenadeIntegration.isAvailable()) {
@@ -424,31 +548,36 @@ public final class GrenadeTacticalController {
     private void beginPlan(Plan plan, @Nullable LivingEntity target,
                            @Nullable SquadThreatIntel intel, long gameTime) {
         finalThrowValidationQueued = false;
-        ArbitrationBlocker blocker = findArbitrationBlocker(plan);
-        if (blocker != null) {
-            logDecision("squad arbitration selected soldier " + blocker.soldierId()
-                + " (score=" + blocker.score() + ") over this candidate", target, intel);
-            state = State.IDLE;
-            return;
-        }
-
-        if (plan.squad != null) {
-            SquadData.GrenadeReservationResult reservation = plan.squad.tryReserveGrenade(
-                soldier.getUUID(), gameTime, RESERVATION_LEASE_TICKS);
-            if (!reservation.acquired()) {
-                if ("squad cooldown".equals(reservation.reason())) {
-                    logDecision("squad cooldown active remaining=" + reservation.remainingTicks()
-                        + " lastThrow=" + plan.squad.getLastGrenadeTick(), target, intel);
-                } else {
-                    logDecision("squad reservation denied owner=" + reservation.owner()
-                        + " remaining=" + reservation.remainingTicks(), target, intel);
-                }
+        boolean smoke = isSmokePlan(plan);
+        if (smoke) {
+            // Fireteam-level pacing is handled by SmokeDeploymentCoordinator.
+        } else {
+            ArbitrationBlocker blocker = findArbitrationBlocker(plan);
+            if (blocker != null) {
+                logDecision("squad arbitration selected soldier " + blocker.soldierId()
+                    + " (score=" + blocker.score() + ") over this candidate", target, intel);
                 state = State.IDLE;
                 return;
             }
-            grenadeReservationHeld = true;
-            logDecision("squad reservation acquired owner=" + soldier.getUUID()
-                + " expires=" + reservation.expiresAtTick(), target, intel);
+
+            if (plan.squad != null) {
+                SquadData.GrenadeReservationResult reservation = plan.squad.tryReserveGrenade(
+                    soldier.getUUID(), gameTime, RESERVATION_LEASE_TICKS);
+                if (!reservation.acquired()) {
+                    if ("squad cooldown".equals(reservation.reason())) {
+                        logDecision("squad cooldown active remaining=" + reservation.remainingTicks()
+                            + " lastThrow=" + plan.squad.getLastGrenadeTick(), target, intel);
+                    } else {
+                        logDecision("squad reservation denied owner=" + reservation.owner()
+                            + " remaining=" + reservation.remainingTicks(), target, intel);
+                    }
+                    state = State.IDLE;
+                    return;
+                }
+                grenadeReservationHeld = true;
+                logDecision("squad reservation acquired owner=" + soldier.getUUID()
+                    + " expires=" + reservation.expiresAtTick(), target, intel);
+            }
         }
 
         renderDebugTrajectory(plan.arc, plan.candidate.targetPoint, plan.planId());
@@ -914,13 +1043,15 @@ public final class GrenadeTacticalController {
     @Nullable
     private Arc validateSelectedArc(Vec3 targetPoint, Vec3 landing,
                                      GrenadeIntegration.BallisticProfile profile, Arc expectedArc,
-                                     boolean requireTargetPlaneClearance) {
-        ArcSearchState geometry = createArcSearchState(targetPoint, landing, profile, false);
+                                     boolean requireTargetPlaneClearance, boolean smokeMode) {
+        ArcSearchState geometry = createArcSearchState(targetPoint, landing, profile, false,
+            smokeMode);
         if (geometry == null) return null;
         PitchCandidate selected = new PitchCandidate(expectedArc.pitch(), expectedArc.pitchBranch());
         return simulateArc(geometry.target, geometry.aimPoint, geometry.origin,
             geometry.launchOrigin, geometry.yaw, geometry.losPitch, selected, profile,
-            geometry.candidates.size(), geometry.safety, geometry.collectPath, requireTargetPlaneClearance);
+            geometry.candidates.size(), geometry.safety, geometry.collectPath,
+            requireTargetPlaneClearance, smokeMode);
     }
 
     @Nullable
@@ -942,7 +1073,11 @@ public final class GrenadeTacticalController {
         }
 
         Candidate candidate = pendingPlan.candidate;
-        if (candidate.entity != null) {
+        if (isSmokePlan(pendingPlan)) {
+            // Fixed screen point thrown at the coordinator's request; no live
+            // target or threat intel to revalidate. The slot and cooldown
+            // checks below still apply.
+        } else if (candidate.entity != null) {
             // Hidden intel-backed plans may outlive the combat goal's target
             // reference for a tick. Revalidate against the entity captured in
             // the plan while still requiring that entity to be alive and valid.
@@ -983,17 +1118,23 @@ public final class GrenadeTacticalController {
         if (!soldier.canUseGrenade(gameTime)) return "personal grenade cooldown became active";
 
         ItemStack current = soldier.getSoldierInventory().getItem(pendingPlan.slot);
-        GrenadeIntegration.SupportInfo support = GrenadeIntegration.inspect(current);
+        GrenadeIntegration.SupportInfo support = GrenadeIntegration.inspect(current,
+            isSmokePlan(pendingPlan) ? GrenadeIntegration.Category.SMOKE
+                : GrenadeIntegration.Category.EXPLOSIVE);
         if (!support.supported() || current.getCount() <= 0) {
             return "grenade slot changed: " + formatSupport(support);
         }
-        GrenadeIntegration.BallisticResult ballistic = GrenadeIntegration.inspectBallistics(current);
+        GrenadeIntegration.BallisticResult ballistic = GrenadeIntegration.inspectBallistics(current,
+            isSmokePlan(pendingPlan) ? GrenadeIntegration.Category.SMOKE
+                : GrenadeIntegration.Category.EXPLOSIVE);
         if (!ballistic.available()) {
             return "ballistic profile unavailable: " + ballistic.reason();
         }
         double distance = soldier.position().distanceTo(candidate.targetPoint);
-        if (distance < StevesArmyConfig.getGrenadeMinRange()
-            || distance > effectiveMaxRange(ballistic.profile())) {
+        boolean belowMinRange = isSmokePlan(pendingPlan)
+            ? distance < SMOKE_MIN_SCREEN_DISTANCE
+            : distance < StevesArmyConfig.getGrenadeMinRange();
+        if (belowMinRange || distance > effectiveMaxRange(ballistic.profile())) {
             return String.format("target moved out of range (%.1f blocks)", distance);
         }
         if (pendingProfile == null || !pendingProfile.equals(ballistic.profile())) {
@@ -1032,7 +1173,9 @@ public final class GrenadeTacticalController {
         }
 
         ItemStack stack = soldier.getSoldierInventory().getItem(plan.slot);
-        GrenadeIntegration.SupportInfo support = GrenadeIntegration.inspect(stack);
+        GrenadeIntegration.SupportInfo support = GrenadeIntegration.inspect(stack,
+            isSmokePlan(plan) ? GrenadeIntegration.Category.SMOKE
+                : GrenadeIntegration.Category.EXPLOSIVE);
         if (!support.supported() || support.count() <= 0) {
             releasePendingReservation("throw slot invalidated");
             logDecision("throw slot invalidated: " + formatSupport(support));
@@ -1040,7 +1183,9 @@ public final class GrenadeTacticalController {
             return false;
         }
 
-        GrenadeIntegration.BallisticResult ballistic = GrenadeIntegration.inspectBallistics(stack);
+        GrenadeIntegration.BallisticResult ballistic = GrenadeIntegration.inspectBallistics(stack,
+            isSmokePlan(plan) ? GrenadeIntegration.Category.SMOKE
+                : GrenadeIntegration.Category.EXPLOSIVE);
         if (!ballistic.available()) {
             logDecision("preparation invalidated: final ballistic profile unavailable: "
                 + ballistic.reason());
@@ -1048,7 +1193,8 @@ public final class GrenadeTacticalController {
             return false;
         }
         Arc finalArc = validateSelectedArc(plan.candidate.targetPoint, plan.candidate.landing,
-            ballistic.profile(), pendingArc, plan.candidate.preferHighArc);
+            ballistic.profile(), pendingArc, plan.candidate.preferHighArc,
+            isSmokePlan(plan));
         if (finalArc == null) {
             String reason = "final trajectory no longer reaches a safe target zone";
             if (preparationReplans < 1 && GrenadeArcCalculationScheduler.request(this, true)) {
@@ -1083,7 +1229,8 @@ public final class GrenadeTacticalController {
 
         GrenadeIntegration.recordDiagnostic(throwResult, plan.candidate.entity,
             plan.candidate.targetPoint, finalArc.predictedLanding(), finalArc.origin(),
-            finalArc.flightTicks(), "TACTICAL", formatCollision(finalArc.firstCollision()), gameTime);
+            finalArc.flightTicks(), isSmokePlan(plan) ? "SMOKE_SCREEN" : "TACTICAL",
+            formatCollision(finalArc.firstCollision()), gameTime);
         soldier.getSoldierInventory().setChanged();
         SquadData.GrenadeThrowResult squadResult = completePendingSquadThrow(
             squad, gameTime, true);
@@ -1211,6 +1358,21 @@ public final class GrenadeTacticalController {
         return true;
     }
 
+    /** Smoke is harmless on landing, but the cloud is ~5.5 blocks wide — keep
+     * the whole cloud off friendlies, not just the impact point. */
+    private boolean isSmokeSafeLanding(Vec3 landing) {
+        AABB area = new AABB(landing, landing).inflate(SMOKE_LANDING_FRIENDLY_RADIUS + 1.0);
+        for (LivingEntity nearby : soldier.level().getEntitiesOfClass(LivingEntity.class, area)) {
+            if (nearby == soldier || !isFriendly(nearby)) continue;
+            Vec3 horizontal = nearby.position().subtract(landing).multiply(1.0, 0.0, 1.0);
+            if (horizontal.lengthSqr()
+                <= SMOKE_LANDING_FRIENDLY_RADIUS * SMOKE_LANDING_FRIENDLY_RADIUS) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     private boolean isProtectedTarget(LivingEntity target) {
         Vec3 footPoint = target.position().add(0.0, 0.25, 0.0);
         return !TargetAcquisition.hasLineOfSight(soldier, target)
@@ -1232,7 +1394,7 @@ public final class GrenadeTacticalController {
     private Arc findArc(Vec3 targetPoint, Vec3 landing,
                          GrenadeIntegration.BallisticProfile profile,
                          boolean preferHighArc) {
-        return findArcVariant(targetPoint, landing, profile, preferHighArc);
+        return findArcVariant(targetPoint, landing, profile, preferHighArc, false);
     }
 
     private double correctElevationForDrag(double elevation, double horizontal, double vertical,
@@ -1278,8 +1440,9 @@ public final class GrenadeTacticalController {
     @Nullable
     private Arc findArcVariant(Vec3 targetPoint, Vec3 landing,
                                GrenadeIntegration.BallisticProfile profile,
-                               boolean preferHighArc) {
-        ArcSearchState search = createArcSearchState(targetPoint, landing, profile, preferHighArc);
+                               boolean preferHighArc, boolean smokeMode) {
+        ArcSearchState search = createArcSearchState(targetPoint, landing, profile,
+            preferHighArc, smokeMode);
         if (search == null) return null;
 
         Arc bestArc = null;
@@ -1287,7 +1450,8 @@ public final class GrenadeTacticalController {
             PitchCandidate candidate = search.candidates.get(search.nextCandidate++);
             Arc arc = simulateArc(search.target, search.aimPoint, search.origin,
                 search.launchOrigin, search.yaw, search.losPitch, candidate, search.profile,
-                search.candidates.size(), search.safety, search.collectPath, preferHighArc);
+                search.candidates.size(), search.safety, search.collectPath, preferHighArc,
+                search.smokeMode);
             if (arc != null && (bestArc == null || arc.score() < bestArc.score())) {
                 bestArc = arc;
             }
@@ -1302,7 +1466,7 @@ public final class GrenadeTacticalController {
     @Nullable
     private ArcSearchState createArcSearchState(Vec3 targetPoint, Vec3 landing,
                                                   GrenadeIntegration.BallisticProfile profile,
-                                                  boolean preferHighArc) {
+                                                  boolean preferHighArc, boolean smokeMode) {
         lastArcSawFriendlyPathBlock = false;
         lastArcSawThrowerCoverBlock = false;
         lastArcRejectedAllForLanding = false;
@@ -1336,7 +1500,7 @@ public final class GrenadeTacticalController {
 
         PathSafetyContext safety = createPathSafetyContext(origin, aimPoint, profile);
         return new ArcSearchState(profile, targetPoint, aimPoint, origin, launchOrigin,
-            yaw, losPitch, candidates, safety, DiagnosticLogEnabled());
+            yaw, losPitch, candidates, safety, DiagnosticLogEnabled(), smokeMode);
     }
 
     private List<PitchCandidate> generatePitchCandidates(double horizontal, double vertical,
@@ -1424,7 +1588,7 @@ public final class GrenadeTacticalController {
                              float yaw, float losPitch, PitchCandidate candidate,
                              GrenadeIntegration.BallisticProfile profile, int candidateCount,
                              PathSafetyContext safety, boolean collectPath,
-                             boolean requireTargetPlaneClearance) {
+                             boolean requireTargetPlaneClearance, boolean smokeMode) {
         float pitch = candidate.pitch();
         double pitchRad = Math.toRadians(pitch);
         double yawRad = Math.toRadians(yaw);
@@ -1539,7 +1703,9 @@ public final class GrenadeTacticalController {
             && !firstCollision.clearedTargetPlane()) return null;
         double targetError = terminalPosition.distanceTo(target);
         lastClosestTerminalError = Math.min(lastClosestTerminalError, targetError);
-        if (targetError > TARGET_ZONE_RADIUS || !isSafeLanding(terminalPosition)
+        if (targetError > TARGET_ZONE_RADIUS
+            || !(smokeMode ? isSmokeSafeLanding(terminalPosition)
+                : isSafeLanding(terminalPosition))
             || distanceToBox(terminalPosition, soldier.getBoundingBox())
                 < THROWER_ENDPOINT_CLEARANCE * THROWER_ENDPOINT_CLEARANCE) return null;
         // Prefer arcs whose first contact lands at or beyond the aim point

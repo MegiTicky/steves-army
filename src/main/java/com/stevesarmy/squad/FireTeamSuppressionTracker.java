@@ -133,6 +133,13 @@ public final class FireTeamSuppressionTracker {
 
                 // --- asymmetric EMA ---
                 float rate = target > entry.level ? riseRate : fallRate;
+                // Smoke cuts the enemy's observation of this fireteam, so the
+                // pressure source is gone: recover in seconds, not half a minute.
+                if (target <= entry.level
+                    && SmokeDeploymentCoordinator.isScreenActive(ownerId, ft,
+                        server.overworld().getGameTime())) {
+                    rate *= StevesArmyConfig.getSmokeFallRateMultiplier();
+                }
                 entry.level = Mth.clamp(
                     entry.level + (target - entry.level) * rate, 0.0f, 1.0f);
 
@@ -243,6 +250,13 @@ public final class FireTeamSuppressionTracker {
 
     public static boolean isHeavilySuppressed(SoldierEntity soldier) {
         return getState(soldier) == FireTeamSuppressionState.HEAVY;
+    }
+
+    /** Ticks the fireteam has continuously held the HEAVY state; 0 when not HEAVY. */
+    public static long getHeavyHoldTicks(SoldierEntity soldier) {
+        Entry e = getEntry(soldier);
+        if (e == null || e.heavyStartTick == -1) return 0;
+        return Math.max(0, serverTick - e.heavyStartTick);
     }
 
     public static Vec3 getCentroid(SoldierEntity soldier) {

@@ -1229,6 +1229,7 @@ public class SoldierEntity extends PathfinderMob implements Container {
         if (coverBehaviorManager != null) {
             coverBehaviorManager.tickSuppression(coverBehaviorManager.isInCover());
         }
+        refreshAttackTargetUnderFire();
         tickCoverStuckWatchdog();
 
         long gameTime = level().getGameTime();
@@ -1581,6 +1582,20 @@ public BlockPos getPingMoveTarget() {
     public boolean hasValidAttackTarget() {
         return attackTargetPos != null &&
                System.currentTimeMillis() - attackTargetTimestamp < ATTACK_MEMORY_MS;
+    }
+
+    /**
+     * Keeps the attack objective alive while the soldier is under fire. The
+     * 60s memory exists to drop stale objectives, but a fireteam pinned by
+     * sustained suppression for longer than that must not silently stop
+     * attacking — being suppressed is evidence the attack is still on, so
+     * extend the window; it expires 60s after the pressure ends.
+     */
+    private void refreshAttackTargetUnderFire() {
+        if (attackTargetPos == null || coverBehaviorManager == null) return;
+        if (coverBehaviorManager.getSuppressionTracker().getSuppressionLevel() >= 0.2f) {
+            attackTargetTimestamp = System.currentTimeMillis();
+        }
     }
 
     public int getAttackGeneration() {
