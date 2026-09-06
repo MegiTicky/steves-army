@@ -18,4 +18,15 @@ public enum FireTeam {
             case GARRISON -> "GAR";
         };
     }
+
+    public String getDisplayName() {
+        return switch (this) {
+            case ALL -> "All";
+            case ALPHA -> "Alpha";
+            case BRAVO -> "Bravo";
+            case CHARLIE -> "Charlie";
+            case DELTA -> "Delta";
+            case GARRISON -> "Garrison";
+        };
+    }
 }

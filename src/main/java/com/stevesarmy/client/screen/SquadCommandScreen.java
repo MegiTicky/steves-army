@@ -2,6 +2,7 @@ package com.stevesarmy.client.screen;
 
 import com.stevesarmy.client.ClientSquadData;
 import com.stevesarmy.client.FireTeamScopeState;
+import com.stevesarmy.client.screen.widget.FireTeamDropdownWidget;
 import com.stevesarmy.client.screen.widget.RoleDropdownWidget;
 import com.stevesarmy.entity.SoldierRole;
 import com.stevesarmy.network.BulkGarrisonPacket;
@@ -41,7 +42,7 @@ public class SquadCommandScreen extends Screen {
     private static final int BUTTON_TEXT_Y_OFFSET = 6;
 
     private static final int COL_HEALTH_WIDTH = 40;
-    private static final int COL_FT_WIDTH = 24;
+    private static final int COL_FT_WIDTH = 42;
     private static final int COL_AMMO_WIDTH = 32;
     private static final int COL_DIST_WIDTH = 50;
     private static final int COL_DISC_WIDTH = 24;
@@ -64,6 +65,10 @@ public class SquadCommandScreen extends Screen {
     private int activeRoleDropdownX;
     private int activeRoleDropdownY;
     private RoleDropdownWidget activeRoleDropdownWidget;
+    private int activeTeamDropdownRow = -1;
+    private int activeTeamDropdownX;
+    private int activeTeamDropdownY;
+    private FireTeamDropdownWidget activeTeamDropdownWidget;
     private int bulkRoleOrdinal = SoldierRole.RIFLEMAN.ordinal();
     private com.stevesarmy.squad.ResupplyConfig draftConfig = com.stevesarmy.squad.ResupplyConfig.DEFAULT;
 
@@ -91,6 +96,7 @@ public class SquadCommandScreen extends Screen {
         int recallButtonX;
         int dismissButtonX;
         int roleColumnX;
+        int fireTeamColumnX;
 
         SoldierRow(SquadStatusSyncPacket.SoldierStatusEntry entry) {
             this.entityId = entry.entityId;
@@ -174,6 +180,7 @@ public class SquadCommandScreen extends Screen {
         if (activeTab == tab) return;
         activeTab = tab;
         closeRoleDropdown();
+        closeTeamDropdown();
         if (tab == Tab.RESUPPLY) {
             draftConfig = ClientSquadData.INSTANCE.getResupplyConfig();
         }
@@ -393,7 +400,14 @@ public class SquadCommandScreen extends Screen {
             x = drawHealthBar(graphics, x, y, row.health, row.maxHealth);
             x += COL_SPACING;
 
-            x = drawFireTeamBadge(graphics, x, y, row.fireTeam);
+            row.fireTeamColumnX = x;
+            if (activeTab == Tab.GARRISON) {
+                drawFireTeamBadge(graphics, x, y, row.fireTeam);
+            } else {
+                FireTeamDropdownWidget teamButton = new FireTeamDropdownWidget(row.fireTeam, getActiveTeams(), ignored -> { });
+                teamButton.render(graphics, font, x, y + 4, COL_FT_WIDTH, ROW_HEIGHT, mouseX - x, mouseY - y - 4);
+            }
+            x += COL_FT_WIDTH;
             x += COL_SPACING;
 
             int fixedColsWidth = COL_AMMO_WIDTH + COL_SPACING
@@ -472,6 +486,18 @@ public class SquadCommandScreen extends Screen {
             graphics.disableScissor();
         }
 
+        if (activeTeamDropdownWidget != null && activeTeamDropdownRow >= 0 && activeTeamDropdownRow < rows.size()) {
+            SoldierRow activeRow = rows.get(activeTeamDropdownRow);
+            int dropItemHeight = 12;
+            int dropBottom = activeTeamDropdownY + dropItemHeight * (1 + getActiveTeams().size());
+            graphics.enableScissor(activeTeamDropdownX, activeTeamDropdownY,
+                activeTeamDropdownX + COL_FT_WIDTH, Math.min(height, dropBottom));
+            activeTeamDropdownWidget.setTeam(activeRow.fireTeam);
+            activeTeamDropdownWidget.render(graphics, font, activeTeamDropdownX, activeTeamDropdownY,
+                COL_FT_WIDTH, ROW_HEIGHT, mouseX - activeTeamDropdownX, mouseY - activeTeamDropdownY);
+            graphics.disableScissor();
+        }
+
         if (hoveredActionTooltip != null) {
             graphics.renderTooltip(font, hoveredActionTooltip, mouseX, mouseY);
         }
@@ -492,6 +518,32 @@ public class SquadCommandScreen extends Screen {
     private void closeRoleDropdown() {
         activeRoleDropdownRow = -1;
         activeRoleDropdownWidget = null;
+    }
+
+    private List<FireTeam> getActiveTeams() {
+        List<FireTeam> teams = new ArrayList<>();
+        FireTeam[] values = FireTeam.values();
+        for (int i = 0; i < teamCount; i++) {
+            teams.add(values[i + 1]);
+        }
+        return teams;
+    }
+
+    private void openFireTeamDropdown(int rowIndex, int x, int y) {
+        SoldierRow row = rows.get(rowIndex);
+        activeTeamDropdownRow = rowIndex;
+        activeTeamDropdownX = x;
+        activeTeamDropdownY = y;
+        activeTeamDropdownWidget = new FireTeamDropdownWidget(row.fireTeam, getActiveTeams(), team -> {
+            NetworkHandler.INSTANCE.sendToServer(SetFireTeamPacket.assignSoldier(row.entityId, team));
+            row.fireTeam = team;
+        });
+        activeTeamDropdownWidget.openDropdown();
+    }
+
+    private void closeTeamDropdown() {
+        activeTeamDropdownRow = -1;
+        activeTeamDropdownWidget = null;
     }
 
     private String getFireTeamCountLabel() {
@@ -533,14 +585,7 @@ public class SquadCommandScreen extends Screen {
 
     private int drawFireTeamBadge(GuiGraphics graphics, int x, int y, FireTeam fireTeam) {
         String ftLabel = fireTeam.getShortName();
-        int ftColor = switch (fireTeam) {
-            case ALPHA -> 0xFFFF5555;
-            case BRAVO -> 0xFF5555FF;
-            case CHARLIE -> 0xFF55FF55;
-            case DELTA -> 0xFFFFFF55;
-            case GARRISON -> 0xFF55FFFF;
-            default -> 0xFFFFFFFF;
-        };
+        int ftColor = FireTeamDropdownWidget.getTeamColor(fireTeam);
         String badge = "[" + ftLabel + "]";
         int width = font.width(badge);
         graphics.drawString(font, Component.literal(badge), x, y + 6, ftColor, false);
@@ -677,6 +722,19 @@ public class SquadCommandScreen extends Screen {
 
     @Override
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
+        if (activeTeamDropdownWidget != null && activeTeamDropdownRow >= 0 && activeTeamDropdownRow < rows.size()) {
+            boolean clicked = activeTeamDropdownWidget.mouseClicked(
+                mouseX - activeTeamDropdownX, mouseY - activeTeamDropdownY, button);
+            if (clicked) {
+                if (!activeTeamDropdownWidget.isDropdownOpen()) {
+                    closeTeamDropdown();
+                }
+                return true;
+            } else {
+                closeTeamDropdown();
+            }
+        }
+
         if (activeRoleDropdownWidget != null && activeRoleDropdownRow >= 0 && activeRoleDropdownRow < rows.size()) {
             int i = activeRoleDropdownRow;
             SoldierRow row = rows.get(i);
@@ -705,6 +763,13 @@ public class SquadCommandScreen extends Screen {
                 if (mouseX >= row.roleColumnX && mouseX < row.roleColumnX + COL_ROLE_WIDTH
                     && localMouseY >= 4 && localMouseY < 16) {
                     openRoleDropdown(rowIndex, row.roleColumnX, rowY + 4);
+                    return true;
+                }
+
+                if (activeTab != Tab.GARRISON
+                    && mouseX >= row.fireTeamColumnX && mouseX < row.fireTeamColumnX + COL_FT_WIDTH
+                    && localMouseY >= 4 && localMouseY < 16) {
+                    openFireTeamDropdown(rowIndex, row.fireTeamColumnX, rowY + 4);
                     return true;
                 }
 
@@ -750,6 +815,9 @@ public class SquadCommandScreen extends Screen {
     public boolean mouseScrolled(double mouseX, double mouseY, double delta) {
         if (activeRoleDropdownRow >= 0) {
             closeRoleDropdown();
+        }
+        if (activeTeamDropdownRow >= 0) {
+            closeTeamDropdown();
         }
         if (mouseY >= ROW_START_Y && mouseY < getListBottom() && getMaxScrollOffset() > 0) {
             scrollOffset -= (int) Math.signum(delta);
