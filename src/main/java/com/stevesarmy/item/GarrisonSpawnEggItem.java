@@ -39,6 +39,7 @@ public class GarrisonSpawnEggItem extends ForgeSpawnEggItem {
         }
         garrison.moveTo(pos.getX() + 0.5, pos.getY() + 1.0, pos.getZ() + 0.5,
             player != null ? player.getYRot() : 0.0F, 0.0F);
+        garrison.maybeRandomizeSkin();
 
         CompoundTag entityTag = getEntityTag(context.getItemInHand());
         if (entityTag != null) {

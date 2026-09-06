@@ -48,6 +48,7 @@ public class StevesArmyConfig {
 
 
     public static final ForgeConfigSpec.BooleanValue VS2_COMPAT_ENABLED;
+    public static final ForgeConfigSpec.BooleanValue SKIN_RANDOMIZE_ON_SPAWN;
     public static final ForgeConfigSpec.BooleanValue VS2_AUTO_TRANSPORT;
     public static final ForgeConfigSpec.IntValue VS2_MAX_TRANSPORTED_SOLDIERS;
 
@@ -336,6 +337,18 @@ BUILDER.pop();
 
         BUILDER.pop();
 
+        BUILDER.push("skins");
+
+        SKIN_RANDOMIZE_ON_SPAWN = BUILDER
+            .comment("Give newly spawned soldiers a random skin from <game dir>/stevesarmy/skins/*.png.",
+                     "PNGs use the vanilla player-skin format (64x64, or 64x32 legacy);",
+                     "the filename without extension is the skin name.",
+                     "Skins can also be switched per-soldier with the Skin Knife item.",
+                     "Default: false")
+            .define("randomizeOnSpawn", false);
+
+        BUILDER.pop();
+
         BUILDER.push("performance");
 
         OPTIMIZATION_LEVEL = BUILDER
@@ -598,6 +611,10 @@ BUILDER.pop();
 
     public static double getSpacingDistance() {
         return SPACING_DISTANCE.get();
+    }
+
+    public static boolean isSkinRandomizeOnSpawn() {
+        return SKIN_RANDOMIZE_ON_SPAWN.get();
     }
 
     public static float getExplosionSuppressionStrength() {

@@ -49,6 +49,7 @@ public final class SoldierSpawner {
         if (loadout != null) {
             applyLoadout(soldier, loadout);
         }
+        soldier.maybeRandomizeSkin();
 
         return finishSpawn(level, soldier, owner, owner != null);
     }
@@ -69,6 +70,7 @@ public final class SoldierSpawner {
         if (soldier == null) return SpawnResult.failure("Failed to create entity " + entityType);
         soldier.moveTo(position.x, position.y, position.z, yaw, pitch);
         if (loadout != null) applyLoadout(soldier, loadout);
+        soldier.maybeRandomizeSkin();
         if (callsign != null && !callsign.equals("-")) {
             UUID leaderForCallsign = owner != null ? owner.getUUID() : null;
             if (soldier instanceof TeamGarrisonEntity tge && tge.getTeamName() != null) leaderForCallsign = teamLeaderId(tge.getTeamName());

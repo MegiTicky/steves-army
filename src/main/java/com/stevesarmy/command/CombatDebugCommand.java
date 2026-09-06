@@ -6,6 +6,7 @@ import com.mojang.brigadier.arguments.FloatArgumentType;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.stevesarmy.StevesArmyMod;
+import com.stevesarmy.skin.SoldierSkinManager;
 import com.stevesarmy.client.CombatDebugRenderer;
 import com.stevesarmy.client.model.PoseConfig;
 import com.stevesarmy.combat.GunIntegration;
@@ -264,10 +265,32 @@ public class CombatDebugCommand {
                         .executes(CombatDebugCommand::resetLowCrouchConfig)))
             )
 
+            // === SKINS ===
+            .then(Commands.literal("skins")
+                .executes(CombatDebugCommand::listSkins)
+                .then(Commands.literal("reload")
+                    .executes(CombatDebugCommand::reloadSkins)))
+
             // === STATUS (show all toggle states) ===
             .then(Commands.literal("status")
                 .executes(CombatDebugCommand::showDebugStatus))
         );
+    }
+
+    // ======================================================================
+    // SKINS
+    // ======================================================================
+    private static int listSkins(CommandContext<CommandSourceStack> context) {
+        List<String> skins = SoldierSkinManager.getSkinNames();
+        context.getSource().sendSuccess(() -> Component.literal(
+            "Skins folder: " + SoldierSkinManager.getSkinFolder() + "\n" +
+            skins.size() + " skin(s): " + (skins.isEmpty() ? "(none)" : String.join(", ", skins))), false);
+        return skins.size();
+    }
+
+    private static int reloadSkins(CommandContext<CommandSourceStack> context) {
+        SoldierSkinManager.reload();
+        return listSkins(context);
     }
 
     // ======================================================================

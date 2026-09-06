@@ -39,6 +39,7 @@ public class TeamGarrisonSpawnEggItem extends ForgeSpawnEggItem {
         }
         garrison.moveTo(pos.getX() + 0.5, pos.getY() + 1.0, pos.getZ() + 0.5,
             player != null ? player.getYRot() : 0.0F, 0.0F);
+        garrison.maybeRandomizeSkin();
 
         // Persisted team from a creative-copied egg, if any.
         ItemStack stack = context.getItemInHand();

@@ -2,6 +2,7 @@ package com.stevesarmy.client.renderer;
 
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.stevesarmy.client.model.SoldierModel;
+import com.stevesarmy.client.SoldierSkinLoader;
 import com.stevesarmy.compat.ysm.ISoldierGeoRenderer;
 import com.stevesarmy.compat.ysm.YsmCompat;
 import com.stevesarmy.entity.EnemySoldierEntity;
@@ -33,7 +34,8 @@ public class EnemySoldierRenderer extends HumanoidMobRenderer<EnemySoldierEntity
 
     @Override
     public ResourceLocation getTextureLocation(EnemySoldierEntity entity) {
-        return TEXTURE;
+        ResourceLocation skin = SoldierSkinLoader.resolve(entity.getSkin());
+        return skin != null ? skin : TEXTURE;
     }
 
     @Override

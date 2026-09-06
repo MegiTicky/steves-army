@@ -56,6 +56,7 @@ public class EnemySoldierSpawnEggItem extends ForgeSpawnEggItem {
         }
 
         StevesArmyMod.LOGGER.info("[EnemySpawnEgg] Enemy created, id: {}", enemy.getId());
+        enemy.maybeRandomizeSkin();
 
         CompoundTag stackTag = stack.getTag();
         boolean hasEntityTag = stackTag != null && stackTag.contains("EntityTag");

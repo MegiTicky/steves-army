@@ -7,6 +7,7 @@ import com.stevesarmy.item.RecruitItem;
 import com.stevesarmy.item.SoldierSpawnEggItem;
 import com.stevesarmy.item.SurvivalCommandStickItem;
 import com.stevesarmy.item.SurgicalKnifeItem;
+import com.stevesarmy.item.SkinKnifeItem;
 import com.stevesarmy.item.TargetSpawnEggItem;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.item.Item;
@@ -27,6 +28,11 @@ public class ModItems {
     public static final RegistryObject<Item> SURGICAL_KNIFE = ITEMS.register(
         "surgical_knife",
         () -> new SurgicalKnifeItem(new Item.Properties().stacksTo(1))
+    );
+
+    public static final RegistryObject<Item> SKIN_KNIFE = ITEMS.register(
+        "skin_knife",
+        () -> new SkinKnifeItem(new Item.Properties().stacksTo(1))
     );
 
     public static final RegistryObject<Item> COMMAND_STICK = ITEMS.register(

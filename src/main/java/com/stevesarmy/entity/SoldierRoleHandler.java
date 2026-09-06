@@ -98,6 +98,7 @@ public final class SoldierRoleHandler {
         dst.syncArmorToEntity(replacement);
 
         soldier.getOwnerUUID().ifPresent(replacement::setOwnerUUID);
+        replacement.setSkinRaw(soldier.getSkin());
         replacement.setFollowState(soldier.getFollowState());
         replacement.setSquadMode(soldier.getSquadMode());
         replacement.setFireDiscipline(soldier.getFireDiscipline());

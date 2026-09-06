@@ -71,6 +71,7 @@ public class SoldierSpawnEggItem extends ForgeSpawnEggItem {
         }
         
         StevesArmyMod.LOGGER.info("[SoldierSpawnEgg] Soldier created, UUID: {}", soldier.getUUID());
+        soldier.maybeRandomizeSkin();
         
         CompoundTag stackTag = stack.getTag();
         boolean hasEntityTag = stackTag != null && stackTag.contains("EntityTag");

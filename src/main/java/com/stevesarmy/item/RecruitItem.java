@@ -44,6 +44,7 @@ public class RecruitItem extends Item {
         
         Vec3 spawnPos = pos.getCenter().add(0, 0.5, 0);
         soldier.moveTo(spawnPos.x, spawnPos.y, spawnPos.z, player.getYRot(), 0.0F);
+        soldier.maybeRandomizeSkin();
         soldier.setOwnerUUID(player.getUUID());
         soldier.setSquadId(squad.getSquadId());
 

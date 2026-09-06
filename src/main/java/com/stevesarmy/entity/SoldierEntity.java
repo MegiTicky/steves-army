@@ -1,7 +1,9 @@
 package com.stevesarmy.entity;
 
 import com.stevesarmy.StevesArmyMod;
+import com.stevesarmy.StevesArmyConfig;
 import com.stevesarmy.compat.VS2Compat;
+import com.stevesarmy.skin.SoldierSkinManager;
 import com.stevesarmy.squad.OwnedSoldierRegistry;
 import com.stevesarmy.combat.CombatDebugData;
 import com.stevesarmy.combat.DetectionSystem;
@@ -162,6 +164,9 @@ public class SoldierEntity extends PathfinderMob implements Container {
     private static final EntityDataAccessor<String> YSM_MODEL_ID =
         SynchedEntityData.defineId(SoldierEntity.class, EntityDataSerializers.STRING);
     private static final EntityDataAccessor<String> YSM_TEXTURE_ID =
+        SynchedEntityData.defineId(SoldierEntity.class, EntityDataSerializers.STRING);
+
+    private static final EntityDataAccessor<String> SKIN =
         SynchedEntityData.defineId(SoldierEntity.class, EntityDataSerializers.STRING);
 
     private static final EntityDataAccessor<Integer> RECALL_TICKS =
@@ -422,6 +427,7 @@ public class SoldierEntity extends PathfinderMob implements Container {
         this.entityData.define(FIRE_TEAM, FireTeam.ALPHA.ordinal());
         this.entityData.define(YSM_MODEL_ID, "");
         this.entityData.define(YSM_TEXTURE_ID, "");
+        this.entityData.define(SKIN, "");
         this.entityData.define(RECALL_TICKS, 0);
         this.entityData.define(MG_DEBUG_POSITION, BlockPos.ZERO);
         this.entityData.define(MG_DEBUG_CENTER, BlockPos.ZERO);
@@ -507,6 +513,7 @@ public class SoldierEntity extends PathfinderMob implements Container {
         tag.putLong("GrenadeCooldownUntil", grenadeCooldownUntilTick);
         tag.putString("YsmModelId", getYsmModelId());
         tag.putString("YsmTextureId", getYsmTextureId());
+        tag.putString("Skin", getSkin());
     }
 
     @Override
@@ -537,6 +544,9 @@ public class SoldierEntity extends PathfinderMob implements Container {
         }
         if (tag.contains("YsmTextureId")) {
             setYsmTextureId(tag.getString("YsmTextureId"));
+        }
+        if (tag.contains("Skin")) {
+            setSkinRaw(tag.getString("Skin"));
         }
     }
 
@@ -765,6 +775,37 @@ public class SoldierEntity extends PathfinderMob implements Container {
 
     public boolean hasYsmModel() {
         return !getYsmModelId().isEmpty();
+    }
+
+    public String getSkin() {
+        return this.entityData.get(SKIN);
+    }
+
+    /** Sets a custom skin by name; unknown names are ignored and keep the default. */
+    public void setSkin(String name) {
+        if (name == null || name.isEmpty()) {
+            this.entityData.set(SKIN, "");
+        } else if (SoldierSkinManager.isKnown(name)) {
+            this.entityData.set(SKIN, name);
+        } else {
+            StevesArmyMod.LOGGER.warn("[Skins] Ignoring unknown skin '{}' for {}", name, getUUID());
+        }
+    }
+
+    /** Sets the skin without validation (NBT load of a skin whose file is temporarily missing). */
+    public void setSkinRaw(String name) {
+        this.entityData.set(SKIN, name == null ? "" : name);
+    }
+
+    /** Picks a random folder skin for newly spawned soldiers when skins.randomizeOnSpawn is enabled. */
+    public void maybeRandomizeSkin() {
+        if (!StevesArmyConfig.isSkinRandomizeOnSpawn()) {
+            return;
+        }
+        String skin = SoldierSkinManager.randomSkinName();
+        if (skin != null) {
+            setSkinRaw(skin);
+        }
     }
 
     public int getRecallTicks() {
