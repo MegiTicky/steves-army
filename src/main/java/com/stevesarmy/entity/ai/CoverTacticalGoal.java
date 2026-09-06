@@ -2198,7 +2198,7 @@ private void tickRepositioning() {
 
         if (currentCover != null && currentCover.getType() == CoverType.HALF
             && soldier.isLowCrouching() && !getCoverManager().isSuppressed()
-            && !healingPosturePending) {
+            && !healingPosturePending && !soldier.isPeekDisabled()) {
             getPeekController().recoverStandingInHalfCover(soldier, "unsuppressed-fallback");
         }
 
@@ -5105,8 +5105,17 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
         }
         soldier.refreshDimensions();
         doLowCrouchIfHalfCover();
-        if (cover.getType() == CoverType.HALF && !getCoverManager().isSuppressed()) {
-            getPeekController().enterStandingInHalfCover(soldier, "cover-arrival");
+        if (cover.getType() == CoverType.HALF) {
+            if (soldier.isPeekDisabled()) {
+                // The peek state machine is never ticked for peek-disabled roles,
+                // so they must enter HIDING here or nothing will ever settle them
+                // below the half-cover wall.
+                getPeekController().enterHiding(soldier);
+                soldier.setLowCrouching(true);
+                soldier.refreshDimensions();
+            } else if (!getCoverManager().isSuppressed()) {
+                getPeekController().enterStandingInHalfCover(soldier, "cover-arrival");
+            }
         }
 
         if (relocationType == RelocationType.GO_TO) {

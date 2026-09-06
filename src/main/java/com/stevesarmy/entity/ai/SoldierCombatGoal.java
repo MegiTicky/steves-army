@@ -2981,19 +2981,46 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
             return 1_000_000;
         }
 
-        int magazineAmmo = GunIntegration.getCurrentAmmo(soldier);
-        int inventoryAmmo = 0;
-        
         com.stevesarmy.inventory.SoldierInventory inv = soldier.getSoldierInventory();
-        if (inv != null) {
-            ItemStack gunStack = inv.getItem(com.stevesarmy.inventory.SoldierInventory.SLOT_MAIN_HAND);
-            for (int i = com.stevesarmy.inventory.SoldierInventory.SLOT_GENERAL_START;
-                 i < com.stevesarmy.inventory.SoldierInventory.INVENTORY_SIZE; i++) {
-                inventoryAmmo += GunIntegration.getAmmoCountForGun(gunStack, inv.getItem(i));
+        if (inv == null) {
+            return GunIntegration.getCurrentAmmo(soldier);
+        }
+
+        // A soldier may carry several guns; every gun's magazine and every
+        // ammo stack that fits any of them counts toward the total.
+        List<ItemStack> guns = new ArrayList<>();
+        ItemStack mainHand = inv.getItem(com.stevesarmy.inventory.SoldierInventory.SLOT_MAIN_HAND);
+        if (GunIntegration.isGun(mainHand)) {
+            guns.add(mainHand);
+        }
+        for (int i = com.stevesarmy.inventory.SoldierInventory.SLOT_GENERAL_START;
+             i < com.stevesarmy.inventory.SoldierInventory.INVENTORY_SIZE; i++) {
+            ItemStack stack = inv.getItem(i);
+            if (!stack.isEmpty() && GunIntegration.isGun(stack)) {
+                guns.add(stack);
             }
         }
-        
-        return magazineAmmo + inventoryAmmo;
+        if (guns.isEmpty()) {
+            return 0;
+        }
+
+        int total = 0;
+        for (ItemStack gun : guns) {
+            total += GunIntegration.getCurrentAmmo(gun);
+        }
+        for (int i = com.stevesarmy.inventory.SoldierInventory.SLOT_GENERAL_START;
+             i < com.stevesarmy.inventory.SoldierInventory.INVENTORY_SIZE; i++) {
+            ItemStack stack = inv.getItem(i);
+            if (stack.isEmpty()) continue;
+            for (ItemStack gun : guns) {
+                if (GunIntegration.getAmmoCountForGun(gun, stack) > 0) {
+                    total += stack.getCount();
+                    break;
+                }
+            }
+        }
+
+        return total;
     }
     
     private void trySuppressPingFire() {
