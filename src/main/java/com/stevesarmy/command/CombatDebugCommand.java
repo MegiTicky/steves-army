@@ -290,6 +290,10 @@ public class CombatDebugCommand {
 
     private static int reloadSkins(CommandContext<CommandSourceStack> context) {
         SoldierSkinManager.reload();
+        // Push the fresh set to every connected player (dedicated-server sync).
+        for (ServerPlayer player : context.getSource().getServer().getPlayerList().getPlayers()) {
+            SoldierSkinManager.sendAllTo(player);
+        }
         return listSkins(context);
     }
 

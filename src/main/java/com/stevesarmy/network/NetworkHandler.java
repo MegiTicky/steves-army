@@ -14,7 +14,7 @@ import java.util.function.Function;
 import java.util.function.Supplier;
 
 public class NetworkHandler {
-    private static final String PROTOCOL_VERSION = "8";
+    private static final String PROTOCOL_VERSION = "9";
     
     public static final SimpleChannel INSTANCE = NetworkRegistry.newSimpleChannel(
         new ResourceLocation(StevesArmyMod.MODID, "main"),
@@ -133,6 +133,14 @@ public class NetworkHandler {
             AttackDebugPacket::encode,
             AttackDebugPacket::new,
             AttackDebugPacket::handle);
+        INSTANCE.registerMessage(id++, SyncSoldierSkinsPacket.class,
+            SyncSoldierSkinsPacket::encode,
+            SyncSoldierSkinsPacket::decode,
+            SyncSoldierSkinsPacket::handle);
+        INSTANCE.registerMessage(id++, RequestSkinPacket.class,
+            RequestSkinPacket::encode,
+            RequestSkinPacket::decode,
+            RequestSkinPacket::handle);
         if (YsmCompat.isLoaded()) {
             registerYsmPacket(id++);
         }

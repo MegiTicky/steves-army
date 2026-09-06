@@ -1,6 +1,9 @@
 package com.stevesarmy.client;
 
 import com.stevesarmy.StevesArmyMod;
+import com.stevesarmy.network.NetworkHandler;
+import com.stevesarmy.network.RequestSkinPacket;
+import com.stevesarmy.network.SyncSoldierSkinsPacket;
 import com.stevesarmy.skin.SoldierSkinManager;
 import com.mojang.blaze3d.platform.NativeImage;
 import net.minecraft.client.Minecraft;
@@ -13,32 +16,44 @@ import net.minecraftforge.client.event.RegisterClientReloadListenersEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
 
+import java.io.ByteArrayInputStream;
 import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
 /**
- * Client-side loader for user-provided soldier skins. Each PNG in
- * {@code <game dir>/stevesarmy/skins} is uploaded as a DynamicTexture
- * registered at {@code steves_army:skins/<name>}. The listener also runs on
- * resource reload (F3+T), which rescan both the folder and the textures, so
- * new PNG files are picked up without a game restart.
+ * Client-side loader for user-provided soldier skins. Sources, in resolution
+ * priority: the local {@code <game dir>/stevesarmy/skins} folder (uploaded as
+ * DynamicTextures), resource packs at
+ * {@code assets/steves_army/textures/entity/soldier/skins/<name>.png}, and
+ * skins whose PNG bytes were pushed by the server (dedicated-server support).
+ * The reload listener re-registers everything on F3+T, and unknown names are
+ * lazily fetched from the local folder or requested from the server once per
+ * session.
  */
 @Mod.EventBusSubscriber(modid = StevesArmyMod.MODID, bus = Mod.EventBusSubscriber.Bus.MOD, value = Dist.CLIENT)
 public final class SoldierSkinLoader {
 
-    /** Names of skins whose DynamicTexture is currently registered. */
+    /** Names of local folder skins whose DynamicTexture is currently registered. */
     private static final Set<String> FOLDER_SKINS = new HashSet<>();
     /** Cached resource-pack texture lookups (empty Optional = not present). */
     private static final Map<String, Optional<ResourceLocation>> RESOURCE_PACK_CACHE = new HashMap<>();
-    /** Skin names already tried via lazy load this session (prevents per-frame retries). */
+    /** Local skin names already tried via lazy load this session (prevents per-frame retries). */
     private static final Set<String> LAZY_ATTEMPTED = new HashSet<>();
+    /** Server-pushed skins: name -> PNG bytes (kept so resource reloads can re-register). */
+    private static final Map<String, byte[]> REMOTE_BYTES = new HashMap<>();
+    /** Server-pushed skins: name -> registered texture id. */
+    private static final Map<String, ResourceLocation> REMOTE_TEXTURES = new HashMap<>();
+    /** Names already requested from the server this session. */
+    private static final Set<String> REQUEST_ATTEMPTED = new HashSet<>();
 
     private SoldierSkinLoader() {}
 
@@ -52,7 +67,7 @@ public final class SoldierSkinLoader {
         });
     }
 
-    /** Rescans the skins folder and (re)registers one DynamicTexture per valid PNG. */
+    /** Rescans the local folder and (re)registers one DynamicTexture per skin. */
     public static synchronized void reload() {
         FOLDER_SKINS.clear();
         RESOURCE_PACK_CACHE.clear();
@@ -62,7 +77,7 @@ public final class SoldierSkinLoader {
             Path file = SoldierSkinManager.getSkinFolder().resolve(name + ".png");
             try (InputStream in = Files.newInputStream(file)) {
                 NativeImage image = NativeImage.read(in);
-                if (!isSupportedSize(image.getWidth(), image.getHeight())) {
+                if (!SoldierSkinManager.isSupportedSize(image.getWidth(), image.getHeight())) {
                     StevesArmyMod.LOGGER.warn("[Skins] Skipping '{}': {}x{} is unsupported (need 64x64 or 64x32)",
                         name, image.getWidth(), image.getHeight());
                     image.close();
@@ -76,13 +91,65 @@ public final class SoldierSkinLoader {
                 StevesArmyMod.LOGGER.warn("[Skins] Failed to load '{}': {}", name, e.toString());
             }
         }
-        StevesArmyMod.LOGGER.info("[Skins] Registered {} folder skin texture(s)", FOLDER_SKINS.size());
+        // Resource reload drops registered textures; rebuild the remote ones from stored bytes.
+        for (Map.Entry<String, byte[]> entry : new HashMap<>(REMOTE_BYTES).entrySet()) {
+            registerRemoteTexture(entry.getKey(), entry.getValue());
+        }
+        StevesArmyMod.LOGGER.info("[Skins] Registered {} folder and {} server skin texture(s)",
+            FOLDER_SKINS.size(), REMOTE_TEXTURES.size());
+    }
+
+    /** Stores and registers skins pushed by the server (main thread via packet enqueueWork). */
+    public static synchronized void receiveServerSkins(List<SyncSoldierSkinsPacket.SkinData> entries) {
+        int stored = 0;
+        for (SyncSoldierSkinsPacket.SkinData entry : entries) {
+            if (REMOTE_BYTES.containsKey(entry.name())) {
+                continue;
+            }
+            if (registerRemoteTexture(entry.name(), entry.data())) {
+                stored++;
+            }
+        }
+        if (stored > 0) {
+            StevesArmyMod.LOGGER.info("[Skins] Received {} server skin(s) ({} total)", stored, REMOTE_BYTES.size());
+        }
+    }
+
+    /** Validates, stores, and registers one remote skin; false if the bytes are not usable. */
+    private static boolean registerRemoteTexture(String name, byte[] data) {
+        try (InputStream in = new ByteArrayInputStream(data)) {
+            NativeImage image = NativeImage.read(in);
+            if (!SoldierSkinManager.isSupportedSize(image.getWidth(), image.getHeight())) {
+                StevesArmyMod.LOGGER.warn("[Skins] Skipping server skin '{}': {}x{} is unsupported",
+                    name, image.getWidth(), image.getHeight());
+                image.close();
+                return false;
+            }
+            ResourceLocation id = remoteTextureId(name);
+            Minecraft.getInstance().getTextureManager().register(id, new DynamicTexture(image));
+            REMOTE_BYTES.put(name, data);
+            REMOTE_TEXTURES.put(name, id);
+            return true;
+        } catch (Exception e) {
+            StevesArmyMod.LOGGER.warn("[Skins] Failed to decode server skin '{}': {}", name, e.toString());
+            return false;
+        }
+    }
+
+    /** Drops all server-pushed skins (world disconnect). */
+    public static synchronized void clearRemote() {
+        for (ResourceLocation id : REMOTE_TEXTURES.values()) {
+            Minecraft.getInstance().getTextureManager().release(id);
+        }
+        REMOTE_BYTES.clear();
+        REMOTE_TEXTURES.clear();
+        REQUEST_ATTEMPTED.clear();
     }
 
     /**
      * Resolves a skin name to a texture, or null to fall back to the default
-     * soldier texture. Folder skins win; resource packs can provide skins at
-     * {@code assets/steves_army/textures/entity/soldier/skins/<name>.png}.
+     * soldier texture. Folder skins win over resource packs and server skins;
+     * unknown names get one lazy local-folder attempt and one server request.
      */
     public static ResourceLocation resolve(String skinName) {
         if (skinName == null || skinName.isEmpty()) {
@@ -95,12 +162,21 @@ public final class SoldierSkinLoader {
         if (packTexture != null) {
             return packTexture;
         }
-        // The file may have been dropped into the folder after startup;
-        // try to load it on demand (once per name per session).
-        return lazyLoad(skinName);
+        ResourceLocation remote = REMOTE_TEXTURES.get(skinName);
+        if (remote != null) {
+            return remote;
+        }
+        // The file may exist locally but postdate startup; try it once.
+        ResourceLocation lazy = lazyLoad(skinName);
+        if (lazy != null) {
+            return lazy;
+        }
+        // Dedicated server: ask for the bytes once; the reply registers the texture.
+        requestFromServer(skinName);
+        return null;
     }
 
-    /** One-time attempt to load a folder skin that was not present at startup. */
+    /** One-time attempt to load a local folder skin that was not present at startup. */
     private static synchronized ResourceLocation lazyLoad(String name) {
         if (LAZY_ATTEMPTED.contains(name)) {
             return null;
@@ -112,7 +188,7 @@ public final class SoldierSkinLoader {
         }
         try (InputStream in = Files.newInputStream(file)) {
             NativeImage image = NativeImage.read(in);
-            if (!isSupportedSize(image.getWidth(), image.getHeight())) {
+            if (!SoldierSkinManager.isSupportedSize(image.getWidth(), image.getHeight())) {
                 StevesArmyMod.LOGGER.warn("[Skins] Skipping '{}': {}x{} is unsupported (need 64x64 or 64x32)",
                     name, image.getWidth(), image.getHeight());
                 image.close();
@@ -127,6 +203,30 @@ public final class SoldierSkinLoader {
             StevesArmyMod.LOGGER.warn("[Skins] Failed to load '{}': {}", name, e.toString());
             return null;
         }
+    }
+
+    /** One-time request for a synced skin name the client cannot resolve itself. */
+    private static void requestFromServer(String name) {
+        if (REQUEST_ATTEMPTED.add(name)) {
+            NetworkHandler.INSTANCE.sendToServer(new RequestSkinPacket(name));
+        }
+    }
+
+    /** Texture id under which a local folder skin is (or would be) registered. */
+    public static ResourceLocation folderTexture(String name) {
+        return folderTextureId(name);
+    }
+
+    /** Texture id under which a server-pushed skin is registered, or null. */
+    public static ResourceLocation remoteTexture(String name) {
+        return REMOTE_TEXTURES.get(name);
+    }
+
+    /** Names of skins pushed by the server this session (sorted, case-insensitive). */
+    public static synchronized List<String> getRemoteNames() {
+        List<String> names = new ArrayList<>(REMOTE_BYTES.keySet());
+        names.sort(String.CASE_INSENSITIVE_ORDER);
+        return names;
     }
 
     private static Optional<ResourceLocation> resourcePackTexture(String name) {
@@ -145,12 +245,7 @@ public final class SoldierSkinLoader {
         return new ResourceLocation(StevesArmyMod.MODID, "skins/" + name.toLowerCase(Locale.ROOT));
     }
 
-    /** Texture id under which a folder skin is (or would be) registered. */
-    public static ResourceLocation folderTexture(String name) {
-        return folderTextureId(name);
-    }
-
-    private static boolean isSupportedSize(int width, int height) {
-        return width == 64 && (height == 64 || height == 32);
+    private static ResourceLocation remoteTextureId(String name) {
+        return new ResourceLocation(StevesArmyMod.MODID, "skins_remote/" + name.toLowerCase(Locale.ROOT));
     }
 }

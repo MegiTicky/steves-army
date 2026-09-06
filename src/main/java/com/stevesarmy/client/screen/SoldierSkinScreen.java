@@ -108,6 +108,12 @@ public class SoldierSkinScreen extends Screen {
                 seen.add(name.toLowerCase(Locale.ROOT));
             }
         }
+        for (String name : SoldierSkinLoader.getRemoteNames()) {
+            if (!seen.contains(name.toLowerCase(Locale.ROOT))) {
+                entries.add(new SkinEntry(name, name + " (server)", SoldierSkinLoader.remoteTexture(name)));
+                seen.add(name.toLowerCase(Locale.ROOT));
+            }
+        }
         return entries;
     }
 
