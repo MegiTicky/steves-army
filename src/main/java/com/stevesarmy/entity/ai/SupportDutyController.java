@@ -8,7 +8,7 @@ import com.stevesarmy.entity.SupportEntity;
 import com.stevesarmy.inventory.SoldierInventory;
 import com.stevesarmy.network.NetworkHandler;
 import com.stevesarmy.network.SyncSoldierInventoryPacket;
-import com.stevesarmy.registry.ModItemTags;
+import com.stevesarmy.registry.HealingItems;
 import com.stevesarmy.squad.OwnedSoldierRegistry;
 import com.stevesarmy.squad.ResupplyConfig;
 import net.minecraft.server.level.ServerLevel;
@@ -290,7 +290,7 @@ public final class SupportDutyController {
             SoldierInventory inv = soldier.getSoldierInventory();
             int count = 0;
             for (int slot = SoldierInventory.SLOT_GENERAL_START; slot < SoldierInventory.INVENTORY_SIZE; slot++) {
-                if (inv.getItem(slot).is(ModItemTags.SOLDIER_HEALING_ITEMS)) {
+                if (HealingItems.isHealingItem(inv.getItem(slot))) {
                     count += inv.getItem(slot).getCount();
                 }
             }
@@ -305,7 +305,7 @@ public final class SupportDutyController {
     private int countHealingItemsPlayer(Player player) {
         int count = 0;
         for (int i = 0; i < player.getInventory().getContainerSize(); i++) {
-            if (player.getInventory().getItem(i).is(ModItemTags.SOLDIER_HEALING_ITEMS)) {
+            if (HealingItems.isHealingItem(player.getInventory().getItem(i))) {
                 count += player.getInventory().getItem(i).getCount();
             }
         }
@@ -327,7 +327,7 @@ public final class SupportDutyController {
     private boolean supportHasHealingItems() {
         SoldierInventory inv = soldier.getSoldierInventory();
         for (int slot = SoldierInventory.SLOT_GENERAL_START; slot < SoldierInventory.INVENTORY_SIZE; slot++) {
-            if (inv.getItem(slot).is(ModItemTags.SOLDIER_HEALING_ITEMS)) return true;
+            if (HealingItems.isHealingItem(inv.getItem(slot))) return true;
         }
         return false;
     }
@@ -466,7 +466,7 @@ public final class SupportDutyController {
 
         for (int slot = SoldierInventory.SLOT_GENERAL_START; slot < SoldierInventory.INVENTORY_SIZE && remaining > 0; slot++) {
             ItemStack stack = inv.getItem(slot);
-            if (stack.isEmpty() || !stack.is(ModItemTags.SOLDIER_HEALING_ITEMS)) continue;
+            if (stack.isEmpty() || !HealingItems.isHealingItem(stack)) continue;
 
             int take = Math.min(stack.getCount(), remaining);
             ItemStack split = stack.split(take);

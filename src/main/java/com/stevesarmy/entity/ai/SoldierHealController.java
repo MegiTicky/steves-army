@@ -5,7 +5,7 @@ import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.inventory.SoldierInventory;
 import com.stevesarmy.network.NetworkHandler;
 import com.stevesarmy.network.SyncSoldierInventoryPacket;
-import com.stevesarmy.registry.ModItemTags;
+import com.stevesarmy.registry.HealingItems;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.item.ItemStack;
 
@@ -96,7 +96,7 @@ public final class SoldierHealController {
     private int findHealingItem() {
         for (int slot = SoldierInventory.SLOT_GENERAL_START; slot < SoldierInventory.INVENTORY_SIZE; slot++) {
             ItemStack stack = soldier.getSoldierInventory().getItem(slot);
-            if (stack.is(ModItemTags.SOLDIER_HEALING_ITEMS) && stack.getUseDuration() > 0) {
+            if (HealingItems.isHealingItem(stack) && stack.getUseDuration() > 0) {
                 return slot;
             }
         }
