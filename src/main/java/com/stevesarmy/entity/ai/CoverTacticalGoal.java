@@ -135,6 +135,14 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
     // from the selected cover's position (18 blocks ~= FOLLOW_COVER_SEARCH_RADIUS + margin).
     private static final double FOLLOW_TARGET_STALE_DISTANCE = 18.0D;
     private static final int FOLLOW_REPLAN_COOLDOWN_TICKS = 40;
+    // Rear roles (support) get a looser FOLLOW leash: a pacing owner must not
+    // drag the medic into a new cover search every few seconds.
+    private static final float SUPPORT_FOLLOW_COVER_DISTANCE = 22.0f;
+    private static final double SUPPORT_FOLLOW_TARGET_STALE_DISTANCE = 30.0D;
+    private static final double SUPPORT_FOLLOW_OWNER_MAX_DISTANCE_SQR = 32.0D * 32.0D;
+    // The support/MG search anchor is latched so repeated searches within this
+    // window score identically instead of tracking every teammate step.
+    private static final int MG_ANCHOR_LATCH_TICKS = 200;
     
     private static final double POSITIONING_TOLERANCE = 0.05;
     private static final double POSITIONING_SPEED = 1.0;
@@ -212,6 +220,8 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
     private BlockPos compromisedCoverPosition = null;
     private boolean emergencyCoverSearchActive = false;
     private BlockPos suppressionEpisodeCover = null;
+    private BlockPos latchedMachineGunnerSearchCenter = null;
+    private int latchedMachineGunnerSearchCenterTick = 0;
     private int suppressionEpisodeCount = 0;
     private boolean suppressionEpisodeActive = false;
     private long continuousSuppressionStartTime = 0L;
@@ -867,7 +877,7 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
 
         LivingEntity owner = soldier.getOwner();
         if (owner == null || !owner.isAlive() || owner.isSpectator()
-            || soldier.distanceToSqr(owner) < FOLLOW_COVER_DISTANCE * FOLLOW_COVER_DISTANCE) {
+            || soldier.distanceToSqr(owner) < followCoverDistance() * followCoverDistance()) {
             return false;
         }
 
@@ -875,6 +885,19 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
         relocationCenter = owner.blockPosition().immutable();
         relocationCommandGeneration = -1;
         return true;
+    }
+
+    /** Rear roles tolerate a farther owner before interrupting for a follow cover move. */
+    private float followCoverDistance() {
+        return soldier.isPeekDisabled() ? SUPPORT_FOLLOW_COVER_DISTANCE : FOLLOW_COVER_DISTANCE;
+    }
+
+    private double followTargetStaleDistance() {
+        return soldier.isPeekDisabled() ? SUPPORT_FOLLOW_TARGET_STALE_DISTANCE : FOLLOW_TARGET_STALE_DISTANCE;
+    }
+
+    private double followOwnerMaxDistanceSqr() {
+        return soldier.isPeekDisabled() ? SUPPORT_FOLLOW_OWNER_MAX_DISTANCE_SQR : 20.0D * 20.0D;
     }
 
     private boolean isRelocationStillValid() {
@@ -955,10 +978,23 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
         if (!soldier.hasValidAttackTarget() && soldier.getSquadMode() != SquadMode.FOLLOW) {
             return null;
         }
+        // The live anchor (riflemen centroid + engagement direction) moves with
+        // every teammate step, which re-ranks all cover on each search. Latch it
+        // briefly so repeated searches — duty recovery, reposition requests —
+        // land on the same spot instead of walking the soldier in circles.
+        if (latchedMachineGunnerSearchCenter != null
+            && soldier.tickCount - latchedMachineGunnerSearchCenterTick < MG_ANCHOR_LATCH_TICKS) {
+            return latchedMachineGunnerSearchCenter;
+        }
         BlockPos target = soldier.hasValidAttackTarget()
             ? soldier.getAttackTargetPos()
             : soldier instanceof MachineGunnerEntity mg ? mg.getSuppressionCenter() : null;
-        return SupportPositionFinder.findRearAnchor(soldier, target);
+        BlockPos anchor = SupportPositionFinder.findRearAnchor(soldier, target);
+        if (anchor != null) {
+            latchedMachineGunnerSearchCenter = anchor;
+            latchedMachineGunnerSearchCenterTick = soldier.tickCount;
+        }
+        return anchor;
     }
 
     /**
@@ -1532,7 +1568,7 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
                 CoverPoint targetCover = getCoverManager().getTargetCover();
                 if (targetCover != null && !getCoverManager().isInCover()
                     && followReplanCooldownTicks <= 0
-                    && ownerPos.distSqr(targetCover.getPosition()) > FOLLOW_TARGET_STALE_DISTANCE * FOLLOW_TARGET_STALE_DISTANCE) {
+                    && ownerPos.distSqr(targetCover.getPosition()) > followTargetStaleDistance() * followTargetStaleDistance()) {
                     CoverReservationManager.release(targetCover.getPosition(), soldier);
                     getCoverManager().clearTargetCover();
                     getPositionController().clear();
@@ -2893,7 +2929,7 @@ private void tickRepositioning() {
             LivingEntity owner = soldier.getOwner();
             if (owner != null) {
                 double distToOwner = currentCover.getPosition().distSqr(owner.blockPosition());
-                if (distToOwner > 20 * 20) {
+                if (distToOwner > followOwnerMaxDistanceSqr()) {
                     if (DiagnosticLogManager.isCoverLoggingEnabled()) {
                         StevesArmyMod.LOGGER.info("[CoverGoal] Cover invalid: too far from owner (dist={})",
                             String.format("%.1f", Math.sqrt(distToOwner)));
@@ -2957,8 +2993,11 @@ private void tickRepositioning() {
             }
         }
 
-        // Check for better cover (only when recovered from suppression)
-        if (canLeaveCoverNow()) {
+        // Check for better cover (only when recovered from suppression).
+        // Peek-disabled roles (support) skip the opportunistic hop entirely:
+        // their score inputs drift constantly, so a marginal edge would reshuffle
+        // them every evaluation. Real invalidation still repositions below.
+        if (canLeaveCoverNow() && !soldier.isPeekDisabled()) {
             Optional<CoverPoint> betterCover = findBetterCover();
             if (betterCover.isPresent()) {
                 CoverPoint newCover = betterCover.get();
@@ -5082,6 +5121,7 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
         getPeekController().resetForNewCover(soldier, cover.getPosition());
         getPeekController().setLastPeekEndTime(System.currentTimeMillis());
         resetSuppressionEpisodes();
+        latchedMachineGunnerSearchCenter = null;
         
         // Compute peek position with LOS validation for full cover
         if (cover.getType() == CoverType.FULL) {
