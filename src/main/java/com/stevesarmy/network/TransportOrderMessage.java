@@ -1,5 +1,7 @@
 package com.stevesarmy.network;
 
+import com.stevesarmy.StevesArmyConfig;
+import com.stevesarmy.compat.AnalogWarfareCompat;
 import com.stevesarmy.compat.VS2Compat;
 import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.squad.FireTeam;
@@ -10,9 +12,11 @@ import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.network.NetworkEvent;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Supplier;
 
@@ -73,10 +77,22 @@ public class TransportOrderMessage {
             sender.displayClientMessage(Component.translatable("transport.steves_army.feedback.no_soldiers"), true);
             return;
         }
+        boolean handlesAvailable = StevesArmyConfig.VEHICLE_HANDLES_ENABLED.get()
+            && AnalogWarfareCompat.isAvailable();
         int dismounted = 0;
         for (SoldierEntity soldier : soldiers) {
+            Entity vehicle = soldier.isPassenger() ? soldier.getVehicle() : null;
+            net.minecraft.world.level.block.entity.BlockEntity handle = null;
+            if (handlesAvailable && vehicle != null && soldier.level() instanceof ServerLevel serverLevel) {
+                handle = AnalogWarfareCompat.findHandleForSeat(serverLevel, vehicle);
+            }
             if (VS2Compat.releaseTransport(soldier)) {
                 dismounted++;
+                if (handle != null) {
+                    // Linked seat: the soldier exits at the handle (the hatch)
+                    // and may stand aboard briefly before ship extraction resumes.
+                    AnalogWarfareCompat.teleportSoldierToHandle(soldier, handle);
+                }
             }
         }
         if (dismounted == 0) {
@@ -117,22 +133,27 @@ public class TransportOrderMessage {
             return;
         }
 
-        List<BlockPos> seats = VS2Compat.findFreeStaticSeats(level, ship, searchCenter, eligible.size());
-        if (seats.isEmpty()) {
-            sender.displayClientMessage(Component.translatable("transport.steves_army.feedback.no_free_seats"), true);
-            return;
+        // Handle-linked seats first (VS Analog Warfare vehicle mount handles);
+        // soldiers without a free link fall back to the plain free-seat scan.
+        List<SoldierEntity> remaining = new ArrayList<>(eligible);
+        int seated = 0;
+        if (StevesArmyConfig.VEHICLE_HANDLES_ENABLED.get() && AnalogWarfareCompat.isAvailable()) {
+            seated = AnalogWarfareCompat.mountViaHandles(level, ship, searchCenter, remaining);
         }
 
-        int seated = 0;
-        for (SoldierEntity soldier : eligible) {
-            if (seated >= seats.size()) {
-                break;
-            }
-            soldier.getNavigation().stop();
-            soldier.cancelCoverMovement();
-            soldier.setDeltaMovement(Vec3.ZERO);
-            if (VS2Compat.seatSoldierDirect(soldier, level, seats.get(seated))) {
-                seated++;
+        if (!remaining.isEmpty()) {
+            List<BlockPos> seats = VS2Compat.findFreeStaticSeats(level, ship, searchCenter, remaining.size());
+            for (SoldierEntity soldier : remaining) {
+                if (seats.isEmpty()) {
+                    break;
+                }
+                soldier.getNavigation().stop();
+                soldier.cancelCoverMovement();
+                soldier.setDeltaMovement(Vec3.ZERO);
+                if (VS2Compat.seatSoldierDirect(soldier, level, seats.get(0))) {
+                    seats.remove(0);
+                    seated++;
+                }
             }
         }
 

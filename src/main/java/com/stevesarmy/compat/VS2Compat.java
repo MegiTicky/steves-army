@@ -66,6 +66,11 @@ public final class VS2Compat {
     private static Class<?> contraptionEntityClass;
     private static Class<?> shipMountedDataProviderClass;
     private static MethodHandle shipGetShipToWorld;
+    private static MethodHandle shipGetWorldToShip;
+    private static MethodHandle shipGetAABB;
+    private static Method aabbMinX;
+    private static Method aabbMinY;
+    private static Method aabbMinZ;
     private static Method getContraption;
     private static Method getSeats;
     private static Method getSeatMapping;
@@ -100,6 +105,9 @@ public final class VS2Compat {
         if (state.reboardBlockTicks > 0) {
             state.reboardBlockTicks--;
         }
+        if (state.handleDismountGraceTicks > 0) {
+            state.handleDismountGraceTicks--;
+        }
 
         if (soldier.isPassenger()) {
             soldier.stopRiding();
@@ -110,8 +118,13 @@ public final class VS2Compat {
         }
 
         if (isInsideShip(soldier) || isBeingDraggedByShip(soldier)) {
-            extractToSafeWorldPosition(soldier, state);
-            return true;
+            // A soldier just let off at a mount handle may stand aboard briefly
+            // (e.g. the loading hatch) before ship-extraction moves it to safe ground.
+            if (state.handleDismountGraceTicks <= 0) {
+                extractToSafeWorldPosition(soldier, state);
+                return true;
+            }
+            return false;
         }
 
         rememberSafeWorldPosition(soldier, state);
@@ -179,6 +192,81 @@ public final class VS2Compat {
         } catch (Throwable ignored) {
         }
         return direction;
+    }
+
+    /** Transforms a world position into ship-local space, or null when unavailable. */
+    @Nullable
+    public static Vec3 worldToShipLocal(@Nullable Object ship, Vec3 worldPos) {
+        if (ship == null || shipGetWorldToShip == null) {
+            return null;
+        }
+        try {
+            Object matrix = shipGetWorldToShip.invoke(ship);
+            if (matrix instanceof org.joml.Matrix4dc m) {
+                org.joml.Vector3d v = new org.joml.Vector3d(worldPos.x, worldPos.y, worldPos.z);
+                m.transformPosition(v);
+                return new Vec3(v.x, v.y, v.z);
+            }
+        } catch (Throwable ignored) {
+        }
+        return null;
+    }
+
+    /**
+     * Minimum corner of the ship's AABB in shipyard (block) space — the origin that
+     * ship-local offsets are added to in order to reach real block positions.
+     */
+    @Nullable
+    public static BlockPos getShipyardMin(@Nullable Object ship) {
+        if (ship == null || shipGetAABB == null) {
+            return null;
+        }
+        try {
+            Object box = shipGetAABB.invoke(ship);
+            if (box == null) {
+                return null;
+            }
+            synchronized (VS2Compat.class) {
+                if (aabbMinX == null || aabbMinX.getDeclaringClass() != box.getClass()) {
+                    aabbMinX = box.getClass().getMethod("minX");
+                    aabbMinY = box.getClass().getMethod("minY");
+                    aabbMinZ = box.getClass().getMethod("minZ");
+                }
+            }
+            return new BlockPos(
+                ((Number) aabbMinX.invoke(box)).intValue(),
+                ((Number) aabbMinY.invoke(box)).intValue(),
+                ((Number) aabbMinZ.invoke(box)).intValue());
+        } catch (Throwable ignored) {
+        }
+        return null;
+    }
+
+    /** True when the entity is a Create SeatEntity (includes tallyho's FlexibleSeatEntity). */
+    public static boolean isCreateSeatEntity(Entity entity) {
+        initialize();
+        return createSeatEntityClass != null && createSeatEntityClass.isInstance(entity);
+    }
+
+    /** Id of the ship managing the given world/shipyard position, or null. */
+    @Nullable
+    public static Long getShipIdAt(Level level, double x, double y, double z) {
+        initialize();
+        if (!available) {
+            return null;
+        }
+        try {
+            Object ship = reflect(getShipObjectManagingPosDouble, level, x, y, z);
+            return getShipIdOf(ship);
+        } catch (ReflectiveOperationException exception) {
+            return null;
+        }
+    }
+
+    /** Grants a soldier a grace period to stand at a handle after a handle dismount. */
+    public static void markHandleDismount(SoldierEntity soldier) {
+        getOrCreateState(soldier).handleDismountGraceTicks =
+            StevesArmyConfig.VEHICLE_HANDLES_DISMOUNT_GRACE.get();
     }
 
     /**
@@ -1276,6 +1364,12 @@ private static boolean isTransportOwnerOnShip(LivingEntity owner, SoldierState s
                     "org.valkyrienskies.mod.common.entity.ShipMountedToDataProvider");
                 shipGetShipToWorld = lookup.findVirtual(shipClass, "getShipToWorld",
                     MethodType.methodType(org.joml.Matrix4dc.class));
+                shipGetWorldToShip = lookup.findVirtual(shipClass, "getWorldToShip",
+                    MethodType.methodType(org.joml.Matrix4dc.class));
+                Class<?> shipAabbClass = Class.forName(
+                    "org.valkyrienskies.core.api.ships.properties.ShipAABB");
+                shipGetAABB = lookup.findVirtual(shipClass, "getShipAABB",
+                    MethodType.methodType(shipAabbClass));
             } catch (ReflectiveOperationException | LinkageError crewHelpers) {
                 // Non-fatal: crew ship-space look transform falls back to the raw direction.
                 StevesArmyMod.LOGGER.warn("[VS2] Crew ship-transform helpers unavailable: {}",
@@ -1351,5 +1445,7 @@ private static boolean isTransportOwnerOnShip(LivingEntity owner, SoldierState s
         private long lastSeatAttemptLog;
         /** Crew soldiers seated on a station seat keep ticking their AI. */
         private boolean crewSeated;
+        /** Ticks a soldier may stand inside the ship after a mount-handle dismount. */
+        private int handleDismountGraceTicks;
     }
 }

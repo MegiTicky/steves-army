@@ -74,6 +74,9 @@ public class StevesArmyConfig {
     public static final ForgeConfigSpec.IntValue VEHICLE_CREW_DUTY_SCAN_INTERVAL;
     public static final ForgeConfigSpec.IntValue VEHICLE_CREW_SEAT_SCAN_INTERVAL;
 
+    public static final ForgeConfigSpec.BooleanValue VEHICLE_HANDLES_ENABLED;
+    public static final ForgeConfigSpec.IntValue VEHICLE_HANDLES_DISMOUNT_GRACE;
+
     public static final ForgeConfigSpec.IntValue OPTIMIZATION_LEVEL;
     public static final ForgeConfigSpec.BooleanValue RETRY_POLICY_ENABLED;
     public static final ForgeConfigSpec.BooleanValue PERCEPTION_FRAME_ENABLED;
@@ -476,6 +479,24 @@ BUILDER.pop();
         VEHICLE_CREW_SEAT_SCAN_INTERVAL = BUILDER
             .comment("Ticks between scans for a free seat while unseated. Default: 40 (2 seconds).")
             .defineInRange("seatScanInterval", 40, 5, 400);
+
+        BUILDER.pop();
+
+        BUILDER.push("vehicleMountHandles");
+
+        VEHICLE_HANDLES_ENABLED = BUILDER
+            .comment("Use VS Analog Warfare vehicle mount handle links for soldier vehicle",
+                     "orders: wheel MOUNT prefers the handle's linked seats (creating them",
+                     "when needed), wheel DISMOUNT lets soldiers out at the handle instead",
+                     "of wherever they sat. Ships or seats without links fall back to the",
+                     "plain free-seat behavior. Reflection-based; no hard dependency.")
+            .define("enabled", true);
+
+        VEHICLE_HANDLES_DISMOUNT_GRACE = BUILDER
+            .comment("Ticks a soldier may stand at a mount handle inside the ship after a",
+                     "handle dismount before ship-extraction moves it to safe ground.",
+                     "Default: 100 (5 seconds).")
+            .defineInRange("dismountGraceTicks", 100, 0, 1200);
 
         BUILDER.pop();
 
