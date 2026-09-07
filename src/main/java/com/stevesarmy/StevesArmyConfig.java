@@ -61,6 +61,19 @@ public class StevesArmyConfig {
     public static final ForgeConfigSpec.IntValue VS2_MAX_TRANSPORTED_SOLDIERS;
     public static final ForgeConfigSpec.IntValue VS2_DISMOUNT_REBOARD_DELAY;
 
+    public static final ForgeConfigSpec.BooleanValue VEHICLE_CREW_ENABLED;
+    public static final ForgeConfigSpec.DoubleValue VEHICLE_CREW_SEAT_SEARCH_RADIUS;
+    public static final ForgeConfigSpec.DoubleValue VEHICLE_CREW_STATION_REACH;
+    public static final ForgeConfigSpec.DoubleValue VEHICLE_CREW_TRAVERSE_SPEED;
+    public static final ForgeConfigSpec.DoubleValue VEHICLE_CREW_BLOOM_PER_SHOT;
+    public static final ForgeConfigSpec.DoubleValue VEHICLE_CREW_BLOOM_MAX;
+    public static final ForgeConfigSpec.DoubleValue VEHICLE_CREW_BLOOM_DECAY;
+    public static final ForgeConfigSpec.IntValue VEHICLE_CREW_BURST_SIZE;
+    public static final ForgeConfigSpec.IntValue VEHICLE_CREW_BURST_PAUSE;
+    public static final ForgeConfigSpec.DoubleValue VEHICLE_CREW_MIN_AIM_TO_FIRE;
+    public static final ForgeConfigSpec.IntValue VEHICLE_CREW_DUTY_SCAN_INTERVAL;
+    public static final ForgeConfigSpec.IntValue VEHICLE_CREW_SEAT_SCAN_INTERVAL;
+
     public static final ForgeConfigSpec.IntValue OPTIMIZATION_LEVEL;
     public static final ForgeConfigSpec.BooleanValue RETRY_POLICY_ENABLED;
     public static final ForgeConfigSpec.BooleanValue PERCEPTION_FRAME_ENABLED;
@@ -403,6 +416,66 @@ BUILDER.pop();
                      "making a manual dismount impossible.",
                      "Default: 100 (5 seconds)")
             .defineInRange("dismountReboardDelay", 100, 0, 1200);
+
+        BUILDER.pop();
+
+        BUILDER.push("vehicleCrew");
+
+        VEHICLE_CREW_ENABLED = BUILDER
+            .comment("Enable the vehicle crew role. Requires Valkyrien Skies; tallyho provides",
+                     "the hull MG and periscope stations the role can man (reflection-based,",
+                     "no hard dependency). Without tallyho crew soldiers seat and stay only.")
+            .define("enabled", true);
+
+        VEHICLE_CREW_SEAT_SEARCH_RADIUS = BUILDER
+            .comment("How far an unseated vehicle crew soldier looks for a free Create seat",
+                     "entity to teleport to. Default: 64 blocks.")
+            .defineInRange("seatSearchRadius", 64.0, 4.0, 256.0);
+
+        VEHICLE_CREW_STATION_REACH = BUILDER
+            .comment("How far a seated crew soldier may man a hull MG or periscope from its seat.",
+                     "Default: 16 blocks.")
+            .defineInRange("stationReach", 16.0, 2.0, 64.0);
+
+        VEHICLE_CREW_TRAVERSE_SPEED = BUILDER
+            .comment("Maximum turret/optic rotation speed in degrees per tick. The mounted gun",
+                     "cannot snap-aim like an eye; tracking takes time. Default: 3.0 (60 deg/s).")
+            .defineInRange("traverseSpeedDegPerTick", 3.0, 0.5, 30.0);
+
+        VEHICLE_CREW_BLOOM_PER_SHOT = BUILDER
+            .comment("Sustained-fire bloom: each shot adds this much aim deviation growth",
+                     "(replaces gun recoil for a stabilized mount). Short bursts stay accurate,",
+                     "long sprays degrade. Default: 0.06.")
+            .defineInRange("bloomPerShot", 0.06, 0.0, 1.0);
+
+        VEHICLE_CREW_BLOOM_MAX = BUILDER
+            .comment("Maximum bloom; final sigma is multiplied by (1 + bloom). Default: 1.0 (2x spread).")
+            .defineInRange("bloomMax", 1.0, 0.0, 3.0);
+
+        VEHICLE_CREW_BLOOM_DECAY = BUILDER
+            .comment("Bloom lost per tick while not firing. Default: 0.02 (full recovery in ~3s).")
+            .defineInRange("bloomDecayPerTick", 0.02, 0.0, 1.0);
+
+        VEHICLE_CREW_BURST_SIZE = BUILDER
+            .comment("Rounds per burst before the crew pauses fire. Default: 6.")
+            .defineInRange("burstSize", 6, 1, 30);
+
+        VEHICLE_CREW_BURST_PAUSE = BUILDER
+            .comment("Ticks between bursts (bloom also decays here). Default: 20 (1 second).")
+            .defineInRange("burstPauseTicks", 20, 0, 100);
+
+        VEHICLE_CREW_MIN_AIM_TO_FIRE = BUILDER
+            .comment("Minimum aimQuality before the crew opens fire. The aim-settle time is the",
+                     "main balance lever against the recoilless mount. Default: 0.35.")
+            .defineInRange("minAimQualityToFire", 0.35, 0.05, 0.95);
+
+        VEHICLE_CREW_DUTY_SCAN_INTERVAL = BUILDER
+            .comment("Ticks between scans for a free hull MG / periscope while seated. Default: 20.")
+            .defineInRange("dutyScanInterval", 20, 5, 200);
+
+        VEHICLE_CREW_SEAT_SCAN_INTERVAL = BUILDER
+            .comment("Ticks between scans for a free seat while unseated. Default: 40 (2 seconds).")
+            .defineInRange("seatScanInterval", 40, 5, 400);
 
         BUILDER.pop();
 

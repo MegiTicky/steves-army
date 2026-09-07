@@ -26,6 +26,8 @@ public class SoldierMoveToPingGoal extends Goal {
     @Override
     public boolean canUse() {
         if (!soldier.isAlive()) return false;
+        // Crew soldiers ignore move pings while seated at their station.
+        if (soldier.isVehicleCrewActive() || soldier.isCrewSeated()) return false;
         if (soldier.hasValidAttackTarget()) return false;
         if (soldier.isGoToHolding()) return false;
         if (!soldier.hasValidPingMoveTarget()) return false;
@@ -41,6 +43,7 @@ public class SoldierMoveToPingGoal extends Goal {
     @Override
     public boolean canContinueToUse() {
         if (!soldier.isAlive()) return false;
+        if (soldier.isVehicleCrewActive() || soldier.isCrewSeated()) return false;
         if (soldier.isGoToHolding()) return false;
         if (!soldier.hasValidPingMoveTarget()) return false;
         if (rawTarget == null) return false;

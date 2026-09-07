@@ -8,7 +8,8 @@ public enum SoldierRole {
     RIFLEMAN,
     MACHINE_GUNNER,
     GARRISON,
-    SUPPORT;
+    SUPPORT,
+    VEHICLE_CREW;
 
     public Component getDisplayName() {
         return Component.translatable("role.steves_army." + name().toLowerCase());

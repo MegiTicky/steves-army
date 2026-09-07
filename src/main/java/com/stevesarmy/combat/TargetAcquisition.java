@@ -39,11 +39,24 @@ public class TargetAcquisition {
     }
     
     private static boolean isInArc(LivingEntity observer, LivingEntity target, double arcDegrees, String arcName) {
-        float headYaw = observer.getYHeadRot();
-        float yawRad = (float) Math.toRadians(-headYaw);
-        Vec3 observerLook = new Vec3(Mth.sin(yawRad), 0, Mth.cos(yawRad));
-        
-        Vec3 toTarget = target.position().subtract(observer.position()).normalize();
+        Vec3 observerLook;
+        Vec3 observerOrigin;
+        if (DetectionViewpoint.hasOverride(observer)) {
+            // A crewed optic looks where the camera looks, not where the seated body faces.
+            observerLook = DetectionViewpoint.getLook(observer).normalize();
+            observerOrigin = DetectionViewpoint.getEyePosition(observer);
+        } else {
+            float headYaw = observer.getYHeadRot();
+            float yawRad = (float) Math.toRadians(-headYaw);
+            observerLook = new Vec3(Mth.sin(yawRad), 0, Mth.cos(yawRad));
+            observerOrigin = observer.position();
+        }
+
+        Vec3 toTarget = target.position().subtract(observerOrigin);
+        if (toTarget.lengthSqr() < 1.0e-4) {
+            return true;
+        }
+        toTarget = toTarget.normalize();
         
         double dot = observerLook.dot(toTarget);
         double angleRadians = Math.acos(Math.max(-1.0, Math.min(1.0, dot)));
@@ -69,7 +82,8 @@ public class TargetAcquisition {
     }
 
     private static VisibilityRay.Result computeVisibility(LivingEntity observer, LivingEntity target) {
-        return VisibilityRay.trace(observer.level(), observer.getEyePosition(), target.getEyePosition(), observer);
+        return VisibilityRay.trace(observer.level(), DetectionViewpoint.getEyePosition(observer),
+            target.getEyePosition(), observer);
     }
 
     public static VisibilityRay.Result getVisibility(LivingEntity observer, LivingEntity target) {
@@ -84,7 +98,7 @@ public class TargetAcquisition {
         long key = ((long) observer.getId() << 32) | (target.getId() & 0xFFFFFFFFL);
         TickVisibilityCache cache = getVisibilityCache(observer.level());
         long currentTick = observer.level().getGameTime();
-        Vec3 from = observer.getEyePosition();
+        Vec3 from = DetectionViewpoint.getEyePosition(observer);
         Vec3 to = target.getEyePosition();
         CachedVisibility cached = cache.results.get(key);
         if (cached != null && cached.expiresAt >= currentTick
@@ -109,14 +123,14 @@ public class TargetAcquisition {
 
     public static boolean hasNearLineOfSightToPosition(LivingEntity observer, Vec3 targetPos, double distanceThreshold) {
         VisibilityRay.Result visibility = getPositionVisibility(observer, targetPos, false);
-        double targetDistance = observer.getEyePosition().distanceTo(targetPos);
+        double targetDistance = DetectionViewpoint.getEyePosition(observer).distanceTo(targetPos);
         return visibility.hasContact()
             || (!visibility.clear() && targetDistance - visibility.blockedDistance() <= distanceThreshold);
     }
 
     private static VisibilityRay.Result getPositionVisibility(LivingEntity observer, Vec3 targetPos,
                                                                boolean ignoreSmoke) {
-        Vec3 from = observer.getEyePosition();
+        Vec3 from = DetectionViewpoint.getEyePosition(observer);
         int cacheTicks = StevesArmyConfig.getPositionVisibilityCacheTicks();
         if (cacheTicks <= 0) {
             PerformanceMetrics.recordVisibilityCacheMiss();

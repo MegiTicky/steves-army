@@ -3,6 +3,7 @@ package com.stevesarmy.compat;
 import com.stevesarmy.StevesArmyConfig;
 import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.entity.SoldierEntity;
+import com.stevesarmy.entity.SoldierRole;
 import com.stevesarmy.squad.SquadMode;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Vec3i;
@@ -63,6 +64,8 @@ public final class VS2Compat {
     private static Class<?> createSeatBlockClass;
     private static Class<?> createSeatEntityClass;
     private static Class<?> contraptionEntityClass;
+    private static Class<?> shipMountedDataProviderClass;
+    private static MethodHandle shipGetShipToWorld;
     private static Method getContraption;
     private static Method getSeats;
     private static Method getSeatMapping;
@@ -89,7 +92,9 @@ public final class VS2Compat {
         SoldierState state = states.computeIfAbsent(soldier.getUUID(), ignored -> new SoldierState());
         if (state.transportAnchorId != null) {
             updateTransport(soldier, state);
-            return isTransported(soldier, state);
+            // Crew soldiers keep ticking their goals while seated so they can
+            // man hull MGs and periscopes; regular transported soldiers freeze.
+            return isTransported(soldier, state) && !state.crewSeated;
         }
 
         if (state.reboardBlockTicks > 0) {
@@ -117,6 +122,155 @@ public final class VS2Compat {
         states.remove(soldier.getUUID());
         authorizedMounts.remove(soldier.getUUID());
         authorizedStaticSeats.remove(soldier.getUUID());
+    }
+
+    /** True when the soldier is seated on a crew-claimed station seat (role keeps ticking AI). */
+    public static boolean isCrewSeated(SoldierEntity soldier) {
+        SoldierState state = states.get(soldier.getUUID());
+        return state != null && state.crewSeated;
+    }
+
+    /** True while the post-dismount re-boarding cooldown is running. */
+    public static boolean isAutoTransportBlocked(SoldierEntity soldier) {
+        SoldierState state = states.get(soldier.getUUID());
+        return state != null && state.reboardBlockTicks > 0;
+    }
+
+    /** The VS2 ship the entity is mounted to, or null. */
+    @Nullable
+    public static Object getMountedShip(Entity entity) {
+        if (!isEnabled()) {
+            return null;
+        }
+        try {
+            return reflect(getShipMountedTo, entity);
+        } catch (ReflectiveOperationException exception) {
+            logReflectionFailure(exception);
+            return null;
+        }
+    }
+
+    /** Stable id of a VS2 ship object, or null. */
+    @Nullable
+    public static Long getShipIdOf(@Nullable Object ship) {
+        if (ship == null) {
+            return null;
+        }
+        try {
+            return ((Number) getShipId.invoke(ship)).longValue();
+        } catch (ReflectiveOperationException exception) {
+            logReflectionFailure(exception);
+            return null;
+        }
+    }
+
+    /** Transforms a direction from ship-local space to world space. */
+    public static Vec3 shipToWorldDirection(@Nullable Object ship, Vec3 direction) {
+        if (ship == null || shipGetShipToWorld == null) {
+            return direction;
+        }
+        try {
+            Object matrix = shipGetShipToWorld.invoke(ship);
+            if (matrix instanceof org.joml.Matrix4dc m) {
+                org.joml.Vector3d v = new org.joml.Vector3d(direction.x, direction.y, direction.z);
+                m.transformDirection(v);
+                return new Vec3(v.x, v.y, v.z);
+            }
+        } catch (Throwable ignored) {
+        }
+        return direction;
+    }
+
+    /**
+     * World-space position of a seat entity. Create SeatEntities on ships live at
+     * shipyard coordinates; VS2 data-provider seats (e.g. tallyho's FlexibleSeatEntity)
+     * are already tracked at world coordinates.
+     */
+    public static Vec3 getSeatWorldPosition(Entity seat) {
+        if (shipMountedDataProviderClass != null && shipMountedDataProviderClass.isInstance(seat)) {
+            return seat.position();
+        }
+        if (seat.level() instanceof ServerLevel serverLevel) {
+            try {
+                Object ship = reflect(getShipObjectManagingPosDouble, serverLevel,
+                    seat.getX(), seat.getY(), seat.getZ());
+                if (ship != null) {
+                    Object world = reflect(toWorldCoordinates, ship,
+                        seat.getX(), seat.getY(), seat.getZ());
+                    if (world instanceof org.joml.Vector3dc v) {
+                        return new Vec3(v.x(), v.y(), v.z());
+                    }
+                }
+            } catch (ReflectiveOperationException ignored) {
+            }
+        }
+        return seat.position();
+    }
+
+    /**
+     * Nearest unoccupied Create seat entity (includes tallyho's FlexibleSeatEntity,
+     * which extends Create's SeatEntity) within the radius of the soldier.
+     */
+    @Nullable
+    public static Entity findFreeSeatEntityNear(SoldierEntity soldier, double radius) {
+        if (!(soldier.level() instanceof ServerLevel level)) {
+            return null;
+        }
+        initialize();
+        if (!available || createSeatEntityClass == null) {
+            return null;
+        }
+        Entity best = null;
+        double bestDistSqr = radius * radius;
+        for (Entity entity : level.getAllEntities()) {
+            if (!createSeatEntityClass.isInstance(entity) || entity.isRemoved()
+                || !entity.getPassengers().isEmpty()) {
+                continue;
+            }
+            Vec3 worldPos = getSeatWorldPosition(entity);
+            double distSqr = worldPos.distanceToSqr(soldier.position());
+            if (distSqr < bestDistSqr) {
+                bestDistSqr = distSqr;
+                best = entity;
+            }
+        }
+        return best;
+    }
+
+    /**
+     * Mounts the soldier onto a specific seat entity as command-driven transport,
+     * mirroring {@link #seatSoldierDirect} but for existing seat entities (tallyho
+     * FlexibleSeatEntity instances have no SeatBlock behind them). The soldier keeps
+     * ticking its AI, so the vehicle crew goal can man stations while seated.
+     */
+    public static boolean seatSoldierOnSeatEntity(SoldierEntity soldier, Entity seat) {
+        initialize();
+        if (!available || soldier.isPassenger() || seat.isRemoved()) {
+            return false;
+        }
+        authorizedMounts.put(soldier.getUUID(), seat.getUUID());
+        try {
+            soldier.startRiding(seat, true);
+        } finally {
+            authorizedMounts.remove(soldier.getUUID());
+        }
+        if (!soldier.isPassenger() || soldier.getVehicle() != seat) {
+            return false;
+        }
+
+        SoldierState state = getOrCreateState(soldier);
+        state.transportAnchorId = seat.getUUID();
+        state.transportOwnerId = null;
+        state.transportShipId = getShipIdOf(getMountedShip(seat));
+        state.transportSeatPosition = null;
+        state.seatRetryCooldownTicks = 0;
+        state.crewSeated = true;
+
+        soldier.getVehicle().positionRider(soldier);
+        syncTransportState(soldier, seat, true);
+        StevesArmyMod.LOGGER.info("[VS2] seatSoldierOnSeatEntity: mounted soldier={} seat={} seatClass={} shipId={}",
+            soldier.getId(), seat.getId(), seat.getClass().getSimpleName(), state.transportShipId);
+        return true;
     }
 
     /** Allows only the immediate Create seat mount initiated by tryContraptionSeat or tryStaticSeat. */
@@ -213,6 +367,7 @@ public final class VS2Compat {
                 state.transportShipId = shipId;
                 state.transportSeatPosition = seatBlockPos;
                 state.seatRetryCooldownTicks = 0;
+                state.crewSeated = soldier.getRole() == SoldierRole.VEHICLE_CREW;
 
                 Vec3 prePos = soldier.position();
                 soldier.getVehicle().positionRider(soldier);
@@ -618,6 +773,7 @@ public final class VS2Compat {
                             if (soldier.isPassenger() && soldier.getVehicle() == vehicle) {
                                 state.transportAnchorId = vehicle.getUUID();
                                 state.transportOwnerId = owner.getUUID();
+                                state.crewSeated = soldier.getRole() == SoldierRole.VEHICLE_CREW;
                                 state.transportShipId = getShipId.invoke(reflect(getShipMountedTo, owner)) instanceof Number id
                                     ? id.longValue() : null;
                                 state.seatRetryCooldownTicks = 0;
@@ -761,6 +917,7 @@ public final class VS2Compat {
 
                                 state.transportAnchorId = vehicle.getUUID();
                                 state.transportOwnerId = owner.getUUID();
+                                state.crewSeated = soldier.getRole() == SoldierRole.VEHICLE_CREW;
                                 state.transportShipId = ownerShipId;
                                 state.transportSeatPosition = candidate;
                                 state.seatRetryCooldownTicks = 0;
@@ -884,6 +1041,7 @@ public final class VS2Compat {
         state.transportOwnerId = null;
         state.transportShipId = null;
         state.transportSeatPosition = null;
+        state.crewSeated = false;
     }
 
     private static boolean isTransported(SoldierEntity soldier, SoldierState state) {
@@ -1113,6 +1271,16 @@ private static boolean isTransportOwnerOnShip(LivingEntity owner, SoldierState s
                     Level.class, BlockPos.class, Entity.class);
             }
             getMountPosInShip = mountedDataClass.getMethod("getMountPosInShip");
+            try {
+                shipMountedDataProviderClass = Class.forName(
+                    "org.valkyrienskies.mod.common.entity.ShipMountedToDataProvider");
+                shipGetShipToWorld = lookup.findVirtual(shipClass, "getShipToWorld",
+                    MethodType.methodType(org.joml.Matrix4dc.class));
+            } catch (ReflectiveOperationException | LinkageError crewHelpers) {
+                // Non-fatal: crew ship-space look transform falls back to the raw direction.
+                StevesArmyMod.LOGGER.warn("[VS2] Crew ship-transform helpers unavailable: {}",
+                    crewHelpers.toString());
+            }
             contraptionEntityClass = Class.forName(CONTRAPTION_ENTITY_CLASS);
             getContraption = contraptionEntityClass.getMethod("getContraption");
             Class<?> contraptionClass = Class.forName("com.simibubi.create.content.contraptions.Contraption");
@@ -1181,5 +1349,7 @@ private static boolean isTransportOwnerOnShip(LivingEntity owner, SoldierState s
         private int seatRetryCooldownTicks;
         private int reboardBlockTicks;
         private long lastSeatAttemptLog;
+        /** Crew soldiers seated on a station seat keep ticking their AI. */
+        private boolean crewSeated;
     }
 }

@@ -67,7 +67,7 @@ public class ExposureCalculator {
         long key = ((long) observer.getId() << 32) | (target.getId() & 0xFFFFFFFFL);
         int cacheTicks = StevesArmyConfig.getExposureCacheTicks();
         long currentTick = level.getGameTime();
-        Vec3 observerEye = observer.getEyePosition();
+        Vec3 observerEye = DetectionViewpoint.getEyePosition(observer);
         Vec3 targetPosition = target.position();
         CachedExposure cached = cache.exposureByPair.get(key);
         if (cached != null && cached.expiresAt >= currentTick
@@ -103,7 +103,7 @@ public class ExposureCalculator {
         PerformanceMetrics.recordExposureCalculation();
 
         Level level = observer.level();
-        Vec3 observerEye = observer.getEyePosition();
+        Vec3 observerEye = DetectionViewpoint.getEyePosition(observer);
 
         Vec3[] targetPoints = getTargetPoints(target);
 
@@ -183,7 +183,7 @@ public class ExposureCalculator {
             return null;
         }
 
-        Vec3 observerEye = observer.getEyePosition();
+        Vec3 observerEye = DetectionViewpoint.getEyePosition(observer);
         for (TargetPoint point : getTargetPointsWithPriority(target)) {
             if (point.type != AimPointType.HEAD) {
                 continue;
@@ -202,7 +202,7 @@ public class ExposureCalculator {
         }
 
         int cacheTicks = StevesArmyConfig.getAimPointCacheTicks();
-        Vec3 observerEye = observer.getEyePosition();
+        Vec3 observerEye = DetectionViewpoint.getEyePosition(observer);
         Vec3 targetPosition = target.position();
         net.minecraft.world.entity.Pose targetPose = target.getPose();
         float targetWidth = target.getBbWidth();

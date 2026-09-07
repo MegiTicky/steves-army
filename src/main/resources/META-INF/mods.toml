@@ -90,6 +90,13 @@ description='''${mod_description}'''
     side="BOTH"
 
 [[dependencies.${mod_id}]]
+    modId="tallyho"
+    mandatory=false
+    versionRange="[3.2,)"
+    ordering="AFTER"
+    side="BOTH"
+
+[[dependencies.${mod_id}]]
     modId="playerrevive"
     mandatory=false
     versionRange="[2.0,)"

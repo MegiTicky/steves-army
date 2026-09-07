@@ -212,6 +212,8 @@ public class SoldierEntity extends PathfinderMob implements Container {
     private PeekController peekController;
     protected CoverGoalController coverTacticalGoal;
     protected Goal coverTacticalGoalTask;
+    /** Set by the vehicle crew goal while it holds a hull MG or periscope station. */
+    private boolean vehicleCrewActive;
     private final ThreatAwareness threatAwareness;
     private final GrenadeTacticalController grenadeTacticalController;
     private final SoldierHealController healController;
@@ -486,6 +488,20 @@ public class SoldierEntity extends PathfinderMob implements Container {
         return false;
     }
 
+    /** True while the vehicle crew goal holds a station (hull MG / periscope). */
+    public boolean isVehicleCrewActive() {
+        return vehicleCrewActive;
+    }
+
+    public void setVehicleCrewActive(boolean active) {
+        this.vehicleCrewActive = active;
+    }
+
+    /** True while seated on a crew transport seat (VS2 keeps the seat, AI keeps ticking). */
+    public boolean isCrewSeated() {
+        return VS2Compat.isCrewSeated(this);
+    }
+
     /**
      * Optional direction that a role prefers for cover evaluation. Riflemen keep
      * the default threat-based evaluation direction.
@@ -592,6 +608,7 @@ public class SoldierEntity extends PathfinderMob implements Container {
             case MACHINE_GUNNER -> ModItems.MACHINE_GUNNER_SPAWN_EGG.get();
             case GARRISON -> ModItems.GARRISON_SPAWN_EGG.get();
             case SUPPORT -> ModItems.SUPPORT_SPAWN_EGG.get();
+            case VEHICLE_CREW -> ModItems.VEHICLE_CREW_SPAWN_EGG.get();
         };
     }
 
@@ -1304,6 +1321,7 @@ public class SoldierEntity extends PathfinderMob implements Container {
         }
         if (!this.level().isClientSide) {
             VS2Compat.onSoldierRemoved(this);
+            com.stevesarmy.combat.VehicleCrewManager.releaseAllFor(this.getUUID());
             TeamManager.removeFromTeam(this);
             com.stevesarmy.combat.cover.CoverReservationManager.releaseAll(this);
             com.stevesarmy.combat.VpbEntityState.remove(this.getUUID());

@@ -1309,6 +1309,8 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
     
     @Override
     public boolean canUse() {
+        // Seated crew soldiers never seek cover; they hold their station.
+        if (soldier.isVehicleCrewActive() || soldier.isCrewSeated()) return false;
         if (soldier.isHealing()) {
             return canContinueHealingInCover();
         }
@@ -1392,6 +1394,7 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
     @Override
     public boolean canContinueToUse() {
         if (!soldier.isAlive()) return false;
+        if (soldier.isVehicleCrewActive() || soldier.isCrewSeated()) return false;
         if (soldier.isHealing()) {
             return canContinueHealingInCover();
         }

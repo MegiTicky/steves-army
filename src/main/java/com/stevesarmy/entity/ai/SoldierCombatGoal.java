@@ -273,6 +273,8 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
     @Override
     public boolean canUse() {
         if (!soldier.isAlive() || soldier.isHealing()) return false;
+        // A crew soldier manning a hull MG fights through the mounted gun, not its rifle.
+        if (soldier.isVehicleCrewActive()) return false;
 
         if (soldier.hasValidPingThreatPos() || soldier.hasValidPingSuppressPos()) {
             return true;
@@ -293,6 +295,7 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
     @Override
     public boolean canContinueToUse() {
         if (!soldier.isAlive() || soldier.isHealing()) return false;
+        if (soldier.isVehicleCrewActive()) return false;
 
         // A valid fire plan must keep this goal alive even after its original
         // entity has left the local target list.

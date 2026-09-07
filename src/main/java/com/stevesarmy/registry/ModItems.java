@@ -80,6 +80,11 @@ public class ModItems {
         () -> new com.stevesarmy.item.TeamGarrisonSpawnEggItem(ModEntities.TEAM_GARRISON, 0x4A7C59, 0x55FFFF, new Item.Properties())
     );
 
+    public static final RegistryObject<Item> VEHICLE_CREW_SPAWN_EGG = ITEMS.register(
+        "vehicle_crew_spawn_egg",
+        () -> new com.stevesarmy.item.VehicleCrewSpawnEggItem(ModEntities.VEHICLE_CREW, 0x4A7C59, 0x4682B4, new Item.Properties())
+    );
+
     public static final RegistryObject<Item> RESUPPLY_POUCH = ITEMS.register(
         "resupply_pouch",
         () -> new Item(new Item.Properties().stacksTo(16))

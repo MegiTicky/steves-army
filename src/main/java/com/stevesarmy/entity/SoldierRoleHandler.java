@@ -1,5 +1,6 @@
 package com.stevesarmy.entity;
 
+import com.stevesarmy.compat.VS2Compat;
 import com.stevesarmy.inventory.SoldierInventory;
 import com.stevesarmy.registry.ModEntities;
 import com.stevesarmy.respawn.PlayerDeathHandler;
@@ -26,6 +27,7 @@ public final class SoldierRoleHandler {
             case MACHINE_GUNNER -> ModEntities.MACHINE_GUNNER.get();
             case GARRISON -> ModEntities.GARRISON.get();
             case SUPPORT -> ModEntities.SUPPORT.get();
+            case VEHICLE_CREW -> ModEntities.VEHICLE_CREW.get();
         };
     }
 
@@ -48,6 +50,11 @@ public final class SoldierRoleHandler {
             return null;
         }
         if (soldier.getRole() == targetRole) {
+            return null;
+        }
+        // Vehicle crew is meaningless without Valkyrien Skies; refuse quietly like
+        // the other conversion refusals.
+        if (targetRole == SoldierRole.VEHICLE_CREW && !VS2Compat.isEnabled()) {
             return null;
         }
         if (!soldier.isAlive() || soldier.isRemoved()) {

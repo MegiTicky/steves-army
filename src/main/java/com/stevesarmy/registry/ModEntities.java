@@ -9,6 +9,7 @@ import com.stevesarmy.entity.ResupplyPouchEntity;
 import com.stevesarmy.entity.SupportEntity;
 import com.stevesarmy.entity.TargetEntity;
 import com.stevesarmy.entity.TeamGarrisonEntity;
+import com.stevesarmy.entity.VehicleCrewEntity;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.MobCategory;
 import net.minecraft.world.entity.ai.attributes.AttributeSupplier;
@@ -90,6 +91,15 @@ public class ModEntities {
             .build(StevesArmyMod.MODID + ":team_garrison")
     );
 
+    public static final RegistryObject<EntityType<VehicleCrewEntity>> VEHICLE_CREW = ENTITIES.register(
+        "vehicle_crew",
+        () -> EntityType.Builder.of(VehicleCrewEntity::new, MobCategory.CREATURE)
+            .sized(0.6F, 1.8F)
+            .clientTrackingRange(10)
+            .updateInterval(3)
+            .build(StevesArmyMod.MODID + ":vehicle_crew")
+    );
+
     public static final RegistryObject<EntityType<ResupplyPouchEntity>> RESUPPLY_POUCH = ENTITIES.register(
         "resupply_pouch",
         () -> EntityType.Builder.of(ResupplyPouchEntity::new, MobCategory.MISC)
@@ -145,6 +155,14 @@ public class ModEntities {
             .build());
 
         event.put(TEAM_GARRISON.get(), Monster.createMonsterAttributes()
+            .add(Attributes.MAX_HEALTH, 20.0D)
+            .add(Attributes.MOVEMENT_SPEED, 0.35D)
+            .add(Attributes.ARMOR, 4.0D)
+            .add(Attributes.ATTACK_DAMAGE, 3.0D)
+            .add(Attributes.FOLLOW_RANGE, 32.0D)
+            .build());
+
+        event.put(VEHICLE_CREW.get(), Monster.createMonsterAttributes()
             .add(Attributes.MAX_HEALTH, 20.0D)
             .add(Attributes.MOVEMENT_SPEED, 0.35D)
             .add(Attributes.ARMOR, 4.0D)

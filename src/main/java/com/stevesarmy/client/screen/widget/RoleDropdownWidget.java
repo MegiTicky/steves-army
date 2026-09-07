@@ -108,6 +108,8 @@ public class RoleDropdownWidget implements SquadControlWidget {
 
     public static String getRoleLabel(SoldierRole role) {
         if (role == null) return "?";
-        return role == SoldierRole.MACHINE_GUNNER ? "MG" : role.getDisplayName().getString();
+        if (role == SoldierRole.MACHINE_GUNNER) return "MG";
+        if (role == SoldierRole.VEHICLE_CREW) return "Crew";
+        return role.getDisplayName().getString();
     }
 }
