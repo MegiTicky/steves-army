@@ -1,53 +1,48 @@
 package com.stevesarmy.client;
 
 import com.mojang.blaze3d.systems.RenderSystem;
-import com.stevesarmy.ping.PingType;
 import com.mojang.math.Axis;
+import com.stevesarmy.transport.TransportOrder;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.network.chat.Component;
 
-public class PingWheelRenderer {
+/** Two-sector radial wheel for vehicle orders: Mount (right), Dismount (left). */
+public class VehicleWheelRenderer {
     private static final int INNER_RADIUS = 30;
     private static final int OUTER_RADIUS = 80;
     private static final int LABEL_RADIUS = 70;
     private static final int SEPARATOR_COLOR = 0xCCAAAAAA;
     private static final int SEPARATOR_HALF_WIDTH = 0;
-    private static boolean loggedRender = false;
-    
+
     public static void render(GuiGraphics guiGraphics) {
-        if (!PingWheelHandler.isWheelActive() || WheelCycleController.isVehiclePage()) return;
+        if (!PingWheelHandler.isWheelActive() || !WheelCycleController.isVehiclePage()) return;
 
         Minecraft mc = Minecraft.getInstance();
         if (mc.player == null) return;
-
-        if (!loggedRender) {
-            com.stevesarmy.StevesArmyMod.LOGGER.info("Ping wheel rendering");
-            loggedRender = true;
-        }
 
         int screenWidth = mc.getWindow().getGuiScaledWidth();
         int screenHeight = mc.getWindow().getGuiScaledHeight();
         int centerX = screenWidth / 2;
         int centerY = screenHeight / 2;
 
-        PingType hoveredType = PingWheelHandler.getHoveredType();
+        TransportOrder hoveredAction = VehicleWheelHandler.getHoveredAction();
 
         RenderSystem.enableBlend();
         RenderSystem.defaultBlendFunc();
         RenderSystem.disableDepthTest();
 
-        int numTypes = PingType.values().length;
-        int sectorSize = 360 / numTypes;
+        int count = TransportOrder.values().length;
+        int sectorSize = 360 / count;
 
-        drawSectorSeparators(guiGraphics, centerX, centerY, numTypes, sectorSize);
+        drawSectorSeparators(guiGraphics, centerX, centerY, count, sectorSize);
 
-        for (int i = 0; i < numTypes; i++) {
-            PingType type = PingType.values()[i];
-            boolean isHovered = type == hoveredType;
+        for (int i = 0; i < count; i++) {
+            TransportOrder order = TransportOrder.values()[i];
+            boolean isHovered = order == hoveredAction;
             int startAngle = i * sectorSize;
 
-            String label = Component.translatable(type.getTranslationKey()).getString();
+            String label = Component.translatable(order.getTranslationKey()).getString();
             double labelRad = Math.toRadians(startAngle + sectorSize / 2 - 90);
             int labelX = centerX + (int) (Math.cos(labelRad) * LABEL_RADIUS);
             int labelY = centerY + (int) (Math.sin(labelRad) * LABEL_RADIUS);
@@ -56,15 +51,15 @@ public class PingWheelRenderer {
             guiGraphics.drawCenteredString(mc.font, label, labelX, labelY - mc.font.lineHeight / 2, textColor);
         }
 
-        // Scope badge
+        // Vehicle orders respect the fire-team scope, so show the same badge as the ping wheel.
         WheelHud.drawScopeBadge(guiGraphics, centerX, centerY);
 
-        WheelCycleController.drawPageHeader(guiGraphics, Component.translatable("wheel.steves_army.orders"));
+        WheelCycleController.drawPageHeader(guiGraphics, Component.translatable("wheel.steves_army.vehicle"));
 
         RenderSystem.enableDepthTest();
         RenderSystem.disableBlend();
     }
-    
+
     private static void drawSectorSeparators(GuiGraphics guiGraphics, int centerX, int centerY,
                                              int sectorCount, int sectorSize) {
         for (int i = 0; i < sectorCount; i++) {
@@ -76,9 +71,5 @@ public class PingWheelRenderer {
                 OUTER_RADIUS, SEPARATOR_HALF_WIDTH + 1, SEPARATOR_COLOR);
             guiGraphics.pose().popPose();
         }
-    }
-
-    public static void resetLogFlag() {
-        loggedRender = false;
     }
 }

@@ -14,7 +14,7 @@ import java.util.function.Function;
 import java.util.function.Supplier;
 
 public class NetworkHandler {
-    private static final String PROTOCOL_VERSION = "9";
+    private static final String PROTOCOL_VERSION = "10";
     
     public static final SimpleChannel INSTANCE = NetworkRegistry.newSimpleChannel(
         new ResourceLocation(StevesArmyMod.MODID, "main"),
@@ -148,6 +148,10 @@ public class NetworkHandler {
             SetSkinPacket::encode,
             SetSkinPacket::decode,
             SetSkinPacket::handle);
+        INSTANCE.registerMessage(id++, TransportOrderMessage.class,
+            TransportOrderMessage::encode,
+            TransportOrderMessage::new,
+            TransportOrderMessage::handle);
     }
 
     @SuppressWarnings({"rawtypes", "unchecked"})

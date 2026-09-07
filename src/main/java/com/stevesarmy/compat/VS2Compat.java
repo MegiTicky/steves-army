@@ -29,7 +29,9 @@ import java.lang.invoke.MethodHandle;
 import java.lang.invoke.MethodHandles;
 import java.lang.invoke.MethodType;
 import java.lang.reflect.Method;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -88,6 +90,10 @@ public final class VS2Compat {
         if (state.transportAnchorId != null) {
             updateTransport(soldier, state);
             return isTransported(soldier, state);
+        }
+
+        if (state.reboardBlockTicks > 0) {
+            state.reboardBlockTicks--;
         }
 
         if (soldier.isPassenger()) {
@@ -254,6 +260,136 @@ public final class VS2Compat {
     }
 
     /**
+     * Manual release shared by the /stevesarmy transport release command and the vehicle wheel:
+     * dismount, clear VS2 dragging + transport state, and briefly block automatic re-boarding.
+     * Returns true if the soldier was mounted.
+     */
+    public static boolean releaseTransport(SoldierEntity soldier) {
+        Entity vehicle = soldier.isPassenger() ? soldier.getVehicle() : null;
+        if (soldier.isPassenger()) {
+            soldier.stopRiding();
+        }
+        clearShipDraggingStateDirect(soldier);
+        clearTransportState(soldier);
+        blockAutoTransport(soldier);
+        if (vehicle != null) {
+            // Send empty passenger list so the anchor no longer reports the soldier.
+            syncTransportState(soldier, vehicle, false);
+        }
+        return vehicle != null;
+    }
+
+    /** Blocks FOLLOW auto-transport for a cooldown, e.g. right after a manual dismount. */
+    public static void blockAutoTransport(SoldierEntity soldier) {
+        int delay = StevesArmyConfig.VS2_DISMOUNT_REBOARD_DELAY.get();
+        if (delay <= 0) {
+            return;
+        }
+        getOrCreateState(soldier).reboardBlockTicks = delay;
+    }
+
+    /** The LoadedShip managing the given block position, or null. */
+    @Nullable
+    public static Object getShipAt(Level level, BlockPos pos) {
+        initialize();
+        if (!available) {
+            return null;
+        }
+        try {
+            return reflect(getShipObjectManagingPos, level, (Vec3i) pos);
+        } catch (ReflectiveOperationException exception) {
+            logReflectionFailure(exception);
+            return null;
+        }
+    }
+
+    /**
+     * Ship the vehicle-wheel MOUNT order targets when the crosshair is not on a vehicle:
+     * the ship the player is mounted to, else the nearest ship within 64 blocks.
+     */
+    @Nullable
+    public static Object resolveMountShipNearPlayer(ServerLevel level, ServerPlayer player) {
+        initialize();
+        if (!available) {
+            return null;
+        }
+        try {
+            Object mounted = reflect(getShipMountedTo, player);
+            if (mounted != null) {
+                return mounted;
+            }
+            for (double radius : new double[] {8.0, 16.0, 32.0, 64.0}) {
+                Object ship = firstShipIntersecting(level, player.position(), radius);
+                if (ship != null) {
+                    return ship;
+                }
+            }
+            return null;
+        } catch (ReflectiveOperationException exception) {
+            logReflectionFailure(exception);
+            return null;
+        }
+    }
+
+    @Nullable
+    private static Object firstShipIntersecting(Level level, Vec3 center, double radius) {
+        try {
+            Object ships = reflect(getShipsIntersecting, level, new AABB(center, center).inflate(radius));
+            if (ships instanceof Iterable<?> iterable) {
+                for (Object ship : iterable) {
+                    return ship;
+                }
+            }
+        } catch (ReflectiveOperationException exception) {
+            logReflectionFailure(exception);
+        }
+        return null;
+    }
+
+    /**
+     * Unoccupied Create SeatBlocks belonging to the given ship, scanned outward from
+     * worldCenter (same scan shape as the auto-transport seat fallback and /transport inspect).
+     */
+    public static List<BlockPos> findFreeStaticSeats(Level level, Object ship, Vec3 worldCenter, int maxSeats) {
+        List<BlockPos> seats = new ArrayList<>();
+        initialize();
+        if (!available || ship == null || maxSeats <= 0 || !(level instanceof ServerLevel serverLevel)) {
+            return seats;
+        }
+        try {
+            long shipId = ((Number) getShipId.invoke(ship)).longValue();
+            BlockPos origin = BlockPos.containing(worldCenter);
+            for (int radius = 0; radius <= 10 && seats.size() < maxSeats; radius++) {
+                for (int x = -radius; x <= radius && seats.size() < maxSeats; x++) {
+                    for (int z = -radius; z <= radius && seats.size() < maxSeats; z++) {
+                        if (Math.max(Math.abs(x), Math.abs(z)) != radius) {
+                            continue;
+                        }
+                        for (int y = -2; y <= 2 && seats.size() < maxSeats; y++) {
+                            BlockPos candidate = origin.offset(x, y, z);
+                            BlockState blockState = level.getBlockState(candidate);
+                            if (!createSeatBlockClass.isInstance(blockState.getBlock())) {
+                                continue;
+                            }
+                            Object seatShip = reflect(getShipObjectManagingPos, level, candidate);
+                            if (seatShip == null || ((Number) getShipId.invoke(seatShip)).longValue() != shipId) {
+                                continue;
+                            }
+                            if (isCreateSeatOccupied(serverLevel, candidate)) {
+                                continue;
+                            }
+                            seats.add(candidate);
+                        }
+                    }
+                }
+            }
+        } catch (ReflectiveOperationException exception) {
+            logReflectionFailure(exception);
+        }
+        return seats;
+    }
+
+    /**
      * Checks whether a single navigation node (block position) should be treated as
      * blocked because it intersects a VS2 ship. Uses the mob's collision footprint
      * for the AABB test.
@@ -407,6 +543,10 @@ public final class VS2Compat {
 
     private static boolean tryStartTransport(SoldierEntity soldier, SoldierState state) {
         if (!StevesArmyConfig.VS2_AUTO_TRANSPORT.get() || soldier.getSquadMode() != SquadMode.FOLLOW) {
+            return false;
+        }
+        // A recent manual dismount suppresses automatic re-boarding for a short while.
+        if (state.reboardBlockTicks > 0) {
             return false;
         }
         LivingEntity owner = soldier.getOwner();
@@ -1039,6 +1179,7 @@ private static boolean isTransportOwnerOnShip(LivingEntity owner, SoldierState s
         @Nullable private Long transportShipId;
         @Nullable private BlockPos transportSeatPosition;
         private int seatRetryCooldownTicks;
+        private int reboardBlockTicks;
         private long lastSeatAttemptLog;
     }
 }

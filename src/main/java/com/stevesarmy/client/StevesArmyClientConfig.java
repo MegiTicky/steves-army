@@ -8,6 +8,7 @@ public final class StevesArmyClientConfig {
     public static final ForgeConfigSpec.BooleanValue SHOW_OWNED_SOLDIER_GLOW;
     public static final ForgeConfigSpec.BooleanValue SHOW_FRIENDLY_SOLDIER_NAME_TAGS;
     public static final ForgeConfigSpec.BooleanValue ENABLE_FIRE_TEAM_WHEEL;
+    public static final ForgeConfigSpec.BooleanValue ENABLE_VEHICLE_WHEEL;
     public static final ForgeConfigSpec.DoubleValue PING_SCALE;
     public static final ForgeConfigSpec.DoubleValue ENEMY_CONTACT_PING_BASELINE_SIZE;
     public static final ForgeConfigSpec.DoubleValue ENEMY_CONTACT_PING_HEIGHT_OFFSET;
@@ -47,10 +48,15 @@ public final class StevesArmyClientConfig {
 
         builder.push("controls");
         ENABLE_FIRE_TEAM_WHEEL = builder
-            .comment("Enable the fire-team selector wheel (G key).",
+            .comment("Enable the fire-team selector wheel (P key, or Ctrl+Middle-click).",
                      "When disabled, use the cycle fire team key binding instead.",
                      "Default: false")
             .define("enableFireTeamWheel", false);
+        ENABLE_VEHICLE_WHEEL = builder
+            .comment("Enable the vehicle wheel page: hold the ping wheel key (middle-click),",
+                     "then left-click to switch to vehicle Mount/Dismount commands.",
+                     "Default: true")
+            .define("enableVehicleWheel", true);
         builder.pop();
 
         SPEC = builder.build();

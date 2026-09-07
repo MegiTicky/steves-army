@@ -59,6 +59,7 @@ public class StevesArmyConfig {
     public static final ForgeConfigSpec.BooleanValue SKIN_RANDOMIZE_ON_SPAWN;
     public static final ForgeConfigSpec.BooleanValue VS2_AUTO_TRANSPORT;
     public static final ForgeConfigSpec.IntValue VS2_MAX_TRANSPORTED_SOLDIERS;
+    public static final ForgeConfigSpec.IntValue VS2_DISMOUNT_REBOARD_DELAY;
 
     public static final ForgeConfigSpec.IntValue OPTIMIZATION_LEVEL;
     public static final ForgeConfigSpec.BooleanValue RETRY_POLICY_ENABLED;
@@ -394,6 +395,14 @@ BUILDER.pop();
         VS2_MAX_TRANSPORTED_SOLDIERS = BUILDER
             .comment("Maximum number of nearby FOLLOW soldiers automatically transported with one owner on a VS ship.")
             .defineInRange("maxTransportedSoldiers", 32, 0, 64);
+
+        VS2_DISMOUNT_REBOARD_DELAY = BUILDER
+            .comment("Ticks a soldier refuses automatic re-boarding after a manual dismount",
+                     "(vehicle wheel Dismount or /stevesarmy transport release).",
+                     "Without this, FOLLOW soldiers on the owner's ship would instantly re-seat,",
+                     "making a manual dismount impossible.",
+                     "Default: 100 (5 seconds)")
+            .defineInRange("dismountReboardDelay", 100, 0, 1200);
 
         BUILDER.pop();
 

@@ -36,5 +36,18 @@
     "ping.steves_army.cqb": "CQB",
     "ping.steves_army.suppress_area": "Suppress",
     "ping.steves_army.attack": "Attack",
+    "transport.steves_army.mount": "Mount",
+    "transport.steves_army.dismount": "Dismount",
+    "wheel.steves_army.orders": "ORDERS",
+    "wheel.steves_army.vehicle": "VEHICLE",
+    "wheel.steves_army.switch_hint": "LMB: switch",
+    "transport.steves_army.feedback.no_soldiers": "No soldiers in scope",
+    "transport.steves_army.feedback.none_mounted": "No mounted soldiers in scope",
+    "transport.steves_army.feedback.all_mounted": "All soldiers in scope are already mounted",
+    "transport.steves_army.feedback.dismounted": "Dismounted %s soldier(s)",
+    "transport.steves_army.feedback.no_vehicle": "No vehicle found",
+    "transport.steves_army.feedback.no_free_seats": "No free seats on that vehicle",
+    "transport.steves_army.feedback.seated": "Seated %s of %s soldier(s)",
+    "transport.steves_army.feedback.vs2_unavailable": "Vehicle transport requires Valkyrien Skies",
     "item.steves_army.resupply_pouch": "Resupply Pouch"
 }

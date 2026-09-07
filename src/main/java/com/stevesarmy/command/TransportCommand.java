@@ -306,17 +306,13 @@ public class TransportCommand {
                 "Releasing soldier " + soldier.getId()
                     + " from transport. Pre-release pos=" + formatPos(prePos)), false);
 
-            if (soldier.isPassenger()) {
-                soldier.stopRiding();
-            }
-
-            VS2Compat.clearShipDraggingStateDirect(soldier);
-            VS2Compat.clearTransportState(soldier);
+            boolean wasMounted = VS2Compat.releaseTransport(soldier);
 
             Vec3 postPos = soldier.position();
             source.sendSuccess(() -> Component.literal(
                 "  Post-release pos=" + formatPos(postPos)
-                    + " isPassenger=" + soldier.isPassenger()), false);
+                    + " isPassenger=" + soldier.isPassenger()
+                    + " wasMounted=" + wasMounted), false);
 
         } catch (Exception e) {
             source.sendFailure(Component.literal("Error: " + e.getMessage()));

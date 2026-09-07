@@ -6,23 +6,20 @@ import com.stevesarmy.network.SpacingDebugPacket;
 import com.stevesarmy.network.SpacingDebugPacket.SpacingDebugEntry;
 import com.stevesarmy.ping.PingType;
 import com.stevesarmy.squad.FireTeam;
-import com.stevesarmy.squad.FireTeamAssignment;
 import com.stevesarmy.squad.SquadLaneAssignment;
 import com.stevesarmy.squad.SquadActivityManager;
 import com.stevesarmy.squad.SquadActivityType;
-import com.stevesarmy.squad.SquadManager;
+import com.stevesarmy.squad.SquadTargeting;
 import com.stevesarmy.util.SpacingHelper;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.network.NetworkEvent;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.UUID;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
@@ -81,7 +78,7 @@ public class PingMessage {
             int dimension = msg.getDimension();
             FireTeam scope = msg.getScope();
 
-            List<SoldierEntity> owned = resolveSquadSoldiers(level, sender, scope);
+            List<SoldierEntity> owned = SquadTargeting.resolveOrderedSoldiers(level, sender, scope);
 
             // GO_TO, SEND, and ATTACK should also clear stale ATTACK state
             if (type == PingType.GO_TO || type == PingType.SEND || type == PingType.ATTACK) {
@@ -188,53 +185,5 @@ public class PingMessage {
             }
         });
         ctx.get().setPacketHandled(true);
-    }
-
-    private static List<SoldierEntity> resolveSquadSoldiers(ServerLevel level, ServerPlayer sender, FireTeam scope) {
-        SquadManager mgr = SquadManager.get(level);
-        java.util.Optional<com.stevesarmy.squad.SquadData> squadOpt = mgr.getSquadByLeader(sender.getUUID());
-        if (squadOpt.isEmpty()) {
-            // No squad — fall back to nearby owned soldiers (within 100 blocks)
-            return level.getEntitiesOfClass(
-                SoldierEntity.class,
-                sender.getBoundingBox().inflate(100),
-                s -> s.isOwnedBy(sender)
-            );
-        }
-
-        com.stevesarmy.squad.SquadData squad = squadOpt.get();
-        List<LivingEntity> members = mgr.getSquadMembers(level, squad.getSquadId(), null);
-        List<SoldierEntity> result = new ArrayList<>();
-        for (LivingEntity member : members) {
-            if (member instanceof SoldierEntity s && s.isAlive() && s.isOwnedBy(sender)
-                && s.getFireTeam() != FireTeam.GARRISON) {
-                result.add(s);
-            }
-        }
-        // Add any owned soldiers not in squad that are within 100 blocks as a fallback (UUID dedup)
-        java.util.Set<UUID> resultUuids = result.stream().map(s -> s.getUUID()).collect(java.util.stream.Collectors.toSet());
-        List<SoldierEntity> nearbyFallback = level.getEntitiesOfClass(
-            SoldierEntity.class,
-            sender.getBoundingBox().inflate(100),
-            s -> s.isOwnedBy(sender) && s.getFireTeam() != FireTeam.GARRISON
-                && !resultUuids.contains(s.getUUID())
-        );
-        result.addAll(nearbyFallback);
-
-        // Filter by fire team scope
-        if (scope != FireTeam.ALL) {
-            FireTeamAssignment fta = FireTeamAssignment.get(level, sender.getUUID());
-            List<UUID> teamIds = fta.getSoldiersInTeam(scope);
-            result = result.stream()
-                .filter(s -> teamIds.contains(s.getUUID()))
-                .collect(Collectors.toList());
-        }
-
-        if (result.isEmpty()) {
-            StevesArmyMod.LOGGER.warn("PingMessage: no owned soldiers found for player {} (squad={})",
-                sender.getName().getString(), squadOpt.isPresent());
-        }
-
-        return result;
     }
 }

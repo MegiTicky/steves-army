@@ -59,29 +59,33 @@ public class PingWheelHandler {
         if (isKeyDown && !wasKeyDown) {
             isWheelActive = true;
             pressStartTime = System.currentTimeMillis();
-            
+
             savedYaw = mc.player.getYRot();
             savedPitch = mc.player.getXRot();
-            
+
             grabMouseForWheel(mc);
-            
+
+            WheelCycleController.onSessionActivated();
+
             StevesArmyMod.LOGGER.info("Ping wheel activated");
         }
-        
+
         if (!isKeyDown && wasKeyDown && isWheelActive) {
             long holdTime = System.currentTimeMillis() - pressStartTime;
-            
+
             releaseMouse(mc);
-            
+
             mc.player.setYRot(savedYaw);
             mc.player.setXRot(savedPitch);
-            
+
             if (holdTime < HOLD_TIME_MS) {
                 StevesArmyMod.LOGGER.info("Ping wheel quick tap ({}ms) - no ping sent, vanilla pick block works", holdTime);
+            } else if (WheelCycleController.isVehiclePage()) {
+                VehicleWheelHandler.fireSelected(mc);
             } else {
                 PingType selectedType = currentHoveredType;
                 StevesArmyMod.LOGGER.info("Ping wheel released after {}ms, selected type: {}", holdTime, selectedType);
-                
+
                 if (!rateLimiter.checkExceeded()) {
                     sendPing(mc, selectedType);
                     StevesArmyMod.LOGGER.info("Ping sent: {} at {}", selectedType, mc.player.blockPosition());
@@ -89,7 +93,7 @@ public class PingWheelHandler {
                     StevesArmyMod.LOGGER.warn("Ping rate limited");
                 }
             }
-            
+
             isWheelActive = false;
             PingWheelRenderer.resetLogFlag();
         }
@@ -159,29 +163,34 @@ public class PingWheelHandler {
     private static void sendPing(Minecraft mc, PingType type) {
         LocalPlayer player = mc.player;
         if (player == null) return;
-        
+
+        Vec3 pingPos = findCrosshairPosition(mc);
+
+        int dimension = player.level().dimension().location().hashCode();
+
+        StevesArmyMod.LOGGER.info("Ping position: {} type: {}", pingPos, type);
+
+        PingMessage message = new PingMessage(type, pingPos, dimension, FireTeamScopeState.INSTANCE.getCurrentScope());
+        NetworkHandler.INSTANCE.sendToServer(message);
+    }
+
+    /** Crosshair world position, continuing through glass and non-colliding vegetation. */
+    static Vec3 findCrosshairPosition(Minecraft mc) {
+        LocalPlayer player = mc.player;
+        if (player == null) return null;
+
         int renderDistanceChunks = mc.options.renderDistance().get();
         double maxDistance = renderDistanceChunks * 16.0;
-        
+
         Vec3 eyePos = player.getEyePosition(1.0f);
         Vec3 lookVec = player.getViewVector(1.0f);
         Vec3 endPos = eyePos.add(lookVec.scale(maxDistance));
-        
+
         BlockHitResult hitResult = clipPingTarget(player, eyePos, endPos, lookVec);
-        
-        Vec3 pingPos;
         if (hitResult.getType() != HitResult.Type.MISS) {
-            pingPos = hitResult.getLocation();
-        } else {
-            pingPos = eyePos.add(lookVec.scale(maxDistance));
+            return hitResult.getLocation();
         }
-        
-        int dimension = player.level().dimension().location().hashCode();
-        
-        StevesArmyMod.LOGGER.info("Ping position: {} type: {}", pingPos, type);
-        
-        PingMessage message = new PingMessage(type, pingPos, dimension, FireTeamScopeState.INSTANCE.getCurrentScope());
-        NetworkHandler.INSTANCE.sendToServer(message);
+        return eyePos.add(lookVec.scale(maxDistance));
     }
 
     /**

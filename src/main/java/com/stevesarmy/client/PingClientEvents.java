@@ -177,6 +177,7 @@ public class PingClientEvents {
         
         PingManager.tick();
         PingWheelHandler.tick();
+        WheelCycleController.tick();
         FormationWheelHandler.tick();
         FireTeamWheelHandler.tick();
         CommandStickState.get().tick();
@@ -324,6 +325,10 @@ public class PingClientEvents {
             
             if (PingWheelHandler.isWheelActive()) {
                 PingWheelRenderer.render(event.getGuiGraphics());
+            }
+
+            if (PingWheelHandler.isWheelActive() && WheelCycleController.isVehiclePage()) {
+                VehicleWheelRenderer.render(event.getGuiGraphics());
             }
 
             if (FireTeamWheelHandler.isWheelActive()) {
