@@ -81,8 +81,9 @@ public final class StationGunnerAI {
      */
     public static boolean activate(Entity station, SoldierEntity soldier, boolean gunner) {
         Object ship = VS2Compat.getShipUnder(station);
-        Vec3 cameraWorld = VS2Compat.shipyardToWorldPosition(ship, station.position());
+        Vec3 cameraWorld = VS2Compat.stationCameraWorldPos(ship, station);
         if (cameraWorld == null) {
+            logUnusableCamera(station, "activation");
             return false;
         }
         active.put(station.getUUID(), new StationState(station, soldier, gunner, cameraWorld));
@@ -183,6 +184,19 @@ public final class StationGunnerAI {
         lastDutyFailureLog = now;
         StevesArmyMod.LOGGER.info("[StationAI] seated soldier={} scan failed: {}",
             soldier.getId(), String.format(message, args));
+    }
+
+    private static long lastCameraRejectLog;
+
+    /** A station whose camera is not at a world position cannot run; say so, throttled. */
+    private static void logUnusableCamera(Entity station, String context) {
+        long now = station.level().getGameTime();
+        if (now - lastCameraRejectLog < 100) {
+            return;
+        }
+        lastCameraRejectLog = now;
+        StevesArmyMod.LOGGER.info("[StationAI] station {} {} refused: camera position {} is not world-space",
+            station.getId(), context, station.position());
     }
 
     private static final class StationScan {
@@ -302,8 +316,9 @@ public final class StationGunnerAI {
         // World-space camera position. No transform, no work: never aim, query,
         // or ray on raw shipyard coordinates.
         Object ship = VS2Compat.getShipUnder(station);
-        Vec3 cameraWorld = VS2Compat.shipyardToWorldPosition(ship, station.position());
+        Vec3 cameraWorld = VS2Compat.stationCameraWorldPos(ship, station);
         if (cameraWorld == null) {
+            logUnusableCamera(station, "tick");
             DetectionViewpoint.clear(soldier);
             return;
         }
@@ -472,8 +487,9 @@ public final class StationGunnerAI {
 
     /**
      * Tallyho computes the aim direction as {@code target - camera.getPosition()},
-     * mixing a world-space target with the camera's shipyard-space position. Feeding
-     * it a pseudo-target makes that difference equal the true world-space direction.
+     * so the pseudo-target makes that difference equal the true world-space
+     * direction. When the camera is already world-space (the normal case) the
+     * pseudo-target is simply the world target itself.
      */
     private static Vec3 aimTargetForStation(StationState state, Vec3 worldTarget) {
         return state.station.position().add(worldTarget.subtract(state.cameraWorld));

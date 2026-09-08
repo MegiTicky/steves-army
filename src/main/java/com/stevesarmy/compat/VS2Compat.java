@@ -244,19 +244,31 @@ public final class VS2Compat {
         return null;
     }
 
+    /** Positions beyond this magnitude are VS2 shipyard allocations, not world coordinates. */
+    private static final double WORLD_COORD_LIMIT = 1.0e6;
+
     /**
-     * Transforms a raw shipyard entity position to world space. The ship transform
-     * expects coordinates relative to the ship's voxel AABB minimum, while entity
-     * positions are stored in the global shipyard allocation.
+     * World-space position of a tallyho station camera. Tallyho keeps these entities
+     * in world coordinates (handleShoot spawns projectiles at the raw position), so a
+     * plausible raw position is used directly. A shipyard-scale position means the
+     * entity was spawned into or left in VS2's allocation region: the ship transform
+     * is tried as a fallback and accepted only if it lands back in the world, since
+     * aiming or scanning on guessed coordinates is worse than refusing to run.
      */
     @Nullable
-    public static Vec3 shipyardToWorldPosition(@Nullable Object ship, Vec3 shipyardPos) {
-        BlockPos shipyardMin = getShipyardMin(ship);
-        if (shipyardMin == null) {
-            return null;
+    public static Vec3 stationCameraWorldPos(@Nullable Object ship, Entity station) {
+        Vec3 raw = station.position();
+        if (isWorldPlausible(raw)) {
+            return raw;
         }
-        return shipToWorldPosition(ship, shipyardPos.subtract(
-            shipyardMin.getX(), shipyardMin.getY(), shipyardMin.getZ()));
+        Vec3 transformed = shipToWorldPosition(ship, raw);
+        return isWorldPlausible(transformed) ? transformed : null;
+    }
+
+    private static boolean isWorldPlausible(@Nullable Vec3 pos) {
+        return pos != null
+            && Math.abs(pos.x) <= WORLD_COORD_LIMIT
+            && Math.abs(pos.z) <= WORLD_COORD_LIMIT;
     }
 
     /**
