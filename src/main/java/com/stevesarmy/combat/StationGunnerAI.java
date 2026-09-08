@@ -61,6 +61,7 @@ public final class StationGunnerAI {
         int burstShots;
         int burstPauseTicks;
         int sweepTick;
+        int statusTick;
 
         StationState(Entity station, SoldierEntity soldier, boolean gunner, Vec3 cameraWorld) {
             this.station = station;
@@ -337,43 +338,62 @@ public final class StationGunnerAI {
 
     private static void tickGunner(StationState state, ServerLevel level) {
         List<LivingEntity> candidates = computeCandidates(state, level);
+        StringBuilder status = new StringBuilder(160)
+            .append("candidates=").append(candidates.size());
+        double nearest = nearestCandidateDistance(state, candidates);
+        if (Double.isFinite(nearest)) {
+            status.append(" nearest=").append(String.format("%.1f", nearest)).append("m");
+        }
         DetectionSystem.DetectionScanResult scan = state.detection.tick(
             state.soldier, candidates, squadIntel(state.soldier));
         LivingEntity best = pickTarget(scan);
+        status.append(" best=").append(best == null ? "none" : best.getId());
         if (best == null) {
             state.target = null;
             state.aimQuality = Math.max(0.0F,
                 state.aimQuality - StevesArmyConfig.getAimQualityLosDecayRate());
             decayBloom(state);
+            emitStatus(state, "gunner", status);
             return;
         }
         state.target = best;
         reportIntel(state.soldier, best);
+        status.append(" detected=").append(state.detection.isTargetDetected(best));
 
         ExposureCalculator.AimPointResult aimPoint =
             ExposureCalculator.getBestAimPoint(state.soldier, best);
         boolean inLos = TargetAcquisition.hasLineOfSight(state.soldier, best);
         updateAimQuality(state, best, inLos);
-        if (aimPoint == null || !aimPoint.canShoot() || !inLos) {
+        status.append(" aimQuality=").append(String.format("%.2f", state.aimQuality))
+            .append(" los=").append(inLos);
+        if (aimPoint == null || !aimPoint.canShoot()) {
+            status.append(" aimPoint=noShot");
             decayBloom(state);
+            emitStatus(state, "gunner", status);
+            return;
+        }
+        if (!inLos) {
+            status.append(" aimPoint=ok");
+            decayBloom(state);
+            emitStatus(state, "gunner", status);
             return;
         }
         if (!FriendlyFireChecker.isSafeToShoot(state.soldier, aimPoint.position, state.aimQuality)) {
+            status.append(" aimPoint=ok friendly=veto");
             decayBloom(state);
+            emitStatus(state, "gunner", status);
             return;
         }
 
         float traverse = StevesArmyConfig.VEHICLE_CREW_TRAVERSE_SPEED.get().floatValue();
         float error = TallyhoCompat.aimTowards(state.station,
             aimTargetForStation(state, aimPoint.position), traverse, 0.0F, 0.0F);
-        if (state.soldier.tickCount % 60 == 0) {
-            StevesArmyMod.LOGGER.info(
-                "[StationAI] gunner soldier={} target={} detected={} aimQuality={} aimError={}deg ready={} belt={} burstPause={}",
-                state.soldier.getId(), best.getId(), state.detection.isTargetDetected(best),
-                String.format("%.2f", state.aimQuality), String.format("%.1f", error),
-                TallyhoCompat.isReadyToFire(state.station), TallyhoCompat.hasAmmo(state.station),
-                state.burstPauseTicks);
-        }
+        status.append(" aimPoint=ok friendly=safe aimError=")
+            .append(String.format("%.1f", error)).append("deg")
+            .append(" ready=").append(TallyhoCompat.isReadyToFire(state.station))
+            .append(" belt=").append(TallyhoCompat.hasAmmo(state.station))
+            .append(" burstPause=").append(state.burstPauseTicks);
+        emitStatus(state, "gunner", status);
         decayBloom(state);
         // Only open fire once the detection system has classified the contact,
         // mirroring infantry trigger discipline.
@@ -402,6 +422,28 @@ public final class StationGunnerAI {
         state.bloom = Math.min(StevesArmyConfig.VEHICLE_CREW_BLOOM_MAX.get().floatValue(),
             state.bloom + StevesArmyConfig.VEHICLE_CREW_BLOOM_PER_SHOT.get().floatValue());
         state.burstShots++;
+    }
+
+    /**
+     * One status line per station per period, whatever the gates are doing — a
+     * healthy-but-silent station taught us nothing three rounds in a row.
+     */
+    private static void emitStatus(StationState state, String kind, StringBuilder status) {
+        state.statusTick++;
+        if (state.statusTick < 60) {
+            return;
+        }
+        state.statusTick = 0;
+        StevesArmyMod.LOGGER.info("[StationAI] {} status soldier={} station={} {}",
+            kind, state.soldier.getId(), state.station.getId(), status.toString());
+    }
+
+    private static double nearestCandidateDistance(StationState state, List<LivingEntity> candidates) {
+        double nearestSqr = Double.POSITIVE_INFINITY;
+        for (LivingEntity entity : candidates) {
+            nearestSqr = Math.min(nearestSqr, state.cameraWorld.distanceToSqr(entity.position()));
+        }
+        return Math.sqrt(nearestSqr);
     }
 
     private static boolean fireBurstGate(StationState state) {
@@ -440,6 +482,8 @@ public final class StationGunnerAI {
 
     private static void tickObserver(StationState state, ServerLevel level) {
         List<LivingEntity> candidates = computeCandidates(state, level);
+        StringBuilder status = new StringBuilder(80)
+            .append("candidates=").append(candidates.size());
         DetectionSystem.DetectionScanResult scan = state.detection.tick(
             state.soldier, candidates, squadIntel(state.soldier));
         LivingEntity best = pickTarget(scan);
@@ -450,10 +494,12 @@ public final class StationGunnerAI {
             // Keep the optics on the contact so intel and detection keep refreshing.
             TallyhoCompat.aimTowards(state.station,
                 aimTargetForStation(state, best.getEyePosition()), traverse, 0.0F, 0.0F);
+            emitStatus(state, "observer", status.append(" tracking=").append(best.getId()));
             return;
         }
         state.target = null;
         sweepOptics(state, traverse);
+        emitStatus(state, "observer", status.append(" sweeping"));
     }
 
     private static void sweepOptics(StationState state, float traverse) {
