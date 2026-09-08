@@ -101,6 +101,9 @@ public final class VS2Compat {
 
         SoldierState state = states.computeIfAbsent(soldier.getUUID(), ignored -> new SoldierState());
         if (state.transportAnchorId != null) {
+            if (state.reboardBlockTicks > 0) {
+                state.reboardBlockTicks--;
+            }
             updateTransport(soldier, state);
             // Transported soldiers freeze completely - crew included. A crew
             // soldier's claimed station is driven by StationGunnerAI (station
@@ -381,6 +384,7 @@ public final class VS2Compat {
         state.transportShipId = getShipIdOf(getMountedShip(seat));
         state.transportSeatPosition = null;
         state.seatRetryCooldownTicks = 0;
+        state.reboardBlockTicks = 0;
         state.crewSeated = true;
 
         soldier.getVehicle().positionRider(soldier);
@@ -484,6 +488,7 @@ public final class VS2Compat {
                 state.transportShipId = shipId;
                 state.transportSeatPosition = seatBlockPos;
                 state.seatRetryCooldownTicks = 0;
+                state.reboardBlockTicks = 0;
                 state.crewSeated = soldier.getRole() == SoldierRole.VEHICLE_CREW;
 
                 Vec3 prePos = soldier.position();
@@ -919,6 +924,7 @@ public final class VS2Compat {
                                 state.transportShipId = getShipId.invoke(reflect(getShipMountedTo, owner)) instanceof Number id
                                     ? id.longValue() : null;
                                 state.seatRetryCooldownTicks = 0;
+                                state.reboardBlockTicks = 0;
 
                                 syncTransportState(soldier, vehicle, true);
 
@@ -1065,6 +1071,7 @@ public final class VS2Compat {
                                 state.transportShipId = ownerShipId;
                                 state.transportSeatPosition = candidate;
                                 state.seatRetryCooldownTicks = 0;
+                                state.reboardBlockTicks = 0;
 
                                 syncTransportState(soldier, soldier.getVehicle(), true);
 
