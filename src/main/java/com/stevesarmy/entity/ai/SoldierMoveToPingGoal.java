@@ -1,6 +1,7 @@
 package com.stevesarmy.entity.ai;
 
 import com.stevesarmy.entity.SoldierEntity;
+import com.stevesarmy.entity.SoldierRole;
 import com.stevesarmy.util.SpacingHelper;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.entity.ai.goal.Goal;
@@ -27,7 +28,8 @@ public class SoldierMoveToPingGoal extends Goal {
     public boolean canUse() {
         if (!soldier.isAlive()) return false;
         // Crew soldiers ignore move pings while seated at their station.
-        if (soldier.isVehicleCrewActive() || soldier.isCrewSeated()) return false;
+        if (soldier.isVehicleCrewActive() || soldier.isCrewSeated()
+            || soldier.getRole() == SoldierRole.VEHICLE_CREW) return false;
         if (soldier.hasValidAttackTarget()) return false;
         if (soldier.isGoToHolding()) return false;
         if (!soldier.hasValidPingMoveTarget()) return false;
@@ -43,7 +45,8 @@ public class SoldierMoveToPingGoal extends Goal {
     @Override
     public boolean canContinueToUse() {
         if (!soldier.isAlive()) return false;
-        if (soldier.isVehicleCrewActive() || soldier.isCrewSeated()) return false;
+        if (soldier.isVehicleCrewActive() || soldier.isCrewSeated()
+            || soldier.getRole() == SoldierRole.VEHICLE_CREW) return false;
         if (soldier.isGoToHolding()) return false;
         if (!soldier.hasValidPingMoveTarget()) return false;
         if (rawTarget == null) return false;

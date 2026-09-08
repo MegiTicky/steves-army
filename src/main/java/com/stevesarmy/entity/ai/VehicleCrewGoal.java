@@ -16,6 +16,7 @@ import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.squad.SquadData;
 import com.stevesarmy.squad.SquadManager;
 import com.stevesarmy.squad.SquadThreatIntel;
+import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.Entity;
@@ -32,12 +33,17 @@ import java.util.Optional;
 import java.util.UUID;
 
 /**
- * Vehicle crew behavior. Seeks the nearest free Create seat entity (including
- * tallyho FlexibleSeatEntity) and teleports into it; once seated it mans the
- * nearest unclaimed tallyho hull MG (aim + fire with the shared detection
- * system, gunner-discipline accuracy model) or, failing that, a periscope
- * (scan + share intel with the owner's overlay). Everything tallyho-side is
- * reflection; without tallyho the crew simply seats and stays.
+ * Vehicle crew behavior. Crew soldiers never ride seat entities: tallyho's
+ * player flow is pure camera possession, and VS2's shipyard-passenger handling
+ * corrupts a soldier's position (mixed world/shipyard coordinates) until any
+ * entity query spanning soldier and seat collapses ("Collision box is too
+ * big"). Instead the soldier posts itself on the deck beside the nearest
+ * unclaimed tallyho hull MG (aim + fire with the shared detection system,
+ * gunner-discipline accuracy model) or periscope (scan + share intel with the
+ * owner's overlay), while detection runs from the camera's world position via
+ * DetectionViewpoint. Everything tallyho-side is reflection; without tallyho
+ * the crew simply stands where it is posted. If the soldier does end up a
+ * passenger (e.g. a handle-linked seat), the legacy seated path still works.
  */
 public class VehicleCrewGoal extends Goal {
     private enum Phase { SEEK, IDLE, GUNNER, OBSERVER }
@@ -59,7 +65,6 @@ public class VehicleCrewGoal extends Goal {
     private float bloom;
     private int burstShots;
     private int burstPauseTicks;
-    private int seatScanCooldown;
     private int dutyScanCooldown;
     private int sweepTick;
 
@@ -96,9 +101,12 @@ public class VehicleCrewGoal extends Goal {
             }
             tickSeated();
         } else {
-            releaseStation("dismounted");
-            phase = Phase.SEEK;
-            tickSeatSeeking();
+            // Unmounted crew: post itself where it stands and let the duty scan
+            // take over. Seat entities are deliberately never used here.
+            if (phase == Phase.SEEK) {
+                enterIdle();
+            }
+            tickSeated();
         }
     }
 
@@ -108,30 +116,7 @@ public class VehicleCrewGoal extends Goal {
         phase = Phase.SEEK;
     }
 
-    // --- Seeking ------------------------------------------------------------
-
-    private void tickSeatSeeking() {
-        if (seatScanCooldown > 0) {
-            seatScanCooldown--;
-            return;
-        }
-        seatScanCooldown = StevesArmyConfig.VEHICLE_CREW_SEAT_SCAN_INTERVAL.get();
-        // A recent manual dismount (vehicle wheel) also blocks the crew's own re-seat.
-        if (VS2Compat.isAutoTransportBlocked(soldier)) {
-            return;
-        }
-        double radius = StevesArmyConfig.VEHICLE_CREW_SEAT_SEARCH_RADIUS.get();
-        Entity seat = VS2Compat.findFreeSeatEntityNear(soldier, radius);
-        if (seat == null) {
-            return;
-        }
-        if (VS2Compat.seatSoldierOnSeatEntity(soldier, seat)) {
-            StevesArmyMod.LOGGER.info("[VehicleCrew] soldier={} seated on seat={} class={}",
-                soldier.getId(), seat.getId(), seat.getClass().getSimpleName());
-        }
-    }
-
-    // --- Seated phases ------------------------------------------------------
+    // --- Seated / posted phases ----------------------------------------------
 
     private void enterIdle() {
         phase = Phase.IDLE;
@@ -153,8 +138,16 @@ public class VehicleCrewGoal extends Goal {
                 tryAcquireDuty();
             }
             case GUNNER, OBSERVER -> {
+                if (VS2Compat.isAutoTransportBlocked(soldier)) {
+                    // The player just ordered this crew off the vehicle.
+                    releaseStation("manual dismount");
+                    return;
+                }
                 if (!validateStation()) {
                     return;
+                }
+                if (!soldier.isPassenger()) {
+                    keepAtPost();
                 }
                 if (phase == Phase.GUNNER) {
                     tickGunner();
@@ -169,6 +162,10 @@ public class VehicleCrewGoal extends Goal {
 
     private void tryAcquireDuty() {
         if (!(soldier.level() instanceof ServerLevel level) || !TallyhoCompat.isAvailable()) {
+            return;
+        }
+        // A recent manual dismount (vehicle wheel) also blocks the crew's own re-post.
+        if (VS2Compat.isAutoTransportBlocked(soldier)) {
             return;
         }
         double reach = StevesArmyConfig.VEHICLE_CREW_STATION_REACH.get();
@@ -190,6 +187,9 @@ public class VehicleCrewGoal extends Goal {
         sweepTick = 0;
         if (detectionSystem == null) {
             detectionSystem = crewDetectionSystem();
+        }
+        if (!soldier.isPassenger()) {
+            keepAtPost();
         }
         StevesArmyMod.LOGGER.info("[VehicleCrew] soldier={} claimed {} {}",
             soldier.getId(), phase == Phase.GUNNER ? "hull MG" : "periscope", choice.getId());
@@ -213,7 +213,9 @@ public class VehicleCrewGoal extends Goal {
             if (claimant != null && !claimant.equals(soldier.getUUID())) {
                 continue;
             }
-            double distanceSqr = entity.position().distanceToSqr(soldier.position());
+            // Station entities live in shipyard space; distances must be taken
+            // against their world-space position, never the raw entity position.
+            double distanceSqr = stationWorldPosOf(entity).distanceToSqr(soldier.position());
             if (distanceSqr > reachSqr) {
                 continue;
             }
@@ -230,9 +232,11 @@ public class VehicleCrewGoal extends Goal {
 
     private boolean validateStation() {
         double reach = StevesArmyConfig.VEHICLE_CREW_STATION_REACH.get();
+        Vec3 stationWorld = station == null ? null : stationWorldPosOf(station);
         boolean invalid = station == null || station.isRemoved() || !station.isAlive()
             || TallyhoCompat.isPlayerPossessed(station)
-            || soldier.distanceToSqr(station) > reach * reach * STATION_RELEASE_DISTANCE_FACTOR;
+            || stationWorld != null
+                && soldier.distanceToSqr(stationWorld) > reach * reach * STATION_RELEASE_DISTANCE_FACTOR;
         if (!invalid && !VehicleCrewManager.claim(station.getUUID(), soldier.getUUID())) {
             invalid = true;
         }
@@ -420,14 +424,57 @@ public class VehicleCrewGoal extends Goal {
 
     // --- Shared helpers -------------------------------------------------------
 
+    /** World-space position of a station entity (its raw position is shipyard space). */
+    private static Vec3 stationWorldPosOf(Entity station) {
+        Object ship = VS2Compat.getMountedShip(station);
+        Vec3 world = VS2Compat.shipToWorldPosition(ship, station.position());
+        return world != null ? world : station.position();
+    }
+
+    /**
+     * Keeps an unmounted gunner standing on the deck beside its station. The
+     * ship may drift under the soldier; if it strays, teleport back to a deck
+     * surface point found in shipyard space (where the ship's blocks live).
+     */
+    private void keepAtPost() {
+        if (!(soldier.level() instanceof ServerLevel level) || station == null) {
+            return;
+        }
+        Vec3 post = postPosition(level);
+        if (post == null) {
+            return;
+        }
+        double dx = soldier.getX() - post.x;
+        double dz = soldier.getZ() - post.z;
+        if (dx * dx + dz * dz > 1.0 || Math.abs(soldier.getY() - post.y) > 2.0) {
+            soldier.getNavigation().stop();
+            soldier.teleportTo(post.x, post.y, post.z);
+        }
+    }
+
+    @javax.annotation.Nullable
+    private Vec3 postPosition(ServerLevel level) {
+        BlockPos base = station.blockPosition();
+        BlockPos surface = base;
+        for (int dy = 0; dy <= 4; dy++) {
+            BlockPos candidate = base.below(dy);
+            if (!level.getBlockState(candidate).getCollisionShape(level, candidate).isEmpty()) {
+                surface = candidate.above();
+                break;
+            }
+        }
+        Object ship = VS2Compat.getMountedShip(station);
+        Vec3 world = VS2Compat.shipToWorldPosition(ship,
+            new Vec3(surface.getX() + 0.5, surface.getY(), surface.getZ() + 0.5));
+        return world != null ? world
+            : new Vec3(surface.getX() + 0.5, surface.getY(), surface.getZ() + 0.5);
+    }
+
     private void beginStationView() {
         Object ship = VS2Compat.getMountedShip(station);
         // Ship-mounted camera entities live in shipyard coordinates server-side;
         // detection must run from the camera's true world position.
-        Vec3 cameraWorld = VS2Compat.shipToWorldPosition(ship, station.position());
-        if (cameraWorld == null) {
-            cameraWorld = station.position();
-        }
+        Vec3 cameraWorld = stationWorldPosOf(station);
         stationWorldPos = cameraWorld;
         Vec3 look = VS2Compat.shipToWorldDirection(ship, station.getLookAngle());
         DetectionViewpoint.set(soldier, cameraWorld, look);

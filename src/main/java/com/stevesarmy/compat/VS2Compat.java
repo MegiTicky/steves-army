@@ -102,6 +102,14 @@ public final class VS2Compat {
             return isTransported(soldier, state) && !state.crewSeated;
         }
 
+        if (soldier.getRole() == SoldierRole.VEHICLE_CREW) {
+            // Crew posts itself on the deck (unmounted); it must never be
+            // extracted to world ground or auto-transported — the extraction
+            // fight against the post position is what corrupted soldier
+            // coordinates and starved the physics thread.
+            return false;
+        }
+
         if (state.reboardBlockTicks > 0) {
             state.reboardBlockTicks--;
         }
@@ -966,6 +974,11 @@ public final class VS2Compat {
     }
 
     private static boolean tryStaticSeat(SoldierEntity soldier, LivingEntity owner, SoldierState state) {
+        // Vehicle crew never rides seat entities; it posts itself beside the
+        // station instead (riding a shipyard-space seat corrupts its position).
+        if (soldier.getRole() == SoldierRole.VEHICLE_CREW) {
+            return false;
+        }
         try {
             Object ownerShip = reflect(getShipMountedTo, owner);
             if (ownerShip == null) {

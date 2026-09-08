@@ -4,6 +4,7 @@ import com.stevesarmy.StevesArmyConfig;
 import com.stevesarmy.compat.AnalogWarfareCompat;
 import com.stevesarmy.compat.VS2Compat;
 import com.stevesarmy.entity.SoldierEntity;
+import com.stevesarmy.entity.SoldierRole;
 import com.stevesarmy.squad.FireTeam;
 import com.stevesarmy.squad.SquadTargeting;
 import com.stevesarmy.transport.TransportOrder;
@@ -86,7 +87,8 @@ public class TransportOrderMessage {
             if (handlesAvailable && vehicle != null && soldier.level() instanceof ServerLevel serverLevel) {
                 handle = AnalogWarfareCompat.findHandleForSeat(serverLevel, vehicle);
             }
-            if (VS2Compat.releaseTransport(soldier)) {
+            boolean wasCrew = soldier.getRole() == SoldierRole.VEHICLE_CREW;
+            if (VS2Compat.releaseTransport(soldier) || wasCrew && !soldier.isPassenger()) {
                 dismounted++;
                 if (handle != null) {
                     // Linked seat: the soldier exits at the handle (the hatch)
@@ -113,8 +115,11 @@ public class TransportOrderMessage {
             sender.displayClientMessage(Component.translatable("transport.steves_army.feedback.no_soldiers"), true);
             return;
         }
+        // Vehicle crew never rides seats; it posts itself beside the station
+        // once its goal runs, so seat mounting does not apply to it.
         List<SoldierEntity> eligible = soldiers.stream()
             .filter(s -> !s.isPassenger())
+            .filter(s -> s.getRole() != SoldierRole.VEHICLE_CREW)
             .toList();
         if (eligible.isEmpty()) {
             sender.displayClientMessage(Component.translatable("transport.steves_army.feedback.all_mounted"), true);

@@ -14,6 +14,7 @@ import com.stevesarmy.combat.cover.pure.PureCoverEvaluator;
 import com.stevesarmy.debug.DiagnosticLogManager;
 import com.stevesarmy.debug.PerformanceMetrics;
 import com.stevesarmy.entity.SoldierEntity;
+import com.stevesarmy.entity.SoldierRole;
 import com.stevesarmy.entity.MachineGunnerEntity;
 import com.stevesarmy.entity.SupportEntity;
 import com.stevesarmy.squad.SquadCoverContext;
@@ -1310,7 +1311,8 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
     @Override
     public boolean canUse() {
         // Seated crew soldiers never seek cover; they hold their station.
-        if (soldier.isVehicleCrewActive() || soldier.isCrewSeated()) return false;
+        if (soldier.isVehicleCrewActive() || soldier.isCrewSeated()
+            || soldier.getRole() == SoldierRole.VEHICLE_CREW) return false;
         if (soldier.isHealing()) {
             return canContinueHealingInCover();
         }
@@ -1394,7 +1396,8 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
     @Override
     public boolean canContinueToUse() {
         if (!soldier.isAlive()) return false;
-        if (soldier.isVehicleCrewActive() || soldier.isCrewSeated()) return false;
+        if (soldier.isVehicleCrewActive() || soldier.isCrewSeated()
+            || soldier.getRole() == SoldierRole.VEHICLE_CREW) return false;
         if (soldier.isHealing()) {
             return canContinueHealingInCover();
         }
