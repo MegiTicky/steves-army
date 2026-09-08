@@ -10,8 +10,8 @@ import org.lwjgl.glfw.GLFW;
 
 /**
  * Hover/selection logic for the vehicle wheel page. This wheel is never opened by its own
- * key: it is reached by left-clicking while the ping wheel is open (see WheelCycleController),
- * and the ping wheel's release path calls {@link #fireSelected(Minecraft)}.
+ * key: it is reached by pressing the cycle button while the ping wheel is open (see
+ * WheelCycleController), and the ping wheel's release path calls {@link #fireSelected(Minecraft)}.
  */
 public class VehicleWheelHandler {
     private static TransportOrder currentHoveredAction;

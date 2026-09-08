@@ -8,6 +8,7 @@
     "GunDisplayInstanceMixin",
     "GunItemRendererMixin",
     "MinecraftGlowMixin",
+    "MouseHandlerWheelMixin",
     "SoldierItemInHandLayerMixin"
   ],
   "injectors": {

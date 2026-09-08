@@ -9,6 +9,7 @@ public final class StevesArmyClientConfig {
     public static final ForgeConfigSpec.BooleanValue SHOW_FRIENDLY_SOLDIER_NAME_TAGS;
     public static final ForgeConfigSpec.BooleanValue ENABLE_FIRE_TEAM_WHEEL;
     public static final ForgeConfigSpec.BooleanValue ENABLE_VEHICLE_WHEEL;
+    public static final ForgeConfigSpec.EnumValue<WheelCycleController.CycleButton> VEHICLE_WHEEL_CYCLE_BUTTON;
     public static final ForgeConfigSpec.DoubleValue PING_SCALE;
     public static final ForgeConfigSpec.DoubleValue ENEMY_CONTACT_PING_BASELINE_SIZE;
     public static final ForgeConfigSpec.DoubleValue ENEMY_CONTACT_PING_HEIGHT_OFFSET;
@@ -54,9 +55,15 @@ public final class StevesArmyClientConfig {
             .define("enableFireTeamWheel", false);
         ENABLE_VEHICLE_WHEEL = builder
             .comment("Enable the vehicle wheel page: hold the ping wheel key (middle-click),",
-                     "then left-click to switch to vehicle Mount/Dismount commands.",
+                     "then press the cycle button to switch to vehicle Mount/Dismount commands.",
                      "Default: true")
             .define("enableVehicleWheel", true);
+        VEHICLE_WHEEL_CYCLE_BUTTON = builder
+            .comment("Mouse button that switches between wheel pages while a wheel is open.",
+                     "Right-click is the default because many mice never report a left-click",
+                     "while the scroll-wheel button is held down.",
+                     "Default: RIGHT")
+            .defineEnum("vehicleWheelCycleButton", WheelCycleController.CycleButton.RIGHT);
         builder.pop();
 
         SPEC = builder.build();
