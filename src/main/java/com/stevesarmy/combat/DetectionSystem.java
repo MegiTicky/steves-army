@@ -40,7 +40,18 @@ public class DetectionSystem {
         this.machineGunnerPipeline = machineGunnerPipeline;
     }
 
+    private double focusedRangeOverride = -1.0;
+
+    /** Overrides the focused detection range (e.g. long-range vehicle crew optics). */
+    public DetectionSystem withFocusedRange(double range) {
+        this.focusedRangeOverride = range;
+        return this;
+    }
+
     public double getFocusedRange() {
+        if (focusedRangeOverride > 0.0) {
+            return focusedRangeOverride;
+        }
         return machineGunnerPipeline
             ? StevesArmyConfig.getMachineGunnerDetectionDistance()
             : StevesArmyConfig.getBasicDetectionDistance();

@@ -64,6 +64,7 @@ public class StevesArmyConfig {
     public static final ForgeConfigSpec.BooleanValue VEHICLE_CREW_ENABLED;
     public static final ForgeConfigSpec.DoubleValue VEHICLE_CREW_SEAT_SEARCH_RADIUS;
     public static final ForgeConfigSpec.DoubleValue VEHICLE_CREW_STATION_REACH;
+    public static final ForgeConfigSpec.DoubleValue VEHICLE_CREW_DETECTION_DISTANCE;
     public static final ForgeConfigSpec.DoubleValue VEHICLE_CREW_TRAVERSE_SPEED;
     public static final ForgeConfigSpec.DoubleValue VEHICLE_CREW_BLOOM_PER_SHOT;
     public static final ForgeConfigSpec.DoubleValue VEHICLE_CREW_BLOOM_MAX;
@@ -439,6 +440,13 @@ BUILDER.pop();
             .comment("How far a seated crew soldier may man a hull MG or periscope from its seat.",
                      "Default: 16 blocks.")
             .defineInRange("stationReach", 16.0, 2.0, 64.0);
+
+        VEHICLE_CREW_DETECTION_DISTANCE = BUILDER
+            .comment("Focused detection distance for crewed optics (hull MG / periscope),",
+                     "independent of infantry detection. A hull MG engages far beyond rifle",
+                     "range, so targets past normal detection distance would be aimed at but",
+                     "never recognized. Default: 96 blocks.")
+            .defineInRange("detectionDistance", 96.0, 16.0, 512.0);
 
         VEHICLE_CREW_TRAVERSE_SPEED = BUILDER
             .comment("Maximum turret/optic rotation speed in degrees per tick. The mounted gun",

@@ -52,6 +52,8 @@ public class VehicleCrewGoal extends Goal {
 
     private DetectionSystem detectionSystem;
     private Entity station;
+    /** The station camera's position in world space (entity pos is shipyard space). */
+    private Vec3 stationWorldPos;
     private LivingEntity target;
     private float aimQuality;
     private float bloom;
@@ -78,6 +80,12 @@ public class VehicleCrewGoal extends Goal {
 
     private static boolean crewEnabled() {
         return StevesArmyConfig.VEHICLE_CREW_ENABLED.get() && VS2Compat.isEnabled();
+    }
+
+    /** Crewed optics detect far beyond infantry range; a hull MG engages at MG range. */
+    private DetectionSystem crewDetectionSystem() {
+        return new DetectionSystem(soldier.getUUID())
+            .withFocusedRange(StevesArmyConfig.VEHICLE_CREW_DETECTION_DISTANCE.get());
     }
 
     @Override
@@ -128,7 +136,7 @@ public class VehicleCrewGoal extends Goal {
     private void enterIdle() {
         phase = Phase.IDLE;
         dutyScanCooldown = 0;
-        detectionSystem = new DetectionSystem(soldier.getUUID());
+        detectionSystem = crewDetectionSystem();
     }
 
     private void tickSeated() {
@@ -178,7 +186,7 @@ public class VehicleCrewGoal extends Goal {
         burstPauseTicks = 0;
         sweepTick = 0;
         if (detectionSystem == null) {
-            detectionSystem = new DetectionSystem(soldier.getUUID());
+            detectionSystem = crewDetectionSystem();
         }
         StevesArmyMod.LOGGER.info("[VehicleCrew] soldier={} claimed {} {}",
             soldier.getId(), phase == Phase.GUNNER ? "hull MG" : "periscope", choice.getId());
@@ -241,6 +249,7 @@ public class VehicleCrewGoal extends Goal {
                 soldier.getId(), station.getId(), reason);
             station = null;
         }
+        stationWorldPos = null;
         if (phase == Phase.GUNNER || phase == Phase.OBSERVER) {
             phase = Phase.IDLE;
             dutyScanCooldown = 0;
@@ -285,9 +294,18 @@ public class VehicleCrewGoal extends Goal {
             return;
         }
 
-        float traverse = StevesArmyConfig.VEHICLE_CREW_TRAVERSE_SPEED.get().floatValue();
-        float error = TallyhoCompat.aimTowards(station, aimPoint.position, traverse, 0.0F, 0.0F);
-        decayBloom();
+            float traverse = StevesArmyConfig.VEHICLE_CREW_TRAVERSE_SPEED.get().floatValue();
+            float error = TallyhoCompat.aimTowards(station, aimTargetForStation(aimPoint.position),
+                traverse, 0.0F, 0.0F);
+            if (soldier.tickCount % 60 == 0) {
+                StevesArmyMod.LOGGER.info(
+                    "[VehicleCrew] gunner soldier={} target={} detected={} aimQuality={} aimError={}deg ready={} belt={} burstPause={}",
+                    soldier.getId(), best.getId(), detectionSystem.isTargetDetected(best),
+                    String.format("%.2f", aimQuality), String.format("%.1f", error),
+                    TallyhoCompat.isReadyToFire(station), TallyhoCompat.hasAmmo(station),
+                    burstPauseTicks);
+            }
+            decayBloom();
         // Only open fire once the detection system has actually classified the
         // contact, mirroring infantry trigger discipline.
         if (!detectionSystem.isTargetDetected(best)
@@ -308,7 +326,7 @@ public class VehicleCrewGoal extends Goal {
             aimQuality, yawSigma * bloomScale, pitchSigma * bloomScale, soldier.level());
 
         // Point the gun at the deviated direction; tallyho clamps to turret limits.
-        TallyhoCompat.aimTowards(station, aimPoint.position, traverse,
+        TallyhoCompat.aimTowards(station, aimTargetForStation(aimPoint.position), traverse,
             deviation[1], deviation[0]);
         TallyhoCompat.fire(station, soldier);
 
@@ -362,7 +380,8 @@ public class VehicleCrewGoal extends Goal {
             target = best;
             reportIntel(best);
             // Keep the optics on the contact so intel and detection keep refreshing.
-            TallyhoCompat.aimTowards(station, best.getEyePosition(), traverse, 0.0F, 0.0F);
+            TallyhoCompat.aimTowards(station, aimTargetForStation(best.getEyePosition()),
+                traverse, 0.0F, 0.0F);
             return;
         }
         target = null;
@@ -393,15 +412,32 @@ public class VehicleCrewGoal extends Goal {
         Vec3 direction = new Vec3(-Math.sin(yawRad), 0.0, Math.cos(yawRad));
         Vec3 sweepTarget = DetectionViewpoint.getEyePosition(soldier)
             .add(direction.scale(OBSERVER_SWEEP_RANGE));
-        TallyhoCompat.aimTowards(station, sweepTarget, traverse, 0.0F, 0.0F);
+        TallyhoCompat.aimTowards(station, aimTargetForStation(sweepTarget), traverse, 0.0F, 0.0F);
     }
 
     // --- Shared helpers -------------------------------------------------------
 
     private void beginStationView() {
-        Vec3 look = VS2Compat.shipToWorldDirection(
-            VS2Compat.getMountedShip(station), station.getLookAngle());
-        DetectionViewpoint.set(soldier, station.position(), look);
+        Object ship = VS2Compat.getMountedShip(station);
+        // Ship-mounted camera entities live in shipyard coordinates server-side;
+        // detection must run from the camera's true world position.
+        Vec3 cameraWorld = VS2Compat.shipToWorldPosition(ship, station.position());
+        if (cameraWorld == null) {
+            cameraWorld = station.position();
+        }
+        stationWorldPos = cameraWorld;
+        Vec3 look = VS2Compat.shipToWorldDirection(ship, station.getLookAngle());
+        DetectionViewpoint.set(soldier, cameraWorld, look);
+    }
+
+    /**
+     * Tallyho computes the aim direction as {@code target - camera.getPosition()},
+     * mixing a world-space target with the camera's shipyard-space position. Feeding
+     * it a pseudo-target makes that difference equal the true world-space direction.
+     */
+    private Vec3 aimTargetForStation(Vec3 worldTarget) {
+        Vec3 cameraPos = stationWorldPos != null ? stationWorldPos : station.position();
+        return station.position().add(worldTarget.subtract(cameraPos));
     }
 
     private List<LivingEntity> computeCandidates() {

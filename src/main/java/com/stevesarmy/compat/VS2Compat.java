@@ -213,6 +213,28 @@ public final class VS2Compat {
     }
 
     /**
+     * Transforms a ship-local (shipyard) position to world space, or null when
+     * unavailable. Ship-mounted entities like tallyho cameras live at shipyard
+     * coordinates server-side; VS2 transforms them only for client tracking.
+     */
+    @Nullable
+    public static Vec3 shipToWorldPosition(@Nullable Object ship, Vec3 localPos) {
+        if (ship == null || shipGetShipToWorld == null) {
+            return null;
+        }
+        try {
+            Object matrix = shipGetShipToWorld.invoke(ship);
+            if (matrix instanceof org.joml.Matrix4dc m) {
+                org.joml.Vector3d v = new org.joml.Vector3d(localPos.x, localPos.y, localPos.z);
+                m.transformPosition(v);
+                return new Vec3(v.x, v.y, v.z);
+            }
+        } catch (Throwable ignored) {
+        }
+        return null;
+    }
+
+    /**
      * Minimum corner of the ship's AABB in shipyard (block) space — the origin that
      * ship-local offsets are added to in order to reach real block positions.
      */
