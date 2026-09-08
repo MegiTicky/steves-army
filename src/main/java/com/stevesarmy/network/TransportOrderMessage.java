@@ -115,11 +115,8 @@ public class TransportOrderMessage {
             sender.displayClientMessage(Component.translatable("transport.steves_army.feedback.no_soldiers"), true);
             return;
         }
-        // Vehicle crew never rides seats; it posts itself beside the station
-        // once its goal runs, so seat mounting does not apply to it.
         List<SoldierEntity> eligible = soldiers.stream()
             .filter(s -> !s.isPassenger())
-            .filter(s -> s.getRole() != SoldierRole.VEHICLE_CREW)
             .toList();
         if (eligible.isEmpty()) {
             sender.displayClientMessage(Component.translatable("transport.steves_army.feedback.all_mounted"), true);
@@ -138,12 +135,24 @@ public class TransportOrderMessage {
             return;
         }
 
-        // Handle-linked seats first (VS Analog Warfare vehicle mount handles);
-        // soldiers without a free link fall back to the plain free-seat scan.
+        // Vehicle crew never rides seats: teleport it aboard onto the deck and
+        // let its goal post it at the nearest unclaimed station.
         List<SoldierEntity> remaining = new ArrayList<>(eligible);
         int seated = 0;
+        for (SoldierEntity crewSoldier : new ArrayList<>(remaining)) {
+            if (crewSoldier.getRole() != SoldierRole.VEHICLE_CREW) {
+                continue;
+            }
+            remaining.remove(crewSoldier);
+            if (VS2Compat.teleportSoldierAboard(crewSoldier, level, ship, searchCenter)) {
+                seated++;
+            }
+        }
+
+        // Handle-linked seats first (VS Analog Warfare vehicle mount handles);
+        // soldiers without a free link fall back to the plain free-seat scan.
         if (StevesArmyConfig.VEHICLE_HANDLES_ENABLED.get() && AnalogWarfareCompat.isAvailable()) {
-            seated = AnalogWarfareCompat.mountViaHandles(level, ship, searchCenter, remaining);
+            seated += AnalogWarfareCompat.mountViaHandles(level, ship, searchCenter, remaining);
         }
 
         if (!remaining.isEmpty()) {

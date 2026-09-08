@@ -300,6 +300,69 @@ public final class VS2Compat {
     }
 
     /**
+     * Teleports a vehicle crew soldier aboard the given ship near worldCenter,
+     * standing on the deck. Crew soldiers are never seated; once aboard, their
+     * goal posts them at the nearest unclaimed station.
+     */
+    public static boolean teleportSoldierAboard(SoldierEntity soldier, ServerLevel level,
+                                                Object ship, Vec3 worldCenter) {
+        initialize();
+        if (!available || ship == null || soldier.isPassenger() || !soldier.isAlive()) {
+            return false;
+        }
+        Vec3 local = worldToShipLocal(ship, worldCenter);
+        if (local == null) {
+            return false;
+        }
+        // worldToShipLocal normally returns shipyard-space coordinates (ship-local
+        // space is the shipyard in VS2); guard against min-relative ship data paths.
+        BlockPos shipyardMin = getShipyardMin(ship);
+        BlockPos base = shipyardMin != null
+            && Math.abs(local.x) < 100000.0D && Math.abs(local.z) < 100000.0D
+            ? shipyardMin.offset(BlockPos.containing(local))
+            : BlockPos.containing(local);
+        BlockPos surface = findDeckSurface(level, base, 6);
+        if (surface == null) {
+            return false;
+        }
+        Vec3 world = shipToWorldPosition(ship,
+            new Vec3(surface.getX() + 0.5, surface.getY(), surface.getZ() + 0.5));
+        if (world == null) {
+            return false;
+        }
+        soldier.getNavigation().stop();
+        soldier.cancelCoverMovement();
+        soldier.setDeltaMovement(Vec3.ZERO);
+        soldier.teleportTo(world.x, world.y, world.z);
+        StevesArmyMod.LOGGER.info("[VS2] Crew posted aboard soldier={} base={} surface={} world={}",
+            soldier.getId(), base, surface, world);
+        return true;
+    }
+
+    /** Top face of the first solid block with two blocks of headroom, spiral out from base. */
+    @Nullable
+    private static BlockPos findDeckSurface(Level level, BlockPos base, int radius) {
+        for (int r = 0; r <= radius; r++) {
+            for (int x = -r; x <= r; x++) {
+                for (int z = -r; z <= r; z++) {
+                    if (Math.max(Math.abs(x), Math.abs(z)) != r) {
+                        continue;
+                    }
+                    for (int y = 3; y >= -3; y--) {
+                        BlockPos floor = base.offset(x, y, z);
+                        if (!level.getBlockState(floor).getCollisionShape(level, floor).isEmpty()
+                            && level.getBlockState(floor.above()).getCollisionShape(level, floor.above()).isEmpty()
+                            && level.getBlockState(floor.above(2)).getCollisionShape(level, floor.above(2)).isEmpty()) {
+                            return floor.above();
+                        }
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
+    /**
      * World-space position of a seat entity. Create SeatEntities on ships live at
      * shipyard coordinates; VS2 data-provider seats (e.g. tallyho's FlexibleSeatEntity)
      * are already tracked at world coordinates.
