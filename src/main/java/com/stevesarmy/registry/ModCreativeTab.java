@@ -28,6 +28,8 @@ public class ModCreativeTab {
                 output.accept(ModItems.MACHINE_GUNNER_SPAWN_EGG.get());
                 output.accept(ModItems.GARRISON_SPAWN_EGG.get());
                 output.accept(ModItems.TEAM_GARRISON_SPAWN_EGG.get());
+                output.accept(ModItems.SUPPORT_SPAWN_EGG.get());
+                output.accept(ModItems.VEHICLE_CREW_SPAWN_EGG.get());
                 output.accept(ModItems.ENEMY_SOLDIER_SPAWN_EGG.get());
                 output.accept(ModItems.TARGET_SPAWN_EGG.get());
                 output.accept(ModItems.RESUPPLY_POUCH.get());
