@@ -62,10 +62,6 @@ final class PathfindingMobSnapshot extends Mob {
     }
 
     @Override
-    protected void defineSynchedData() {
-    }
-
-    @Override
     public void readAdditionalSaveData(net.minecraft.nbt.CompoundTag tag) {
     }
 
