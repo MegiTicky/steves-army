@@ -2,6 +2,7 @@ package com.stevesarmy.compat;
 
 import com.stevesarmy.StevesArmyConfig;
 import com.stevesarmy.StevesArmyMod;
+import com.stevesarmy.combat.StationGunnerAI;
 import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.entity.SoldierRole;
 import com.stevesarmy.squad.SquadMode;
@@ -46,6 +47,8 @@ public final class VS2Compat {
     private static final int FULL_SEAT_RETRY_TICKS = 100;
     /** Ticks the owner must be off-ship before a FOLLOW soldier is released (debounce). */
     private static final int RELEASE_DEBOUNCE_TICKS = 40;
+    /** Ticks between station duty scans for a seated crew soldier without a station. */
+    private static final int CREW_DUTY_SCAN_INTERVAL_TICKS = 20;
 
     private static volatile boolean initialized;
     private static volatile boolean available;
@@ -1083,6 +1086,24 @@ public final class VS2Compat {
         return false;
     }
 
+    /**
+     * Seated crew soldiers freeze (their goals never tick), so they can never run
+     * the unmounted duty scan in VehicleCrewGoal. Throttled hook that hands the
+     * soldier to StationGunnerAI.assignSeatedSoldier, which finds it a station on
+     * the same ship and activates the station-side gun AI.
+     */
+    private static void tickSeatedCrewDuty(SoldierEntity soldier, SoldierState state) {
+        if (!state.crewSeated) {
+            return;
+        }
+        if (state.crewDutyScanCooldown > 0) {
+            state.crewDutyScanCooldown--;
+            return;
+        }
+        state.crewDutyScanCooldown = CREW_DUTY_SCAN_INTERVAL_TICKS;
+        StationGunnerAI.assignSeatedSoldier(soldier, state.transportShipId);
+    }
+
     private static void updateTransport(SoldierEntity soldier, SoldierState state) {
         // Command-driven mounts (transportOwnerId == null) are kept regardless of owner state.
         if (state.transportOwnerId == null) {
@@ -1090,6 +1111,7 @@ public final class VS2Compat {
                 && state.transportAnchorId.equals(soldier.getVehicle().getUUID())) {
                 soldier.getVehicle().positionRider(soldier);
                 stopMovement(soldier);
+                tickSeatedCrewDuty(soldier, state);
                 return;
             }
             StevesArmyMod.LOGGER.info("[VS2] Command-driven transport lost soldier={} passenger={} expectedAnchor={}",
@@ -1127,6 +1149,7 @@ public final class VS2Compat {
         // Non-player entities are allowed to live at shipyard coords (VS2 only
         // intercepts setPosRaw for players). Mirrors the command-driven branch.
         anchor.positionRider(soldier);
+        tickSeatedCrewDuty(soldier, state);
 
         // HOLD soldiers stay seated regardless of owner state.
         // FOLLOW soldiers release when the owner is no longer on the ship.
@@ -1513,5 +1536,7 @@ public final class VS2Compat {
         private int ownerOffShipCount;
         /** Ticks a soldier may stand inside the ship after a mount-handle dismount. */
         private int handleDismountGraceTicks;
+        /** Throttle for the seated-crew station duty scan. */
+        private int crewDutyScanCooldown;
     }
 }

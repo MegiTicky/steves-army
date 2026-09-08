@@ -20,6 +20,7 @@ import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
 
 import javax.annotation.Nullable;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
@@ -121,6 +122,81 @@ public final class StationGunnerAI {
                 deactivate(entry.getKey(), "soldier stopped");
             }
         }
+    }
+
+    /**
+     * Seat-time duty assignment. Seated crew soldiers freeze (their goals never
+     * tick), so the unmounted scan in {@link com.stevesarmy.entity.ai.VehicleCrewGoal}
+     * never runs for them; transport instead calls this after seating. Distance
+     * is shipyard-to-shipyard: the station and the seat both live in shipyard
+     * space, while the seated soldier's own position() is a stale world coordinate.
+     */
+    public static void assignSeatedSoldier(SoldierEntity soldier, @Nullable Long transportShipId) {
+        if (!(soldier.level() instanceof ServerLevel level)
+            || soldier.isRemoved()
+            || !soldier.isPassenger()
+            || soldier.getRole() != SoldierRole.VEHICLE_CREW
+            || !TallyhoCompat.isAvailable()
+            || soldierHasStation(soldier)) {
+            return;
+        }
+        Entity vehicle = soldier.getVehicle();
+        if (vehicle == null) {
+            return;
+        }
+        // The seat recorded its ship at mount time; fall back to a live lookup.
+        Long soldierShipId = transportShipId != null
+            ? transportShipId : VS2Compat.getShipIdOf(VS2Compat.getMountedShip(vehicle));
+        if (soldierShipId == null) {
+            return;
+        }
+        Entity mg = findStationForSeated(level, soldier, soldierShipId, vehicle, true);
+        Entity choice = mg != null ? mg : findStationForSeated(level, soldier, soldierShipId, vehicle, false);
+        if (choice == null) {
+            return;
+        }
+        boolean gunner = TallyhoCompat.isHullMG(choice);
+        if (!VehicleCrewManager.claim(choice.getUUID(), soldier.getUUID())) {
+            return;
+        }
+        if (activate(choice, soldier, gunner)) {
+            StevesArmyMod.LOGGER.info("[StationAI] seated soldier={} claimed {} {} shipId={}",
+                soldier.getId(), gunner ? "hull MG" : "periscope", choice.getId(), soldierShipId);
+        } else {
+            VehicleCrewManager.release(choice.getUUID(), soldier.getUUID());
+        }
+    }
+
+    private static Entity findStationForSeated(ServerLevel level, SoldierEntity soldier,
+                                               Long soldierShipId, Entity vehicle, boolean hullMg) {
+        List<Entity> candidates = new ArrayList<>();
+        double reach = StevesArmyConfig.VEHICLE_CREW_STATION_REACH.get();
+        double reachSqr = reach * reach;
+        for (Entity entity : level.getAllEntities()) {
+            boolean matches = hullMg ? TallyhoCompat.isHullMG(entity) : TallyhoCompat.isPeriscope(entity);
+            if (!matches || entity.isRemoved() || !entity.isAlive()) {
+                continue;
+            }
+            if (TallyhoCompat.isPlayerPossessed(entity)) {
+                continue;
+            }
+            UUID claimant = VehicleCrewManager.claimantOf(entity.getUUID());
+            if (claimant != null && !claimant.equals(soldier.getUUID())) {
+                continue;
+            }
+            Long stationShipId = VS2Compat.getShipIdOf(VS2Compat.getMountedShip(entity));
+            if (!soldierShipId.equals(stationShipId)) {
+                continue;
+            }
+            double distanceSqr = entity.position().distanceToSqr(vehicle.position());
+            if (distanceSqr > reachSqr) {
+                continue;
+            }
+            candidates.add(entity);
+        }
+        return candidates.stream()
+            .min(Comparator.comparingDouble(e -> e.position().distanceToSqr(vehicle.position())))
+            .orElse(null);
     }
 
     @SubscribeEvent
