@@ -23,6 +23,7 @@ import javax.annotation.Nullable;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.StringJoiner;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -338,96 +339,166 @@ public final class StationGunnerAI {
 
     private static void tickGunner(StationState state, ServerLevel level) {
         List<LivingEntity> candidates = computeCandidates(state, level);
-        StringBuilder status = new StringBuilder(160)
-            .append("candidates=").append(candidates.size());
-        double nearest = nearestCandidateDistance(state, candidates);
-        if (Double.isFinite(nearest)) {
-            status.append(" nearest=").append(String.format("%.1f", nearest)).append("m");
-        }
         DetectionSystem.DetectionScanResult scan = state.detection.tick(
             state.soldier, candidates, squadIntel(state.soldier));
         LivingEntity best = pickTarget(scan);
-        status.append(" best=").append(best == null ? "none" : best.getId());
+
+        float aimError = Float.NaN;
+        boolean fireGateReached = false;
         if (best == null) {
             state.target = null;
             state.aimQuality = Math.max(0.0F,
                 state.aimQuality - StevesArmyConfig.getAimQualityLosDecayRate());
             decayBloom(state);
-            emitStatus(state, "gunner", status);
-            return;
-        }
-        state.target = best;
-        reportIntel(state.soldier, best);
-        status.append(" detected=").append(state.detection.isTargetDetected(best));
+        } else {
+            state.target = best;
+            reportIntel(state.soldier, best);
 
-        ExposureCalculator.AimPointResult aimPoint =
-            ExposureCalculator.getBestAimPoint(state.soldier, best);
-        boolean inLos = TargetAcquisition.hasLineOfSight(state.soldier, best);
-        updateAimQuality(state, best, inLos);
-        status.append(" aimQuality=").append(String.format("%.2f", state.aimQuality))
-            .append(" los=").append(inLos);
-        if (aimPoint == null || !aimPoint.canShoot()) {
-            status.append(" aimPoint=noShot");
-            decayBloom(state);
-            emitStatus(state, "gunner", status);
-            return;
-        }
-        if (!inLos) {
-            status.append(" aimPoint=ok");
-            decayBloom(state);
-            emitStatus(state, "gunner", status);
-            return;
-        }
-        if (!FriendlyFireChecker.isSafeToShoot(state.soldier, aimPoint.position, state.aimQuality)) {
-            status.append(" aimPoint=ok friendly=veto");
-            decayBloom(state);
-            emitStatus(state, "gunner", status);
-            return;
-        }
+            ExposureCalculator.AimPointResult aimPoint =
+                ExposureCalculator.getBestAimPoint(state.soldier, best);
+            boolean inLos = TargetAcquisition.hasLineOfSight(state.soldier, best);
+            updateAimQuality(state, best, inLos);
+            if (aimPoint != null && aimPoint.canShoot() && inLos
+                && FriendlyFireChecker.isSafeToShoot(state.soldier, aimPoint.position, state.aimQuality)) {
+                float traverse = StevesArmyConfig.VEHICLE_CREW_TRAVERSE_SPEED.get().floatValue();
+                aimError = TallyhoCompat.aimTowards(state.station,
+                    aimTargetForStation(state, aimPoint.position), traverse, 0.0F, 0.0F);
+                fireGateReached = true;
+                decayBloom(state);
+                // Only open fire once the detection system has classified the
+                // contact, mirroring infantry trigger discipline.
+                if (state.detection.isTargetDetected(best)
+                    && state.aimQuality >= StevesArmyConfig.VEHICLE_CREW_MIN_AIM_TO_FIRE.get().floatValue()
+                    && aimError <= FIRE_TOLERANCE_DEGREES
+                    && fireBurstGate(state)) {
+                    float yawSigma = AimAccuracyManager.getYawSigma(state.aimQuality)
+                        + (float) aimPoint.concealment * 2.00F;
+                    float pitchSigma = AimAccuracyManager.getPitchSigma(state.aimQuality)
+                        + (float) aimPoint.concealment * 0.75F;
+                    float bloomScale = 1.0F + state.bloom;
+                    float[] deviation = AimAccuracyManager.sampleGaussianDeviation(
+                        state.aimQuality, yawSigma * bloomScale, pitchSigma * bloomScale, level);
 
-        float traverse = StevesArmyConfig.VEHICLE_CREW_TRAVERSE_SPEED.get().floatValue();
-        float error = TallyhoCompat.aimTowards(state.station,
-            aimTargetForStation(state, aimPoint.position), traverse, 0.0F, 0.0F);
-        status.append(" aimPoint=ok friendly=safe aimError=")
-            .append(String.format("%.1f", error)).append("deg")
-            .append(" ready=").append(TallyhoCompat.isReadyToFire(state.station))
-            .append(" belt=").append(TallyhoCompat.hasAmmo(state.station))
-            .append(" burstPause=").append(state.burstPauseTicks);
-        emitStatus(state, "gunner", status);
-        decayBloom(state);
-        // Only open fire once the detection system has classified the contact,
-        // mirroring infantry trigger discipline.
-        if (!state.detection.isTargetDetected(best)
-            || state.aimQuality < StevesArmyConfig.VEHICLE_CREW_MIN_AIM_TO_FIRE.get().floatValue()
-            || error > FIRE_TOLERANCE_DEGREES) {
-            return;
-        }
-        if (!fireBurstGate(state)) {
-            return;
+                    // Point the gun at the deviated direction; tallyho clamps to turret limits.
+                    TallyhoCompat.aimTowards(state.station, aimTargetForStation(state, aimPoint.position), traverse,
+                        deviation[1], deviation[0]);
+                    TallyhoCompat.fire(state.station, state.soldier);
+
+                    state.bloom = Math.min(StevesArmyConfig.VEHICLE_CREW_BLOOM_MAX.get().floatValue(),
+                        state.bloom + StevesArmyConfig.VEHICLE_CREW_BLOOM_PER_SHOT.get().floatValue());
+                    state.burstShots++;
+                }
+            } else {
+                decayBloom(state);
+            }
         }
 
-        float yawSigma = AimAccuracyManager.getYawSigma(state.aimQuality)
-            + (float) aimPoint.concealment * 2.00F;
-        float pitchSigma = AimAccuracyManager.getPitchSigma(state.aimQuality)
-            + (float) aimPoint.concealment * 0.75F;
-        float bloomScale = 1.0F + state.bloom;
-        float[] deviation = AimAccuracyManager.sampleGaussianDeviation(
-            state.aimQuality, yawSigma * bloomScale, pitchSigma * bloomScale, level);
-
-        // Point the gun at the deviated direction; tallyho clamps to turret limits.
-        TallyhoCompat.aimTowards(state.station, aimTargetForStation(state, aimPoint.position), traverse,
-            deviation[1], deviation[0]);
-        TallyhoCompat.fire(state.station, state.soldier);
-
-        state.bloom = Math.min(StevesArmyConfig.VEHICLE_CREW_BLOOM_MAX.get().floatValue(),
-            state.bloom + StevesArmyConfig.VEHICLE_CREW_BLOOM_PER_SHOT.get().floatValue());
-        state.burstShots++;
+        state.statusTick++;
+        if (state.statusTick >= 60) {
+            state.statusTick = 0;
+            logGunnerChain(state, candidates, scan, best, aimError, fireGateReached);
+        }
     }
 
     /**
-     * One status line per station per period, whatever the gates are doing — a
-     * healthy-but-silent station taught us nothing three rounds in a row.
+     * Stage-by-stage diagnosis for the most promising candidate. Every stage is
+     * evaluated even after one fails — "assuming this passed, the next error is" —
+     * so a single line names the blocker and shows what the later stages would do.
      */
+    private static void logGunnerChain(StationState state, List<LivingEntity> candidates,
+                                       DetectionSystem.DetectionScanResult scan, @Nullable LivingEntity picked,
+                                       float aimError, boolean fireGateReached) {
+        StringJoiner chain = new StringJoiner(" ");
+        chain.add("cand=" + candidates.size());
+        LivingEntity subject = picked;
+        if (subject == null && !candidates.isEmpty()) {
+            double bestDistSqr = Double.POSITIVE_INFINITY;
+            for (LivingEntity candidate : candidates) {
+                double distSqr = state.cameraWorld.distanceToSqr(candidate.position());
+                if (distSqr < bestDistSqr) {
+                    bestDistSqr = distSqr;
+                    subject = candidate;
+                }
+            }
+            chain.add("nearest=" + String.format("%.1f", Math.sqrt(bestDistSqr)) + "m");
+        }
+        if (subject == null) {
+            StevesArmyMod.LOGGER.info("[StationAI] gunner chain soldier={} station={} {} (nothing in range)",
+                state.soldier.getId(), state.station.getId(), chain);
+            return;
+        }
+        if (picked == null) {
+            chain.add("picked=none subject=" + subject.getId());
+        }
+
+        String blocker = null;
+        boolean los = TargetAcquisition.hasLineOfSight(state.soldier, subject);
+        chain.add("los=" + (los ? "ok" : "BLOCKED"));
+        if (!los) {
+            blocker = "los";
+        }
+
+        double points = -1.0;
+        boolean detected = false;
+        for (DetectionSystem.TargetObservation observation : scan.observations()) {
+            if (observation.target() == subject) {
+                points = observation.accumulatedPoints();
+                detected = observation.detected();
+                break;
+            }
+        }
+        chain.add("detect=" + (points < 0 ? "?" : (int) points + "pts")
+            + (detected ? "+classified" : ""));
+        if (blocker == null && !detected) {
+            blocker = "detect";
+        }
+
+        ExposureCalculator.AimPointResult aimPoint =
+            ExposureCalculator.getBestAimPoint(state.soldier, subject);
+        boolean aimOk = aimPoint != null && aimPoint.canShoot();
+        chain.add("aim=" + (aimOk ? "ok" : "noShot"));
+        if (blocker == null && !aimOk) {
+            blocker = "aim";
+        }
+
+        boolean friendly = aimOk
+            && FriendlyFireChecker.isSafeToShoot(state.soldier, aimPoint.position, state.aimQuality);
+        chain.add("friendly=" + (!aimOk ? "-" : friendly ? "safe" : "VETO"));
+        if (blocker == null && aimOk && !friendly) {
+            blocker = "friendly";
+        }
+
+        String fireState;
+        if (blocker != null) {
+            fireState = "blocked";
+        } else if (!detected) {
+            fireState = "wait-detect";
+        } else if (Float.isNaN(aimError)) {
+            fireState = "not-aiming";
+        } else if (aimError > FIRE_TOLERANCE_DEGREES) {
+            fireState = "traversing";
+        } else if (state.burstPauseTicks > 0) {
+            fireState = "burst-pause";
+        } else if (!TallyhoCompat.isReadyToFire(state.station)) {
+            fireState = "cooldown";
+        } else if (!TallyhoCompat.hasAmmo(state.station)) {
+            fireState = "dry";
+        } else {
+            fireState = "SHOOTING";
+        }
+        chain.add("quality=" + String.format("%.2f", state.aimQuality))
+            .add("aimErr=" + (Float.isNaN(aimError) ? "-" : String.format("%.1f", aimError) + "deg"))
+            .add("fire=" + fireState)
+            .add("ready=" + TallyhoCompat.isReadyToFire(state.station))
+            .add("belt=" + TallyhoCompat.hasAmmo(state.station))
+            .add("burstPause=" + state.burstPauseTicks);
+
+        StevesArmyMod.LOGGER.info("[StationAI] gunner chain soldier={} station={} {}{}",
+            state.soldier.getId(), state.station.getId(), chain,
+            blocker == null ? "" : " blocker=" + blocker);
+    }
+
+    /** One observer status line per station per period, whatever the optics are doing. */
     private static void emitStatus(StationState state, String kind, StringBuilder status) {
         state.statusTick++;
         if (state.statusTick < 60) {
@@ -436,14 +507,6 @@ public final class StationGunnerAI {
         state.statusTick = 0;
         StevesArmyMod.LOGGER.info("[StationAI] {} status soldier={} station={} {}",
             kind, state.soldier.getId(), state.station.getId(), status.toString());
-    }
-
-    private static double nearestCandidateDistance(StationState state, List<LivingEntity> candidates) {
-        double nearestSqr = Double.POSITIVE_INFINITY;
-        for (LivingEntity entity : candidates) {
-            nearestSqr = Math.min(nearestSqr, state.cameraWorld.distanceToSqr(entity.position()));
-        }
-        return Math.sqrt(nearestSqr);
     }
 
     private static boolean fireBurstGate(StationState state) {

@@ -4,6 +4,7 @@ import com.stevesarmy.StevesArmyConfig;
 import com.stevesarmy.compat.VS2Compat;
 import com.stevesarmy.combat.smoke.SmokeSourceRegistry;
 import com.stevesarmy.debug.PerformanceMetrics;
+import com.stevesarmy.entity.SoldierEntity;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.level.Level;
@@ -190,6 +191,11 @@ public final class VisibilityRay {
 
         double shipObstruction;
         if (contactOnly && !VS2Compat.isEnabled()) {
+            shipObstruction = Double.POSITIVE_INFINITY;
+        } else if (observer instanceof SoldierEntity soldier && soldier.isVehicleCrewActive()) {
+            // A station gunner's camera sits inside its own ship's collision, so
+            // ship geometry would block every ray at the muzzle. Crew perception
+            // ignores ships; world blocks still apply.
             shipObstruction = Double.POSITIVE_INFINITY;
         } else {
             shipObstruction = VS2Compat.getShipAwareBlockHitDistance(level, from, to, observer);
