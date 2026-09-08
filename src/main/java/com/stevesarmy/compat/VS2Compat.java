@@ -1111,6 +1111,14 @@ public final class VS2Compat {
             return;
         }
 
+        // Keep the rider's stored position on its seat. Seats on VS objects live in
+        // shipyard space, and a soldier whose stored position stays at its stale
+        // world spot (where it stood when seated) makes every AI query straddle the
+        // two spaces - VS2 rejects the mixed box and the physics thread starves.
+        // Non-player entities are allowed to live at shipyard coords (VS2 only
+        // intercepts setPosRaw for players). Mirrors the command-driven branch.
+        anchor.positionRider(soldier);
+
         // HOLD soldiers stay seated regardless of owner state.
         // FOLLOW soldiers release when the owner is no longer on the ship.
         if (soldier.getSquadMode() == SquadMode.HOLD) {
