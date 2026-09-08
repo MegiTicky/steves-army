@@ -246,18 +246,16 @@ public class VehicleCrewGoal extends Goal {
         Object soldierShip = VS2Compat.getMountedShip(soldier);
         boolean seatedOnShip = soldier.isPassenger()
             && VS2Compat.getShipIdOf(soldierShip) != null;
+        // Removal/possession are the only loss conditions for a seated gunner:
+        // the seat can be far from the gun in shipyard space, so a reach gate here
+        // (which findStation skips for same-ship stations) would re-release the
+        // station every tick and the gunner phase would never run.
         boolean invalid = station == null || station.isRemoved() || !station.isAlive()
             || TallyhoCompat.isPlayerPossessed(station);
-        if (!invalid) {
-            if (seatedOnShip) {
-                // Consistent-space check: seat (shipyard) vs station (shipyard).
-                invalid = station.position().distanceToSqr(soldier.getVehicle().position())
-                    > reach * reach * STATION_RELEASE_DISTANCE_FACTOR;
-            } else {
-                Vec3 stationWorld = stationWorldPosOf(station);
-                invalid = stationWorld != null
-                    && soldier.distanceToSqr(stationWorld) > reach * reach * STATION_RELEASE_DISTANCE_FACTOR;
-            }
+        if (!invalid && !seatedOnShip) {
+            Vec3 stationWorld = stationWorldPosOf(station);
+            invalid = stationWorld != null
+                && soldier.distanceToSqr(stationWorld) > reach * reach * STATION_RELEASE_DISTANCE_FACTOR;
         }
         if (!invalid && !VehicleCrewManager.claim(station.getUUID(), soldier.getUUID())) {
             invalid = true;
