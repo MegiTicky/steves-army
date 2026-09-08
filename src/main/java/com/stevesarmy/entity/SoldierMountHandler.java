@@ -26,6 +26,8 @@ public final class SoldierMountHandler {
         if (authorized) {
             StevesArmyMod.LOGGER.info("[MountEvent] {} ALLOWED soldier={} vehicle={} vehicleClass={}",
                 side, soldier.getId(), vehicle == null ? -1 : vehicle.getId(), vehicleClass);
+            // Seating ends any crawl; the crawl pose is broken for VS2-mounted passengers.
+            soldier.setLowCrouching(false);
         } else {
             StevesArmyMod.LOGGER.info("[MountEvent] {} CANCELED soldier={} vehicle={} vehicleClass={}",
                 side, soldier.getId(), vehicle == null ? -1 : vehicle.getId(), vehicleClass);

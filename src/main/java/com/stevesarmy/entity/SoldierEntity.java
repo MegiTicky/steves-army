@@ -2021,6 +2021,12 @@ public BlockPos getPingMoveTarget() {
             return;
         }
 
+        // Soldiers aboard ships never crawl: the crawl pose re-dimensions a
+        // VS2-mounted passenger, breaking seat rendering and ship collision.
+        if (lowCrouch && VS2Compat.isOnShip(this)) {
+            lowCrouch = false;
+        }
+
         if (!lowCrouch) {
             // Any explicit stand request (cover exit, movement, or combat) ends
             // the firing-prone ownership before the shared pose is cleared.

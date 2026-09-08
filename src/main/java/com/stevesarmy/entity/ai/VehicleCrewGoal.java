@@ -136,6 +136,9 @@ public class VehicleCrewGoal extends Goal {
     private void enterIdle() {
         phase = Phase.IDLE;
         dutyScanCooldown = 0;
+        // Never crawl at a station; the gate in setLowCrouching covers aboard-ship
+        // requests, this clears anything picked up before seating.
+        soldier.setLowCrouching(false);
         detectionSystem = crewDetectionSystem();
     }
 
