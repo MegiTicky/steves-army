@@ -103,10 +103,10 @@ public final class VS2Compat {
         }
 
         if (soldier.getRole() == SoldierRole.VEHICLE_CREW) {
-            // Crew posts itself on the deck (unmounted); it must never be
-            // extracted to world ground or auto-transported — the extraction
-            // fight against the post position is what corrupted soldier
-            // coordinates and starved the physics thread.
+            // Crew soldiers are never extracted to world ground or auto-seated;
+            // they board the owner's ship by teleport and post themselves at
+            // stations (riding shipyard-space seats corrupts their position).
+            tickCrewBoarding(soldier, state);
             return false;
         }
 
@@ -307,36 +307,81 @@ public final class VS2Compat {
     public static boolean teleportSoldierAboard(SoldierEntity soldier, ServerLevel level,
                                                 Object ship, Vec3 worldCenter) {
         initialize();
-        if (!available || ship == null || soldier.isPassenger() || !soldier.isAlive()) {
-            return false;
+        String failure = null;
+        Vec3 world = null;
+        while (true) {
+            if (!available || ship == null || !soldier.isAlive()) {
+                failure = "vs2 unavailable";
+                break;
+            }
+            if (soldier.isPassenger()) {
+                failure = "already a passenger";
+                break;
+            }
+            Vec3 local = worldToShipLocal(ship, worldCenter);
+            if (local == null) {
+                failure = "no world-to-ship transform";
+                break;
+            }
+            // worldToShipLocal normally returns shipyard-space coordinates (ship-local
+            // space is the shipyard in VS2); guard against min-relative ship data paths.
+            BlockPos shipyardMin = getShipyardMin(ship);
+            BlockPos base = shipyardMin != null
+                && Math.abs(local.x) < 100000.0D && Math.abs(local.z) < 100000.0D
+                ? shipyardMin.offset(BlockPos.containing(local))
+                : BlockPos.containing(local);
+            BlockPos surface = findDeckSurface(level, base, 6);
+            if (surface == null) {
+                failure = "no deck surface near " + base;
+                break;
+            }
+            world = shipToWorldPosition(ship,
+                new Vec3(surface.getX() + 0.5, surface.getY(), surface.getZ() + 0.5));
+            if (world == null) {
+                failure = "no ship-to-world transform";
+                break;
+            }
+            break;
         }
-        Vec3 local = worldToShipLocal(ship, worldCenter);
-        if (local == null) {
-            return false;
-        }
-        // worldToShipLocal normally returns shipyard-space coordinates (ship-local
-        // space is the shipyard in VS2); guard against min-relative ship data paths.
-        BlockPos shipyardMin = getShipyardMin(ship);
-        BlockPos base = shipyardMin != null
-            && Math.abs(local.x) < 100000.0D && Math.abs(local.z) < 100000.0D
-            ? shipyardMin.offset(BlockPos.containing(local))
-            : BlockPos.containing(local);
-        BlockPos surface = findDeckSurface(level, base, 6);
-        if (surface == null) {
-            return false;
-        }
-        Vec3 world = shipToWorldPosition(ship,
-            new Vec3(surface.getX() + 0.5, surface.getY(), surface.getZ() + 0.5));
         if (world == null) {
+            throttledCrewLog("boarding failed for soldier=" + soldier.getId() + ": " + failure);
             return false;
         }
         soldier.getNavigation().stop();
         soldier.cancelCoverMovement();
         soldier.setDeltaMovement(Vec3.ZERO);
         soldier.teleportTo(world.x, world.y, world.z);
-        StevesArmyMod.LOGGER.info("[VS2] Crew posted aboard soldier={} base={} surface={} world={}",
-            soldier.getId(), base, surface, world);
+        StevesArmyMod.LOGGER.info("[VS2] Crew posted aboard soldier={} world={}",
+            soldier.getId(), world);
         return true;
+    }
+
+    private static long lastCrewBoardingFailLog;
+
+    private static void throttledCrewLog(String message) {
+        long now = System.currentTimeMillis();
+        if (now - lastCrewBoardingFailLog < 10_000L) {
+            return;
+        }
+        lastCrewBoardingFailLog = now;
+        StevesArmyMod.LOGGER.warn("[VS2] Crew {}", message);
+    }
+
+    /**
+     * Removes a soldier from a legacy shipyard-space seat mount (old corrupted
+     * state) without blocking its crew goal from re-posting immediately.
+     */
+    public static void healShipyardSeatMount(SoldierEntity soldier) {
+        Entity vehicle = soldier.isPassenger() ? soldier.getVehicle() : null;
+        if (vehicle == null) {
+            return;
+        }
+        soldier.stopRiding();
+        clearShipDraggingStateDirect(soldier);
+        clearTransportState(soldier);
+        syncTransportState(soldier, vehicle, false);
+        StevesArmyMod.LOGGER.info("[VS2] Healed shipyard-seat mount soldier={} vehicle={}",
+            soldier.getId(), vehicle.getId());
     }
 
     /** Top face of the first solid block with two blocks of headroom, spiral out from base. */
@@ -848,6 +893,50 @@ public final class VS2Compat {
 
     private static boolean isInsideShip(Entity entity) {
         return intersectsShip(entity.level(), entity.getBoundingBox());
+    }
+
+    /**
+     * Seat-free crew boarding: when the owner stands on a ship, teleport the
+     * crew soldier onto that ship's deck near the owner. Replaces the old
+     * auto-transport path that seated crew on shipyard-space seats.
+     */
+    private static void tickCrewBoarding(SoldierEntity soldier, SoldierState state) {
+        if (state.crewBoardingCooldownTicks > 0) {
+            state.crewBoardingCooldownTicks--;
+            return;
+        }
+        state.crewBoardingCooldownTicks = 40;
+        LivingEntity owner = soldier.getOwner();
+        if (owner == null || !owner.isAlive()
+            || !(soldier.level() instanceof ServerLevel serverLevel)) {
+            return;
+        }
+        Object ownerShip = firstShipIntersecting(owner.level(), owner.getBoundingBox());
+        if (ownerShip == null) {
+            return;
+        }
+        Object soldierShip = firstShipIntersecting(soldier.level(), soldier.getBoundingBox());
+        if (soldierShip != null
+            && getShipIdOf(soldierShip) != null
+            && getShipIdOf(soldierShip).equals(getShipIdOf(ownerShip))) {
+            // Already aboard; VS2 drags world entities standing on the deck.
+            return;
+        }
+        teleportSoldierAboard(soldier, serverLevel, ownerShip, owner.position());
+    }
+
+    /** First ship intersecting the given box, or null. */
+    @Nullable
+    private static Object firstShipIntersecting(Level level, AABB bounds) {
+        try {
+            Object ships = reflect(getShipsIntersecting, level, bounds);
+            if (ships instanceof Iterable<?> iterable && iterable.iterator().hasNext()) {
+                return iterable.iterator().next();
+            }
+        } catch (ReflectiveOperationException exception) {
+            logReflectionFailure(exception);
+        }
+        return null;
     }
 
     private static boolean intersectsShip(Level level, AABB bounds) {
@@ -1464,9 +1553,10 @@ private static boolean isTransportOwnerOnShip(LivingEntity owner, SoldierState s
                     MethodType.methodType(org.joml.Matrix4dc.class));
                 shipGetWorldToShip = lookup.findVirtual(shipClass, "getWorldToShip",
                     MethodType.methodType(org.joml.Matrix4dc.class));
-                Class<?> shipAabbClass = Class.forName(
-                    "org.valkyrienskies.core.api.ships.properties.ShipAABB");
-                shipGetAABB = lookup.findVirtual(shipClass, "getShipAABB",
+                // VS2 replaced the old ShipAABB type with JOML's AABBic voxel box;
+                // the minX/minY/minZ accessor lookups below are generic by class.
+                Class<?> shipAabbClass = Class.forName("org.joml.primitives.AABBic");
+                shipGetAABB = lookup.findVirtual(shipClass, "getShipVoxelAABB",
                     MethodType.methodType(shipAabbClass));
             } catch (ReflectiveOperationException | LinkageError crewHelpers) {
                 // Non-fatal: crew ship-space look transform falls back to the raw direction.
@@ -1543,6 +1633,8 @@ private static boolean isTransportOwnerOnShip(LivingEntity owner, SoldierState s
         private long lastSeatAttemptLog;
         /** Crew soldiers seated on a station seat keep ticking their AI. */
         private boolean crewSeated;
+        /** Cooldown between seat-free crew boarding teleports. */
+        private int crewBoardingCooldownTicks;
         /** Ticks a soldier may stand inside the ship after a mount-handle dismount. */
         private int handleDismountGraceTicks;
     }

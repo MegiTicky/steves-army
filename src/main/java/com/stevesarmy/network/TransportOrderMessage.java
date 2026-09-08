@@ -4,6 +4,7 @@ import com.stevesarmy.StevesArmyConfig;
 import com.stevesarmy.compat.AnalogWarfareCompat;
 import com.stevesarmy.compat.VS2Compat;
 import com.stevesarmy.entity.SoldierEntity;
+import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.entity.SoldierRole;
 import com.stevesarmy.squad.FireTeam;
 import com.stevesarmy.squad.SquadTargeting;
@@ -139,6 +140,12 @@ public class TransportOrderMessage {
         // let its goal post it at the nearest unclaimed station.
         List<SoldierEntity> remaining = new ArrayList<>(eligible);
         int seated = 0;
+        long crewCount = remaining.stream()
+            .filter(s -> s.getRole() == SoldierRole.VEHICLE_CREW).count();
+        if (crewCount > 0) {
+            StevesArmyMod.LOGGER.info("[Transport] routing {} vehicle crew to deck teleport",
+                crewCount);
+        }
         for (SoldierEntity crewSoldier : new ArrayList<>(remaining)) {
             if (crewSoldier.getRole() != SoldierRole.VEHICLE_CREW) {
                 continue;

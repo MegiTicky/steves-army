@@ -96,6 +96,16 @@ public class VehicleCrewGoal extends Goal {
     @Override
     public void tick() {
         if (soldier.isPassenger()) {
+            // Heal soldiers corrupted by the old seated flow: a vehicle parked at
+            // shipyard coordinates is a shipyard-space seat mount, which mixes
+            // the soldier's coordinates and starves VS2's physics thread.
+            Entity vehicle = soldier.getVehicle();
+            if (vehicle != null
+                && (Math.abs(vehicle.getX()) > 1.0E6D || Math.abs(vehicle.getZ()) > 1.0E6D)) {
+                VS2Compat.healShipyardSeatMount(soldier);
+            }
+        }
+        if (soldier.isPassenger()) {
             if (phase == Phase.SEEK) {
                 enterIdle();
             }
