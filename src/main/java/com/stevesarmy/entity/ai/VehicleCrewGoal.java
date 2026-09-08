@@ -33,17 +33,14 @@ import java.util.Optional;
 import java.util.UUID;
 
 /**
- * Vehicle crew behavior. Crew soldiers never ride seat entities: tallyho's
- * player flow is pure camera possession, and VS2's shipyard-passenger handling
- * corrupts a soldier's position (mixed world/shipyard coordinates) until any
- * entity query spanning soldier and seat collapses ("Collision box is too
- * big"). Instead the soldier posts itself on the deck beside the nearest
- * unclaimed tallyho hull MG (aim + fire with the shared detection system,
- * gunner-discipline accuracy model) or periscope (scan + share intel with the
- * owner's overlay), while detection runs from the camera's world position via
- * DetectionViewpoint. Everything tallyho-side is reflection; without tallyho
- * the crew simply stands where it is posted. If the soldier does end up a
- * passenger (e.g. a handle-linked seat), the legacy seated path still works.
+ * Vehicle crew behavior. Crew soldiers board the owner's ship through the same
+ * seat transport as riflemen (VS2's rider mixins handle the shipyard-space seat
+ * tracking), and their AI keeps ticking while seated so they can man a tallyho
+ * hull MG (aim + fire with the shared detection system, gunner-discipline
+ * accuracy model) or periscope (scan + share intel with the owner's overlay).
+ * Detection runs from the camera's world position via DetectionViewpoint;
+ * everything tallyho-side is reflection. Without tallyho the crew simply rides
+ * along like any other transported soldier.
  */
 public class VehicleCrewGoal extends Goal {
     private enum Phase { SEEK, IDLE, GUNNER, OBSERVER }
@@ -96,23 +93,13 @@ public class VehicleCrewGoal extends Goal {
     @Override
     public void tick() {
         if (soldier.isPassenger()) {
-            // Heal soldiers corrupted by the old seated flow: a vehicle parked at
-            // shipyard coordinates is a shipyard-space seat mount, which mixes
-            // the soldier's coordinates and starves VS2's physics thread.
-            Entity vehicle = soldier.getVehicle();
-            if (vehicle != null
-                && (Math.abs(vehicle.getX()) > 1.0E6D || Math.abs(vehicle.getZ()) > 1.0E6D)) {
-                VS2Compat.healShipyardSeatMount(soldier);
-            }
-        }
-        if (soldier.isPassenger()) {
             if (phase == Phase.SEEK) {
                 enterIdle();
             }
             tickSeated();
         } else {
             // Unmounted crew: post itself where it stands and let the duty scan
-            // take over. Seat entities are deliberately never used here.
+            // take over until it claims a station.
             if (phase == Phase.SEEK) {
                 enterIdle();
             }

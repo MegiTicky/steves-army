@@ -136,25 +136,10 @@ public class TransportOrderMessage {
             return;
         }
 
-        // Vehicle crew never rides seats: teleport it aboard onto the deck and
-        // let its goal post it at the nearest unclaimed station.
+        // Crew soldiers board shipyard seats exactly like riflemen; their crew AI
+        // keeps ticking once seated (crewSeated), so they still man their station.
         List<SoldierEntity> remaining = new ArrayList<>(eligible);
         int seated = 0;
-        long crewCount = remaining.stream()
-            .filter(s -> s.getRole() == SoldierRole.VEHICLE_CREW).count();
-        if (crewCount > 0) {
-            StevesArmyMod.LOGGER.info("[Transport] routing {} vehicle crew to deck teleport",
-                crewCount);
-        }
-        for (SoldierEntity crewSoldier : new ArrayList<>(remaining)) {
-            if (crewSoldier.getRole() != SoldierRole.VEHICLE_CREW) {
-                continue;
-            }
-            remaining.remove(crewSoldier);
-            if (VS2Compat.teleportSoldierAboard(crewSoldier, level, ship, searchCenter)) {
-                seated++;
-            }
-        }
 
         // Handle-linked seats first (VS Analog Warfare vehicle mount handles);
         // soldiers without a free link fall back to the plain free-seat scan.
