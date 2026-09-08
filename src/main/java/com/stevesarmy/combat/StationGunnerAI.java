@@ -49,6 +49,7 @@ public final class StationGunnerAI {
     private static final double OBSERVER_SWEEP_RANGE = 32.0;
 
     private static final Map<UUID, StationState> active = new ConcurrentHashMap<>();
+    private static long lastDutyFailureLog;
 
     private static final class StationState {
         final Entity station;
@@ -81,7 +82,7 @@ public final class StationGunnerAI {
      * can't be resolved - a gun with no trustworthy camera must not run.
      */
     public static boolean activate(Entity station, SoldierEntity soldier, boolean gunner) {
-        Object ship = VS2Compat.getMountedShip(station);
+        Object ship = VS2Compat.getShipUnder(station);
         Vec3 cameraWorld = VS2Compat.shipToWorldPosition(ship, station.position());
         if (cameraWorld == null) {
             return false;
@@ -146,13 +147,16 @@ public final class StationGunnerAI {
         }
         // The seat recorded its ship at mount time; fall back to a live lookup.
         Long soldierShipId = transportShipId != null
-            ? transportShipId : VS2Compat.getShipIdOf(VS2Compat.getMountedShip(vehicle));
+            ? transportShipId : VS2Compat.getShipIdOf(VS2Compat.getShipUnder(vehicle));
         if (soldierShipId == null) {
+            logDutyScanFailure(soldier, "no resolvable ship for seat {}", vehicle.getId());
             return;
         }
         Entity mg = findStationForSeated(level, soldier, soldierShipId, vehicle, true);
         Entity choice = mg != null ? mg : findStationForSeated(level, soldier, soldierShipId, vehicle, false);
         if (choice == null) {
+            logDutyScanFailure(soldier, "no free hull MG/periscope within reach on ship {}",
+                soldierShipId);
             return;
         }
         boolean gunner = TallyhoCompat.isHullMG(choice);
@@ -165,6 +169,17 @@ public final class StationGunnerAI {
         } else {
             VehicleCrewManager.release(choice.getUUID(), soldier.getUUID());
         }
+    }
+
+    /** Duty-scan failures are diagnostic gold; throttle them instead of silencing them. */
+    private static void logDutyScanFailure(SoldierEntity soldier, String message, Object arg) {
+        long now = soldier.level().getGameTime();
+        if (now - lastDutyFailureLog < 100) {
+            return;
+        }
+        lastDutyFailureLog = now;
+        StevesArmyMod.LOGGER.info("[StationAI] seated soldier={} scan failed: {}",
+            soldier.getId(), message.formatted(arg));
     }
 
     private static Entity findStationForSeated(ServerLevel level, SoldierEntity soldier,
@@ -184,7 +199,7 @@ public final class StationGunnerAI {
             if (claimant != null && !claimant.equals(soldier.getUUID())) {
                 continue;
             }
-            Long stationShipId = VS2Compat.getShipIdOf(VS2Compat.getMountedShip(entity));
+            Long stationShipId = VS2Compat.getShipIdOf(VS2Compat.getShipUnder(entity));
             if (!soldierShipId.equals(stationShipId)) {
                 continue;
             }
@@ -247,7 +262,7 @@ public final class StationGunnerAI {
 
         // World-space camera position. No transform, no work: never aim, query,
         // or ray on raw shipyard coordinates.
-        Object ship = VS2Compat.getMountedShip(station);
+        Object ship = VS2Compat.getShipUnder(station);
         Vec3 cameraWorld = VS2Compat.shipToWorldPosition(ship, station.position());
         if (cameraWorld == null) {
             DetectionViewpoint.clear(soldier);

@@ -576,6 +576,24 @@ public final class VS2Compat {
     }
 
     /**
+     * Ship for a free-standing shipyard-space entity (tallyho stations, seats).
+     * VS2's getShipMountedTo only resolves for entities riding a vehicle; station
+     * cameras aren't riding anything, so fall back to the position-based lookup
+     * at the entity's (shipyard) block position.
+     */
+    @Nullable
+    public static Object getShipUnder(@Nullable Entity entity) {
+        if (entity == null) {
+            return null;
+        }
+        Object mounted = getMountedShip(entity);
+        if (mounted != null) {
+            return mounted;
+        }
+        return getShipAt(entity.level(), entity.blockPosition());
+    }
+
+    /**
      * Ship the vehicle-wheel MOUNT order targets when the crosshair is not on a vehicle:
      * the ship the player is mounted to, else the nearest ship within 64 blocks.
      */
