@@ -20,8 +20,6 @@ import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
 
 import javax.annotation.Nullable;
-import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -128,9 +126,11 @@ public final class StationGunnerAI {
     /**
      * Seat-time duty assignment. Seated crew soldiers freeze (their goals never
      * tick), so the unmounted scan in {@link com.stevesarmy.entity.ai.VehicleCrewGoal}
-     * never runs for them; transport instead calls this after seating. Distance
-     * is shipyard-to-shipyard: the station and the seat both live in shipyard
-     * space, while the seated soldier's own position() is a stale world coordinate.
+     * never runs for them; transport instead calls this after seating. Same-ship
+     * is the vehicle identity — the soldier never touches the gun (the station
+     * AI runs it), so seat-to-station distance only orders preference, it does
+     * not gate. Candidate positions and the seat live in shipyard space; the
+     * seated soldier's own position() is a stale world coordinate.
      */
     public static void assignSeatedSoldier(SoldierEntity soldier, @Nullable Long transportShipId) {
         if (!(soldier.level() instanceof ServerLevel level)
@@ -149,14 +149,16 @@ public final class StationGunnerAI {
         Long soldierShipId = transportShipId != null
             ? transportShipId : VS2Compat.getShipIdOf(VS2Compat.getShipUnder(vehicle));
         if (soldierShipId == null) {
-            logDutyScanFailure(soldier, "no resolvable ship for seat {}", vehicle.getId());
+            logDutyScanFailure(soldier, "no resolvable ship for seat %s", vehicle.getId());
             return;
         }
-        Entity mg = findStationForSeated(level, soldier, soldierShipId, vehicle, true);
-        Entity choice = mg != null ? mg : findStationForSeated(level, soldier, soldierShipId, vehicle, false);
+        StationScan scan = scanStations(level, soldier, soldierShipId, vehicle);
+        Entity choice = scan.choice;
         if (choice == null) {
-            logDutyScanFailure(soldier, "no free hull MG/periscope within reach on ship {}",
-                soldierShipId);
+            logDutyScanFailure(soldier,
+                "no free station on ship %s (mg=%d scope=%d possessed=%d claimed=%d shipMismatch=%d nearest=%.1f)",
+                soldierShipId, scan.mg, scan.scope, scan.possessed, scan.claimed,
+                scan.shipMismatch, scan.nearestSameShip);
             return;
         }
         boolean gunner = TallyhoCompat.isHullMG(choice);
@@ -172,46 +174,82 @@ public final class StationGunnerAI {
     }
 
     /** Duty-scan failures are diagnostic gold; throttle them instead of silencing them. */
-    private static void logDutyScanFailure(SoldierEntity soldier, String message, Object arg) {
+    private static void logDutyScanFailure(SoldierEntity soldier, String message, Object... args) {
         long now = soldier.level().getGameTime();
         if (now - lastDutyFailureLog < 100) {
             return;
         }
         lastDutyFailureLog = now;
         StevesArmyMod.LOGGER.info("[StationAI] seated soldier={} scan failed: {}",
-            soldier.getId(), message.formatted(arg));
+            soldier.getId(), String.format(message, args));
     }
 
-    private static Entity findStationForSeated(ServerLevel level, SoldierEntity soldier,
-                                               Long soldierShipId, Entity vehicle, boolean hullMg) {
-        List<Entity> candidates = new ArrayList<>();
-        double reach = StevesArmyConfig.VEHICLE_CREW_STATION_REACH.get();
-        double reachSqr = reach * reach;
+    private static final class StationScan {
+        @Nullable Entity choice;
+        int mg;
+        int scope;
+        int possessed;
+        int claimed;
+        int shipMismatch;
+        double nearestSameShip = Double.POSITIVE_INFINITY;
+    }
+
+    /**
+     * Single pass over the entity list. MGs win over periscopes; nearest wins
+     * within a type. Same-ship id is the only gate — the reach limit stays in
+     * the unmounted VehicleCrewGoal scan, where a standing soldier really does
+     * have to walk to the gun.
+     */
+    private static StationScan scanStations(ServerLevel level, SoldierEntity soldier,
+                                            Long soldierShipId, Entity vehicle) {
+        StationScan scan = new StationScan();
+        Entity bestGunner = null;
+        double bestGunnerDist = Double.POSITIVE_INFINITY;
+        Entity bestObserver = null;
+        double bestObserverDist = Double.POSITIVE_INFINITY;
         for (Entity entity : level.getAllEntities()) {
-            boolean matches = hullMg ? TallyhoCompat.isHullMG(entity) : TallyhoCompat.isPeriscope(entity);
-            if (!matches || entity.isRemoved() || !entity.isAlive()) {
+            boolean isMg = TallyhoCompat.isHullMG(entity);
+            if (!isMg && !TallyhoCompat.isPeriscope(entity)) {
                 continue;
             }
+            if (entity.isRemoved() || !entity.isAlive()) {
+                continue;
+            }
+            if (isMg) {
+                scan.mg++;
+            } else {
+                scan.scope++;
+            }
             if (TallyhoCompat.isPlayerPossessed(entity)) {
+                scan.possessed++;
                 continue;
             }
             UUID claimant = VehicleCrewManager.claimantOf(entity.getUUID());
             if (claimant != null && !claimant.equals(soldier.getUUID())) {
+                scan.claimed++;
                 continue;
             }
             Long stationShipId = VS2Compat.getShipIdOf(VS2Compat.getShipUnder(entity));
             if (!soldierShipId.equals(stationShipId)) {
+                scan.shipMismatch++;
                 continue;
             }
-            double distanceSqr = entity.position().distanceToSqr(vehicle.position());
-            if (distanceSqr > reachSqr) {
-                continue;
+            double distSqr = entity.position().distanceToSqr(vehicle.position());
+            if (distSqr < scan.nearestSameShip) {
+                scan.nearestSameShip = distSqr;
             }
-            candidates.add(entity);
+            if (isMg) {
+                if (distSqr < bestGunnerDist) {
+                    bestGunnerDist = distSqr;
+                    bestGunner = entity;
+                }
+            } else if (distSqr < bestObserverDist) {
+                bestObserverDist = distSqr;
+                bestObserver = entity;
+            }
         }
-        return candidates.stream()
-            .min(Comparator.comparingDouble(e -> e.position().distanceToSqr(vehicle.position())))
-            .orElse(null);
+        scan.choice = bestGunner != null ? bestGunner : bestObserver;
+        return scan;
     }
 
     @SubscribeEvent
