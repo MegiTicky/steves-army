@@ -99,9 +99,11 @@ public final class VS2Compat {
         SoldierState state = states.computeIfAbsent(soldier.getUUID(), ignored -> new SoldierState());
         if (state.transportAnchorId != null) {
             updateTransport(soldier, state);
-            // Crew soldiers keep ticking their goals while seated so they can
-            // man hull MGs and periscopes; regular transported soldiers freeze.
-            return isTransported(soldier, state) && !state.crewSeated;
+            // Transported soldiers freeze completely - crew included. A crew
+            // soldier's claimed station is driven by StationGunnerAI (station
+            // side, strict world space), so the soldier itself does no
+            // computation while riding a VS object.
+            return isTransported(soldier, state);
         }
 
         if (state.reboardBlockTicks > 0) {
@@ -702,6 +704,13 @@ public final class VS2Compat {
     public static double getShipAwareBlockHitDistance(Level level, Vec3 from, Vec3 to,
                                                        @Nullable Entity source) {
         if (!isEnabled()) {
+            return Double.POSITIVE_INFINITY;
+        }
+        // Fail closed on absurd endpoints: a clip mixing world and shipyard
+        // coordinates would march through unloaded chunks with blocking loads
+        // and freeze the server tick.
+        if (Math.abs(from.x) > 1.0E6D || Math.abs(from.z) > 1.0E6D
+            || Math.abs(to.x) > 1.0E6D || Math.abs(to.z) > 1.0E6D) {
             return Double.POSITIVE_INFINITY;
         }
 

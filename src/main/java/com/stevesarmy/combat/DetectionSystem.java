@@ -102,7 +102,11 @@ public class DetectionSystem {
                 state.accumulatedPoints = Math.max(state.accumulatedPoints, SHARED_INTEL_FLOOR);
             }
 
-            double distanceSqr = soldier.distanceToSqr(target);
+            // Range is measured from the sensor position (DetectionViewpoint), not
+            // the soldier's body: a station gunner's viewpoint is the hull MG /
+            // periscope camera, and a seat-mounted soldier's stored position is
+            // meaningless on VS objects (it lives in shipyard space).
+            double distanceSqr = DetectionViewpoint.getEyePosition(soldier).distanceToSqr(target.position());
             boolean wasInLOS = state.wasInLOSLastCheck;
 
             // --- Cheap rejection before expensive visibility tracing ---

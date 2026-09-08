@@ -174,6 +174,13 @@ public final class VisibilityRay {
         if (from.distanceToSqr(to) < EPSILON) {
             return new Result(true, 0.0, Double.POSITIVE_INFINITY);
         }
+        // Fail closed on absurd endpoints: a ray mixing world and shipyard
+        // coordinates (VS objects keep entities ~millions of blocks apart) would
+        // march through unloaded chunks with blocking loads and freeze the server.
+        if (Math.abs(from.x) > 1.0E6D || Math.abs(from.z) > 1.0E6D
+            || Math.abs(to.x) > 1.0E6D || Math.abs(to.z) > 1.0E6D) {
+            return new Result(false, 0.0, 0.0);
+        }
 
         Vec3 direction = to.subtract(from);
         double length = direction.length();
