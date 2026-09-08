@@ -128,7 +128,7 @@ public class VehicleCrewGoal extends Goal {
     /** World-space position of a station entity (its raw position is shipyard space). */
     private static Vec3 stationWorldPosOf(Entity station) {
         Object ship = VS2Compat.getShipUnder(station);
-        Vec3 world = VS2Compat.shipToWorldPosition(ship, station.position());
+        Vec3 world = VS2Compat.shipyardToWorldPosition(ship, station.position());
         return world != null ? world : station.position();
     }
 }

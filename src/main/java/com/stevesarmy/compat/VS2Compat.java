@@ -245,6 +245,21 @@ public final class VS2Compat {
     }
 
     /**
+     * Transforms a raw shipyard entity position to world space. The ship transform
+     * expects coordinates relative to the ship's voxel AABB minimum, while entity
+     * positions are stored in the global shipyard allocation.
+     */
+    @Nullable
+    public static Vec3 shipyardToWorldPosition(@Nullable Object ship, Vec3 shipyardPos) {
+        BlockPos shipyardMin = getShipyardMin(ship);
+        if (shipyardMin == null) {
+            return null;
+        }
+        return shipToWorldPosition(ship, shipyardPos.subtract(
+            shipyardMin.getX(), shipyardMin.getY(), shipyardMin.getZ()));
+    }
+
+    /**
      * Minimum corner of the ship's AABB in shipyard (block) space — the origin that
      * ship-local offsets are added to in order to reach real block positions.
      */

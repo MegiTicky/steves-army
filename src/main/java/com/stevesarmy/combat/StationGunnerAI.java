@@ -81,14 +81,15 @@ public final class StationGunnerAI {
      */
     public static boolean activate(Entity station, SoldierEntity soldier, boolean gunner) {
         Object ship = VS2Compat.getShipUnder(station);
-        Vec3 cameraWorld = VS2Compat.shipToWorldPosition(ship, station.position());
+        Vec3 cameraWorld = VS2Compat.shipyardToWorldPosition(ship, station.position());
         if (cameraWorld == null) {
             return false;
         }
         active.put(station.getUUID(), new StationState(station, soldier, gunner, cameraWorld));
         soldier.setVehicleCrewActive(true);
-        StevesArmyMod.LOGGER.info("[StationAI] soldier={} mans {} {} (gunner={}) camera={}",
-            soldier.getId(), gunner ? "hull MG" : "periscope", station.getId(), gunner, cameraWorld);
+        StevesArmyMod.LOGGER.info("[StationAI] soldier={} mans {} {} (gunner={}) shipyard={} cameraWorld={}",
+            soldier.getId(), gunner ? "hull MG" : "periscope", station.getId(), gunner,
+            station.position(), cameraWorld);
         return true;
     }
 
@@ -301,7 +302,7 @@ public final class StationGunnerAI {
         // World-space camera position. No transform, no work: never aim, query,
         // or ray on raw shipyard coordinates.
         Object ship = VS2Compat.getShipUnder(station);
-        Vec3 cameraWorld = VS2Compat.shipToWorldPosition(ship, station.position());
+        Vec3 cameraWorld = VS2Compat.shipyardToWorldPosition(ship, station.position());
         if (cameraWorld == null) {
             DetectionViewpoint.clear(soldier);
             return;
