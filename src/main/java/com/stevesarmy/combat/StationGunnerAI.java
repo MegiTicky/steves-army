@@ -12,13 +12,17 @@ import com.stevesarmy.squad.SquadThreatIntel;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.monster.Enemy;
+import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
 
+import com.stevesarmy.entity.TargetEntity;
 import javax.annotation.Nullable;
 import java.util.List;
 import java.util.Map;
@@ -46,6 +50,13 @@ public final class StationGunnerAI {
     private static final float FIRE_TOLERANCE_DEGREES = 2.0F;
     private static final int SWEEP_PERIOD_TICKS = 240;
     private static final double OBSERVER_SWEEP_RANGE = 32.0;
+    // Mirrors the infantry suppression pacing in SoldierCombatGoal.
+    private static final int SUPPRESSION_PLAN_MAX_TICKS = 200;
+    private static final int SUPPRESSION_COOLDOWN_TICKS = 100;
+    private static final double SUPPRESSION_SPREAD_MIN_RADIUS = 0.12;
+    private static final double SUPPRESSION_SPREAD_PER_BLOCK = 0.0075;
+    private static final double SUPPRESSION_SPREAD_MAX_RADIUS = 0.85;
+    private static final double SUPPRESSION_VERTICAL_SPREAD_RATIO = 0.45;
 
     private static final Map<UUID, StationState> active = new ConcurrentHashMap<>();
     private static long lastDutyFailureLog;
@@ -63,6 +74,10 @@ public final class StationGunnerAI {
         int burstPauseTicks;
         int sweepTick;
         int statusTick;
+        @Nullable UUID suppressionThreatId;
+        int suppressionPlanTicks;
+        int suppressionCooldownTicks;
+        @Nullable Vec3 suppressionAimPos;
 
         StationState(Entity station, SoldierEntity soldier, boolean gunner, Vec3 cameraWorld) {
             this.station = station;
@@ -114,6 +129,7 @@ public final class StationGunnerAI {
         VehicleCrewManager.release(stationId, state.soldier.getUUID());
         state.soldier.setVehicleCrewActive(false);
         DetectionViewpoint.clear(state.soldier);
+        releaseSuppression(state, squadIntel(state.soldier));
         StevesArmyMod.LOGGER.info("[StationAI] soldier={} left station={} ({})",
             state.soldier.getId(), state.station.getId(), reason);
     }
@@ -350,7 +366,13 @@ public final class StationGunnerAI {
             state.aimQuality = Math.max(0.0F,
                 state.aimQuality - StevesArmyConfig.getAimQualityLosDecayRate());
             decayBloom(state);
+            tickSuppression(state, level);
         } else {
+            if (state.suppressionThreatId != null) {
+                // A precise target overrides suppression; hand the claim back.
+                releaseSuppression(state, squadIntel(state.soldier));
+                state.suppressionCooldownTicks = SUPPRESSION_COOLDOWN_TICKS;
+            }
             state.target = best;
             reportIntel(state.soldier, best);
 
@@ -423,13 +445,19 @@ public final class StationGunnerAI {
             chain.add("nearest=" + String.format("%.1f", Math.sqrt(bestDistSqr)) + "m");
         }
         if (subject == null) {
-            StevesArmyMod.LOGGER.info("[StationAI] gunner chain soldier={} station={} {} (nothing in range)",
-                state.soldier.getId(), state.station.getId(), chain);
+            StevesArmyMod.LOGGER.info("[StationAI] gunner chain soldier={} station={} {} suppress={} (nothing in range)",
+                state.soldier.getId(), state.station.getId(), chain,
+                state.suppressionThreatId != null ? "active" : "no");
             return;
         }
         if (picked == null) {
             chain.add("picked=none subject=" + subject.getId());
         }
+        chain.add("target=" + EntityType.getKey(subject.getType())
+            + "@[" + String.format("%.0f,%.0f,%.0f",
+                subject.getX(), subject.getY(), subject.getZ())
+            + " d=" + String.format("%.0f", state.cameraWorld.distanceTo(subject.position())) + "m");
+        chain.add("suppress=" + (state.suppressionThreatId != null ? "active" : "no"));
 
         String blocker = null;
         boolean los = TargetAcquisition.hasLineOfSight(state.soldier, subject);
@@ -486,6 +514,11 @@ public final class StationGunnerAI {
         } else {
             fireState = "SHOOTING";
         }
+        if (state.suppressionThreatId != null) {
+            // Suppression mode drives the gun; the precise-fire gates are idle.
+            fireState = "suppressing";
+            blocker = null;
+        }
         chain.add("quality=" + String.format("%.2f", state.aimQuality))
             .add("aimErr=" + (Float.isNaN(aimError) ? "-" : String.format("%.1f", aimError) + "deg"))
             .add("fire=" + fireState)
@@ -507,6 +540,111 @@ public final class StationGunnerAI {
         state.statusTick = 0;
         StevesArmyMod.LOGGER.info("[StationAI] {} status soldier={} station={} {}",
             kind, state.soldier.getId(), state.station.getId(), status.toString());
+    }
+
+    /**
+     * Sustained suppressive fire at the last-known position of a squad threat the
+     * gun cannot currently see. The gun keeps firing through the same burst/bloom
+     * machinery with a distance-based beaten-zone spread; the fired CBC rounds
+     * already apply suppression along their trajectories, so no separate
+     * suppression call is needed on the victim side.
+     */
+    private static void tickSuppression(StationState state, ServerLevel level) {
+        if (state.suppressionCooldownTicks > 0) {
+            state.suppressionCooldownTicks--;
+            return;
+        }
+        SquadThreatIntel intel = squadIntel(state.soldier);
+        if (intel == null || !StevesArmyConfig.VEHICLE_CREW_SUPPRESSION_ENABLED.get()) {
+            return;
+        }
+        long now = level.getGameTime();
+        UUID soldierId = state.soldier.getUUID();
+
+        SquadThreatIntel.ThreatKnowledge threat = null;
+        if (state.suppressionThreatId != null) {
+            SquadThreatIntel.ThreatKnowledge assigned =
+                intel.getThreat(state.suppressionThreatId).orElse(null);
+            if (assigned == null || !assigned.isAlive || assigned.lastKnownPosition == null
+                || intel.isThreatStale(state.suppressionThreatId, now)) {
+                releaseSuppression(state, intel);
+                state.suppressionCooldownTicks = SUPPRESSION_COOLDOWN_TICKS;
+                return;
+            }
+            threat = assigned;
+        } else {
+            double range = StevesArmyConfig.VEHICLE_CREW_SUPPRESSION_RANGE.get();
+            SquadThreatIntel.ThreatKnowledge bestThreat = null;
+            double bestDistSqr = range * range;
+            for (SquadThreatIntel.ThreatKnowledge knowledge : intel.getUnsuppressedThreats()) {
+                if (knowledge.lastKnownPosition == null) {
+                    continue;
+                }
+                double distSqr = state.cameraWorld.distanceToSqr(
+                    Vec3.atCenterOf(knowledge.lastKnownPosition));
+                if (distSqr < bestDistSqr) {
+                    bestDistSqr = distSqr;
+                    bestThreat = knowledge;
+                }
+            }
+            if (bestThreat == null
+                || !intel.tryClaimThreatSuppression(bestThreat.threatEntityId, soldierId, now, 1)) {
+                state.suppressionCooldownTicks = SUPPRESSION_COOLDOWN_TICKS;
+                return;
+            }
+            threat = bestThreat;
+            state.suppressionThreatId = bestThreat.threatEntityId;
+            StevesArmyMod.LOGGER.info("[StationAI] soldier={} suppressing threat={} at {}",
+                state.soldier.getId(), bestThreat.threatEntityId, bestThreat.lastKnownPosition);
+        }
+
+        intel.updateSuppressionHeartbeat(state.suppressionThreatId, soldierId, now);
+        state.suppressionPlanTicks++;
+        if (state.suppressionPlanTicks > SUPPRESSION_PLAN_MAX_TICKS
+            || TallyhoCompat.isPlayerPossessed(state.station)
+            || !TallyhoCompat.hasAmmo(state.station)) {
+            releaseSuppression(state, intel);
+            state.suppressionCooldownTicks = SUPPRESSION_COOLDOWN_TICKS;
+            return;
+        }
+
+        // Re-roll the beaten zone per burst so sustained fire walks the position.
+        if (state.burstShots == 0) {
+            Vec3 base = threat.lastVisibleAimPoint != null
+                ? threat.lastVisibleAimPoint
+                : Vec3.atCenterOf(threat.lastKnownPosition).add(0.0, 1.0, 0.0);
+            double distance = state.cameraWorld.distanceTo(base);
+            double spreadRadius = Mth.clamp(
+                SUPPRESSION_SPREAD_MIN_RADIUS + distance * SUPPRESSION_SPREAD_PER_BLOCK,
+                SUPPRESSION_SPREAD_MIN_RADIUS, SUPPRESSION_SPREAD_MAX_RADIUS);
+            Vec3 toTarget = base.subtract(state.cameraWorld);
+            Vec3 horizontal = new Vec3(toTarget.x, 0.0, toTarget.z).normalize();
+            Vec3 lateral = new Vec3(-horizontal.z, 0.0, horizontal.x);
+            state.suppressionAimPos = base
+                .add(lateral.scale((level.random.nextDouble() - 0.5) * 2.0 * spreadRadius))
+                .add(horizontal.scale((level.random.nextDouble() - 0.5) * spreadRadius * 0.35))
+                .add(0.0, (level.random.nextDouble() - 0.5) * 2.0 * spreadRadius
+                    * SUPPRESSION_VERTICAL_SPREAD_RATIO, 0.0);
+        }
+
+        float traverse = StevesArmyConfig.VEHICLE_CREW_TRAVERSE_SPEED.get().floatValue();
+        float error = TallyhoCompat.aimTowards(state.station,
+            aimTargetForStation(state, state.suppressionAimPos), traverse, 0.0F, 0.0F);
+        if (error <= FIRE_TOLERANCE_DEGREES && fireBurstGate(state)) {
+            TallyhoCompat.fire(state.station, state.soldier);
+            state.bloom = Math.min(StevesArmyConfig.VEHICLE_CREW_BLOOM_MAX.get().floatValue(),
+                state.bloom + StevesArmyConfig.VEHICLE_CREW_BLOOM_PER_SHOT.get().floatValue());
+            state.burstShots++;
+        }
+    }
+
+    private static void releaseSuppression(StationState state, @Nullable SquadThreatIntel intel) {
+        if (state.suppressionThreatId != null && intel != null) {
+            intel.releaseThreatSuppression(state.suppressionThreatId, state.soldier.getUUID());
+        }
+        state.suppressionThreatId = null;
+        state.suppressionPlanTicks = 0;
+        state.suppressionAimPos = null;
     }
 
     private static boolean fireBurstGate(StationState state) {
@@ -613,7 +751,20 @@ public final class StationGunnerAI {
             new AABB(center, center).inflate(maxRange),
             entity -> entity != state.soldier && entity != state.station
                 && TargetAcquisition.isValidTarget(state.soldier, entity)
-                && !state.soldier.isFriendlyTo(entity));
+                && !state.soldier.isFriendlyTo(entity)
+                && isCombatTarget(entity));
+    }
+
+    /**
+     * Station gunners only engage combat-relevant entities. Without this, any
+     * ambient mob flying through the detection box gets classified and pulls the
+     * gun's fire into the sky.
+     */
+    private static boolean isCombatTarget(Entity entity) {
+        return entity instanceof SoldierEntity
+            || entity instanceof Enemy
+            || entity instanceof Player player && !player.isCreative()
+            || entity instanceof TargetEntity;
     }
 
     private static LivingEntity pickTarget(DetectionSystem.DetectionScanResult scan) {

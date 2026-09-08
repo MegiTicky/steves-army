@@ -74,6 +74,8 @@ public class StevesArmyConfig {
     public static final ForgeConfigSpec.DoubleValue VEHICLE_CREW_MIN_AIM_TO_FIRE;
     public static final ForgeConfigSpec.IntValue VEHICLE_CREW_DUTY_SCAN_INTERVAL;
     public static final ForgeConfigSpec.IntValue VEHICLE_CREW_SEAT_SCAN_INTERVAL;
+    public static final ForgeConfigSpec.BooleanValue VEHICLE_CREW_SUPPRESSION_ENABLED;
+    public static final ForgeConfigSpec.DoubleValue VEHICLE_CREW_SUPPRESSION_RANGE;
 
     public static final ForgeConfigSpec.BooleanValue VEHICLE_HANDLES_ENABLED;
     public static final ForgeConfigSpec.IntValue VEHICLE_HANDLES_DISMOUNT_GRACE;
@@ -487,6 +489,17 @@ BUILDER.pop();
         VEHICLE_CREW_SEAT_SCAN_INTERVAL = BUILDER
             .comment("Ticks between scans for a free seat while unseated. Default: 40 (2 seconds).")
             .defineInRange("seatScanInterval", 40, 5, 400);
+
+        VEHICLE_CREW_SUPPRESSION_ENABLED = BUILDER
+            .comment("Hull MG crews shift to sustained suppressive fire at the last-known position",
+                     "of squad threats when no target is visible. The fired rounds already apply",
+                     "suppression along their trajectory. Default: true.")
+            .define("suppressionEnabled", true);
+
+        VEHICLE_CREW_SUPPRESSION_RANGE = BUILDER
+            .comment("Maximum distance of a last-known enemy position a hull MG will suppress.",
+                     "Default: 128 (matches infantry suppression range).")
+            .defineInRange("suppressionRange", 128.0, 16.0, 256.0);
 
         BUILDER.pop();
 
