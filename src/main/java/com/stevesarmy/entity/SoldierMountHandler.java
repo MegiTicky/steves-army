@@ -29,7 +29,10 @@ public final class SoldierMountHandler {
             // Seating ends any crawl; the crawl pose is broken for VS2-mounted passengers.
             soldier.setLowCrouching(false);
         } else {
-            StevesArmyMod.LOGGER.info("[MountEvent] {} CANCELED soldier={} vehicle={} vehicleClass={}",
+            // Cancellations are the common case for crew and untargeted soldiers: VS
+            // ships and Create seats routinely try to re-seat a soldier that walks or
+            // teleports past them. Debug (not info) so the log isn't flooded.
+            StevesArmyMod.LOGGER.debug("[MountEvent] {} CANCELED soldier={} vehicle={} vehicleClass={}",
                 side, soldier.getId(), vehicle == null ? -1 : vehicle.getId(), vehicleClass);
             event.setCanceled(true);
         }

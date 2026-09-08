@@ -2,6 +2,7 @@ package com.stevesarmy.compat;
 
 import com.stevesarmy.StevesArmyConfig;
 import com.stevesarmy.StevesArmyMod;
+import com.stevesarmy.combat.VehicleCrewManager;
 import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.entity.SoldierRole;
 import com.stevesarmy.squad.SquadMode;
@@ -300,48 +301,21 @@ public final class VS2Compat {
     }
 
     /**
-     * Teleports a vehicle crew soldier aboard the given ship near worldCenter,
-     * standing on the deck. Crew soldiers are never seated; once aboard, their
-     * goal posts them at the nearest unclaimed station.
+     * Teleports a vehicle crew soldier aboard the given ship, posting it beside
+     * an unclaimed tallyho station (hull MG / periscope) on that ship so its goal
+     * can claim it immediately. Crew soldiers are never seated; anchoring to the
+     * station's world position (rather than scanning a floor under the owner)
+     * is what actually places them on the deck beside the gun. Falls back to a
+     * highest-solid-block deck surface when no station exists on the ship.
      */
     public static boolean teleportSoldierAboard(SoldierEntity soldier, ServerLevel level,
                                                 Object ship, Vec3 worldCenter) {
         initialize();
-        String failure = null;
-        Vec3 world = null;
-        while (true) {
-            if (!available || ship == null || !soldier.isAlive()) {
-                failure = "vs2 unavailable";
-                break;
-            }
-            if (soldier.isPassenger()) {
-                failure = "already a passenger";
-                break;
-            }
-            Vec3 local = worldToShipLocal(ship, worldCenter);
-            if (local == null) {
-                failure = "no world-to-ship transform";
-                break;
-            }
-            // worldToShipLocal normally returns shipyard-space coordinates (ship-local
-            // space is the shipyard in VS2); guard against min-relative ship data paths.
-            BlockPos shipyardMin = getShipyardMin(ship);
-            BlockPos base = shipyardMin != null
-                && Math.abs(local.x) < 100000.0D && Math.abs(local.z) < 100000.0D
-                ? shipyardMin.offset(BlockPos.containing(local))
-                : BlockPos.containing(local);
-            BlockPos surface = findDeckSurface(level, base, 6);
-            if (surface == null) {
-                failure = "no deck surface near " + base;
-                break;
-            }
-            world = shipToWorldPosition(ship,
-                new Vec3(surface.getX() + 0.5, surface.getY(), surface.getZ() + 0.5));
-            if (world == null) {
-                failure = "no ship-to-world transform";
-                break;
-            }
-            break;
+        String failure = "no station";
+        Vec3 world = stationPostWorld(level, ship, worldCenter);
+        if (world == null) {
+            world = deckPostWorld(level, ship, worldCenter);
+            failure = world == null ? "no deck surface" : null;
         }
         if (world == null) {
             throttledCrewLog("boarding failed for soldier=" + soldier.getId() + ": " + failure);
@@ -354,6 +328,119 @@ public final class VS2Compat {
         StevesArmyMod.LOGGER.info("[VS2] Crew posted aboard soldier={} world={}",
             soldier.getId(), world);
         return true;
+    }
+
+    /**
+     * World position beside the nearest unclaimed tallyho station (hull MG or
+     * periscope) belonging to the given ship, chosen nearest to worldCenter.
+     * Returns null when the ship has no such station.
+     */
+    @Nullable
+    private static Vec3 stationPostWorld(ServerLevel level, Object ship, Vec3 worldCenter) {
+        Long shipId = getShipIdOf(ship);
+        Entity best = null;
+        double bestSqr = Double.MAX_VALUE;
+        for (Entity entity : level.getAllEntities()) {
+            boolean station = TallyhoCompat.isHullMG(entity) || TallyhoCompat.isPeriscope(entity);
+            if (!station || entity.isRemoved()
+                || TallyhoCompat.isPlayerPossessed(entity)
+                || VehicleCrewManager.claimantOf(entity.getUUID()) != null) {
+                continue;
+            }
+            if (getShipIdOf(getMountedShip(entity)) == null
+                || !getShipIdOf(getMountedShip(entity)).equals(shipId)) {
+                continue;
+            }
+            Vec3 local = entity.position();
+            Vec3 worldPos = shipToWorldPosition(ship, local);
+            if (worldPos == null) {
+                worldPos = local;
+            }
+            double dSqr = worldCenter.distanceToSqr(worldPos);
+            if (dSqr < bestSqr) {
+                bestSqr = dSqr;
+                best = entity;
+            }
+        }
+        if (best == null) {
+            return null;
+        }
+        // Post the soldier on the deck surface under the station's shipyard column
+        // (the camera floats at gun height; standing on the solid top beneath it is
+        // the deck). Search down a short window so a slightly-embedded camera still
+        // posts to the right floor.
+        BlockPos stationBlock = best.blockPosition();
+        Vec3 standLocal = null;
+        for (int dy = 0; dy <= 4; dy++) {
+            BlockPos floor = stationBlock.below(dy);
+            if (!level.getBlockState(floor).getCollisionShape(level, floor).isEmpty()) {
+                standLocal = new Vec3(floor.getX() + 0.5, floor.getY() + 1.0, floor.getZ() + 0.5);
+                break;
+            }
+        }
+        Vec3 worldPos = standLocal != null
+            ? shipToWorldPosition(ship, standLocal)
+            : shipToWorldPosition(ship, best.position());
+        if (worldPos == null) {
+            worldPos = standLocal != null ? standLocal : best.position();
+        }
+        // Stand a half block off the gun so the soldier is beside it, not inside it.
+        return new Vec3(worldPos.x + 0.5, worldPos.y, worldPos.z);
+    }
+
+    /**
+     * World-space deck surface on the ship nearest to worldCenter. Searches the
+     * shipyard space for the <em>highest</em> solid block with headroom and maps
+     * it back to world space.
+     */
+    @Nullable
+    private static Vec3 deckPostWorld(ServerLevel level, Object ship, Vec3 worldCenter) {
+        Vec3 localCenter = worldToShipLocal(ship, worldCenter);
+        if (localCenter == null) {
+            return null;
+        }
+        BlockPos shipyardMin = getShipyardMin(ship);
+        BlockPos base = shipyardMin != null
+            && Math.abs(localCenter.x) < 100000.0D && Math.abs(localCenter.z) < 100000.0D
+            ? shipyardMin.offset(BlockPos.containing(localCenter))
+            : BlockPos.containing(localCenter);
+        BlockPos surface = findHighestSurface(level, base, 6);
+        if (surface == null) {
+            return null;
+        }
+        return shipToWorldPosition(ship,
+            new Vec3(surface.getX() + 0.5, surface.getY(), surface.getZ() + 0.5));
+    }
+
+    /**
+     * Top face of the highest solid block with two blocks of headroom, spiral out
+     * from base. Search window climbs from base up (deck tiles rather than hull
+     * floor, which is what the old lowest-block scan landed crew on).
+     */
+    @Nullable
+    private static BlockPos findHighestSurface(Level level, BlockPos base, int radius) {
+        BlockPos best = null;
+        double bestY = Double.NEGATIVE_INFINITY;
+        for (int r = 0; r <= radius; r++) {
+            for (int x = -r; x <= r; x++) {
+                for (int z = -r; z <= r; z++) {
+                    if (Math.max(Math.abs(x), Math.abs(z)) != r) {
+                        continue;
+                    }
+                    for (int y = 12; y >= -3; y--) {
+                        BlockPos floor = base.offset(x, y, z);
+                        if (!level.getBlockState(floor).getCollisionShape(level, floor).isEmpty()
+                            && level.getBlockState(floor.above()).getCollisionShape(level, floor.above()).isEmpty()
+                            && level.getBlockState(floor.above(2)).getCollisionShape(level, floor.above(2)).isEmpty()
+                            && floor.getY() > bestY) {
+                            bestY = floor.getY();
+                            best = floor.above();
+                        }
+                    }
+                }
+            }
+        }
+        return best;
     }
 
     private static long lastCrewBoardingFailLog;
@@ -382,29 +469,6 @@ public final class VS2Compat {
         syncTransportState(soldier, vehicle, false);
         StevesArmyMod.LOGGER.info("[VS2] Healed shipyard-seat mount soldier={} vehicle={}",
             soldier.getId(), vehicle.getId());
-    }
-
-    /** Top face of the first solid block with two blocks of headroom, spiral out from base. */
-    @Nullable
-    private static BlockPos findDeckSurface(Level level, BlockPos base, int radius) {
-        for (int r = 0; r <= radius; r++) {
-            for (int x = -r; x <= r; x++) {
-                for (int z = -r; z <= r; z++) {
-                    if (Math.max(Math.abs(x), Math.abs(z)) != r) {
-                        continue;
-                    }
-                    for (int y = 3; y >= -3; y--) {
-                        BlockPos floor = base.offset(x, y, z);
-                        if (!level.getBlockState(floor).getCollisionShape(level, floor).isEmpty()
-                            && level.getBlockState(floor.above()).getCollisionShape(level, floor.above()).isEmpty()
-                            && level.getBlockState(floor.above(2)).getCollisionShape(level, floor.above(2)).isEmpty()) {
-                            return floor.above();
-                        }
-                    }
-                }
-            }
-        }
-        return null;
     }
 
     /**
