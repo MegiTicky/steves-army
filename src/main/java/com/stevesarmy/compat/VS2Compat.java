@@ -1175,7 +1175,8 @@ public final class VS2Compat {
             && state.transportAnchorId.equals(soldier.getVehicle().getUUID());
     }
 
-private static boolean isTransportOwnerOnShip(LivingEntity owner, SoldierState state) {
+    private static boolean isTransportOwnerOnShip(LivingEntity owner, SoldierState state) {
+        // Seated owner: the seat's position resolves to the transport ship.
         Entity vehicle = owner.getVehicle();
         while (vehicle != null) {
             if (createSeatEntityClass.isInstance(vehicle)) {
@@ -1195,6 +1196,13 @@ private static boolean isTransportOwnerOnShip(LivingEntity owner, SoldierState s
                 }
             }
             vehicle = vehicle.getVehicle();
+        }
+        // Walking owner: seat-chain checks can't see someone standing on the deck.
+        // A world-space bounding-box intersect is the only reliable test then;
+        // without it the transport releases soldiers the moment the owner stands up.
+        if (state.transportShipId != null) {
+            Object ship = firstShipIntersecting(owner.level(), owner.position(), 3.0D);
+            return ship != null && state.transportShipId.equals(getShipIdOf(ship));
         }
         return false;
     }

@@ -198,6 +198,7 @@ public class VehicleCrewGoal extends Goal {
         Long crewShipId = VS2Compat.getShipIdOf(VS2Compat.getMountedShip(soldier));
         List<StationCandidate> candidates = new ArrayList<>();
         double reachSqr = reach * reach;
+        boolean seatedOnShip = crewShipId != null && soldier.isPassenger();
         for (Entity entity : level.getAllEntities()) {
             boolean matches = hullMg ? TallyhoCompat.isHullMG(entity) : TallyhoCompat.isPeriscope(entity);
             if (!matches || entity.isRemoved() || !entity.isAlive()) {
@@ -210,14 +211,27 @@ public class VehicleCrewGoal extends Goal {
             if (claimant != null && !claimant.equals(soldier.getUUID())) {
                 continue;
             }
-            // Station entities live in shipyard space; distances must be taken
-            // against their world-space position, never the raw entity position.
-            double distanceSqr = stationWorldPosOf(entity).distanceToSqr(soldier.position());
-            if (distanceSqr > reachSqr) {
-                continue;
-            }
             boolean sameShip = crewShipId != null
                 && crewShipId.equals(VS2Compat.getShipIdOf(VS2Compat.getMountedShip(entity)));
+            double distanceSqr;
+            if (seatedOnShip) {
+                // A seated soldier's stored position is a stale world coordinate
+                // (often the sea floor where it boarded); the live position is its
+                // seat's. Both seat and station are shipyard-space, so compare
+                // shipyard-to-shipyard. Same-ship stations skip the reach gate:
+                // a seated gunner mans its own ship's guns wherever they are.
+                distanceSqr = entity.position().distanceToSqr(soldier.getVehicle().position());
+                if (!sameShip && distanceSqr > reachSqr) {
+                    continue;
+                }
+            } else {
+                // Station entities live in shipyard space; for an unmounted soldier
+                // distances must use the station's world-space position.
+                distanceSqr = stationWorldPosOf(entity).distanceToSqr(soldier.position());
+                if (distanceSqr > reachSqr) {
+                    continue;
+                }
+            }
             candidates.add(new StationCandidate(entity, sameShip, distanceSqr));
         }
         return candidates.stream()
@@ -229,11 +243,22 @@ public class VehicleCrewGoal extends Goal {
 
     private boolean validateStation() {
         double reach = StevesArmyConfig.VEHICLE_CREW_STATION_REACH.get();
-        Vec3 stationWorld = station == null ? null : stationWorldPosOf(station);
+        Object soldierShip = VS2Compat.getMountedShip(soldier);
+        boolean seatedOnShip = soldier.isPassenger()
+            && VS2Compat.getShipIdOf(soldierShip) != null;
         boolean invalid = station == null || station.isRemoved() || !station.isAlive()
-            || TallyhoCompat.isPlayerPossessed(station)
-            || stationWorld != null
-                && soldier.distanceToSqr(stationWorld) > reach * reach * STATION_RELEASE_DISTANCE_FACTOR;
+            || TallyhoCompat.isPlayerPossessed(station);
+        if (!invalid) {
+            if (seatedOnShip) {
+                // Consistent-space check: seat (shipyard) vs station (shipyard).
+                invalid = station.position().distanceToSqr(soldier.getVehicle().position())
+                    > reach * reach * STATION_RELEASE_DISTANCE_FACTOR;
+            } else {
+                Vec3 stationWorld = stationWorldPosOf(station);
+                invalid = stationWorld != null
+                    && soldier.distanceToSqr(stationWorld) > reach * reach * STATION_RELEASE_DISTANCE_FACTOR;
+            }
+        }
         if (!invalid && !VehicleCrewManager.claim(station.getUUID(), soldier.getUUID())) {
             invalid = true;
         }
