@@ -322,7 +322,7 @@ public class DetectionSystem {
         DetectionState state = detectionStates.computeIfAbsent(target.getUUID(), id -> new DetectionState());
         state.accumulatedPoints = DETECTION_THRESHOLD;
         state.wasInLOSLastCheck = true;
-        state.lastCheckTime = System.currentTimeMillis();
+        state.lastCheckTime = target.level().getGameTime();
     }
 
     /** Returns the most recent LOS result used by the detection state machine. */
