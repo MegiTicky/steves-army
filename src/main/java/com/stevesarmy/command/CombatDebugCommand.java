@@ -20,6 +20,7 @@ import com.stevesarmy.combat.cover.CoverReservationManager;
 import com.stevesarmy.combat.cover.FiringPosition;
 import com.stevesarmy.combat.cover.FiringPositionFinder;
 import com.stevesarmy.combat.SquadSyncHandler;
+import com.stevesarmy.combat.VehicleCrewDebugManager;
 import com.stevesarmy.debug.DiagnosticLogManager;
 import com.stevesarmy.debug.PerformanceMetrics;
 import com.stevesarmy.entity.SoldierEntity;
@@ -198,6 +199,14 @@ public class CombatDebugCommand {
                     .executes(CombatDebugCommand::toggleSpacingVisualization))
                 .then(Commands.literal("fireteam_suppression")
                     .executes(CombatDebugCommand::toggleFireteamSuppressionDebug))
+                .then(Commands.literal("crew")
+                    .executes(CombatDebugCommand::cycleVehicleCrewDebug)
+                    .then(Commands.literal("off")
+                        .executes(ctx -> setVehicleCrewDebug(ctx, VehicleCrewDebugManager.OFF)))
+                    .then(Commands.literal("minimal")
+                        .executes(ctx -> setVehicleCrewDebug(ctx, VehicleCrewDebugManager.MINIMAL)))
+                    .then(Commands.literal("verbose")
+                        .executes(ctx -> setVehicleCrewDebug(ctx, VehicleCrewDebugManager.VERBOSE))))
                 .then(Commands.literal("status")
                     .executes(CombatDebugCommand::renderStatus))
             )
@@ -677,6 +686,32 @@ public class CombatDebugCommand {
         boolean enabled = SquadSyncHandler.toggleAttackDebug(player);
         context.getSource().sendSuccess(() -> Component.literal(
             "Fireteam suppression debug: " + (enabled ? "ON" : "OFF")
+        ), true);
+        return 1;
+    }
+
+    private static int cycleVehicleCrewDebug(CommandContext<CommandSourceStack> context) {
+        ServerPlayer player = context.getSource().getPlayer();
+        if (player == null) {
+            context.getSource().sendFailure(Component.literal("Vehicle crew debug requires a player source."));
+            return 0;
+        }
+        int mode = VehicleCrewDebugManager.cycle(player);
+        context.getSource().sendSuccess(() -> Component.literal(
+            "Vehicle crew debug: " + VehicleCrewDebugManager.modeName(mode)
+        ), true);
+        return 1;
+    }
+
+    private static int setVehicleCrewDebug(CommandContext<CommandSourceStack> context, int requestedMode) {
+        ServerPlayer player = context.getSource().getPlayer();
+        if (player == null) {
+            context.getSource().sendFailure(Component.literal("Vehicle crew debug requires a player source."));
+            return 0;
+        }
+        int mode = VehicleCrewDebugManager.setMode(player, requestedMode);
+        context.getSource().sendSuccess(() -> Component.literal(
+            "Vehicle crew debug: " + VehicleCrewDebugManager.modeName(mode)
         ), true);
         return 1;
     }

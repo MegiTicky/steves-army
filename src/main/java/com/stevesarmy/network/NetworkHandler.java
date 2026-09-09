@@ -152,6 +152,10 @@ public class NetworkHandler {
             TransportOrderMessage::encode,
             TransportOrderMessage::new,
             TransportOrderMessage::handle);
+        INSTANCE.registerMessage(id++, VehicleCrewDebugPacket.class,
+            VehicleCrewDebugPacket::encode,
+            VehicleCrewDebugPacket::new,
+            VehicleCrewDebugPacket::handle);
     }
 
     @SuppressWarnings({"rawtypes", "unchecked"})

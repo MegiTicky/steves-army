@@ -313,6 +313,7 @@ public class PingClientEvents {
             CoverDebugRenderer.render(event.getPoseStack(), event.getCamera());
             SpacingDebugRenderer.render(event.getPoseStack(), event.getCamera());
             FireTeamSuppressionDebugRenderer.render(event.getPoseStack(), event.getCamera());
+            VehicleCrewDebugRenderer.render(event.getPoseStack(), event.getCamera());
             CommandStickRenderer.render(event.getPoseStack(), event.getCamera(), event.getPartialTick());
         }
     }

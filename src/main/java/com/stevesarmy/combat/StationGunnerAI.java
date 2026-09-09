@@ -6,10 +6,13 @@ import com.stevesarmy.compat.TallyhoCompat;
 import com.stevesarmy.compat.VS2Compat;
 import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.entity.SoldierRole;
+import com.stevesarmy.network.NetworkHandler;
+import com.stevesarmy.network.VehicleCrewDebugPacket;
 import com.stevesarmy.squad.SquadData;
 import com.stevesarmy.squad.SquadManager;
 import com.stevesarmy.squad.SquadThreatIntel;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
@@ -60,6 +63,7 @@ public final class StationGunnerAI {
 
     private static final Map<UUID, StationState> active = new ConcurrentHashMap<>();
     private static long lastDutyFailureLog;
+    private static int debugSyncTicks;
 
     private static final class StationState {
         final Entity station;
@@ -78,6 +82,9 @@ public final class StationGunnerAI {
         int suppressionPlanTicks;
         int suppressionCooldownTicks;
         @Nullable Vec3 suppressionAimPos;
+        @Nullable DetectionSystem.DetectionScanResult lastScan;
+        float lastAimError = Float.NaN;
+        int debugState;
 
         StationState(Entity station, SoldierEntity soldier, boolean gunner, Vec3 cameraWorld) {
             this.station = station;
@@ -309,6 +316,53 @@ public final class StationGunnerAI {
                 }
             }
         }
+        if (!VehicleCrewDebugManager.subscribedPlayers().isEmpty() && ++debugSyncTicks >= 5) {
+            debugSyncTicks = 0;
+            for (ServerPlayer player : event.getServer().getPlayerList().getPlayers()) {
+                int mode = VehicleCrewDebugManager.getMode(player.getUUID());
+                if (mode != VehicleCrewDebugManager.OFF) {
+                    sendDebugSnapshot(player, mode);
+                }
+            }
+        }
+    }
+
+    public static void sendDebugSnapshot(ServerPlayer player, int mode) {
+        if (mode == VehicleCrewDebugManager.OFF) {
+            NetworkHandler.sendTo(player, new VehicleCrewDebugPacket(mode, List.of()));
+            return;
+        }
+        List<VehicleCrewDebugPacket.Entry> entries = new java.util.ArrayList<>();
+        for (StationState state : active.values()) {
+            if (!state.soldier.isOwnedBy(player) || state.cameraWorld == null) {
+                continue;
+            }
+            entries.add(toDebugEntry(state, mode));
+        }
+        NetworkHandler.sendTo(player, new VehicleCrewDebugPacket(mode, entries));
+    }
+
+    private static VehicleCrewDebugPacket.Entry toDebugEntry(StationState state, int mode) {
+        Vec3 look = state.station.getLookAngle().normalize();
+        UUID targetId = state.target != null ? state.target.getUUID() : null;
+        Vec3 targetPos = state.target != null ? state.target.getEyePosition() : null;
+        List<VehicleCrewDebugPacket.Observation> observations = new java.util.ArrayList<>();
+        if (mode == VehicleCrewDebugManager.VERBOSE && state.lastScan != null) {
+            for (DetectionSystem.TargetObservation observation : state.lastScan.observations()) {
+                if (observations.size() >= 10) break;
+                observations.add(new VehicleCrewDebugPacket.Observation(observation.target().getUUID(),
+                    observation.target().getEyePosition(), observation.band().ordinal(), observation.visible(),
+                    observation.detected(), (float) observation.accumulatedPoints()));
+            }
+        }
+        int debugState = state.debugState;
+        if (state.suppressionThreatId != null) debugState = 4;
+        return new VehicleCrewDebugPacket.Entry(state.station.getUUID(), state.soldier.getUUID(), state.gunner,
+            state.cameraWorld, look, targetId, targetPos, debugState, state.aimQuality, state.lastAimError,
+            state.bloom, state.burstShots, state.burstPauseTicks, TallyhoCompat.isReadyToFire(state.station),
+            TallyhoCompat.hasAmmo(state.station), state.suppressionThreatId, state.suppressionAimPos,
+            (float) state.detection.getFocusedRange(), TallyhoCompat.getYawLimit(state.station),
+            state.sweepTick / (float) SWEEP_PERIOD_TICKS, List.copyOf(observations));
     }
 
     private static void tickStation(UUID stationId, StationState state) {
@@ -354,7 +408,9 @@ public final class StationGunnerAI {
             return;
         }
         state.cameraWorld = cameraWorld;
-        Vec3 look = VS2Compat.shipToWorldDirection(ship, station.getLookAngle());
+        // VS2 already exposes a mounted camera's look angle in world space.
+        // Applying the ship rotation here would rotate the detection view twice.
+        Vec3 look = station.getLookAngle();
         DetectionViewpoint.set(soldier, cameraWorld, look);
 
         if (state.gunner) {
@@ -370,24 +426,28 @@ public final class StationGunnerAI {
         List<LivingEntity> candidates = computeCandidates(state, level);
         DetectionSystem.DetectionScanResult scan = state.detection.tick(
             state.soldier, candidates, squadIntel(state.soldier));
+        state.lastScan = scan;
+        state.debugState = 0;
+        reportDetectedIntel(state.soldier, scan);
         LivingEntity best = pickTarget(scan);
 
         float aimError = Float.NaN;
         boolean fireGateReached = false;
         if (best == null) {
             state.target = null;
+            state.debugState = 1;
             state.aimQuality = Math.max(0.0F,
                 state.aimQuality - StevesArmyConfig.getAimQualityLosDecayRate());
             decayBloom(state);
             tickSuppression(state, level);
         } else {
+            state.debugState = 2;
             if (state.suppressionThreatId != null) {
                 // A precise target overrides suppression; hand the claim back.
                 releaseSuppression(state, squadIntel(state.soldier));
                 state.suppressionCooldownTicks = SUPPRESSION_COOLDOWN_TICKS;
             }
             state.target = best;
-            reportIntel(state.soldier, best);
 
             ExposureCalculator.AimPointResult aimPoint =
                 ExposureCalculator.getBestAimPoint(state.soldier, best);
@@ -428,6 +488,7 @@ public final class StationGunnerAI {
             }
         }
 
+        state.lastAimError = aimError;
         state.statusTick++;
         if (state.statusTick >= 60) {
             state.statusTick = 0;
@@ -702,11 +763,14 @@ public final class StationGunnerAI {
             .append("candidates=").append(candidates.size());
         DetectionSystem.DetectionScanResult scan = state.detection.tick(
             state.soldier, candidates, squadIntel(state.soldier));
+        state.lastScan = scan;
+        state.debugState = 0;
+        reportDetectedIntel(state.soldier, scan);
         LivingEntity best = pickTarget(scan);
         float traverse = StevesArmyConfig.VEHICLE_CREW_TRAVERSE_SPEED.get().floatValue();
         if (best != null) {
+            state.debugState = 2;
             state.target = best;
-            reportIntel(state.soldier, best);
             // Keep the optics on the contact so intel and detection keep refreshing.
             TallyhoCompat.aimTowards(state.station,
                 aimTargetForStation(state, best.getEyePosition()), traverse, 0.0F, 0.0F);
@@ -714,6 +778,7 @@ public final class StationGunnerAI {
             return;
         }
         state.target = null;
+        state.debugState = 3;
         sweepOptics(state, traverse);
         emitStatus(state, "observer", status.append(" sweeping"));
     }
@@ -804,19 +869,30 @@ public final class StationGunnerAI {
         return bestDetected != null ? bestDetected : bestVisible;
     }
 
-    private static void reportIntel(SoldierEntity soldier, LivingEntity threat) {
-        if (!threat.isAlive() || !TargetAcquisition.isValidTarget(soldier, threat)) {
-            return;
-        }
+    /**
+     * Reports every contact the scan classified, matching the infantry combat
+     * goal: detected-and-visible contacts feed squad intel, and any visible
+     * contact reaches the owner's enemy-contact tracker. The gun still locks a
+     * single target; this only spreads what the crew knows to the squad.
+     */
+    private static void reportDetectedIntel(SoldierEntity soldier,
+                                             DetectionSystem.DetectionScanResult scan) {
         SquadThreatIntel intel = squadIntel(soldier);
-        if (intel != null) {
-            ExposureCalculator.AimPointResult aimPoint =
-                ExposureCalculator.getBestAimPoint(soldier, threat);
-            intel.reportThreat(soldier.getUUID(), threat, threat.blockPosition(),
-                aimPoint != null && aimPoint.canShoot() ? aimPoint.position : threat.getEyePosition(),
-                threat.getEyePosition(), 1.0F);
+        for (DetectionSystem.TargetObservation observation : scan.observations()) {
+            LivingEntity threat = observation.target();
+            if (!observation.visible() || !threat.isAlive()
+                || !TargetAcquisition.isValidTarget(soldier, threat)) {
+                continue;
+            }
+            if (observation.detected() && intel != null) {
+                ExposureCalculator.AimPointResult aimPoint =
+                    ExposureCalculator.getBestAimPoint(soldier, threat);
+                intel.reportThreat(soldier.getUUID(), threat, threat.blockPosition(),
+                    aimPoint != null && aimPoint.canShoot() ? aimPoint.position : threat.getEyePosition(),
+                    threat.getEyePosition(), 1.0F);
+            }
+            EnemyContactTracker.reportContact(soldier, threat);
         }
-        EnemyContactTracker.reportContact(soldier, threat);
     }
 
     @Nullable
