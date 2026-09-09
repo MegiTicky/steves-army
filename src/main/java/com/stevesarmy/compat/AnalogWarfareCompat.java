@@ -1,5 +1,6 @@
 package com.stevesarmy.compat;
 
+import com.stevesarmy.StevesArmyConfig;
 import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.entity.SoldierEntity;
 import net.minecraft.core.BlockPos;
@@ -57,6 +58,10 @@ public final class AnalogWarfareCompat {
      * so the mount-time association is the primary dismount path.
      */
     private static final Map<UUID, BlockPos> soldierHandles = new HashMap<>();
+    /** Maximum distance (blocks) between a soldier and their handle for an automatic exit. */
+    private static final double EXIT_MAX_DISTANCE_SQR = 64.0 * 64.0;
+    /** shipId -> handle block positions in shipyard space; validated before use, dropped when stale. */
+    private static final Map<Long, List<BlockPos>> shipHandles = new HashMap<>();
 
     private static Class<?> handleBeClass;
     private static Class<?> linkClass;
@@ -282,7 +287,7 @@ public final class AnalogWarfareCompat {
                 }
             }
         }
-        for (BlockEntity handle : scanHandlesNear(level, vehicle.blockPosition())) {
+        for (BlockEntity handle : scanHandlesNear(level, vehicle.blockPosition(), null)) {
             for (Object link : getLinks(handle)) {
                 if (linkMatchesSeat(link, vehicle)) {
                     return handle;
@@ -295,6 +300,73 @@ public final class AnalogWarfareCompat {
     /** Forgets a soldier's mount-time handle association (dismount consumed it, or the soldier is gone). */
     public static void forget(UUID soldierId) {
         soldierHandles.remove(soldierId);
+    }
+
+    /** The handle whose links reference the given shipyard seat position, or null. */
+    @Nullable
+    public static BlockEntity handleForSeatPos(ServerLevel level, Object ship, BlockPos seatPos) {
+        for (BlockEntity handle : findHandlesForShip(level, ship, null)) {
+            for (Object link : getLinks(handle)) {
+                if (linkMatchesSeatPos(link, seatPos)) {
+                    return handle;
+                }
+            }
+        }
+        return null;
+    }
+
+    private static boolean linkMatchesSeatPos(Object link, BlockPos seatPos) {
+        try {
+            Object pos = linkSeatPos.invoke(link);
+            return pos instanceof BlockPos blockPos && blockPos.equals(seatPos);
+        } catch (Exception exception) {
+            return false;
+        }
+    }
+
+    /**
+     * Records the soldier's handle when the seat they were just attached to belongs to a
+     * handle link, so every later release (wheel order or automatic) can exit at the
+     * hatch. Called from the VS2 seat attach paths.
+     */
+    public static void recordHandleForSeat(@Nullable ServerLevel level, Object ship,
+                                           SoldierEntity soldier, BlockPos seatPos) {
+        if (level == null || !StevesArmyConfig.VEHICLE_HANDLES_ENABLED.get() || !isAvailable()) {
+            return;
+        }
+        BlockEntity handle = handleForSeatPos(level, ship, seatPos);
+        if (handle != null) {
+            soldierHandles.put(soldier.getUUID(), handle.getBlockPos());
+            StevesArmyMod.LOGGER.info("[VAW] recorded handle={} for soldier={} at seat={}",
+                handle.getBlockPos(), soldier.getId(), seatPos);
+        }
+    }
+
+    /**
+     * Automatic-release exit path: use only the remembered handle, and only while the
+     * vehicle is close — a soldier released because the ship sailed away must not be
+     * teleported back onto it. Returns true if the exit happened.
+     */
+    public static boolean exitAtRememberedHandle(SoldierEntity soldier) {
+        BlockPos remembered = soldierHandles.get(soldier.getUUID());
+        if (remembered == null || !StevesArmyConfig.VEHICLE_HANDLES_ENABLED.get() || !isAvailable()
+            || !(soldier.level() instanceof ServerLevel level)) {
+            return false;
+        }
+        BlockEntity handle = level.getBlockEntity(remembered);
+        if (!isHandle(handle)) {
+            soldierHandles.remove(soldier.getUUID());
+            return false;
+        }
+        Vec3 world = getHandleWorldPosition(handle);
+        if (world == null || soldier.distanceToSqr(world) > EXIT_MAX_DISTANCE_SQR) {
+            return false;
+        }
+        if (teleportSoldierToHandle(soldier, handle)) {
+            soldierHandles.remove(soldier.getUUID());
+            return true;
+        }
+        return false;
     }
 
     private static boolean linkMatchesSeat(Object link, Entity seat) {
@@ -333,18 +405,24 @@ public final class AnalogWarfareCompat {
     // --- Handle discovery -----------------------------------------------------
 
     private static List<BlockEntity> findHandlesForShip(ServerLevel level, Object ship,
-                                                        Vec3 searchCenter) {
+                                                        @Nullable Vec3 searchCenter) {
         Long shipId = VS2Compat.getShipIdOf(ship);
         if (shipId == null) {
             return List.of();
         }
+        List<BlockEntity> cached = cachedHandles(level, shipId);
+        if (!cached.isEmpty()) {
+            return cached;
+        }
         // Anchor candidates in shipyard block space: the aim point mapped onto the
         // ship, plus any seat entity already aboard (exact block-space coordinates).
         List<BlockPos> anchors = new ArrayList<>();
-        Vec3 local = VS2Compat.worldToShipLocal(ship, searchCenter);
-        BlockPos shipyardMin = VS2Compat.getShipyardMin(ship);
-        if (local != null && shipyardMin != null) {
-            anchors.add(shipyardMin.offset(BlockPos.containing(local)));
+        if (searchCenter != null) {
+            Vec3 local = VS2Compat.worldToShipLocal(ship, searchCenter);
+            BlockPos shipyardMin = VS2Compat.getShipyardMin(ship);
+            if (local != null && shipyardMin != null) {
+                anchors.add(shipyardMin.offset(BlockPos.containing(local)));
+            }
         }
         for (Entity entity : level.getAllEntities()) {
             if (!VS2Compat.isCreateSeatEntity(entity) || entity.isRemoved()) {
@@ -354,16 +432,19 @@ public final class AnalogWarfareCompat {
                 entity.getX(), entity.getY(), entity.getZ());
             if (shipId.equals(entityShipId)) {
                 anchors.add(entity.blockPosition());
-                if (anchors.size() >= 3) {
+                if (anchors.size() >= 4) {
                     break;
                 }
             }
         }
 
+        // Stride-1 boxes around the anchors first: handles sit next to their linked
+        // seats, and the 16-block lattice only samples positions congruent to the
+        // anchor modulo 16, so it misses handles placed at ordinary positions.
         List<BlockEntity> handles = new ArrayList<>();
         java.util.Set<BlockPos> seen = new java.util.HashSet<>();
         for (BlockPos anchor : anchors) {
-            for (BlockEntity handle : scanHandles(level, anchor, shipId)) {
+            for (BlockEntity handle : scanHandlesNear(level, anchor, shipId)) {
                 if (seen.add(handle.getBlockPos())) {
                     handles.add(handle);
                 }
@@ -372,7 +453,45 @@ public final class AnalogWarfareCompat {
                 break;
             }
         }
+        // Wide lattice as a last resort for handles far from every anchor.
+        if (handles.isEmpty()) {
+            for (BlockPos anchor : anchors) {
+                for (BlockEntity handle : scanHandles(level, anchor, shipId)) {
+                    if (seen.add(handle.getBlockPos())) {
+                        handles.add(handle);
+                    }
+                }
+                if (!handles.isEmpty()) {
+                    break;
+                }
+            }
+        }
+        if (handles.isEmpty()) {
+            StevesArmyMod.LOGGER.info("[VAW] no handles found for ship={}", shipId);
+        } else {
+            shipHandles.put(shipId, handles.stream().map(BlockEntity::getBlockPos).toList());
+        }
         return handles;
+    }
+
+    /** Cached handle positions for a ship, revalidated; a fully stale entry triggers a rescan. */
+    private static List<BlockEntity> cachedHandles(ServerLevel level, long shipId) {
+        List<BlockPos> positions = shipHandles.get(shipId);
+        if (positions == null) {
+            return List.of();
+        }
+        List<BlockEntity> valid = new ArrayList<>();
+        for (BlockPos pos : positions) {
+            BlockEntity blockEntity = level.getBlockEntity(pos);
+            if (isHandle(blockEntity) && getHandleShipId(blockEntity) == shipId) {
+                valid.add(blockEntity);
+            }
+        }
+        if (valid.isEmpty()) {
+            // Ship re-placed: shipyard positions drifted, drop the cache.
+            shipHandles.remove(shipId);
+        }
+        return valid;
     }
 
     /** Handles around the anchor in shipyard block space, nearest first. */
@@ -407,7 +526,8 @@ public final class AnalogWarfareCompat {
      * samples positions congruent to the anchor modulo 16, so handles placed at any
      * other position are invisible to it.
      */
-    private static List<BlockEntity> scanHandlesNear(ServerLevel level, BlockPos anchor) {
+    private static List<BlockEntity> scanHandlesNear(ServerLevel level, BlockPos anchor,
+                                                     @Nullable Long shipId) {
         List<BlockEntity> found = new ArrayList<>();
         BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
         for (int x = -16; x <= 16; x++) {
@@ -415,9 +535,13 @@ public final class AnalogWarfareCompat {
                 for (int z = -16; z <= 16; z++) {
                     cursor.setWithOffset(anchor, x, y, z);
                     BlockEntity blockEntity = level.getBlockEntity(cursor);
-                    if (isHandle(blockEntity)) {
-                        found.add(blockEntity);
+                    if (!isHandle(blockEntity)) {
+                        continue;
                     }
+                    if (shipId != null && getHandleShipId(blockEntity) != shipId.longValue()) {
+                        continue;
+                    }
+                    found.add(blockEntity);
                 }
             }
         }

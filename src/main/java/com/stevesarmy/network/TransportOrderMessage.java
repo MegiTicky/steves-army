@@ -81,6 +81,7 @@ public class TransportOrderMessage {
         boolean handlesAvailable = StevesArmyConfig.VEHICLE_HANDLES_ENABLED.get()
             && AnalogWarfareCompat.isAvailable();
         int dismounted = 0;
+        int handleExits = 0;
         for (SoldierEntity soldier : soldiers) {
             Entity vehicle = soldier.isPassenger() ? soldier.getVehicle() : null;
             net.minecraft.world.level.block.entity.BlockEntity handle = null;
@@ -94,10 +95,13 @@ public class TransportOrderMessage {
                     // and may stand aboard briefly before ship extraction resumes.
                     if (AnalogWarfareCompat.teleportSoldierToHandle(soldier, handle)) {
                         AnalogWarfareCompat.forget(soldier.getUUID());
+                        handleExits++;
                     }
                 }
             }
         }
+        StevesArmyMod.LOGGER.info("[Transport] DISMOUNT by {}: resolved={} dismounted={} handleExits={}",
+            sender.getName().getString(), soldiers.size(), dismounted, handleExits);
         if (dismounted == 0) {
             sender.displayClientMessage(Component.translatable("transport.steves_army.feedback.none_mounted"), true);
         } else {
@@ -140,11 +144,13 @@ public class TransportOrderMessage {
         // keeps ticking once seated (crewSeated), so they still man their station.
         List<SoldierEntity> remaining = new ArrayList<>(eligible);
         int seated = 0;
+        int viaHandles = 0;
 
         // Handle-linked seats first (VS Analog Warfare vehicle mount handles);
         // soldiers without a free link fall back to the plain free-seat scan.
         if (StevesArmyConfig.VEHICLE_HANDLES_ENABLED.get() && AnalogWarfareCompat.isAvailable()) {
-            seated += AnalogWarfareCompat.mountViaHandles(level, ship, searchCenter, remaining);
+            viaHandles = AnalogWarfareCompat.mountViaHandles(level, ship, searchCenter, remaining);
+            seated += viaHandles;
         }
 
         if (!remaining.isEmpty()) {
@@ -163,6 +169,8 @@ public class TransportOrderMessage {
             }
         }
 
+        StevesArmyMod.LOGGER.info("[Transport] MOUNT by {}: eligible={} seated={} (viaHandles={}, viaFallback={})",
+            sender.getName().getString(), eligible.size(), seated, viaHandles, seated - viaHandles);
         if (seated == 0) {
             sender.displayClientMessage(Component.translatable("transport.steves_army.feedback.no_free_seats"), true);
         } else {

@@ -329,6 +329,13 @@ public final class VS2Compat {
             StevesArmyConfig.VEHICLE_HANDLES_DISMOUNT_GRACE.get();
     }
 
+    /** Remembers the handle owning a just-attached seat so later releases can exit at it. */
+    private static void recordHandleLink(ServerLevel level, Object ship, SoldierEntity soldier, BlockPos seatPos) {
+        if (StevesArmyConfig.VEHICLE_HANDLES_ENABLED.get()) {
+            AnalogWarfareCompat.recordHandleForSeat(level, ship, soldier, seatPos);
+        }
+    }
+
     /**
      * World-space position of a seat entity. Create SeatEntities on ships live at
      * shipyard coordinates; VS2 data-provider seats (e.g. tallyho's FlexibleSeatEntity)
@@ -534,6 +541,10 @@ public final class VS2Compat {
                 if (worldPos != null) {
                     StevesArmyMod.LOGGER.info("[VS2] seatSoldierDirect: resolved seat worldPos=({}, {}, {})",
                         String.format("%.2f", worldPos.x()), String.format("%.2f", worldPos.y()), String.format("%.2f", worldPos.z()));
+                }
+
+                if (ship != null && level instanceof ServerLevel serverLevel) {
+                    recordHandleLink(serverLevel, ship, soldier, seatBlockPos);
                 }
 
                 return true;
@@ -1106,6 +1117,9 @@ public final class VS2Compat {
                                 StevesArmyMod.LOGGER.info("[VS2] Static seat attached soldier={} seat={} vehicle={} soldierPos={} vehiclePos={}",
                                     soldier.getId(), candidate, soldier.getVehicle().getId(), soldier.position(),
                                     soldier.getVehicle().position());
+                                if (owner.level() instanceof ServerLevel serverLevel) {
+                                    recordHandleLink(serverLevel, ownerShip, soldier, candidate);
+                                }
                                 return true;
                             }
                             StevesArmyMod.LOGGER.warn("[VS2] Static seat mount did not persist soldier={} seat={} passenger={} vehicle={}",
@@ -1253,6 +1267,11 @@ public final class VS2Compat {
             soldier.getId(), formatVec3(preDismountPos), formatVec3(postReleasePos),
             String.format("%.2f", preDismountPos.distanceTo(postReleasePos)));
         clearTransportState(state);
+        // Automatic releases (owner left the ship, lost anchor) also exit at the hatch
+        // when the vehicle is parked nearby.
+        if (StevesArmyConfig.VEHICLE_HANDLES_ENABLED.get()) {
+            AnalogWarfareCompat.exitAtRememberedHandle(soldier);
+        }
     }
 
     private static void clearTransportState(SoldierState state) {
