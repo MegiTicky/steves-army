@@ -292,8 +292,21 @@ public final class StationGunnerAI {
         }
         for (UUID stationId : List.copyOf(active.keySet())) {
             StationState state = active.get(stationId);
-            if (state != null) {
+            if (state == null) {
+                continue;
+            }
+            try {
                 tickStation(stationId, state);
+            } catch (Throwable unexpected) {
+                // This ticker runs on the server thread every tick: a bug here must
+                // cost the station its job, never the whole game.
+                StevesArmyMod.LOGGER.error("[StationAI] station {} tick failed, releasing gunner {}: {}",
+                    stationId, state.soldier.getId(), unexpected.toString(), unexpected);
+                try {
+                    deactivate(stationId, "tick error");
+                } catch (Throwable ignored) {
+                    active.remove(stationId);
+                }
             }
         }
     }
@@ -609,7 +622,9 @@ public final class StationGunnerAI {
         }
 
         // Re-roll the beaten zone per burst so sustained fire walks the position.
-        if (state.burstShots == 0) {
+        // The null check matters: a precise target dying mid-burst hands over a
+        // non-zero burstShots with no suppression aim point yet.
+        if (state.suppressionAimPos == null || state.burstShots == 0) {
             Vec3 base = threat.lastVisibleAimPoint != null
                 ? threat.lastVisibleAimPoint
                 : Vec3.atCenterOf(threat.lastKnownPosition).add(0.0, 1.0, 0.0);
