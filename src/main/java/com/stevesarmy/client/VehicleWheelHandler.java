@@ -22,8 +22,12 @@ public class VehicleWheelHandler {
         return currentHoveredAction;
     }
 
-    static void fireSelected(Minecraft mc) {
-        TransportOrder action = getHoveredAction();
+    /**
+     * Sends the captured wheel action. The action is snapshotted before the ping wheel
+     * release re-grabs the mouse (grabMouse recenters the cursor), so it must not be
+     * recomputed here.
+     */
+    static void fireSelected(Minecraft mc, TransportOrder action) {
         if (action == null || mc.player == null) {
             return;
         }

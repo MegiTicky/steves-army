@@ -4,6 +4,7 @@ import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.network.NetworkHandler;
 import com.stevesarmy.network.PingMessage;
 import com.stevesarmy.ping.PingType;
+import com.stevesarmy.transport.TransportOrder;
 import com.stevesarmy.util.RateLimiter;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
@@ -73,6 +74,12 @@ public class PingWheelHandler {
         if (!isKeyDown && wasKeyDown && isWheelActive) {
             long holdTime = System.currentTimeMillis() - pressStartTime;
 
+            // grabMouse() below recenters the cursor, so the vehicle-page hover must be
+            // captured before the mouse is re-grabbed; the ping path uses the type that
+            // the renderer cached while the wheel was open.
+            TransportOrder vehicleAction = WheelCycleController.isVehiclePage()
+                ? VehicleWheelHandler.getHoveredAction() : null;
+
             releaseMouse(mc);
 
             mc.player.setYRot(savedYaw);
@@ -80,8 +87,8 @@ public class PingWheelHandler {
 
             if (holdTime < HOLD_TIME_MS) {
                 StevesArmyMod.LOGGER.info("Ping wheel quick tap ({}ms) - no ping sent, vanilla pick block works", holdTime);
-            } else if (WheelCycleController.isVehiclePage()) {
-                VehicleWheelHandler.fireSelected(mc);
+            } else if (vehicleAction != null) {
+                VehicleWheelHandler.fireSelected(mc, vehicleAction);
             } else {
                 PingType selectedType = currentHoveredType;
                 StevesArmyMod.LOGGER.info("Ping wheel released after {}ms, selected type: {}", holdTime, selectedType);

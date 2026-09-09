@@ -145,6 +145,7 @@ public final class VS2Compat {
         states.remove(soldier.getUUID());
         authorizedMounts.remove(soldier.getUUID());
         authorizedStaticSeats.remove(soldier.getUUID());
+        AnalogWarfareCompat.forget(soldier.getUUID());
     }
 
     /** True when the soldier is seated on a crew-claimed station seat (role keeps ticking AI). */

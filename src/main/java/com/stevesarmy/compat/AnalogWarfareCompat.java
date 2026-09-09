@@ -17,8 +17,11 @@ import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
+import java.util.UUID;
 
 /**
  * Reflection-only integration with VS Analog Warfare's vehicle mount handles
@@ -47,6 +50,13 @@ public final class AnalogWarfareCompat {
     private static volatile boolean initialized;
     private static volatile boolean available;
     private static boolean failureLogged;
+    /**
+     * Soldier UUID -> handle block position, recorded when the soldier mounted through
+     * that handle. Mirrors VAW's own VehicleMountManager.ACTIVE_MOUNTS: link scanning
+     * (a 16-block-stride lattice in VAW itself) cannot reliably rediscover the handle,
+     * so the mount-time association is the primary dismount path.
+     */
+    private static final Map<UUID, BlockPos> soldierHandles = new HashMap<>();
 
     private static Class<?> handleBeClass;
     private static Class<?> linkClass;
@@ -238,6 +248,7 @@ public final class AnalogWarfareCompat {
                 if (VS2Compat.seatSoldierOnSeatEntity(soldier, seat)) {
                     soldiers.remove(0);
                     seated++;
+                    soldierHandles.put(soldier.getUUID(), handle.getBlockPos());
                     StevesArmyMod.LOGGER.info("[VAW] handle mount: soldier={} -> seat={} handle={}",
                         soldier.getId(), seat.getId(), handle.getBlockPos());
                 }
@@ -247,19 +258,43 @@ public final class AnalogWarfareCompat {
     }
 
     /**
-     * The handle whose links reference this seat (by entity UUID or block
-     * position), or null. Used to let dismounting soldiers out at the handle.
+     * The handle to let this soldier out through: the handle recorded at mount time
+     * first, then a link scan around the seat (lattice stride, then a stride-1 box so
+     * off-lattice handles are found too).
      */
     @Nullable
-    public static BlockEntity findHandleForSeat(ServerLevel level, Entity seat) {
-        for (BlockEntity handle : scanHandles(level, seat.blockPosition(), null)) {
+    public static BlockEntity findHandleForSoldier(ServerLevel level, SoldierEntity soldier) {
+        Entity vehicle = soldier.isPassenger() ? soldier.getVehicle() : null;
+        if (vehicle == null) {
+            return null;
+        }
+        BlockPos remembered = soldierHandles.get(soldier.getUUID());
+        if (remembered != null) {
+            BlockEntity handle = level.getBlockEntity(remembered);
+            if (isHandle(handle)) {
+                return handle;
+            }
+        }
+        for (BlockEntity handle : scanHandles(level, vehicle.blockPosition(), null)) {
             for (Object link : getLinks(handle)) {
-                if (linkMatchesSeat(link, seat)) {
+                if (linkMatchesSeat(link, vehicle)) {
+                    return handle;
+                }
+            }
+        }
+        for (BlockEntity handle : scanHandlesNear(level, vehicle.blockPosition())) {
+            for (Object link : getLinks(handle)) {
+                if (linkMatchesSeat(link, vehicle)) {
                     return handle;
                 }
             }
         }
         return null;
+    }
+
+    /** Forgets a soldier's mount-time handle association (dismount consumed it, or the soldier is gone). */
+    public static void forget(UUID soldierId) {
+        soldierHandles.remove(soldierId);
     }
 
     private static boolean linkMatchesSeat(Object link, Entity seat) {
@@ -360,6 +395,29 @@ public final class AnalogWarfareCompat {
                         }
                     }
                     found.add(blockEntity);
+                }
+            }
+        }
+        found.sort(Comparator.comparingInt(be -> manhattanDistance(be.getBlockPos(), anchor)));
+        return found;
+    }
+
+    /**
+     * Stride-1 box scan for handles near the seat anchor. VAW's 16-block lattice only
+     * samples positions congruent to the anchor modulo 16, so handles placed at any
+     * other position are invisible to it.
+     */
+    private static List<BlockEntity> scanHandlesNear(ServerLevel level, BlockPos anchor) {
+        List<BlockEntity> found = new ArrayList<>();
+        BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
+        for (int x = -16; x <= 16; x++) {
+            for (int y = -8; y <= 8; y++) {
+                for (int z = -16; z <= 16; z++) {
+                    cursor.setWithOffset(anchor, x, y, z);
+                    BlockEntity blockEntity = level.getBlockEntity(cursor);
+                    if (isHandle(blockEntity)) {
+                        found.add(blockEntity);
+                    }
                 }
             }
         }

@@ -5,7 +5,6 @@ import com.stevesarmy.compat.AnalogWarfareCompat;
 import com.stevesarmy.compat.VS2Compat;
 import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.StevesArmyMod;
-import com.stevesarmy.entity.SoldierRole;
 import com.stevesarmy.squad.FireTeam;
 import com.stevesarmy.squad.SquadTargeting;
 import com.stevesarmy.transport.TransportOrder;
@@ -86,15 +85,16 @@ public class TransportOrderMessage {
             Entity vehicle = soldier.isPassenger() ? soldier.getVehicle() : null;
             net.minecraft.world.level.block.entity.BlockEntity handle = null;
             if (handlesAvailable && vehicle != null && soldier.level() instanceof ServerLevel serverLevel) {
-                handle = AnalogWarfareCompat.findHandleForSeat(serverLevel, vehicle);
+                handle = AnalogWarfareCompat.findHandleForSoldier(serverLevel, soldier);
             }
-            boolean wasCrew = soldier.getRole() == SoldierRole.VEHICLE_CREW;
-            if (VS2Compat.releaseTransport(soldier) || wasCrew && !soldier.isPassenger()) {
+            if (VS2Compat.releaseTransport(soldier)) {
                 dismounted++;
                 if (handle != null) {
                     // Linked seat: the soldier exits at the handle (the hatch)
                     // and may stand aboard briefly before ship extraction resumes.
-                    AnalogWarfareCompat.teleportSoldierToHandle(soldier, handle);
+                    if (AnalogWarfareCompat.teleportSoldierToHandle(soldier, handle)) {
+                        AnalogWarfareCompat.forget(soldier.getUUID());
+                    }
                 }
             }
         }
