@@ -82,6 +82,7 @@ public class BulkGarrisonPacket {
                     }
                     for (OwnedSoldierRegistry.Entry entry : entries) {
                         if (entry.fireTeam() != targetTeam.ordinal()) continue;
+                        if (entry.role() == SoldierRole.VEHICLE_CREW.ordinal()) continue;
                         SoldierEntity soldier = findLoaded(player, entry.soldierId());
                         if (soldier == null) continue;
                         SoldierRoleHandler.convertSoldier(soldier, SoldierRole.GARRISON, FireTeam.GARRISON);

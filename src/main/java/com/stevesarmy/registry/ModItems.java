@@ -45,6 +45,11 @@ public class ModItems {
         () -> new CreativeCommandStickItem(new Item.Properties().stacksTo(1))
     );
 
+    public static final RegistryObject<Item> CREW_ASSIGN_STICK = ITEMS.register(
+        "crew_assign_stick",
+        () -> new com.stevesarmy.item.CrewAssignStickItem(new Item.Properties().stacksTo(1))
+    );
+
     public static final RegistryObject<Item> SOLDIER_SPAWN_EGG = ITEMS.register(
         "soldier_spawn_egg",
         () -> new SoldierSpawnEggItem(ModEntities.SOLDIER, 0x4A7C59, 0x2F4F2F, new Item.Properties())

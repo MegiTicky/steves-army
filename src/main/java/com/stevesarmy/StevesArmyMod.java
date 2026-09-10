@@ -44,6 +44,7 @@ public class StevesArmyMod {
         ModLoadingContext.get().registerConfig(ModConfig.Type.CLIENT, StevesArmyClientConfig.SPEC);
 
         modEventBus.addListener(this::commonSetup);
+        modEventBus.addListener(this::processImc);
 
         MinecraftForge.EVENT_BUS.register(this);
         MinecraftForge.EVENT_BUS.register(TeamEventHandler.class);
@@ -70,5 +71,19 @@ public class StevesArmyMod {
         StevesArmyCommand.register(event.getDispatcher());
         TransportCommand.register(event.getDispatcher());
         LOGGER.info("Registered commands: /stevesarmy, /steves_army, /stevesarmy_debug, /stevesarmy transport");
+    }
+
+    /** IMC drain for the VehicleCrewApi contract (see api/VehicleCrewApi javadoc). */
+    private void processImc(net.minecraftforge.fml.event.lifecycle.InterModProcessEvent event) {
+        net.minecraftforge.fml.InterModComms.getMessages("vs_analog_warfare", "vehicleSetupCompleted"::equals)
+            .forEach(imc -> {
+                Object payload = imc.getMessageSupplier().get();
+                if (payload instanceof Object[] parts && parts.length == 3
+                    && parts[0] instanceof net.minecraft.server.level.ServerPlayer player
+                    && parts[1] instanceof net.minecraft.world.level.Level level
+                    && parts[2] instanceof net.minecraft.core.BlockPos pos) {
+                    com.stevesarmy.api.VehicleCrewApi.onVehicleSetupCompleted(player, level, pos);
+                }
+            });
     }
 }

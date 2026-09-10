@@ -2,6 +2,7 @@ package com.stevesarmy.squad;
 
 import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.entity.SoldierEntity;
+import com.stevesarmy.entity.SoldierRole;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.LivingEntity;
@@ -27,7 +28,7 @@ public final class SquadTargeting {
             return level.getEntitiesOfClass(
                 SoldierEntity.class,
                 sender.getBoundingBox().inflate(100),
-                s -> s.isOwnedBy(sender)
+                s -> s.isOwnedBy(sender) && s.getRole() != SoldierRole.VEHICLE_CREW
             );
         }
 
@@ -36,7 +37,8 @@ public final class SquadTargeting {
         List<SoldierEntity> result = new ArrayList<>();
         for (LivingEntity member : members) {
             if (member instanceof SoldierEntity s && s.isAlive() && s.isOwnedBy(sender)
-                && s.getFireTeam() != FireTeam.GARRISON) {
+                && s.getFireTeam() != FireTeam.GARRISON
+                && s.getRole() != SoldierRole.VEHICLE_CREW) {
                 result.add(s);
             }
         }
@@ -46,6 +48,7 @@ public final class SquadTargeting {
             SoldierEntity.class,
             sender.getBoundingBox().inflate(100),
             s -> s.isOwnedBy(sender) && s.getFireTeam() != FireTeam.GARRISON
+                && s.getRole() != SoldierRole.VEHICLE_CREW
                 && !resultUuids.contains(s.getUUID())
         );
         result.addAll(nearbyFallback);

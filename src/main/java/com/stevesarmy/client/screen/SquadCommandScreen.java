@@ -15,6 +15,7 @@ import com.stevesarmy.network.SetSoldierConfigPacket;
 import com.stevesarmy.network.SetSoldierRoleByUUIDPacket;
 import com.stevesarmy.network.SetResupplyConfigPacket;
 import com.stevesarmy.network.SquadStatusSyncPacket;
+import com.stevesarmy.network.VehicleCrewDismountPacket;
 import com.stevesarmy.squad.FireDiscipline;
 import com.stevesarmy.squad.FireTeam;
 import com.stevesarmy.squad.ResupplyConfig;
@@ -55,6 +56,7 @@ public class SquadCommandScreen extends Screen {
     private static final ItemStack INVENTORY_ICON = new ItemStack(Items.CHEST);
     private static final ItemStack RECALL_ICON = new ItemStack(Items.ENDER_PEARL);
     private static final ItemStack DISMISS_ICON = new ItemStack(Items.BARRIER);
+    private static final ItemStack DISMOUNT_ICON = new ItemStack(Items.MINECART);
 
     private List<SoldierRow> rows = new ArrayList<>();
     private int teamCount = 2;
@@ -75,6 +77,7 @@ public class SquadCommandScreen extends Screen {
     private enum Tab {
         SQUAD,
         GARRISON,
+        VEHICLE_CREW,
         RESUPPLY
     }
 
@@ -92,6 +95,7 @@ public class SquadCommandScreen extends Screen {
         double distance;
         int recallTicks;
         boolean loaded;
+        int dutyType;
         int invButtonX;
         int recallButtonX;
         int dismissButtonX;
@@ -112,6 +116,7 @@ public class SquadCommandScreen extends Screen {
             this.distance = entry.distance;
             this.recallTicks = entry.recallTicks;
             this.loaded = entry.loaded;
+            this.dutyType = entry.dutyType;
         }
 
         void update(SquadStatusSyncPacket.SoldierStatusEntry entry, net.minecraft.client.gui.Font font) {
@@ -126,6 +131,7 @@ public class SquadCommandScreen extends Screen {
             this.distance = entry.distance;
             this.recallTicks = entry.recallTicks;
             this.loaded = entry.loaded;
+            this.dutyType = entry.dutyType;
         }
 
         SoldierRole getRole() {
@@ -144,18 +150,20 @@ public class SquadCommandScreen extends Screen {
         rebuildFooterButtons();
     }
 
-    private boolean matchesTab(FireTeam fireTeam) {
+    private boolean matchesTab(SquadStatusSyncPacket.SoldierStatusEntry entry) {
         return switch (activeTab) {
-            case GARRISON -> fireTeam == FireTeam.GARRISON;
+            case GARRISON -> entry.getFireTeam() == FireTeam.GARRISON;
+            case VEHICLE_CREW -> entry.getRole() == SoldierRole.VEHICLE_CREW;
             case RESUPPLY -> false;
-            default -> fireTeam != FireTeam.GARRISON;
+            default -> entry.getFireTeam() != FireTeam.GARRISON
+                && entry.getRole() != SoldierRole.VEHICLE_CREW;
         };
     }
 
     private void rebuildTabButtons() {
         int tabWidth = 60;
         int tabHeight = 14;
-        int x = width - PANEL_LEFT - tabWidth * 3 - 8;
+        int x = width - PANEL_LEFT - tabWidth * 4 - 12;
         int y = 6;
 
         Button squadTab = Button.builder(Component.literal("Squad"), button -> switchTab(Tab.SQUAD))
@@ -168,6 +176,12 @@ public class SquadCommandScreen extends Screen {
             .bounds(x, y, tabWidth, tabHeight).build();
         garrisonTab.active = activeTab != Tab.GARRISON;
         addRenderableWidget(garrisonTab);
+
+        x += tabWidth + 4;
+        Button crewTab = Button.builder(Component.literal("Crew"), button -> switchTab(Tab.VEHICLE_CREW))
+            .bounds(x, y, tabWidth, tabHeight).build();
+        crewTab.active = activeTab != Tab.VEHICLE_CREW;
+        addRenderableWidget(crewTab);
 
         x += tabWidth + 4;
         Button resupplyTab = Button.builder(Component.literal("Resupply"), button -> switchTab(Tab.RESUPPLY))
@@ -192,6 +206,12 @@ public class SquadCommandScreen extends Screen {
 
         if (activeTab == Tab.RESUPPLY) {
             rebuildResupplyButtons();
+            rebuildTabButtons();
+            return;
+        }
+
+        if (activeTab == Tab.VEHICLE_CREW) {
+            // Crew are managed per-soldier; no squad-wide discipline/role/team controls.
             rebuildTabButtons();
             return;
         }
@@ -320,7 +340,7 @@ public class SquadCommandScreen extends Screen {
     private void rebuildRows() {
         rows.clear();
         for (SquadStatusSyncPacket.SoldierStatusEntry entry : ClientSquadData.INSTANCE.getAllEntries()) {
-            if (matchesTab(entry.getFireTeam())) {
+            if (matchesTab(entry)) {
                 rows.add(new SoldierRow(entry));
             }
         }
@@ -337,7 +357,7 @@ public class SquadCommandScreen extends Screen {
 
         List<SoldierRow> updatedRows = new ArrayList<>(entries.size());
         for (SquadStatusSyncPacket.SoldierStatusEntry entry : entries) {
-            if (!matchesTab(entry.getFireTeam())) continue;
+            if (!matchesTab(entry)) continue;
             SoldierRow row = existingRows.get(entry.entityId);
             if (row == null) {
                 row = new SoldierRow(entry);
@@ -403,6 +423,8 @@ public class SquadCommandScreen extends Screen {
             row.fireTeamColumnX = x;
             if (activeTab == Tab.GARRISON) {
                 drawFireTeamBadge(graphics, x, y, row.fireTeam);
+            } else if (activeTab == Tab.VEHICLE_CREW) {
+                drawDutyBadge(graphics, x, y, row.dutyType);
             } else {
                 FireTeamDropdownWidget teamButton = new FireTeamDropdownWidget(row.fireTeam, getActiveTeams(), ignored -> { });
                 teamButton.render(graphics, font, x, y + 4, COL_FT_WIDTH, ROW_HEIGHT, mouseX - x, mouseY - y - 4);
@@ -446,9 +468,14 @@ public class SquadCommandScreen extends Screen {
 
             drawIconButton(graphics, row.invButtonX, buttonY, INVENTORY_ICON, row.loaded && row.distance <= 20.0,
                 false, Component.literal("Open inventory"), mouseX, mouseY);
-            String recallLabel = row.recallTicks > 0 ? "Recall: " + ((row.recallTicks + 19) / 20) + "s" : "Recall soldier";
-            drawIconButton(graphics, row.recallButtonX, buttonY, RECALL_ICON, row.recallTicks <= 0,
-                false, Component.literal(recallLabel), mouseX, mouseY);
+            if (activeTab == Tab.VEHICLE_CREW) {
+                drawIconButton(graphics, row.recallButtonX, buttonY, DISMOUNT_ICON, row.loaded,
+                    false, Component.literal("Dismount soldier"), mouseX, mouseY);
+            } else {
+                String recallLabel = row.recallTicks > 0 ? "Recall: " + ((row.recallTicks + 19) / 20) + "s" : "Recall soldier";
+                drawIconButton(graphics, row.recallButtonX, buttonY, RECALL_ICON, row.recallTicks <= 0,
+                    false, Component.literal(recallLabel), mouseX, mouseY);
+            }
             drawIconButton(graphics, row.dismissButtonX, buttonY, DISMISS_ICON, true,
                 true, Component.literal("Dismiss soldier"), mouseX, mouseY);
         }
@@ -457,6 +484,14 @@ public class SquadCommandScreen extends Screen {
         drawScrollbar(graphics, contentX + contentWidth - 3, ROW_START_Y, listBottom, visibleRows);
 
         int footerY = getFooterY();
+        if (activeTab == Tab.VEHICLE_CREW) {
+            graphics.drawString(font, Component.literal("-- Vehicle Crew --  Crew: " + rows.size()), contentX, footerY, 0xFFAAAAAA, false);
+            graphics.drawString(font, Component.literal("Select crew with the Crew Assign Stick, then sneak-use a seat to assign them."),
+                contentX, footerY + 14, 0xFF888888, false);
+            super.render(graphics, mouseX, mouseY, partialTick);
+            renderDropdowns(graphics, mouseX, mouseY);
+            return;
+        }
         graphics.drawString(font, Component.literal("-- Squad Settings --  NPCs: " + rows.size()), contentX, footerY, 0xFFAAAAAA, false);
 
         int btnY = footerY + 14;
@@ -473,7 +508,11 @@ public class SquadCommandScreen extends Screen {
         graphics.drawString(font, Component.literal("Teams: " + teamCount), contentX, fireTeamRowY + BUTTON_TEXT_Y_OFFSET, 0xFFCCCCCC, false);
 
         super.render(graphics, mouseX, mouseY, partialTick);
+        renderDropdowns(graphics, mouseX, mouseY);
+    }
 
+    /** Role/team dropdown overlays plus the hovered-action tooltip, shared by all tabs. */
+    private void renderDropdowns(GuiGraphics graphics, int mouseX, int mouseY) {
         if (activeRoleDropdownWidget != null && activeRoleDropdownRow >= 0 && activeRoleDropdownRow < rows.size()) {
             SoldierRow activeRow = rows.get(activeRoleDropdownRow);
             int dropItemHeight = 12;
@@ -590,6 +629,21 @@ public class SquadCommandScreen extends Screen {
         int width = font.width(badge);
         graphics.drawString(font, Component.literal(badge), x, y + 6, ftColor, false);
         return x + COL_FT_WIDTH;
+    }
+
+    /** Crew duty readout in the fire-team column: MG gunner, periscope observer, or off duty. */
+    private void drawDutyBadge(GuiGraphics graphics, int x, int y, int dutyType) {
+        String badge = switch (dutyType) {
+            case 1 -> "[MG]";
+            case 2 -> "[OPTIC]";
+            default -> "[-]";
+        };
+        int color = switch (dutyType) {
+            case 1 -> 0xFF55FF55;
+            case 2 -> 0xFF40E0FF;
+            default -> 0xFF777777;
+        };
+        graphics.drawString(font, Component.literal(badge), x, y + 6, color, false);
     }
 
     private int drawName(GuiGraphics graphics, int x, int y, String name, int width) {
@@ -766,7 +820,7 @@ public class SquadCommandScreen extends Screen {
                     return true;
                 }
 
-                if (activeTab != Tab.GARRISON
+                if (activeTab == Tab.SQUAD
                     && mouseX >= row.fireTeamColumnX && mouseX < row.fireTeamColumnX + COL_FT_WIDTH
                     && localMouseY >= 4 && localMouseY < 16) {
                     openFireTeamDropdown(rowIndex, row.fireTeamColumnX, rowY + 4);
@@ -774,7 +828,11 @@ public class SquadCommandScreen extends Screen {
                 }
 
                 if (tryClickInventoryButton(row, mouseX, localMouseY)) return true;
-                if (tryClickRecallButton(mouseX, row.recallButtonX, localMouseY, row.entityId, row.recallTicks)) return true;
+                if (activeTab == Tab.VEHICLE_CREW) {
+                    if (tryClickDismountButton(mouseX, row.recallButtonX, localMouseY, row.entityId)) return true;
+                } else {
+                    if (tryClickRecallButton(mouseX, row.recallButtonX, localMouseY, row.entityId, row.recallTicks)) return true;
+                }
                 if (tryClickDismissButton(mouseX, row.dismissButtonX, localMouseY, row.entityId)) return true;
                 return true;
             }
@@ -797,6 +855,15 @@ public class SquadCommandScreen extends Screen {
         if (mouseX >= buttonX && mouseX < buttonX + ACTION_BUTTON_SIZE
             && localMouseY >= 1 && localMouseY < 1 + ACTION_BUTTON_SIZE) {
             NetworkHandler.INSTANCE.sendToServer(new RecallPacket(soldierId));
+            return true;
+        }
+        return false;
+    }
+
+    private boolean tryClickDismountButton(double mouseX, int buttonX, int localMouseY, UUID soldierId) {
+        if (mouseX >= buttonX && mouseX < buttonX + ACTION_BUTTON_SIZE
+            && localMouseY >= 1 && localMouseY < 1 + ACTION_BUTTON_SIZE) {
+            NetworkHandler.INSTANCE.sendToServer(new VehicleCrewDismountPacket(soldierId));
             return true;
         }
         return false;

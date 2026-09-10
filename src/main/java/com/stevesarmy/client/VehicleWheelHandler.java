@@ -40,7 +40,11 @@ public class VehicleWheelHandler {
             new TransportOrderMessage(action, aimPosition, FireTeamScopeState.INSTANCE.getCurrentScope()));
     }
 
-    /** Center dead zone cancels; otherwise MOUNT is the right half, DISMOUNT the left half. */
+    /**
+     * Center dead zone cancels; otherwise the wheel splits into one equal sector per
+     * action, clockwise from up: MOUNT (upper right), DISMOUNT (bottom), MOUNT_CREW
+     * (upper left).
+     */
     private static TransportOrder determineActionFromMouse() {
         double deltaX = PingWheelHandler.getDeltaX();
         double deltaY = PingWheelHandler.getDeltaY();
@@ -55,7 +59,9 @@ public class VehicleWheelHandler {
         if (adjustedDegrees < 0) adjustedDegrees += 360;
         if (adjustedDegrees >= 360) adjustedDegrees -= 360;
 
-        int sector = ((int) (adjustedDegrees / 180)) % TransportOrder.values().length;
+        int count = TransportOrder.values().length;
+        double sectorSize = 360.0 / count;
+        int sector = ((int) (adjustedDegrees / sectorSize)) % count;
         return TransportOrder.values()[sector];
     }
 }

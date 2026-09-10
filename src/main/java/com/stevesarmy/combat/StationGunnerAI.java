@@ -128,6 +128,16 @@ public final class StationGunnerAI {
         return false;
     }
 
+    /** 0 = off duty, 1 = hull MG gunner, 2 = periscope observer. */
+    public static int dutyTypeOf(SoldierEntity soldier) {
+        for (StationState state : active.values()) {
+            if (state.soldier == soldier) {
+                return state.gunner ? 1 : 2;
+            }
+        }
+        return 0;
+    }
+
     public static void deactivate(UUID stationId, String reason) {
         StationState state = active.remove(stationId);
         if (state == null) {

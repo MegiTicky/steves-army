@@ -68,9 +68,42 @@ public class TransportOrderMessage {
             switch (msg.getOrder()) {
                 case MOUNT -> handleMount(sender, level, soldiers, msg.getAimPosition());
                 case DISMOUNT -> handleDismount(sender, soldiers);
+                case MOUNT_CREW -> handleMountCrew(sender, level, msg.getAimPosition());
             }
         });
         ctx.get().setPacketHandled(true);
+    }
+
+    /**
+     * Boards station-less vehicle crew onto the aimed ship. Deliberately does not use
+     * {@link SquadTargeting}: crew are excluded from player orders, and this action
+     * never pulls crew that are actively manning a station.
+     */
+    private static void handleMountCrew(ServerPlayer sender, ServerLevel level, Vec3 aimPosition) {
+        if (!VS2Compat.isEnabled()) {
+            sender.displayClientMessage(Component.translatable("transport.steves_army.feedback.vs2_unavailable"), true);
+            return;
+        }
+        Vec3 searchCenter = aimPosition;
+        Object ship = VS2Compat.getShipAt(level, BlockPos.containing(aimPosition));
+        if (ship == null) {
+            searchCenter = sender.position();
+            ship = VS2Compat.resolveMountShipNearPlayer(level, sender);
+        }
+        if (ship == null) {
+            sender.displayClientMessage(Component.translatable("transport.steves_army.feedback.no_vehicle"), true);
+            return;
+        }
+        List<SoldierEntity> crew = com.stevesarmy.transport.CrewAssignment.stationlessCrewNear(level, sender, searchCenter, 64);
+        if (crew.isEmpty()) {
+            sender.displayClientMessage(Component.translatable("transport.steves_army.feedback.no_crew"), true);
+            return;
+        }
+        int seated = com.stevesarmy.transport.CrewAssignment.autoAssignNear(sender, level, ship, searchCenter);
+        StevesArmyMod.LOGGER.info("[Transport] MOUNT_CREW by {}: crew={} seated={}",
+            sender.getName().getString(), crew.size(), seated);
+        sender.displayClientMessage(
+            Component.translatable("transport.steves_army.feedback.seated", seated, crew.size()), true);
     }
 
     private static void handleDismount(ServerPlayer sender, List<SoldierEntity> soldiers) {

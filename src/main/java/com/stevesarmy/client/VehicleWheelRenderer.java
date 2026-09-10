@@ -7,7 +7,7 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.network.chat.Component;
 
-/** Two-sector radial wheel for vehicle orders: Mount (right), Dismount (left). */
+/** Radial wheel for vehicle orders: Mount (upper right), Dismount (bottom), Mount Crew (upper left). */
 public class VehicleWheelRenderer {
     private static final int INNER_RADIUS = 30;
     private static final int OUTER_RADIUS = 80;

@@ -64,8 +64,10 @@ public class SquadStatusSyncPacket {
             double distance = buf.readDouble();
             int recallTicks = buf.readVarInt();
             boolean loaded = buf.readBoolean();
+            int dutyType = buf.readVarInt();
             entries.add(new SoldierStatusEntry(entityId, entityIntId, name, health, maxHealth, totalAmmo, gunStack,
-                squadModeOrdinal, fireDisciplineOrdinal, fireTeamOrdinal, roleOrdinal, coverState, distance, recallTicks, loaded));
+                squadModeOrdinal, fireDisciplineOrdinal, fireTeamOrdinal, roleOrdinal, coverState, distance, recallTicks, loaded,
+                dutyType));
         }
         return new SquadStatusSyncPacket(entries, config);
     }
@@ -92,6 +94,7 @@ public class SquadStatusSyncPacket {
             buf.writeDouble(entry.distance);
             buf.writeVarInt(entry.recallTicks);
             buf.writeBoolean(entry.loaded);
+            buf.writeVarInt(entry.dutyType);
         }
     }
 
@@ -141,7 +144,8 @@ public class SquadStatusSyncPacket {
                     loaded ? soldier.getSyncedCoverState() : snapshot.coverState(),
                     loaded ? soldier.distanceTo(player) : -1.0D,
                     loaded ? soldier.getRecallTicks() : snapshot.recallTicks(),
-                    loaded));
+                    loaded,
+                    loaded ? com.stevesarmy.combat.StationGunnerAI.dutyTypeOf(soldier) : 0));
             }
         }
         return new SquadStatusSyncPacket(entries,
@@ -164,11 +168,21 @@ public class SquadStatusSyncPacket {
         public final double distance;
         public final int recallTicks;
         public final boolean loaded;
+        /** 0 = off duty, 1 = hull MG gunner, 2 = periscope observer (vehicle crew only). */
+        public final int dutyType;
 
         public SoldierStatusEntry(UUID entityId, int entityIntId, String name, float health, float maxHealth,
                                     int totalAmmo, ItemStack gunStack, int squadModeOrdinal,
                                    int fireDisciplineOrdinal, int fireTeamOrdinal, int roleOrdinal,
                                    int coverState, double distance, int recallTicks, boolean loaded) {
+            this(entityId, entityIntId, name, health, maxHealth, totalAmmo, gunStack, squadModeOrdinal,
+                fireDisciplineOrdinal, fireTeamOrdinal, roleOrdinal, coverState, distance, recallTicks, loaded, 0);
+        }
+
+        public SoldierStatusEntry(UUID entityId, int entityIntId, String name, float health, float maxHealth,
+                                    int totalAmmo, ItemStack gunStack, int squadModeOrdinal,
+                                   int fireDisciplineOrdinal, int fireTeamOrdinal, int roleOrdinal,
+                                   int coverState, double distance, int recallTicks, boolean loaded, int dutyType) {
             this.entityId = entityId;
             this.entityIntId = entityIntId;
             this.name = name;
@@ -184,6 +198,7 @@ public class SquadStatusSyncPacket {
             this.distance = distance;
             this.recallTicks = recallTicks;
             this.loaded = loaded;
+            this.dutyType = dutyType;
         }
 
         public SquadMode getSquadMode() { return SquadMode.values()[squadModeOrdinal % SquadMode.values().length]; }

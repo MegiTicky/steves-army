@@ -17,6 +17,7 @@
     "item.steves_army.skin_knife": "Skin Knife",
     "item.steves_army.command_stick": "Command Stick",
     "item.steves_army.creative_command_stick": "Creative Command Stick",
+    "item.steves_army.crew_assign_stick": "Crew Assign Stick",
     "item.steves_army.soldier_spawn_egg": "Rifleman Spawn Egg",
     "item.steves_army.enemy_soldier_spawn_egg": "Enemy Soldier Spawn Egg",
     "item.steves_army.machine_gunner_spawn_egg": "Machine Gunner Spawn Egg",
@@ -40,6 +41,7 @@
     "ping.steves_army.attack": "Attack",
     "transport.steves_army.mount": "Mount",
     "transport.steves_army.dismount": "Dismount",
+    "transport.steves_army.mount_crew": "Mount Crew",
     "wheel.steves_army.orders": "ORDERS",
     "wheel.steves_army.vehicle": "VEHICLE",
     "wheel.steves_army.switch_hint_rmb": "RMB: switch",
@@ -52,5 +54,11 @@
     "transport.steves_army.feedback.no_free_seats": "No free seats on that vehicle",
     "transport.steves_army.feedback.seated": "Seated %s of %s soldier(s)",
     "transport.steves_army.feedback.vs2_unavailable": "Vehicle transport requires Valkyrien Skies",
+    "transport.steves_army.feedback.no_crew": "No free vehicle crew nearby",
+    "transport.steves_army.feedback.crew_assigned": "Assigned %s of %s crew",
+    "transport.steves_army.feedback.crew_seat_occupied": "That seat is occupied",
+    "transport.steves_army.feedback.crew_deployed": "Vehicle crew deployed to seat",
+    "transport.steves_army.feedback.crew_dismounted": "Vehicle crew dismounted",
+    "transport.steves_army.feedback.crew_not_mounted": "That crew is not mounted",
     "item.steves_army.resupply_pouch": "Resupply Pouch"
 }

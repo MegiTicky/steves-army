@@ -9,7 +9,9 @@ import com.stevesarmy.inventory.SoldierInventory;
 import com.stevesarmy.inventory.SoldierInventoryMenu;
 import com.stevesarmy.network.NetworkHandler;
 import com.stevesarmy.network.SetSoldierRolePacket;
+import com.stevesarmy.network.VehicleCrewDismountPacket;
 import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
@@ -43,6 +45,11 @@ public class SoldierInventoryScreen extends AbstractContainerScreen<SoldierInven
         SoldierRole currentRole = soldier != null ? soldier.getRole() : SoldierRole.RIFLEMAN;
         this.roleWidget = new RoleDropdownWidget(currentRole, this::switchRole);
         refreshRoleWidget();
+        if (soldier != null && soldier.getRole() == SoldierRole.VEHICLE_CREW) {
+            addRenderableWidget(Button.builder(Component.literal("Dismount"), button ->
+                    NetworkHandler.INSTANCE.sendToServer(new VehicleCrewDismountPacket(soldier.getUUID())))
+                .bounds(this.leftPos - 52, this.topPos + 2, 50, 14).build());
+        }
     }
 
     @Override
