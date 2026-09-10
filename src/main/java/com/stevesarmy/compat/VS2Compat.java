@@ -16,7 +16,6 @@ import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.Pose;
 import net.minecraft.world.entity.player.Player;
-import net.minecraft.world.entity.projectile.ProjectileUtil;
 import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.Level;
@@ -37,6 +36,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 
 /** Optional VS2 integration. Ships are transport, never terrain for soldier AI. */
@@ -365,12 +365,13 @@ public final class VS2Compat {
     }
 
     /**
-     * First Create/VSAW seat entity the view ray passes through within reach.
-     * Seats on ships live at shipyard coordinates (VS2's DefaultShipyardEntityHandler),
-     * so a world-space ray never intersects their world-space AABB. The world pass
-     * catches seats in world space; the per-ship pass transforms the ray into each
-     * intersecting ship's local frame and re-tests there (mirrors VS2's own
-     * RaycastUtils.raytraceEntities). Nearest hit wins.
+     * First Create/VSAW seat entity the view ray passes through within reach, or null.
+     * Seats on ships live at shipyard coordinates, and VS2's MixinLevel rewrites the
+     * query box of every Level.getEntities call (shipyard boxes are pushed back to
+     * world space), so ProjectileUtil-based picking can never see them from either
+     * frame. All loaded entities are therefore enumerated directly and the view ray
+     * is tested against each seat's bounding box translated to world space — pure
+     * math, no level entity queries.
      */
     @Nullable
     public static Entity findSeatAlongLook(Player player, double reach) {
@@ -381,60 +382,67 @@ public final class VS2Compat {
         Level level = player.level();
         Vec3 eye = player.getEyePosition();
         Vec3 end = eye.add(player.getLookAngle().scale(reach));
-        AABB worldBox = new AABB(eye, end).inflate(1.0);
 
-        // World-space pass (station-less seats, seats on ships in world coords).
         Entity best = null;
+        Vec3 bestWorldPos = null;
         double bestDistSqr = Double.MAX_VALUE;
-        if (available) {
-            net.minecraft.world.phys.EntityHitResult worldHit = ProjectileUtil.getEntityHitResult(
-                level, player, eye, end, worldBox, seatFilter());
-            if (worldHit != null) {
-                best = worldHit.getEntity();
-                bestDistSqr = eye.distanceToSqr(worldHit.getLocation());
+        for (Entity entity : allEntities(level)) {
+            if (entity.isRemoved() || !entity.isAlive()
+                || !createSeatEntityClass.isInstance(entity)) {
+                continue;
             }
-
-            // Per-ship pass: re-test the ray in each intersecting ship's local frame.
-            try {
-                Object ships = reflect(getShipsIntersecting, level, worldBox);
-                if (ships instanceof Iterable<?> iterable) {
-                    for (Object ship : iterable) {
-                        if (ship == null) {
-                            continue;
-                        }
-                        Vec3 localEye = worldToShipLocal(ship, eye);
-                        Vec3 localEnd = worldToShipLocal(ship, end);
-                        if (localEye == null || localEnd == null) {
-                            continue;
-                        }
-                        AABB localBox = new AABB(localEye, localEnd).inflate(1.0);
-                        net.minecraft.world.phys.EntityHitResult localHit = ProjectileUtil.getEntityHitResult(
-                            level, player, localEye, localEnd, localBox, seatFilter());
-                        if (localHit == null) {
-                            continue;
-                        }
-                        // Rank in world space so the closest seat across all ships wins.
-                        Vec3 worldPos = shipToWorldPosition(ship, localHit.getLocation());
-                        if (worldPos == null) {
-                            continue;
-                        }
-                        double distSqr = eye.distanceToSqr(worldPos);
-                        if (distSqr < bestDistSqr) {
-                            bestDistSqr = distSqr;
-                            best = localHit.getEntity();
-                        }
-                    }
+            Vec3 raw = entity.position();
+            Vec3 worldPos = raw;
+            Object ship = shipAtRawPosition(level, raw);
+            if (ship != null) {
+                Vec3 transformed = shipToWorldPosition(ship, raw);
+                if (transformed == null) {
+                    continue;
                 }
-            } catch (ReflectiveOperationException | RuntimeException ignored) {
-                // Ship scan is best-effort; fall back to the world-space result.
+                worldPos = transformed;
             }
+            AABB worldBox = entity.getBoundingBox()
+                .move(worldPos.x - raw.x, worldPos.y - raw.y, worldPos.z - raw.z)
+                .inflate(entity.getPickRadius());
+            Optional<Vec3> hit = worldBox.clip(eye, end);
+            if (hit.isEmpty()) {
+                continue;
+            }
+            double distSqr = eye.distanceToSqr(hit.get());
+            if (distSqr < bestDistSqr) {
+                bestDistSqr = distSqr;
+                best = entity;
+                bestWorldPos = worldPos;
+            }
+        }
+        if (best != null) {
+            StevesArmyMod.LOGGER.info("[Crew] seat pick: entity={} world={}",
+                best.getId(), formatVec3(bestWorldPos));
         }
         return best;
     }
 
-    private static java.util.function.Predicate<Entity> seatFilter() {
-        return entity -> entity.isAlive() && !entity.isRemoved()
-            && createSeatEntityClass != null && createSeatEntityClass.isInstance(entity);
+    /** All loaded entities on either side (server: getAllEntities, client: entitiesForRendering). */
+    private static Iterable<Entity> allEntities(Level level) {
+        if (level instanceof ServerLevel serverLevel) {
+            return serverLevel.getAllEntities();
+        }
+        // Client branch only ever executes on the physical client, so the
+        // ClientLevel reference never resolves on a dedicated server.
+        return ((net.minecraft.client.multiplayer.ClientLevel) level).entitiesForRendering();
+    }
+
+    /** Ship managing the given raw (shipyard or world) position, or null. */
+    @Nullable
+    private static Object shipAtRawPosition(Level level, Vec3 raw) {
+        if (!available) {
+            return null;
+        }
+        try {
+            return reflect(getShipObjectManagingPosDouble, level, raw.x, raw.y, raw.z);
+        } catch (ReflectiveOperationException exception) {
+            return null;
+        }
     }
 
     /**
