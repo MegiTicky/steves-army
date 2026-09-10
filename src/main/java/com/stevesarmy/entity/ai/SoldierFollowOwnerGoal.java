@@ -3,6 +3,7 @@ package com.stevesarmy.entity.ai;
 import com.stevesarmy.combat.cover.CoverBehaviorManager;
 import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.entity.SoldierEntity;
+import com.stevesarmy.entity.SoldierRole;
 import com.stevesarmy.squad.SquadMode;
 import com.stevesarmy.util.SpacingHelper;
 import net.minecraft.core.BlockPos;
@@ -37,6 +38,10 @@ public class SoldierFollowOwnerGoal extends Goal {
 
     @Override
     public boolean canUse() {
+        // Vehicle crew never walk after the player: they belong to their vehicle.
+        if (soldier.getRole() == SoldierRole.VEHICLE_CREW) {
+            return false;
+        }
         if (soldier.getSquadMode() != SquadMode.FOLLOW) {
             return false;
         }
@@ -69,6 +74,9 @@ public class SoldierFollowOwnerGoal extends Goal {
 
     @Override
     public boolean canContinueToUse() {
+        if (soldier.getRole() == SoldierRole.VEHICLE_CREW) {
+            return false;
+        }
         if (soldier.getSquadMode() != SquadMode.FOLLOW) {
             return false;
         }

@@ -886,6 +886,12 @@ public final class VS2Compat {
         if (!StevesArmyConfig.VS2_AUTO_TRANSPORT.get() || soldier.getSquadMode() != SquadMode.FOLLOW) {
             return false;
         }
+        // Vehicle crew board ships only through the explicit crew paths (egg on seat,
+        // crew assign stick, wheel mount-crew, API). Auto-transport would make them
+        // owner-linked passengers that get released the moment the player leaves.
+        if (soldier.getRole() == SoldierRole.VEHICLE_CREW) {
+            return false;
+        }
         // A recent manual dismount suppresses automatic re-boarding for a short while.
         if (state.reboardBlockTicks > 0) {
             return false;
@@ -1221,6 +1227,13 @@ public final class VS2Compat {
         // HOLD soldiers stay seated regardless of owner state.
         // FOLLOW soldiers release when the owner is no longer on the ship.
         if (soldier.getSquadMode() == SquadMode.HOLD) {
+            stopMovement(soldier);
+            return;
+        }
+
+        // Vehicle crew seats are command-driven: they stay aboard regardless of where
+        // the owner is, even if a legacy owner-linked state somehow exists.
+        if (soldier.getRole() == SoldierRole.VEHICLE_CREW) {
             stopMovement(soldier);
             return;
         }

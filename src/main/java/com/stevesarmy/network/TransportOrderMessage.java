@@ -63,11 +63,14 @@ public class TransportOrderMessage {
             if (sender == null) return;
 
             ServerLevel level = sender.serverLevel();
-            List<SoldierEntity> soldiers = SquadTargeting.resolveOrderedSoldiers(level, sender, msg.getScope());
 
             switch (msg.getOrder()) {
-                case MOUNT -> handleMount(sender, level, soldiers, msg.getAimPosition());
-                case DISMOUNT -> handleDismount(sender, soldiers);
+                // Crew are excluded from SquadTargeting, so only resolve scoped
+                // soldiers for the infantry orders.
+                case MOUNT -> handleMount(sender, level,
+                    SquadTargeting.resolveOrderedSoldiers(level, sender, msg.getScope()), msg.getAimPosition());
+                case DISMOUNT -> handleDismount(sender,
+                    SquadTargeting.resolveOrderedSoldiers(level, sender, msg.getScope()));
                 case MOUNT_CREW -> handleMountCrew(sender, level, msg.getAimPosition());
             }
         });

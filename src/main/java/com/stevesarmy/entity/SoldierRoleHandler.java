@@ -141,6 +141,10 @@ public final class SoldierRoleHandler {
                 replacement.setSquadMode(SquadMode.FOLLOW);
             }
         }
+        if (targetRole == SoldierRole.VEHICLE_CREW) {
+            // Crew hold position at their vehicle; they never FOLLOW the player.
+            replacement.setSquadMode(SquadMode.HOLD);
+        }
 
         UUID ownerUuid = soldier.getOwnerUUID().orElse(null);
         if (ownerUuid != null) {

@@ -153,6 +153,10 @@ public final class SoldierSpawner {
                 soldier.setFireTeam(fireTeams.getSelectedSpawnTeam());
                 fireTeams.assignToTeam(soldier.getUUID(), soldier.getFireTeam());
             }
+            if (soldier.getRole() == SoldierRole.VEHICLE_CREW) {
+                // Crew hold position at their vehicle; they never FOLLOW the player.
+                soldier.setSquadMode(com.stevesarmy.squad.SquadMode.HOLD);
+            }
         }
 
         soldier.setPersistenceRequired();
