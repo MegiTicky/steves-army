@@ -1243,6 +1243,36 @@ public final class VS2Compat {
     }
 
     /**
+     * True when {@code pos} holds a free Create SeatBlock on the given ship — the
+     * precondition for {@link #seatSoldierDirect} to mount there (the same checks
+     * {@link #findFreeStaticSeats} applies, for a single position).
+     */
+    public static boolean isValidStaticSeat(ServerLevel level, @Nullable Object ship, BlockPos pos) {
+        initialize();
+        if (!available || ship == null || createSeatBlockClass == null) {
+            return false;
+        }
+        try {
+            if (!createSeatBlockClass.isInstance(level.getBlockState(pos).getBlock())) {
+                return false;
+            }
+            Long shipId = getShipIdOf(ship);
+            if (shipId == null) {
+                return false;
+            }
+            Object seatShip = reflect(getShipObjectManagingPos, level, (Vec3i) pos);
+            Long seatShipId = seatShip == null ? null : getShipIdOf(seatShip);
+            if (!shipId.equals(seatShipId)) {
+                return false;
+            }
+            return !isCreateSeatOccupied(level, pos);
+        } catch (ReflectiveOperationException exception) {
+            logReflectionFailure(exception);
+            return false;
+        }
+    }
+
+    /**
      * Seated crew soldiers freeze (their goals never tick), so they can never run
      * the unmounted duty scan in VehicleCrewGoal. Throttled hook that hands the
      * soldier to StationGunnerAI.assignSeatedSoldier, which finds it a station on

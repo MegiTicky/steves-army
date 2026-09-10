@@ -5,6 +5,7 @@ import com.stevesarmy.compat.VS2Compat;
 import com.stevesarmy.entity.SoldierSpawner;
 import com.stevesarmy.entity.VehicleCrewEntity;
 import com.stevesarmy.registry.ModEntities;
+import com.stevesarmy.transport.CrewAssignment;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
@@ -21,6 +22,7 @@ import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.common.ForgeSpawnEggItem;
 
 import javax.annotation.Nullable;
+import java.util.List;
 import java.util.function.Supplier;
 
 /**
@@ -95,7 +97,9 @@ public class VehicleCrewSpawnEggItem extends ForgeSpawnEggItem {
         if (!result.success()) {
             return;
         }
-        if (!VS2Compat.seatSoldierOnSeatEntity(crew, seat)) {
+        // Mount through the shared crew routine (clicked static seat via SeatBlock.sitDown
+        // first) — a raw mount onto a pre-existing seat entity does not stick.
+        if (CrewAssignment.assignToClickedSeat(level, seat, List.of(crew)) == 0) {
             // Left standing at the seat: the unmounted crew goal walks it to a station.
             StevesArmyMod.LOGGER.warn("[Crew] spawned crew={} could not mount seat={}", crew.getId(), seat.getId());
         }
