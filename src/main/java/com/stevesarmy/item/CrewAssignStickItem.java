@@ -13,9 +13,6 @@ import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.context.UseOnContext;
 import net.minecraft.world.level.Level;
-import net.minecraft.world.phys.AABB;
-import net.minecraft.world.phys.Vec3;
-import net.minecraft.world.entity.projectile.ProjectileUtil;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -81,11 +78,6 @@ public class CrewAssignStickItem extends CommandStickItem {
 
     /** First Create/VSAW seat entity the view ray passes through within build reach. */
     public static Entity findSeatAlongLook(Player player) {
-        Vec3 eye = player.getEyePosition();
-        Vec3 end = eye.add(player.getLookAngle().scale(SEAT_REACH));
-        net.minecraft.world.phys.EntityHitResult hit = ProjectileUtil.getEntityHitResult(player.level(), player,
-            eye, end, new AABB(eye, end).inflate(1.0),
-            entity -> entity.isAlive() && !entity.isRemoved() && VS2Compat.isCreateSeatEntity(entity));
-        return hit != null ? hit.getEntity() : null;
+        return VS2Compat.findSeatAlongLook(player, SEAT_REACH);
     }
 }

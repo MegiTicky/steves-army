@@ -15,6 +15,8 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.Pose;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.entity.projectile.ProjectileUtil;
 import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.Level;
@@ -360,6 +362,79 @@ public final class VS2Compat {
             }
         }
         return seat.position();
+    }
+
+    /**
+     * First Create/VSAW seat entity the view ray passes through within reach.
+     * Seats on ships live at shipyard coordinates (VS2's DefaultShipyardEntityHandler),
+     * so a world-space ray never intersects their world-space AABB. The world pass
+     * catches seats in world space; the per-ship pass transforms the ray into each
+     * intersecting ship's local frame and re-tests there (mirrors VS2's own
+     * RaycastUtils.raytraceEntities). Nearest hit wins.
+     */
+    @Nullable
+    public static Entity findSeatAlongLook(Player player, double reach) {
+        initialize();
+        if (createSeatEntityClass == null) {
+            return null;
+        }
+        Level level = player.level();
+        Vec3 eye = player.getEyePosition();
+        Vec3 end = eye.add(player.getLookAngle().scale(reach));
+        AABB worldBox = new AABB(eye, end).inflate(1.0);
+
+        // World-space pass (station-less seats, seats on ships in world coords).
+        Entity best = null;
+        double bestDistSqr = Double.MAX_VALUE;
+        if (available) {
+            net.minecraft.world.phys.EntityHitResult worldHit = ProjectileUtil.getEntityHitResult(
+                level, player, eye, end, worldBox, seatFilter());
+            if (worldHit != null) {
+                best = worldHit.getEntity();
+                bestDistSqr = eye.distanceToSqr(worldHit.getLocation());
+            }
+
+            // Per-ship pass: re-test the ray in each intersecting ship's local frame.
+            try {
+                Object ships = reflect(getShipsIntersecting, level, worldBox);
+                if (ships instanceof Iterable<?> iterable) {
+                    for (Object ship : iterable) {
+                        if (ship == null) {
+                            continue;
+                        }
+                        Vec3 localEye = worldToShipLocal(ship, eye);
+                        Vec3 localEnd = worldToShipLocal(ship, end);
+                        if (localEye == null || localEnd == null) {
+                            continue;
+                        }
+                        AABB localBox = new AABB(localEye, localEnd).inflate(1.0);
+                        net.minecraft.world.phys.EntityHitResult localHit = ProjectileUtil.getEntityHitResult(
+                            level, player, localEye, localEnd, localBox, seatFilter());
+                        if (localHit == null) {
+                            continue;
+                        }
+                        // Rank in world space so the closest seat across all ships wins.
+                        Vec3 worldPos = shipToWorldPosition(ship, localHit.getLocation());
+                        if (worldPos == null) {
+                            continue;
+                        }
+                        double distSqr = eye.distanceToSqr(worldPos);
+                        if (distSqr < bestDistSqr) {
+                            bestDistSqr = distSqr;
+                            best = localHit.getEntity();
+                        }
+                    }
+                }
+            } catch (ReflectiveOperationException | RuntimeException ignored) {
+                // Ship scan is best-effort; fall back to the world-space result.
+            }
+        }
+        return best;
+    }
+
+    private static java.util.function.Predicate<Entity> seatFilter() {
+        return entity -> entity.isAlive() && !entity.isRemoved()
+            && createSeatEntityClass != null && createSeatEntityClass.isInstance(entity);
     }
 
     /**
