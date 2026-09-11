@@ -98,8 +98,9 @@ public class VehicleCrewSpawnEggItem extends ForgeSpawnEggItem {
         }
         // Seat through the shared crew routine on the ship at the anchor — the
         // soldier flow: ship + anchor position, free SeatBlock scan, never a
-        // specific seat entity.
-        Object ship = VS2Compat.getShipObjectAtWorldPos(level, anchor.x, anchor.y, anchor.z);
+        // specific seat entity. The resolver reconciles the shipyard-chunk
+        // lookup with world-space intersection, same as the crew stick.
+        Object ship = VS2Compat.resolveShipAtWorldAnchor(level, anchor);
         if (ship == null && player instanceof ServerPlayer serverPlayer) {
             ship = VS2Compat.resolveMountShipNearPlayer(level, serverPlayer);
         }
