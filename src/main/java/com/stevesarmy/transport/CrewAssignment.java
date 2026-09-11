@@ -78,6 +78,7 @@ public final class CrewAssignment {
                 crew.size(), anchorWorld);
             return 0;
         }
+        VS2Compat.logCrewMountDiagnostics(level, ship, anchorWorld);
         List<SoldierEntity> remaining = new ArrayList<>(crew);
         int seatedCount = 0;
 
@@ -86,7 +87,18 @@ public final class CrewAssignment {
             seatedCount += AnalogWarfareCompat.mountViaHandles(level, ship, anchorWorld, remaining);
         }
 
-        // Tier 2: the ship's free SeatBlock scan around the anchor (shipyard space).
+        // Tier 2: Create's own contraption seats via the Create Interactive ship mapping —
+        // the same path normal soldiers take on moving ships; no shipyard block access.
+        if (!remaining.isEmpty()) {
+            for (SoldierEntity soldier : new ArrayList<>(remaining)) {
+                if (VS2Compat.seatSoldierOnShipContraption(level, shipId, soldier) != null) {
+                    remaining.remove(soldier);
+                    seatedCount++;
+                }
+            }
+        }
+
+        // Tier 3: the ship's free SeatBlock scan around the anchor (shipyard space).
         if (!remaining.isEmpty()) {
             List<BlockPos> seats = VS2Compat.findFreeStaticSeats(level, ship, anchorWorld, remaining.size());
             for (SoldierEntity soldier : new ArrayList<>(remaining)) {
@@ -102,7 +114,7 @@ public final class CrewAssignment {
             }
         }
 
-        // Tier 3: raw seat-entity mounts — ships whose seats have no SeatBlock behind
+        // Tier 4: raw seat-entity mounts — ships whose seats have no SeatBlock behind
         // them (e.g. tallyho FlexibleSeatEntity) have no static path at all.
         if (!remaining.isEmpty()) {
             List<Entity> seatEntities = freeSeatEntitiesOnShip(level, shipId, anchorWorld, remaining.size());
@@ -161,9 +173,13 @@ public final class CrewAssignment {
     private static List<Entity> freeSeatEntitiesOnShip(ServerLevel level, Long shipId,
                                                        Vec3 originWorld, int max) {
         List<Entity> candidates = new ArrayList<>();
+        int createSeatEntitiesSeen = 0;
         for (Entity entity : level.getAllEntities()) {
-            if (entity.isRemoved() || !entity.getPassengers().isEmpty()
-                || !VS2Compat.isCreateSeatEntity(entity)) {
+            if (entity.isRemoved() || !VS2Compat.isCreateSeatEntity(entity)) {
+                continue;
+            }
+            createSeatEntitiesSeen++;
+            if (!entity.getPassengers().isEmpty()) {
                 continue;
             }
             Long other = VS2Compat.getShipIdOf(VS2Compat.getShipUnder(entity));
@@ -172,6 +188,8 @@ public final class CrewAssignment {
             }
             candidates.add(entity);
         }
+        StevesArmyMod.LOGGER.info("[Crew] raw seat entity scan: create-seat entities in world={} free on shipId={}={}",
+            createSeatEntitiesSeen, shipId, candidates.size());
         candidates.sort(Comparator.comparingDouble(
             seat -> VS2Compat.getSeatWorldPosition(seat).distanceToSqr(originWorld)));
         if (candidates.size() > max) {

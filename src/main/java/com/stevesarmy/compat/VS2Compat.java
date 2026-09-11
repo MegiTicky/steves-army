@@ -705,6 +705,8 @@ public final class VS2Compat {
         int seatBlocks = 0;
         int rejectedShip = 0;
         int occupiedSeats = 0;
+        int nonAirBlocks = 0;
+        List<String> sampleBlocks = new ArrayList<>();
         try {
             long shipId = ((Number) getShipId.invoke(ship)).longValue();
             Vec3 shipLocalCenter = worldToShipLocal(ship, worldCenter);
@@ -722,6 +724,13 @@ public final class VS2Compat {
                         for (int y = -2; y <= 2 && seats.size() < maxSeats; y++) {
                             BlockPos candidate = origin.offset(x, y, z);
                             BlockState blockState = level.getBlockState(candidate);
+                            if (!blockState.isAir()) {
+                                nonAirBlocks++;
+                                String blockName = blockState.getBlock().toString();
+                                if (sampleBlocks.size() < 5 && !sampleBlocks.contains(blockName)) {
+                                    sampleBlocks.add(blockName);
+                                }
+                            }
                             if (!createSeatBlockClass.isInstance(blockState.getBlock())) {
                                 continue;
                             }
@@ -740,8 +749,9 @@ public final class VS2Compat {
                     }
                 }
             }
-            StevesArmyMod.LOGGER.info("[Crew] static seat scan result: shipId={} origin={} seatBlocks={} shipRejected={} occupied={}",
-                shipId, origin, seatBlocks, rejectedShip, occupiedSeats);
+            StevesArmyMod.LOGGER.info(
+                "[Crew] static seat scan result: shipId={} origin={} seatBlocks={} shipRejected={} occupied={} nonAirBlocks={} sampleBlocks={}",
+                shipId, origin, seatBlocks, rejectedShip, occupiedSeats, nonAirBlocks, sampleBlocks);
         } catch (ReflectiveOperationException exception) {
             logReflectionFailure(exception);
         }
@@ -784,6 +794,123 @@ public final class VS2Compat {
         } catch (ReflectiveOperationException exception) {
             logReflectionFailure(exception);
             return false;
+        }
+    }
+
+    /**
+     * One-shot diagnostic dump for crew mount failures: which ships VS thinks are at the
+     * anchor (is the resolved ship the clicked one?), where the ship's voxel AABB sits in
+     * ship space, the anchor's ship-space position with a shipToWorld round-trip check,
+     * and whether the shipyard chunk there is loaded. Each field targets one candidate
+     * root cause for "scan finds no seats".
+     */
+    public static void logCrewMountDiagnostics(ServerLevel level, @Nullable Object ship, Vec3 anchorWorld) {
+        initialize();
+        if (!available) {
+            return;
+        }
+        try {
+            StringBuilder shipsAtAnchor = new StringBuilder();
+            Object ships = reflect(getShipsIntersecting, level, new AABB(anchorWorld, anchorWorld));
+            if (ships instanceof Iterable<?> iterable) {
+                for (Object s : iterable) {
+                    shipsAtAnchor.append(getShipIdOf(s)).append(' ');
+                }
+            }
+            Long shipId = getShipIdOf(ship);
+            BlockPos voxelMin = ship == null ? null : getShipyardMin(ship);
+            Vec3 converted = ship == null ? null : worldToShipLocal(ship, anchorWorld);
+            String roundTrip = "n/a";
+            if (converted != null) {
+                Vec3 back = shipToWorldPosition(ship, converted);
+                roundTrip = back == null ? "null" : String.format("%.2f", back.distanceTo(anchorWorld));
+            }
+            boolean chunkLoaded = converted == null || isChunkLoaded(level, BlockPos.containing(converted));
+            StevesArmyMod.LOGGER.info(
+                "[CrewDiag] anchor={} shipsAtAnchor=[{}] shipId={} voxelAABBmin={} anchorInShipSpace={} shipToWorldRoundTripErr={} originChunkLoaded={}",
+                formatVec3(anchorWorld), shipsAtAnchor.toString().trim(), shipId, voxelMin,
+                converted == null ? "null" : formatVec3(converted), roundTrip, chunkLoaded);
+        } catch (Throwable t) {
+            StevesArmyMod.LOGGER.warn("[CrewDiag] failed: {}", t.toString());
+        }
+    }
+
+    /** True when the level chunk containing {@code pos} is currently loaded, best effort. */
+    private static boolean isChunkLoaded(ServerLevel level, BlockPos pos) {
+        try {
+            Object chunkSource = level.getChunkSource();
+            Method getChunkNow = chunkSource.getClass().getMethod("getChunkNow", int.class, int.class);
+            return getChunkNow.invoke(chunkSource, pos.getX() >> 4, pos.getZ() >> 4) != null;
+        } catch (ReflectiveOperationException ignored) {
+            return true; // cannot tell — do not misreport
+        }
+    }
+
+    /**
+     * Seats a soldier on a free Create contraption seat of the given ship via the Create
+     * Interactive ship mapping — Create's own seat bookkeeping (contraption-local seat
+     * positions and its UUID→index occupancy map), so no shipyard block or coordinate
+     * transform is involved. This is the path normal soldiers take on moving ships
+     * (tryContraptionSeat). Returns the contraption vehicle when seated, or null.
+     */
+    @Nullable
+    public static Entity seatSoldierOnShipContraption(ServerLevel level, long shipId, SoldierEntity soldier) {
+        if (!isEnabled() || createInteractiveUtil == null) {
+            return null;
+        }
+        try {
+            Entity mappedVehicle = (Entity) getContraptionEntityForShip.invoke(createInteractiveUtil, shipId, false);
+            if (mappedVehicle == null) {
+                StevesArmyMod.LOGGER.info("[Crew] Create Interactive has no contraption for ship={}", shipId);
+                return null;
+            }
+            StevesArmyMod.LOGGER.info("[Crew] Create Interactive mapped ship={} to contraption vehicle={}",
+                shipId, mappedVehicle.getId());
+            Object contraption = getContraption.invoke(mappedVehicle);
+            if (contraption == null) {
+                StevesArmyMod.LOGGER.info("[Crew] Contraption vehicle={} has no initialized contraption",
+                    mappedVehicle.getId());
+                return null;
+            }
+            @SuppressWarnings("unchecked")
+            java.util.List<BlockPos> seats = (java.util.List<BlockPos>) getSeats.invoke(contraption);
+            @SuppressWarnings("unchecked")
+            java.util.Map<UUID, Integer> occupied = (java.util.Map<UUID, Integer>) getSeatMapping.invoke(contraption);
+            StevesArmyMod.LOGGER.info("[Crew] Contraption vehicle={} seats={} occupied={}",
+                mappedVehicle.getId(), seats.size(), occupied);
+            for (int index = 0; index < seats.size(); index++) {
+                if (occupied.containsValue(index)) {
+                    continue;
+                }
+                authorizedMounts.put(soldier.getUUID(), mappedVehicle.getUUID());
+                try {
+                    addSittingPassenger.invoke(mappedVehicle, soldier, index);
+                    if (soldier.isPassenger() && soldier.getVehicle() == mappedVehicle) {
+                        SoldierState state = getOrCreateState(soldier);
+                        state.transportAnchorId = mappedVehicle.getUUID();
+                        state.transportOwnerId = null;
+                        state.crewSeated = soldier.getRole() == SoldierRole.VEHICLE_CREW;
+                        state.transportShipId = shipId;
+                        state.transportSeatPosition = null;
+                        state.seatRetryCooldownTicks = 0;
+                        state.reboardBlockTicks = 0;
+                        syncTransportState(soldier, mappedVehicle, true);
+                        StevesArmyMod.LOGGER.info("[Crew] assigned soldier={} to contraption seat={} vehicle={}",
+                            soldier.getId(), index, mappedVehicle.getId());
+                        return mappedVehicle;
+                    }
+                    StevesArmyMod.LOGGER.warn("[Crew] contraption seat mount failed soldier={} seat={} vehicle={}",
+                        soldier.getId(), index, mappedVehicle.getId());
+                } finally {
+                    authorizedMounts.remove(soldier.getUUID());
+                }
+            }
+            StevesArmyMod.LOGGER.info("[Crew] no empty contraption seats for soldier={} vehicle={}",
+                soldier.getId(), mappedVehicle.getId());
+            return null;
+        } catch (ReflectiveOperationException exception) {
+            logReflectionFailure(exception);
+            return null;
         }
     }
 
