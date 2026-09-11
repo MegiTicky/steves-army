@@ -368,6 +368,77 @@ public final class VS2Compat {
         }
     }
 
+    /**
+     * Resolves a ship from a clicked world-space anchor.
+     *
+     * <p>VS2's position-manager lookup is shipyard-chunk based, so it can return
+     * an unrelated ship when the anchor is a world-space raycast hit. Reconcile
+     * that result with VS2's world-space intersection query before falling back
+     * to the legacy result.</p>
+     */
+    @Nullable
+    public static Object resolveShipAtWorldAnchor(Level level, Vec3 anchor) {
+        initialize();
+        Object managingShip = getShipObjectAtWorldPos(level, anchor.x, anchor.y, anchor.z);
+        if (!available || getShipsIntersecting == null) {
+            StevesArmyMod.LOGGER.info(
+                "[VS2] crew anchor resolver: world intersection unavailable, using managing shipId={}",
+                getShipIdOf(managingShip));
+            return managingShip;
+        }
+
+        try {
+            Object ships = reflect(getShipsIntersecting, level, new AABB(anchor, anchor));
+            List<Object> intersecting = new ArrayList<>();
+            List<String> candidateIds = new ArrayList<>();
+            if (ships instanceof Iterable<?> iterable) {
+                for (Object candidate : iterable) {
+                    if (candidate == null) {
+                        continue;
+                    }
+                    intersecting.add(candidate);
+                    Long candidateId = getShipIdOf(candidate);
+                    candidateIds.add(candidateId == null ? "unknown" : candidateId.toString());
+                }
+            }
+
+            Long managingId = getShipIdOf(managingShip);
+            Object selected = null;
+            String decision;
+            if (managingShip != null && managingId != null) {
+                for (int i = 0; i < intersecting.size(); i++) {
+                    Long candidateId = getShipIdOf(intersecting.get(i));
+                    if (managingId.equals(candidateId)) {
+                        selected = intersecting.get(i);
+                        break;
+                    }
+                }
+            }
+            if (selected != null) {
+                decision = "managing-match";
+            } else if (intersecting.size() == 1) {
+                selected = intersecting.get(0);
+                decision = "sole-intersection";
+            } else if (intersecting.isEmpty()) {
+                selected = managingShip;
+                decision = "no-intersection-managing-fallback";
+            } else {
+                decision = "ambiguous-intersection-near-player-fallback";
+            }
+
+            StevesArmyMod.LOGGER.info(
+                "[VS2] crew anchor resolver: anchor={} managingShipId={} intersectingShipIds=[{}] selectedShipId={} decision={}",
+                formatVec3(anchor), managingId, String.join(", ", candidateIds),
+                getShipIdOf(selected), decision);
+            return selected;
+        } catch (ReflectiveOperationException | RuntimeException exception) {
+            StevesArmyMod.LOGGER.warn(
+                "[VS2] crew anchor resolver failed; using managing shipId={}: {}",
+                getShipIdOf(managingShip), exception.toString());
+            return managingShip;
+        }
+    }
+
     /** Grants a soldier a grace period to stand at a handle after a handle dismount. */
     public static void markHandleDismount(SoldierEntity soldier) {
         getOrCreateState(soldier).handleDismountGraceTicks =

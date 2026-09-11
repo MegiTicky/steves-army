@@ -74,7 +74,7 @@ public class CommandStickAssignCrewPacket {
                 return;
             }
             Vec3 anchor = new Vec3(msg.x, msg.y, msg.z);
-            Object ship = VS2Compat.getShipObjectAtWorldPos(level, msg.x, msg.y, msg.z);
+            Object ship = VS2Compat.resolveShipAtWorldAnchor(level, anchor);
             if (ship == null) {
                 ship = VS2Compat.resolveMountShipNearPlayer(level, sender);
             }
