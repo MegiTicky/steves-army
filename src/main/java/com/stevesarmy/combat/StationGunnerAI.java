@@ -11,6 +11,7 @@ import com.stevesarmy.network.VehicleCrewDebugPacket;
 import com.stevesarmy.squad.SquadData;
 import com.stevesarmy.squad.SquadManager;
 import com.stevesarmy.squad.SquadThreatIntel;
+import com.stevesarmy.squad.FireDiscipline;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.util.Mth;
@@ -53,13 +54,15 @@ public final class StationGunnerAI {
     private static final float FIRE_TOLERANCE_DEGREES = 2.0F;
     private static final int SWEEP_PERIOD_TICKS = 240;
     private static final double OBSERVER_SWEEP_RANGE = 32.0;
-    // Mirrors the infantry suppression pacing in SoldierCombatGoal.
-    private static final int SUPPRESSION_PLAN_MAX_TICKS = 200;
-    private static final int SUPPRESSION_COOLDOWN_TICKS = 100;
-    private static final double SUPPRESSION_SPREAD_MIN_RADIUS = 0.12;
-    private static final double SUPPRESSION_SPREAD_PER_BLOCK = 0.0075;
-    private static final double SUPPRESSION_SPREAD_MAX_RADIUS = 0.85;
-    private static final double SUPPRESSION_VERTICAL_SPREAD_RATIO = 0.45;
+    // The hull MG runs the infantry machine-gunner doctrine via FireControl; this
+    // is its weapon class for both direct fire and suppression pacing.
+    private static final FireControl.DirectFireWeaponProfile DIRECT_PROFILE =
+        FireControl.DirectFireWeaponProfile.MACHINE_GUN;
+    private static final FireControl.SuppressionWeaponProfile SUPPRESSION_PROFILE =
+        FireControl.SuppressionWeaponProfile.MACHINE_GUN;
+    // Bloom feeds the suppression beaten zone in place of the infantry gun's
+    // TaCZ-derived aim inaccuracy: degrees of cone per bloom point.
+    private static final double BLOOM_SUPPRESSION_SPREAD_DEGREES = 3.0;
 
     private static final Map<UUID, StationState> active = new ConcurrentHashMap<>();
     private static long lastDutyFailureLog;
@@ -82,6 +85,9 @@ public final class StationGunnerAI {
         int suppressionPlanTicks;
         int suppressionCooldownTicks;
         @Nullable Vec3 suppressionAimPos;
+        int suppressionBurstShots;
+        int suppressionBurstPauseTicks;
+        float lastShotThreshold = Float.NaN;
         @Nullable DetectionSystem.DetectionScanResult lastScan;
         float lastAimError = Float.NaN;
         int debugState;
@@ -455,7 +461,7 @@ public final class StationGunnerAI {
             if (state.suppressionThreatId != null) {
                 // A precise target overrides suppression; hand the claim back.
                 releaseSuppression(state, squadIntel(state.soldier));
-                state.suppressionCooldownTicks = SUPPRESSION_COOLDOWN_TICKS;
+                state.suppressionCooldownTicks = FireControl.SUPPRESSION_COOLDOWN_TICKS;
             }
             state.target = best;
 
@@ -469,11 +475,34 @@ public final class StationGunnerAI {
                 aimError = TallyhoCompat.aimTowards(state.station,
                     aimTargetForStation(state, aimPoint.position), traverse, 0.0F, 0.0F);
                 fireGateReached = true;
-                decayBloom(state);
-                // Only open fire once the detection system has classified the
-                // contact, mirroring infantry trigger discipline.
-                if (state.detection.isTargetDetected(best)
-                    && state.aimQuality >= StevesArmyConfig.VEHICLE_CREW_MIN_AIM_TO_FIRE.get().floatValue()
+
+                // Infantry-style dynamic shot threshold, scaled by the crew's fire
+                // discipline, instead of a static aim gate.
+                FireDiscipline discipline = state.soldier.getFireDiscipline();
+                float targetAimQ = AimAccuracyManager.getTargetAimQuality(state.soldier, best);
+                float thresholdScale = StevesArmyConfig.getAimQualityThresholdScale();
+                if (discipline == FireDiscipline.CONSERVE) {
+                    thresholdScale = Math.max(thresholdScale, 0.55F);
+                } else if (discipline == FireDiscipline.SUPPRESSIVE) {
+                    thresholdScale = Math.min(thresholdScale, 0.20F);
+                }
+                float shotThreshold = Math.max(0.15F, targetAimQ * thresholdScale);
+                state.lastShotThreshold = shotThreshold;
+
+                boolean fired = false;
+                if (state.burstPauseTicks > 0) {
+                    // Burst recovery from the DIRECT_PROFILE, like the infantry
+                    // direct-fire burst machinery.
+                    state.burstPauseTicks--;
+                } else if (state.burstShots > 0 && state.aimQuality
+                    < FireControl.directBurstContinuationThreshold(discipline, shotThreshold)) {
+                    // Recoil-quality floor cut the burst short, as in infantry.
+                    state.burstShots = 0;
+                    state.burstPauseTicks = DIRECT_PROFILE.recoveryTicks;
+                } else if (state.aimQuality >= shotThreshold
+                    // Only open fire once the detection system has classified the
+                    // contact, mirroring infantry trigger discipline.
+                    && state.detection.isTargetDetected(best)
                     && aimError <= FIRE_TOLERANCE_DEGREES
                     && fireBurstGate(state)) {
                     float yawSigma = AimAccuracyManager.getYawSigma(state.aimQuality)
@@ -492,6 +521,14 @@ public final class StationGunnerAI {
                     state.bloom = Math.min(StevesArmyConfig.VEHICLE_CREW_BLOOM_MAX.get().floatValue(),
                         state.bloom + StevesArmyConfig.VEHICLE_CREW_BLOOM_PER_SHOT.get().floatValue());
                     state.burstShots++;
+                    if (state.burstShots >= DIRECT_PROFILE.burstShots) {
+                        state.burstShots = 0;
+                        state.burstPauseTicks = DIRECT_PROFILE.recoveryTicks;
+                    }
+                    fired = true;
+                }
+                if (!fired) {
+                    decayBloom(state);
                 }
             } else {
                 decayBloom(state);
@@ -589,8 +626,11 @@ public final class StationGunnerAI {
             fireState = "not-aiming";
         } else if (aimError > FIRE_TOLERANCE_DEGREES) {
             fireState = "traversing";
+        } else if (!Float.isNaN(state.lastShotThreshold)
+            && state.aimQuality < state.lastShotThreshold) {
+            fireState = "building";
         } else if (state.burstPauseTicks > 0) {
-            fireState = "burst-pause";
+            fireState = "recovery";
         } else if (!TallyhoCompat.isReadyToFire(state.station)) {
             fireState = "cooldown";
         } else if (!TallyhoCompat.hasAmmo(state.station)) {
@@ -628,10 +668,11 @@ public final class StationGunnerAI {
 
     /**
      * Sustained suppressive fire at the last-known position of a squad threat the
-     * gun cannot currently see. The gun keeps firing through the same burst/bloom
-     * machinery with a distance-based beaten-zone spread; the fired CBC rounds
-     * already apply suppression along their trajectories, so no separate
-     * suppression call is needed on the victim side.
+     * gun cannot currently see. Runs the infantry suppression doctrine via
+     * FireControl: MACHINE_GUN burst pacing, a distance-and-bloom beaten zone
+     * re-rolled per burst, and a lane that widens as the contact ages. The fired
+     * CBC rounds already apply suppression along their trajectories, so no
+     * separate suppression call is needed on the victim side.
      */
     private static void tickSuppression(StationState state, ServerLevel level) {
         if (state.suppressionCooldownTicks > 0) {
@@ -652,7 +693,7 @@ public final class StationGunnerAI {
             if (assigned == null || !assigned.isAlive || assigned.lastKnownPosition == null
                 || intel.isThreatStale(state.suppressionThreatId, now)) {
                 releaseSuppression(state, intel);
-                state.suppressionCooldownTicks = SUPPRESSION_COOLDOWN_TICKS;
+                state.suppressionCooldownTicks = FireControl.SUPPRESSION_COOLDOWN_TICKS;
                 return;
             }
             threat = assigned;
@@ -673,7 +714,7 @@ public final class StationGunnerAI {
             }
             if (bestThreat == null
                 || !intel.tryClaimThreatSuppression(bestThreat.threatEntityId, soldierId, now, 1)) {
-                state.suppressionCooldownTicks = SUPPRESSION_COOLDOWN_TICKS;
+                state.suppressionCooldownTicks = FireControl.SUPPRESSION_COOLDOWN_TICKS;
                 return;
             }
             threat = bestThreat;
@@ -684,35 +725,35 @@ public final class StationGunnerAI {
 
         intel.updateSuppressionHeartbeat(state.suppressionThreatId, soldierId, now);
         state.suppressionPlanTicks++;
-        if (state.suppressionPlanTicks > SUPPRESSION_PLAN_MAX_TICKS
+        if (state.suppressionPlanTicks > FireControl.SUPPRESSION_PLAN_MAX_TICKS
             || TallyhoCompat.isPlayerPossessed(state.station)
             || !TallyhoCompat.hasAmmo(state.station)) {
             releaseSuppression(state, intel);
-            state.suppressionCooldownTicks = SUPPRESSION_COOLDOWN_TICKS;
+            state.suppressionCooldownTicks = FireControl.SUPPRESSION_COOLDOWN_TICKS;
             return;
         }
 
         // Re-roll the beaten zone per burst so sustained fire walks the position.
         // The null check matters: a precise target dying mid-burst hands over a
-        // non-zero burstShots with no suppression aim point yet.
-        if (state.suppressionAimPos == null || state.burstShots == 0) {
+        // non-zero burstShots with no suppression aim point yet. Bloom stands in
+        // for the infantry gun's TaCZ-derived aim inaccuracy.
+        if (state.suppressionAimPos == null || state.suppressionBurstShots == 0) {
             Vec3 base = threat.lastVisibleAimPoint != null
                 ? threat.lastVisibleAimPoint
                 : Vec3.atCenterOf(threat.lastKnownPosition).add(0.0, 1.0, 0.0);
             double distance = state.cameraWorld.distanceTo(base);
-            double spreadRadius = Mth.clamp(
-                SUPPRESSION_SPREAD_MIN_RADIUS + distance * SUPPRESSION_SPREAD_PER_BLOCK,
-                SUPPRESSION_SPREAD_MIN_RADIUS, SUPPRESSION_SPREAD_MAX_RADIUS);
-            Vec3 toTarget = base.subtract(state.cameraWorld);
-            Vec3 horizontal = new Vec3(toTarget.x, 0.0, toTarget.z).normalize();
-            Vec3 lateral = new Vec3(-horizontal.z, 0.0, horizontal.x);
-            state.suppressionAimPos = base
-                .add(lateral.scale((level.random.nextDouble() - 0.5) * 2.0 * spreadRadius))
-                .add(horizontal.scale((level.random.nextDouble() - 0.5) * spreadRadius * 0.35))
-                .add(0.0, (level.random.nextDouble() - 0.5) * 2.0 * spreadRadius
-                    * SUPPRESSION_VERTICAL_SPREAD_RATIO, 0.0);
+            double gunSpreadMeters = distance
+                * Math.tan(Math.toRadians(state.bloom * BLOOM_SUPPRESSION_SPREAD_DEGREES));
+            long contactAge = now - threat.lastSeenTime;
+            state.suppressionAimPos = FireControl.calculateLastSeenSuppressionSpread(
+                state.cameraWorld, state.cameraWorld, level.random, base, gunSpreadMeters, contactAge);
         }
 
+        if (state.suppressionBurstPauseTicks > 0) {
+            // Pause between suppression bursts (SUPPRESSION_PROFILE).
+            state.suppressionBurstPauseTicks--;
+            return;
+        }
         float traverse = StevesArmyConfig.VEHICLE_CREW_TRAVERSE_SPEED.get().floatValue();
         float error = TallyhoCompat.aimTowards(state.station,
             aimTargetForStation(state, state.suppressionAimPos), traverse, 0.0F, 0.0F);
@@ -720,7 +761,11 @@ public final class StationGunnerAI {
             TallyhoCompat.fire(state.station, state.soldier);
             state.bloom = Math.min(StevesArmyConfig.VEHICLE_CREW_BLOOM_MAX.get().floatValue(),
                 state.bloom + StevesArmyConfig.VEHICLE_CREW_BLOOM_PER_SHOT.get().floatValue());
-            state.burstShots++;
+            state.suppressionBurstShots++;
+            if (state.suppressionBurstShots >= SUPPRESSION_PROFILE.burstShots) {
+                state.suppressionBurstShots = 0;
+                state.suppressionBurstPauseTicks = SUPPRESSION_PROFILE.pauseTicks;
+            }
         }
     }
 
@@ -731,18 +776,16 @@ public final class StationGunnerAI {
         state.suppressionThreatId = null;
         state.suppressionPlanTicks = 0;
         state.suppressionAimPos = null;
+        state.suppressionBurstShots = 0;
+        state.suppressionBurstPauseTicks = 0;
     }
 
+    /**
+     * The weapon's own fire cadence: tallyho's internal cooldown plus belt check.
+     * Burst sizing and recovery are the DIRECT_PROFILE's job (handled in
+     * {@link #tickGunner}), matching the infantry burst machinery.
+     */
     private static boolean fireBurstGate(StationState state) {
-        if (state.burstPauseTicks > 0) {
-            state.burstPauseTicks--;
-            return false;
-        }
-        if (state.burstShots >= StevesArmyConfig.VEHICLE_CREW_BURST_SIZE.get()) {
-            state.burstShots = 0;
-            state.burstPauseTicks = StevesArmyConfig.VEHICLE_CREW_BURST_PAUSE.get();
-            return false;
-        }
         return TallyhoCompat.isReadyToFire(state.station) && TallyhoCompat.hasAmmo(state.station);
     }
 

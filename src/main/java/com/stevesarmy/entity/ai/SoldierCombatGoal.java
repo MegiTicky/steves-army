@@ -7,6 +7,9 @@ import com.stevesarmy.combat.CombatTargetQueryCache;
 import com.stevesarmy.combat.DetectionSystem;
 import com.stevesarmy.combat.EnemyContactTracker;
 import com.stevesarmy.combat.ExposureCalculator;
+import com.stevesarmy.combat.FireControl;
+import com.stevesarmy.combat.FireControl.DirectFireWeaponProfile;
+import com.stevesarmy.combat.FireControl.SuppressionWeaponProfile;
 import com.stevesarmy.combat.FriendlyFireChecker;
 import com.stevesarmy.combat.GunIntegration;
 import com.stevesarmy.combat.TargetAcquisition;
@@ -102,16 +105,9 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
     private SquadThreatIntel.ThreatKnowledge pendingSuppressionThreat = null;
     private static final float SUPPRESSION_ADS_THRESHOLD = 0.5f;
     private static final double SUPPRESSION_MAX_RANGE = 128.0;
-    private static final int SUPPRESSION_CONTACT_FOCUSED_TICKS = 50;
-    private static final int SUPPRESSION_CONTACT_MAX_TICKS = 120;
-    private static final int SUPPRESSION_PLAN_MAX_TICKS = 200;
     private static final int SUPPRESSION_ACTIVE_FIRE_TICKS = 120;
     private static final int SUPPRESSION_PREPARATION_TICKS = 20;
     private static final double SUPPRESSION_LOS_TOLERANCE = 2.0;  // blocks
-    private static final double SUPPRESSION_SPREAD_MIN_RADIUS = 0.12;
-    private static final double SUPPRESSION_SPREAD_PER_BLOCK = 0.0075;
-    private static final double SUPPRESSION_SPREAD_MAX_RADIUS = 0.85;
-    private static final double SUPPRESSION_VERTICAL_SPREAD_RATIO = 0.45;
     private static final float PRONE_FIRING_ARC_DEGREES = 30.0f;
     private static final float FIRING_ALIGNMENT_DEGREES = 7.0f;
     private static final float TURN_RATE_DEGREES = 30.0f;
@@ -211,37 +207,6 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
     private DirectFireWeaponProfile directBurstProfile = null;
     private int directBurstShotLimit = 0;
     private float directBurstContinuationThreshold = 0.0f;
-
-    private enum DirectFireWeaponProfile {
-        SINGLE_SHOT(1, 0),
-        AUTO_RIFLE(4, 8),
-        SMG(4, 7),
-        MACHINE_GUN(5, 10);
-
-        final int burstShots;
-        final int recoveryTicks;
-
-        DirectFireWeaponProfile(int burstShots, int recoveryTicks) {
-            this.burstShots = burstShots;
-            this.recoveryTicks = recoveryTicks;
-        }
-    }
-
-    private enum SuppressionWeaponProfile {
-        BOLT(2, 12),
-        RIFLE(4, 10),
-        AUTO_RIFLE(6, 7),
-        SMG(5, 7),
-        MACHINE_GUN(12, 4);
-
-        final int burstShots;
-        final int pauseTicks;
-
-        SuppressionWeaponProfile(int burstShots, int pauseTicks) {
-            this.burstShots = burstShots;
-            this.pauseTicks = pauseTicks;
-        }
-    }
 
     public static void setDebugLoggingEnabled(boolean enabled) {
         DiagnosticLogManager.setAttackLoggingEnabled(enabled);
@@ -2354,7 +2319,7 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
 
     private int getMaxSuppressorsForThreat(SquadThreatIntel.ThreatKnowledge threat) {
         long age = soldier.level().getGameTime() - threat.lastSeenTime;
-        if (age > SUPPRESSION_CONTACT_FOCUSED_TICKS) {
+        if (age > FireControl.SUPPRESSION_CONTACT_FOCUSED_TICKS) {
             return 1;
         }
         return machineGunnerPipeline && hasReadySquadMachineGunner(threat) ? 1 : 2;
@@ -2404,8 +2369,8 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
         }
 
         long contactAge = soldier.level().getGameTime() - suppressionLastSeenTick;
-        boolean expired = soldier.tickCount - suppressionPlanStartTick > SUPPRESSION_PLAN_MAX_TICKS
-            || contactAge > SUPPRESSION_CONTACT_MAX_TICKS
+        boolean expired = soldier.tickCount - suppressionPlanStartTick > FireControl.SUPPRESSION_PLAN_MAX_TICKS
+            || contactAge > FireControl.SUPPRESSION_CONTACT_MAX_TICKS
             || (suppressionFirstShotTick < 0
                 && soldier.tickCount - suppressionPlanStartTick > SUPPRESSION_PREPARATION_TICKS)
             || (suppressionFirstShotTick >= 0
@@ -2420,28 +2385,8 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
     private Vec3 calculateSuppressionSpread(Vec3 targetPos, float aimInaccuracy) {
         double distance = soldier.position().distanceTo(targetPos);
         double gunSpread = distance * Math.tan(Math.toRadians(aimInaccuracy));
-        double spreadRadius = Mth.clamp(
-            SUPPRESSION_SPREAD_MIN_RADIUS + distance * SUPPRESSION_SPREAD_PER_BLOCK + gunSpread,
-            SUPPRESSION_SPREAD_MIN_RADIUS,
-            SUPPRESSION_SPREAD_MAX_RADIUS
-        );
-
-        // Spread perpendicular to the firing direction so shots form a small, believable
-        // beaten zone around the selected last-known position or cover opening.
-        Vec3 toTarget = targetPos.subtract(soldier.getEyePosition());
-        Vec3 horizontalDirection = new Vec3(toTarget.x, 0.0, toTarget.z).normalize();
-        Vec3 lateralDirection = new Vec3(-horizontalDirection.z, 0.0, horizontalDirection.x);
-        double lateralOffset = (soldier.level().random.nextDouble() - 0.5) * 2.0 * spreadRadius;
-        double depthOffset = (soldier.level().random.nextDouble() - 0.5) * spreadRadius * 0.35;
-        double verticalOffset = (soldier.level().random.nextDouble() - 0.5)
-            * 2.0 * spreadRadius * SUPPRESSION_VERTICAL_SPREAD_RATIO;
-        
-        // Callers provide a complete world-space target. Do not add a generic
-        // vertical offset here: half-cover opening targets already include the
-        // cover top, while other suppression targets set their own height.
-        return targetPos.add(lateralDirection.scale(lateralOffset))
-            .add(horizontalDirection.scale(depthOffset))
-            .add(0.0, verticalOffset, 0.0);
+        return FireControl.calculateSuppressionSpread(soldier.position(), soldier.getEyePosition(),
+            soldier.level().random, targetPos, gunSpread);
     }
 
     private boolean prepareToFire(Vec3 targetPos, boolean isDirectTarget) {
@@ -2598,12 +2543,7 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
     }
 
     private float getDirectBurstContinuationThreshold(float startThreshold) {
-        float scale = switch (soldier.getFireDiscipline()) {
-            case CONSERVE -> 0.70f;
-            case SUPPRESSIVE -> 0.40f;
-            default -> 0.55f;
-        };
-        return Math.max(0.08f, startThreshold * scale);
+        return FireControl.directBurstContinuationThreshold(soldier.getFireDiscipline(), startThreshold);
     }
 
     private void beginDirectFireBurst(DirectFireWeaponProfile profile, int shotLimit, boolean mobile,
@@ -2713,8 +2653,8 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
         intel.updateSuppressionHeartbeat(suppressionTargetUUID, soldier.getUUID(), soldier.level().getGameTime());
 
         long contactAge = soldier.level().getGameTime() - suppressionLastSeenTick;
-        boolean planExpired = soldier.tickCount - suppressionPlanStartTick > SUPPRESSION_PLAN_MAX_TICKS
-            || contactAge > SUPPRESSION_CONTACT_MAX_TICKS
+        boolean planExpired = soldier.tickCount - suppressionPlanStartTick > FireControl.SUPPRESSION_PLAN_MAX_TICKS
+            || contactAge > FireControl.SUPPRESSION_CONTACT_MAX_TICKS
             || (suppressionFirstShotTick < 0
                 && soldier.tickCount - suppressionPlanStartTick > SUPPRESSION_PREPARATION_TICKS)
             || (suppressionFirstShotTick >= 0
@@ -2862,20 +2802,10 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
     }
 
     private Vec3 calculateLastSeenSuppressionSpread(Vec3 targetPos, float aimInaccuracy, long contactAge) {
-        Vec3 spreadTarget = calculateSuppressionSpread(targetPos, aimInaccuracy);
-        if (contactAge <= SUPPRESSION_CONTACT_FOCUSED_TICKS) {
-            return spreadTarget;
-        }
-
-        double ageFraction = Mth.clamp(
-            (contactAge - SUPPRESSION_CONTACT_FOCUSED_TICKS)
-                / (double) (SUPPRESSION_CONTACT_MAX_TICKS - SUPPRESSION_CONTACT_FOCUSED_TICKS),
-            0.0, 1.0);
-        Vec3 toTarget = targetPos.subtract(soldier.getEyePosition());
-        Vec3 lateral = new Vec3(-toTarget.z, 0.0, toTarget.x).normalize();
-        double laneHalfWidth = 0.35 + ageFraction * 1.15;
-        double lateralOffset = (soldier.level().random.nextDouble() - 0.5) * 2.0 * laneHalfWidth;
-        return spreadTarget.add(lateral.scale(lateralOffset));
+        double distance = soldier.position().distanceTo(targetPos);
+        double gunSpread = distance * Math.tan(Math.toRadians(aimInaccuracy));
+        return FireControl.calculateLastSeenSuppressionSpread(soldier.position(), soldier.getEyePosition(),
+            soldier.level().random, targetPos, gunSpread, contactAge);
     }
 
     public void onTargetKilledByTeammate(UUID killedThreatId) {

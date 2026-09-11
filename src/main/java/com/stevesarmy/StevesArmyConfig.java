@@ -69,9 +69,6 @@ public class StevesArmyConfig {
     public static final ForgeConfigSpec.DoubleValue VEHICLE_CREW_BLOOM_PER_SHOT;
     public static final ForgeConfigSpec.DoubleValue VEHICLE_CREW_BLOOM_MAX;
     public static final ForgeConfigSpec.DoubleValue VEHICLE_CREW_BLOOM_DECAY;
-    public static final ForgeConfigSpec.IntValue VEHICLE_CREW_BURST_SIZE;
-    public static final ForgeConfigSpec.IntValue VEHICLE_CREW_BURST_PAUSE;
-    public static final ForgeConfigSpec.DoubleValue VEHICLE_CREW_MIN_AIM_TO_FIRE;
     public static final ForgeConfigSpec.IntValue VEHICLE_CREW_DUTY_SCAN_INTERVAL;
     public static final ForgeConfigSpec.IntValue VEHICLE_CREW_SEAT_SCAN_INTERVAL;
     public static final ForgeConfigSpec.BooleanValue VEHICLE_CREW_SUPPRESSION_ENABLED;
@@ -468,19 +465,6 @@ BUILDER.pop();
         VEHICLE_CREW_BLOOM_DECAY = BUILDER
             .comment("Bloom lost per tick while not firing. Default: 0.02 (full recovery in ~3s).")
             .defineInRange("bloomDecayPerTick", 0.02, 0.0, 1.0);
-
-        VEHICLE_CREW_BURST_SIZE = BUILDER
-            .comment("Rounds per burst before the crew pauses fire. Default: 6.")
-            .defineInRange("burstSize", 6, 1, 30);
-
-        VEHICLE_CREW_BURST_PAUSE = BUILDER
-            .comment("Ticks between bursts (bloom also decays here). Default: 20 (1 second).")
-            .defineInRange("burstPauseTicks", 20, 0, 100);
-
-        VEHICLE_CREW_MIN_AIM_TO_FIRE = BUILDER
-            .comment("Minimum aimQuality before the crew opens fire. The aim-settle time is the",
-                     "main balance lever against the recoilless mount. Default: 0.35.")
-            .defineInRange("minAimQualityToFire", 0.35, 0.05, 0.95);
 
         VEHICLE_CREW_DUTY_SCAN_INTERVAL = BUILDER
             .comment("Ticks between scans for a free hull MG / periscope while seated. Default: 20.")
