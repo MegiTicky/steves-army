@@ -1,7 +1,6 @@
 package com.stevesarmy.item;
 
 import com.stevesarmy.StevesArmyMod;
-import com.stevesarmy.compat.VS2Compat;
 import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.entity.SoldierRole;
 import com.stevesarmy.network.CommandStickAssignCrewPacket;
@@ -13,6 +12,8 @@ import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.context.UseOnContext;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 
 import javax.annotation.Nullable;
@@ -69,11 +70,13 @@ public class CrewAssignStickItem extends CommandStickItem {
      * so the base reposition runs.
      */
     private static boolean tryAssign(Player player) {
-        Vec3 anchor = findAimAnchor(player);
+        BlockHitResult hit = findAimHit(player);
+        Vec3 anchor = hit == null ? null : hit.getLocation();
         List<Integer> selected = new ArrayList<>(CommandStickSelection.getSelectedIds());
-        StevesArmyMod.LOGGER.info("[CrewStick] assign click: anchor={} selected={}",
-            anchor == null ? "none" : formatVec3(anchor), selected.size());
-        if (anchor == null) {
+        StevesArmyMod.LOGGER.info("[CrewStick] assign click: anchor={} block={} selected={}",
+            anchor == null ? "none" : formatVec3(anchor),
+            hit == null ? "none" : hit.getBlockPos(), selected.size());
+        if (hit == null) {
             return false;
         }
         if (selected.isEmpty()) {
@@ -81,16 +84,21 @@ public class CrewAssignStickItem extends CommandStickItem {
                 net.minecraft.network.chat.Component.literal("No crew selected"), true);
             return true;
         }
-        NetworkHandler.INSTANCE.sendToServer(new CommandStickAssignCrewPacket(anchor, selected));
+        NetworkHandler.INSTANCE.sendToServer(
+            new CommandStickAssignCrewPacket(anchor, hit.getBlockPos(), selected));
         return true;
     }
 
-    /** World-space anchor: ship-aware block hit within reach, or null. */
+    /**
+     * Crosshair block hit, exactly the ray {@code /vs get-ship} uses: the vanilla clip,
+     * which VS2 makes ship-aware in world space. VS2 resolves the ship from the hit
+     * block directly — no seat picking, no coordinate transforms.
+     */
     @Nullable
-    public static Vec3 findAimAnchor(Player player) {
-        Vec3 eye = player.getEyePosition();
-        Vec3 end = eye.add(player.getLookAngle().scale(SEAT_REACH));
-        return VS2Compat.getShipAwareBlockHitLocation(player.level(), eye, end, player);
+    public static BlockHitResult findAimHit(Player player) {
+        HitResult hit = player.pick(SEAT_REACH, 1.0F, false);
+        return hit.getType() == HitResult.Type.BLOCK && hit instanceof BlockHitResult blockHit
+            ? blockHit : null;
     }
 
     private static String formatVec3(Vec3 v) {

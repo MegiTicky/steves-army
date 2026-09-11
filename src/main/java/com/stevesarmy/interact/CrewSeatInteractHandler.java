@@ -56,7 +56,7 @@ public final class CrewSeatInteractHandler {
                     // Anchor on the clicked seat's world position — the same
                     // position-based packet the block raytrace sends.
                     NetworkHandler.INSTANCE.sendToServer(new CommandStickAssignCrewPacket(
-                        VS2Compat.getSeatWorldPosition(target), selected));
+                        VS2Compat.getSeatWorldPosition(target), target.blockPosition(), selected));
                 }
             }
             event.setCanceled(true);
@@ -68,7 +68,7 @@ public final class CrewSeatInteractHandler {
             if (!event.getLevel().isClientSide) {
                 VehicleCrewSpawnEggItem.spawnCrewOnSeat(
                     (net.minecraft.server.level.ServerLevel) event.getLevel(),
-                    VS2Compat.getSeatWorldPosition(target), player, mainHand);
+                    VS2Compat.getSeatWorldPosition(target), target.blockPosition(), player, mainHand);
             }
             event.setCanceled(true);
             event.setCancellationResult(InteractionResult.SUCCESS);

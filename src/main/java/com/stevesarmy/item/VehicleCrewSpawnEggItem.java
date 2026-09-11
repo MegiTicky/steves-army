@@ -6,6 +6,7 @@ import com.stevesarmy.entity.SoldierSpawner;
 import com.stevesarmy.entity.VehicleCrewEntity;
 import com.stevesarmy.registry.ModEntities;
 import com.stevesarmy.transport.CrewAssignment;
+import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
@@ -18,6 +19,8 @@ import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.context.UseOnContext;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.common.ForgeSpawnEggItem;
 
@@ -43,10 +46,10 @@ public class VehicleCrewSpawnEggItem extends ForgeSpawnEggItem {
     @Override
     public InteractionResultHolder<ItemStack> use(Level level, Player player, InteractionHand hand) {
         ItemStack stack = player.getItemInHand(hand);
-        Vec3 anchor = player.isShiftKeyDown() ? findAimAnchor(player) : null;
-        if (anchor != null) {
+        BlockHitResult hit = player.isShiftKeyDown() ? findAimHit(player) : null;
+        if (hit != null) {
             if (!level.isClientSide) {
-                spawnCrewOnSeat((ServerLevel) level, anchor, player, stack);
+                spawnCrewOnSeat((ServerLevel) level, hit.getLocation(), hit.getBlockPos(), player, stack);
             }
             return InteractionResultHolder.sidedSuccess(stack, level.isClientSide);
         }
@@ -58,10 +61,11 @@ public class VehicleCrewSpawnEggItem extends ForgeSpawnEggItem {
         Level level = context.getLevel();
         Player player = context.getPlayer();
         if (player != null && player.isShiftKeyDown()) {
-            Vec3 anchor = findAimAnchor(player);
-            if (anchor != null) {
+            BlockHitResult hit = findAimHit(player);
+            if (hit != null) {
                 if (!level.isClientSide) {
-                    spawnCrewOnSeat((ServerLevel) level, anchor, player, context.getItemInHand());
+                    spawnCrewOnSeat((ServerLevel) level, hit.getLocation(), hit.getBlockPos(),
+                        player, context.getItemInHand());
                 }
                 return InteractionResult.sidedSuccess(level.isClientSide);
             }
@@ -69,16 +73,20 @@ public class VehicleCrewSpawnEggItem extends ForgeSpawnEggItem {
         return super.useOn(context);
     }
 
-    /** World-space anchor: ship-aware block hit within reach, or null. */
+    /**
+     * Crosshair block hit, exactly the ray {@code /vs get-ship} uses: the vanilla clip,
+     * which VS2 makes ship-aware in world space.
+     */
     @Nullable
-    private static Vec3 findAimAnchor(Player player) {
-        Vec3 eye = player.getEyePosition();
-        Vec3 end = eye.add(player.getLookAngle().scale(SEAT_REACH));
-        return VS2Compat.getShipAwareBlockHitLocation(player.level(), eye, end, player);
+    private static BlockHitResult findAimHit(Player player) {
+        HitResult hit = player.pick(SEAT_REACH, 1.0F, false);
+        return hit.getType() == HitResult.Type.BLOCK && hit instanceof BlockHitResult blockHit
+            ? blockHit : null;
     }
 
     /** Shared server-side "spawn crew seated here" used by the egg item and the seat interact handler. */
-    public static void spawnCrewOnSeat(ServerLevel level, Vec3 anchor, Player player, ItemStack eggStack) {
+    public static void spawnCrewOnSeat(ServerLevel level, Vec3 anchor, BlockPos hitBlock,
+                                       Player player, ItemStack eggStack) {
         VehicleCrewEntity crew = ModEntities.VEHICLE_CREW.get().create(level);
         if (crew == null) {
             return;
@@ -96,11 +104,19 @@ public class VehicleCrewSpawnEggItem extends ForgeSpawnEggItem {
         if (!result.success()) {
             return;
         }
-        // Seat through the shared crew routine on the ship at the anchor — the
-        // soldier flow: ship + anchor position, free SeatBlock scan, never a
-        // specific seat entity. The resolver reconciles the shipyard-chunk
-        // lookup with world-space intersection, same as the crew stick.
-        Object ship = VS2Compat.resolveShipAtWorldAnchor(level, anchor);
+        // Ship resolution in /vs get-ship order: the ship managing the exact hit block
+        // wins; geometric resolver and near-player search stay as fallbacks.
+        Object ship = VS2Compat.getShipObjectAtBlockPos(level, hitBlock);
+        if (ship != null) {
+            StevesArmyMod.LOGGER.info("[Crew] egg ship resolved via vs get-ship at hit block {}: shipId={}",
+                hitBlock, VS2Compat.getShipIdOf(ship));
+        }
+        if (ship == null) {
+            ship = VS2Compat.resolveShipAtWorldAnchor(level, anchor);
+        }
+        if (ship == null && player instanceof ServerPlayer serverPlayer) {
+            ship = VS2Compat.resolveMountShipNearPlayer(level, serverPlayer);
+        }
         if (ship == null && player instanceof ServerPlayer serverPlayer) {
             ship = VS2Compat.resolveMountShipNearPlayer(level, serverPlayer);
         }

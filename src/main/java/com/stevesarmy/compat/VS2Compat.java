@@ -349,6 +349,16 @@ public final class VS2Compat {
         return createSeatEntityClass != null && createSeatEntityClass.isInstance(entity);
     }
 
+    /**
+     * The {@code /vs get-ship} lookup: the ship managing the exact block a world-space
+     * ray hit. VS2 exposes ship blocks to the world at their transformed positions, so
+     * a vanilla clip's hit block resolves directly through VS2's chunk map.
+     */
+    @Nullable
+    public static Object getShipObjectAtBlockPos(Level level, BlockPos pos) {
+        return getShipObjectAtWorldPos(level, pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5);
+    }
+
     /** Id of the ship managing the given world/shipyard position, or null. */
     @Nullable
     public static Long getShipIdAt(Level level, double x, double y, double z) {

@@ -6,6 +6,7 @@ import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.entity.SoldierRole;
 import com.stevesarmy.item.CrewAssignStickItem;
 import com.stevesarmy.transport.CrewAssignment;
+import net.minecraft.core.BlockPos;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
@@ -30,12 +31,14 @@ public class CommandStickAssignCrewPacket {
     private final double x;
     private final double y;
     private final double z;
+    private final BlockPos hitBlock;
     private final List<Integer> crewIds;
 
-    public CommandStickAssignCrewPacket(Vec3 anchor, List<Integer> crewIds) {
+    public CommandStickAssignCrewPacket(Vec3 anchor, BlockPos hitBlock, List<Integer> crewIds) {
         this.x = anchor.x;
         this.y = anchor.y;
         this.z = anchor.z;
+        this.hitBlock = hitBlock;
         this.crewIds = List.copyOf(crewIds);
     }
 
@@ -43,6 +46,7 @@ public class CommandStickAssignCrewPacket {
         this.x = buf.readDouble();
         this.y = buf.readDouble();
         this.z = buf.readDouble();
+        this.hitBlock = buf.readBlockPos();
         int count = buf.readVarInt();
         List<Integer> ids = new ArrayList<>(count);
         for (int i = 0; i < count; i++) {
@@ -55,6 +59,7 @@ public class CommandStickAssignCrewPacket {
         buf.writeDouble(msg.x);
         buf.writeDouble(msg.y);
         buf.writeDouble(msg.z);
+        buf.writeBlockPos(msg.hitBlock);
         buf.writeVarInt(msg.crewIds.size());
         for (int id : msg.crewIds) {
             buf.writeVarInt(id);
@@ -74,7 +79,17 @@ public class CommandStickAssignCrewPacket {
                 return;
             }
             Vec3 anchor = new Vec3(msg.x, msg.y, msg.z);
-            Object ship = VS2Compat.resolveShipAtWorldAnchor(level, anchor);
+            // Ship resolution in /vs get-ship order: the vanilla clip's hit block is
+            // the authoritative crosshair pick, so the ship managing that exact block
+            // wins; the geometric resolver only runs when the hit block maps to nothing.
+            Object ship = VS2Compat.getShipObjectAtBlockPos(level, msg.hitBlock);
+            if (ship != null) {
+                StevesArmyMod.LOGGER.info("[CrewStick] ship resolved via vs get-ship at hit block {}: shipId={}",
+                    msg.hitBlock, VS2Compat.getShipIdOf(ship));
+            }
+            if (ship == null) {
+                ship = VS2Compat.resolveShipAtWorldAnchor(level, anchor);
+            }
             if (ship == null) {
                 ship = VS2Compat.resolveMountShipNearPlayer(level, sender);
             }
