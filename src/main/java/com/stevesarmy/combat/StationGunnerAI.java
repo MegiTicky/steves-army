@@ -605,7 +605,7 @@ public final class StationGunnerAI {
         ExposureCalculator.AimPointResult aimPoint =
             ExposureCalculator.getBestAimPoint(state.soldier, subject);
         boolean aimOk = aimPoint != null && aimPoint.canShoot();
-        chain.add("aim=" + (aimOk ? "ok" : "noShot"));
+        chain.add("aim=" + (aimOk ? aimPoint.type.displayName : "noShot"));
         if (blocker == null && !aimOk) {
             blocker = "aim";
         }

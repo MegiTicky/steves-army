@@ -22,6 +22,14 @@ public final class VisibilityRay {
     private static final double EPSILON = 1.0e-7;
     private static final double MAX_CONCEALMENT = 1.0;
     private static final double LEAF_CONCEALMENT = 0.75;
+    /**
+     * A station gunner's camera sits inside its own ship's hull, so ship clip hits
+     * within this distance of the ray origin are the interior surface the ray must
+     * exit, not an obstruction. Ship hits beyond it block crew rays like world
+     * blocks: ship-mounted cover on other ships and grazes of the gun's own
+     * bulwark stay visible to perception.
+     */
+    private static final double CREW_SELF_HULL_ESCAPE_DISTANCE = 2.5;
 
     private static final Map<Level, TraceCache> TRACE_CACHES =
         java.util.Collections.synchronizedMap(new WeakHashMap<>());
@@ -193,10 +201,13 @@ public final class VisibilityRay {
         if (contactOnly && !VS2Compat.isEnabled()) {
             shipObstruction = Double.POSITIVE_INFINITY;
         } else if (observer instanceof SoldierEntity soldier && soldier.isVehicleCrewActive()) {
-            // A station gunner's camera sits inside its own ship's collision, so
-            // ship geometry would block every ray at the muzzle. Crew perception
-            // ignores ships; world blocks still apply.
-            shipObstruction = Double.POSITIVE_INFINITY;
+            double shipHit = VS2Compat.getShipAwareBlockHitDistance(level, from, to, observer);
+            // Crew rays see ships again — but the gunner's own hull surface right
+            // at the muzzle is an artifact of the camera being mounted inside the
+            // ship, so near hits are treated as the interior escape.
+            shipObstruction = shipHit > CREW_SELF_HULL_ESCAPE_DISTANCE
+                ? shipHit
+                : Double.POSITIVE_INFINITY;
         } else {
             shipObstruction = VS2Compat.getShipAwareBlockHitDistance(level, from, to, observer);
         }
