@@ -1,5 +1,6 @@
 package com.stevesarmy.item;
 
+import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.compat.VS2Compat;
 import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.entity.SoldierRole;
@@ -41,6 +42,9 @@ public class CrewAssignStickItem extends CommandStickItem {
     @Override
     public InteractionResultHolder<ItemStack> use(Level level, Player player, InteractionHand hand) {
         ItemStack stack = player.getItemInHand(hand);
+        if (level.isClientSide) {
+            StevesArmyMod.LOGGER.info("[CrewStick] use: shift={} hand={}", player.isShiftKeyDown(), hand);
+        }
         if (player.isShiftKeyDown() && level.isClientSide && tryAssignToSeat(player)) {
             return InteractionResultHolder.success(stack);
         }
@@ -51,6 +55,9 @@ public class CrewAssignStickItem extends CommandStickItem {
     public InteractionResult useOn(UseOnContext context) {
         Player player = context.getPlayer();
         Level level = context.getLevel();
+        if (player != null && level.isClientSide) {
+            StevesArmyMod.LOGGER.info("[CrewStick] useOn: shift={}", player.isShiftKeyDown());
+        }
         if (player != null && player.isShiftKeyDown() && level.isClientSide && tryAssignToSeat(player)) {
             return InteractionResult.SUCCESS;
         }
@@ -63,10 +70,12 @@ public class CrewAssignStickItem extends CommandStickItem {
      */
     private static boolean tryAssignToSeat(Player player) {
         Entity seat = findSeatAlongLook(player);
+        List<Integer> selected = new ArrayList<>(CommandStickSelection.getSelectedIds());
+        StevesArmyMod.LOGGER.info("[CrewStick] assign click: seatHit={} selected={}",
+            seat == null ? "none" : seat.getId(), selected.size());
         if (seat == null) {
             return false;
         }
-        List<Integer> selected = new ArrayList<>(CommandStickSelection.getSelectedIds());
         if (selected.isEmpty()) {
             player.displayClientMessage(
                 net.minecraft.network.chat.Component.literal("No crew selected"), true);

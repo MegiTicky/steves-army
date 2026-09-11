@@ -377,6 +377,7 @@ public final class VS2Compat {
     public static Entity findSeatAlongLook(Player player, double reach) {
         initialize();
         if (createSeatEntityClass == null) {
+            StevesArmyMod.LOGGER.info("[CrewStick] pick skipped: Create SeatEntity class unresolved");
             return null;
         }
         Level level = player.level();
@@ -386,11 +387,13 @@ public final class VS2Compat {
         Entity best = null;
         Vec3 bestWorldPos = null;
         double bestDistSqr = Double.MAX_VALUE;
+        int seatEntitiesSeen = 0;
         for (Entity entity : allEntities(level)) {
             if (entity.isRemoved() || !entity.isAlive()
                 || !createSeatEntityClass.isInstance(entity)) {
                 continue;
             }
+            seatEntitiesSeen++;
             Vec3 raw = entity.position();
             Vec3 worldPos = raw;
             Object ship = shipAtRawPosition(level, raw);
@@ -406,6 +409,8 @@ public final class VS2Compat {
                 .inflate(entity.getPickRadius());
             Optional<Vec3> hit = worldBox.clip(eye, end);
             if (hit.isEmpty()) {
+                StevesArmyMod.LOGGER.info("[CrewStick] pick: seat={} raw={} world={} eye={} ray missed AABB",
+                    entity.getId(), formatVec3(raw), formatVec3(worldPos), formatVec3(eye));
                 continue;
             }
             double distSqr = eye.distanceToSqr(hit.get());
@@ -418,6 +423,10 @@ public final class VS2Compat {
         if (best != null) {
             StevesArmyMod.LOGGER.info("[Crew] seat pick: entity={} world={}",
                 best.getId(), formatVec3(bestWorldPos));
+        } else {
+            StevesArmyMod.LOGGER.info(
+                "[CrewStick] pick miss: seat entities seen={} (empty Create seats discard their entity - ships hold SeatBlocks, not entities)",
+                seatEntitiesSeen);
         }
         return best;
     }

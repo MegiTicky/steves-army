@@ -1,5 +1,6 @@
 package com.stevesarmy.network;
 
+import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.compat.VS2Compat;
 import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.entity.SoldierRole;
@@ -57,10 +58,18 @@ public class CommandStickAssignCrewPacket {
             }
             ItemStack mainHand = sender.getMainHandItem();
             if (!(mainHand.getItem() instanceof CrewAssignStickItem)) {
+                StevesArmyMod.LOGGER.info("[CrewStick] packet dropped: main hand is {} (assign stick required)",
+                    mainHand.getItem());
                 return;
             }
             Entity seat = level.getEntity(msg.seatEntityId);
             if (seat == null || seat.isRemoved() || !VS2Compat.isCreateSeatEntity(seat)) {
+                StevesArmyMod.LOGGER.info(
+                    "[CrewStick] packet dropped: seat id {} -> {} (removed={}, createSeat={})",
+                    msg.seatEntityId,
+                    seat == null ? "null" : seat.getClass().getSimpleName(),
+                    seat != null && seat.isRemoved(),
+                    seat != null && VS2Compat.isCreateSeatEntity(seat));
                 return;
             }
             List<SoldierEntity> crew = new ArrayList<>();
@@ -74,8 +83,13 @@ public class CommandStickAssignCrewPacket {
                 }
             }
             if (crew.isEmpty()) {
+                StevesArmyMod.LOGGER.info(
+                    "[CrewStick] packet dropped: none of the {} ids resolved to owned vehicle crew",
+                    msg.crewIds.size());
                 return;
             }
+            StevesArmyMod.LOGGER.info("[CrewStick] packet accepted: seat={} crew={}/{}",
+                seat.getId(), crew.size(), msg.crewIds.size());
             int seated = CrewAssignment.assignToClickedSeat(level, seat, crew);
             sender.displayClientMessage(
                 Component.translatable("transport.steves_army.feedback.crew_assigned", seated, crew.size()), true);
