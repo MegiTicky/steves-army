@@ -1,6 +1,7 @@
 package com.stevesarmy.respawn;
 
 import com.stevesarmy.StevesArmyMod;
+import com.stevesarmy.compat.VS2Compat;
 import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.squad.SquadData;
 import com.stevesarmy.squad.SquadManager;
@@ -23,7 +24,9 @@ public class RespawnCameraController {
         CameraState state = new CameraState(
             player.getUUID(),
             targetSoldier.getUUID(),
-            targetSoldier.position(),
+            // Seated crew live at shipyard coordinates on VS ships — store the
+            // converted world position; tick() re-derives it live anyway.
+            VS2Compat.getSoldierWorldPosition(targetSoldier),
             targetSoldier.getYRot(),
             targetSoldier.getXRot(),
             squadManager,
@@ -72,10 +75,15 @@ public class RespawnCameraController {
                 ServerPlayer player = state.level.getServer().getPlayerList().getPlayer(state.playerId);
                 SoldierEntity soldier = findSoldierByUUID(state.level, state.soldierId);
                 if (player != null && soldier != null && soldier.isAlive() && !player.isSpectator()) {
-                    player.setCamera(null);
-                    player.teleportTo(state.soldierPos.x, state.soldierPos.y + 0.5, state.soldierPos.z);
-                    player.setYRot(state.soldierYRot);
-                    player.setXRot(state.soldierXRot);
+                    // Re-derive the position every tick so the dead body tracks a
+                    // soldier seated on a moving VS ship, in world space.
+                    Vec3 livePos = VS2Compat.getSoldierWorldPosition(soldier);
+                    if (VS2Compat.isWorldPlausible(livePos)) {
+                        player.setCamera(null);
+                        player.teleportTo(livePos.x, livePos.y + 0.5, livePos.z);
+                        player.setYRot(state.soldierYRot);
+                        player.setXRot(state.soldierXRot);
+                    }
                 }
             }
             

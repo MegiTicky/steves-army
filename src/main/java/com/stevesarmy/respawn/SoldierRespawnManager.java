@@ -3,6 +3,7 @@ package com.stevesarmy.respawn;
 import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.combat.GunIntegration;
 import com.stevesarmy.combat.cover.CoverReservationManager;
+import com.stevesarmy.compat.VS2Compat;
 import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.inventory.SoldierInventory;
 import com.stevesarmy.squad.SquadData;
@@ -22,34 +23,58 @@ public class SoldierRespawnManager {
     
     public static void initiateRespawn(ServerPlayer player, SoldierEntity soldier, SquadManager squadManager, SquadData squad, ServerLevel level) {
         UUID soldierUUID = soldier.getUUID();
-        Vec3 soldierPos = soldier.position();
+
+        // Snapshot the seat before the discard destroys the transport state and
+        // Create's seat mapping, and resolve a world-space position — soldiers
+        // seated on VS ships live at shipyard coordinates server-side.
+        VS2Compat.SeatCapture seatCapture = VS2Compat.captureSeatForTakeover(level, soldier);
+        Vec3 soldierPos = VS2Compat.getSoldierWorldPosition(soldier);
         float soldierYRot = soldier.getYRot();
         float soldierXRot = soldier.getXRot();
-        
+
         SoldierInventory soldierInventory = soldier.getSoldierInventory();
-        
+
         player.setHealth(RESPAWN_HEALTH);
         player.getFoodData().setFoodLevel(RESPAWN_FOOD);
-        
+
         transferEquipment(player, soldier, soldierInventory);
-        
+
         soldier.stopRiding();
         CoverReservationManager.releaseAll(soldier);
         squadManager.removeMemberFromSquad(soldierUUID);
         soldier.discard();
-        
-        player.teleportTo(soldierPos.x, soldierPos.y + TELEPORT_OFFSET, soldierPos.z);
-        player.setYRot(soldierYRot);
-        player.setXRot(soldierXRot);
-        player.setYHeadRot(soldierYRot);
-        
+
+        // Teleport target: the captured seat when available, else the soldier's
+        // converted position. If neither is world-plausible (e.g. the ship was
+        // scrapped mid-transition), stay at the vanilla respawn point instead
+        // of teleporting into VS2's shipyard allocation region.
+        Vec3 targetPos = seatCapture != null && VS2Compat.isWorldPlausible(seatCapture.worldPos())
+            ? seatCapture.worldPos()
+            : soldierPos;
+        if (VS2Compat.isWorldPlausible(targetPos)) {
+            player.teleportTo(targetPos.x, targetPos.y + TELEPORT_OFFSET, targetPos.z);
+            player.setYRot(soldierYRot);
+            player.setXRot(soldierXRot);
+            player.setYHeadRot(soldierYRot);
+        } else {
+            StevesArmyMod.LOGGER.warn("[Respawn] No world-plausible position for soldier {} — player {} stays at respawn point",
+                soldierUUID.toString().substring(0, 8), player.getName().getString());
+        }
+
+        if (seatCapture != null && seatCapture.hasSeat()
+            && !VS2Compat.seatPlayerInCapturedSeat(level, player, seatCapture)) {
+            player.sendSystemMessage(net.minecraft.network.chat.Component.literal(
+                "Your crew seat was lost — you respawn beside the vehicle instead."));
+        }
+
         player.sendSystemMessage(
-            net.minecraft.network.chat.Component.literal("Respawned as soldier at " + 
-                String.format("%.1f, %.1f, %.1f", soldierPos.x, soldierPos.y, soldierPos.z))
+            net.minecraft.network.chat.Component.literal("Respawned as soldier at " +
+                String.format("%.1f, %.1f, %.1f", targetPos.x, targetPos.y, targetPos.z))
         );
-        
-        StevesArmyMod.LOGGER.info("[Respawn] Successfully transferred player {} to soldier position. Squad size: {}", 
-            player.getName().getString(), 
+
+        StevesArmyMod.LOGGER.info("[Respawn] Successfully transferred player {} to soldier position (seat taken over: {}). Squad size: {}",
+            player.getName().getString(),
+            seatCapture != null && seatCapture.hasSeat(),
             squad.getMemberCount());
     }
     

@@ -277,7 +277,7 @@ public final class VS2Compat {
         return isWorldPlausible(transformed) ? transformed : null;
     }
 
-    private static boolean isWorldPlausible(@Nullable Vec3 pos) {
+    public static boolean isWorldPlausible(@Nullable Vec3 pos) {
         return pos != null
             && Math.abs(pos.x) <= WORLD_COORD_LIMIT
             && Math.abs(pos.z) <= WORLD_COORD_LIMIT;
@@ -751,6 +751,283 @@ public final class VS2Compat {
 
     private static String formatVec3(Vec3 v) {
         return String.format("(%.2f, %.2f, %.2f)", v.x, v.y, v.z);
+    }
+
+    // ------------------------------------------------------------------
+    // Player takeover of a seated soldier's seat (respawn-as-soldier)
+    // ------------------------------------------------------------------
+
+    /**
+     * World-space position of a soldier. Soldiers seated on VS objects live at
+     * shipyard coordinates server-side (VS2 transforms positions only for
+     * client tracking), so an implausible raw position is converted through the
+     * seat or ship transform. Returns the raw position when nothing converts.
+     */
+    public static Vec3 getSoldierWorldPosition(SoldierEntity soldier) {
+        Vec3 raw = soldier.position();
+        if (isWorldPlausible(raw)) {
+            return raw;
+        }
+        if (!isEnabled()) {
+            return raw;
+        }
+        Vec3 converted = convertShipyardPosition(soldier.level(), raw, states.get(soldier.getUUID()));
+        return isWorldPlausible(converted) ? converted : raw;
+    }
+
+    /**
+     * Converts a shipyard-space reference to world space: static seat block
+     * position first, then the seat entity, then the raw position through the
+     * ship managing it. Returns null when nothing converts.
+     */
+    @Nullable
+    private static Vec3 convertShipyardPosition(Level level, Vec3 rawPos, @Nullable SoldierState state) {
+        if (level instanceof ServerLevel serverLevel) {
+            if (state != null && state.transportSeatPosition != null) {
+                Vec3 world = staticSeatWorldPos(serverLevel, state.transportSeatPosition);
+                if (world != null) {
+                    return world;
+                }
+            }
+            if (state != null && state.transportAnchorId != null) {
+                Entity anchor = serverLevel.getEntity(state.transportAnchorId);
+                if (anchor != null && !anchor.isRemoved() && isSeatLikeEntity(anchor)) {
+                    Vec3 world = getSeatWorldPosition(anchor);
+                    if (isWorldPlausible(world)) {
+                        return world;
+                    }
+                }
+            }
+            try {
+                // The soldier's own shipyard position is managed by its ship.
+                Object ship = reflect(getShipObjectManagingPosDouble, serverLevel,
+                    rawPos.x, rawPos.y, rawPos.z);
+                Vec3 world = shipToWorldPosition(ship, rawPos);
+                if (world != null) {
+                    return world;
+                }
+            } catch (ReflectiveOperationException ignored) {
+            }
+        }
+        return null;
+    }
+
+    /** True for entities whose position getSeatWorldPosition understands. */
+    private static boolean isSeatLikeEntity(Entity entity) {
+        if (shipMountedDataProviderClass != null && shipMountedDataProviderClass.isInstance(entity)) {
+            return true;
+        }
+        return createSeatEntityClass != null && createSeatEntityClass.isInstance(entity);
+    }
+
+    /** World position of a static seat block, or null when no ship manages it. */
+    @Nullable
+    private static Vec3 staticSeatWorldPos(ServerLevel level, BlockPos seatPos) {
+        try {
+            Object ship = reflect(getShipObjectManagingPos, level, (Vec3i) seatPos);
+            if (ship == null) {
+                return null;
+            }
+            Object world = reflect(toWorldCoordinates, ship,
+                seatPos.getX() + 0.5, seatPos.getY(), seatPos.getZ() + 0.5);
+            if (world instanceof org.joml.Vector3dc v) {
+                return new Vec3(v.x(), v.y(), v.z());
+            }
+        } catch (ReflectiveOperationException ignored) {
+        }
+        return null;
+    }
+
+    /**
+     * Snapshot of a seated soldier's seat so a player can respawn into it.
+     * Stable ids only — positions are re-derived at restore time because the
+     * ship keeps moving between death and respawn.
+     */
+    public static final class SeatCapture {
+        @Nullable private final UUID anchorId;
+        @Nullable private final Long shipId;
+        @Nullable private final BlockPos staticSeatPos;
+        @Nullable private final Integer contraptionSeatIndex;
+        private final Vec3 worldPos;
+
+        private SeatCapture(@Nullable UUID anchorId, @Nullable Long shipId,
+                            @Nullable BlockPos staticSeatPos, @Nullable Integer contraptionSeatIndex,
+                            Vec3 worldPos) {
+            this.anchorId = anchorId;
+            this.shipId = shipId;
+            this.staticSeatPos = staticSeatPos;
+            this.contraptionSeatIndex = contraptionSeatIndex;
+            this.worldPos = worldPos;
+        }
+
+        /** True when the capture names a seat a player could take over. */
+        public boolean hasSeat() {
+            return anchorId != null || staticSeatPos != null || contraptionSeatIndex != null;
+        }
+
+        /** World-space position of the seat when captured — the takeover fallback spot. */
+        public Vec3 worldPos() {
+            return worldPos;
+        }
+    }
+
+    /**
+     * Snapshots the seat a soldier is riding so {@link #seatPlayerInCapturedSeat}
+     * can put a player in it after the soldier is discarded. Must be called
+     * before the discard: the Create seat mapping and the soldier's transport
+     * state are both gone after removal. Returns null when the soldier is not
+     * seated on a known seat type or VS2 compat is unavailable.
+     */
+    @Nullable
+    public static SeatCapture captureSeatForTakeover(ServerLevel level, SoldierEntity soldier) {
+        if (!isEnabled()) {
+            return null;
+        }
+        SoldierState state = states.get(soldier.getUUID());
+        Entity vehicle = soldier.getVehicle();
+        UUID anchorId = state != null && state.transportAnchorId != null
+            ? state.transportAnchorId
+            : vehicle != null ? vehicle.getUUID() : null;
+        Long shipId = state == null ? null : state.transportShipId;
+        BlockPos staticSeatPos = state == null ? null : state.transportSeatPosition;
+        Integer seatIndex = readContraptionSeatIndex(vehicle, soldier.getUUID());
+
+        Entity anchorEntity = anchorId == null ? null : level.getEntity(anchorId);
+        boolean anchorSeatLike = anchorEntity != null && isSeatLikeEntity(anchorEntity);
+        if (staticSeatPos == null && seatIndex == null && !anchorSeatLike) {
+            // Not seated on a known seat type (may not even be on a ship):
+            // plain takeover at the soldier's position.
+            return null;
+        }
+
+        Vec3 worldPos = staticSeatPos != null ? staticSeatWorldPos(level, staticSeatPos) : null;
+        if (worldPos == null && vehicle != null && isSeatLikeEntity(vehicle)) {
+            Vec3 seatWorld = getSeatWorldPosition(vehicle);
+            if (isWorldPlausible(seatWorld)) {
+                worldPos = seatWorld;
+            }
+        }
+        if (worldPos == null) {
+            worldPos = getSoldierWorldPosition(soldier);
+        }
+        SeatCapture capture = new SeatCapture(anchorId, shipId, staticSeatPos, seatIndex, worldPos);
+        StevesArmyMod.LOGGER.info("[Respawn] Captured seat takeover soldier={} anchor={} staticSeat={} shipId={} index={} world={}",
+            soldier.getId(), anchorId, staticSeatPos, shipId, seatIndex, formatVec3(worldPos));
+        return capture;
+    }
+
+    /** The Create contraption seat index a rider occupies, or null. */
+    @Nullable
+    private static Integer readContraptionSeatIndex(@Nullable Entity vehicle, UUID riderId) {
+        if (vehicle == null || contraptionEntityClass == null || !contraptionEntityClass.isInstance(vehicle)) {
+            return null;
+        }
+        try {
+            Object contraption = getContraption.invoke(vehicle);
+            if (contraption == null) {
+                return null;
+            }
+            @SuppressWarnings("unchecked")
+            java.util.Map<UUID, Integer> occupied =
+                (java.util.Map<UUID, Integer>) getSeatMapping.invoke(contraption);
+            return occupied.get(riderId);
+        } catch (ReflectiveOperationException ignored) {
+            return null;
+        }
+    }
+
+    /**
+     * Mounts {@code player} into the seat captured from a discarded soldier:
+     * static seat block first, then the captured anchor entity, then the Create
+     * contraption seat index. Soldier mounts are gated by SoldierMountHandler;
+     * player mounts pass through un-gated, so no authorization is needed here.
+     * Returns false when nothing worked — the caller has already placed the
+     * player at the seat's captured world position.
+     */
+    public static boolean seatPlayerInCapturedSeat(ServerLevel level, ServerPlayer player, @Nullable SeatCapture capture) {
+        if (capture == null || !capture.hasSeat() || !isEnabled() || player.isPassenger()) {
+            return false;
+        }
+
+        if (capture.staticSeatPos != null && createSeatBlockClass != null
+            && createSeatBlockClass.isInstance(level.getBlockState(capture.staticSeatPos).getBlock())
+            && !isCreateSeatOccupied(level, capture.staticSeatPos)) {
+            try {
+                createSeatSitDown.invoke(null, level, capture.staticSeatPos, player);
+            } catch (ReflectiveOperationException exception) {
+                logReflectionFailure(exception);
+            }
+            if (player.isPassenger()) {
+                syncPlayerSeatMount(level, player, capture);
+                return true;
+            }
+        }
+
+        if (capture.anchorId != null) {
+            Entity anchor = level.getEntity(capture.anchorId);
+            if (anchor != null && !anchor.isRemoved() && anchor.getPassengers().isEmpty()
+                && isSeatLikeEntity(anchor)) {
+                player.startRiding(anchor, true);
+                if (player.isPassenger() && player.getVehicle() == anchor) {
+                    syncPlayerSeatMount(level, player, capture);
+                    return true;
+                }
+            }
+        }
+
+        if (capture.contraptionSeatIndex != null && capture.shipId != null && createInteractiveUtil != null) {
+            try {
+                Entity mappedVehicle =
+                    (Entity) getContraptionEntityForShip.invoke(createInteractiveUtil, capture.shipId, false);
+                Object contraption = mappedVehicle == null ? null : getContraption.invoke(mappedVehicle);
+                if (mappedVehicle != null && contraption != null) {
+                    @SuppressWarnings("unchecked")
+                    java.util.Map<UUID, Integer> occupied =
+                        (java.util.Map<UUID, Integer>) getSeatMapping.invoke(contraption);
+                    if (!occupied.containsValue(capture.contraptionSeatIndex)) {
+                        addSittingPassenger.invoke(mappedVehicle, player, capture.contraptionSeatIndex);
+                        if (player.isPassenger() && player.getVehicle() == mappedVehicle) {
+                            syncPlayerSeatMount(level, player, capture);
+                            return true;
+                        }
+                    }
+                }
+            } catch (ReflectiveOperationException exception) {
+                logReflectionFailure(exception);
+            }
+        }
+
+        StevesArmyMod.LOGGER.info("[Respawn] Seat takeover mount failed for player {} — standing at captured seat position",
+            player.getName().getString());
+        return false;
+    }
+
+    /**
+     * syncTransportState equivalent for a player takeover: shipyard anchors are
+     * not vanilla-tracked, so the mounting player and everyone near the seat
+     * need the anchor's add-entity packet before the passenger packet.
+     */
+    private static void syncPlayerSeatMount(ServerLevel level, ServerPlayer player, SeatCapture capture) {
+        Entity anchor = player.getVehicle();
+        if (anchor == null) {
+            return;
+        }
+        Vec3 refPos = capture.worldPos();
+        java.util.Set<ServerPlayer> recipients = new java.util.HashSet<>();
+        recipients.add(player);
+        for (ServerPlayer other : level.getServer().getPlayerList().getPlayers()) {
+            if (other.distanceToSqr(refPos) < 16384.0) {
+                recipients.add(other);
+            }
+        }
+        net.minecraft.network.protocol.Packet<?> spawnPacket = anchor.getAddEntityPacket();
+        ClientboundSetPassengersPacket passengersPacket = new ClientboundSetPassengersPacket(anchor);
+        for (ServerPlayer recipient : recipients) {
+            recipient.connection.send(spawnPacket);
+            recipient.connection.send(passengersPacket);
+        }
+        StevesArmyMod.LOGGER.info("[Respawn] Synced seat takeover mount player={} anchor={} recipients={}",
+            player.getName().getString(), anchor.getId(), recipients.size());
     }
 
     /** Public wrapper to clear VS2 dragging state after a manual release. */

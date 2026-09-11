@@ -2,6 +2,7 @@ package com.stevesarmy.respawn;
 
 import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.compat.PlayerReviveCompat;
+import com.stevesarmy.compat.VS2Compat;
 import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.squad.SquadData;
 import com.stevesarmy.squad.SquadManager;
@@ -118,7 +119,9 @@ public class PlayerDeathHandler {
         pendingRespawns.put(player.getUUID(), new RespawnData(
             player.getUUID(),
             nearestSoldier.getUUID(),
-            nearestSoldier.position(),
+            // Seated crew live at shipyard coordinates on VS ships — store the
+            // converted world position or the corpse transition flies off-map.
+            VS2Compat.getSoldierWorldPosition(nearestSoldier),
             nearestSoldier.getYRot(),
             nearestSoldier.getXRot(),
             squad.getSquadId()
@@ -202,7 +205,8 @@ public class PlayerDeathHandler {
             }
 
             RespawnData replacementData = new RespawnData(
-                playerId, replacement.getUUID(), replacement.position(), replacement.getYRot(), replacement.getXRot(), data.squadId
+                playerId, replacement.getUUID(), VS2Compat.getSoldierWorldPosition(replacement),
+                replacement.getYRot(), replacement.getXRot(), data.squadId
             );
             if (pendingRespawns.replace(playerId, data, replacementData)) {
                 Optional<SquadData> squadOpt = squadManager.getSquadById(data.squadId);
@@ -244,8 +248,11 @@ public class PlayerDeathHandler {
             if (!(entity instanceof SoldierEntity soldier)) {
                 continue;
             }
-            
-            double dist = soldier.distanceToSqr(deathPos);
+
+            // Rank in world space: a crew soldier seated on a VS ship reports
+            // shipyard coordinates from position(), which would rank it
+            // millions of blocks from the death position.
+            double dist = VS2Compat.getSoldierWorldPosition(soldier).distanceToSqr(deathPos);
             if (dist < nearestDist) {
                 nearestDist = dist;
                 nearest = soldier;
