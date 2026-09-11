@@ -58,8 +58,8 @@ public final class CrewAssignment {
      * infantry MOUNT order:
      * <ol>
      *   <li>VSAW handle-linked seats,</li>
-     *   <li>the ship's free SeatBlock scan around the anchor in shipyard space — the
-     *       radius-0 candidate is the anchor block itself, so aiming straight at a seat
+     *   <li>the ship's free SeatBlocks, scanned across the whole voxel AABB in shipyard
+     *       space and taken nearest-to-anchor first, so aiming straight at a seat
      *       prefers it,</li>
      *   <li>raw seat-entity mounts for ships whose seats have no SeatBlock behind them
      *       (e.g. tallyho FlexibleSeatEntity) — the unreliable kind, so WARN-logged.</li>
@@ -98,9 +98,15 @@ public final class CrewAssignment {
             }
         }
 
-        // Tier 3: the ship's free SeatBlock scan around the anchor (shipyard space).
+        // Tier 3: the ship's free SeatBlocks, scanning the ship's whole voxel AABB
+        // (shipyard space), nearest to the anchor first.
         if (!remaining.isEmpty()) {
             List<BlockPos> seats = VS2Compat.findFreeStaticSeats(level, ship, anchorWorld, remaining.size());
+            if (seats.isEmpty()) {
+                // No seat blocks anywhere on the ship — inventory its entities so the
+                // log identifies any entity-based seats a block scan cannot see.
+                VS2Compat.logShipEntityCensus(level, ship, anchorWorld);
+            }
             for (SoldierEntity soldier : new ArrayList<>(remaining)) {
                 if (seats.isEmpty()) {
                     break;

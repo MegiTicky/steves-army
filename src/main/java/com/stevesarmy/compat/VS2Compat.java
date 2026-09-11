@@ -9,6 +9,7 @@ import com.stevesarmy.squad.SquadMode;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Vec3i;
 import net.minecraft.network.protocol.game.ClientboundSetPassengersPacket;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.Entity;
@@ -19,6 +20,7 @@ import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.phys.AABB;
@@ -26,6 +28,7 @@ import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.fml.ModList;
+import net.minecraftforge.registries.ForgeRegistries;
 
 import javax.annotation.Nullable;
 import java.lang.invoke.MethodHandle;
@@ -33,6 +36,7 @@ import java.lang.invoke.MethodHandles;
 import java.lang.invoke.MethodType;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -78,6 +82,9 @@ public final class VS2Compat {
     private static Method aabbMinX;
     private static Method aabbMinY;
     private static Method aabbMinZ;
+    private static Method aabbMaxX;
+    private static Method aabbMaxY;
+    private static Method aabbMaxZ;
     private static Method getContraption;
     private static Method getSeats;
     private static Method getSeatMapping;
@@ -299,6 +306,36 @@ public final class VS2Compat {
                 ((Number) aabbMinX.invoke(box)).intValue(),
                 ((Number) aabbMinY.invoke(box)).intValue(),
                 ((Number) aabbMinZ.invoke(box)).intValue());
+        } catch (Throwable ignored) {
+        }
+        return null;
+    }
+
+    /**
+     * Maximum corner of the ship's voxel AABB in shipyard (block) space; null when
+     * VS2 has no AABB for the ship or reflection fails. Mirrors {@link #getShipyardMin}.
+     */
+    @Nullable
+    public static BlockPos getShipyardMax(@Nullable Object ship) {
+        if (ship == null || shipGetAABB == null) {
+            return null;
+        }
+        try {
+            Object box = shipGetAABB.invoke(ship);
+            if (box == null) {
+                return null;
+            }
+            synchronized (VS2Compat.class) {
+                if (aabbMaxX == null || aabbMaxX.getDeclaringClass() != box.getClass()) {
+                    aabbMaxX = box.getClass().getMethod("maxX");
+                    aabbMaxY = box.getClass().getMethod("maxY");
+                    aabbMaxZ = box.getClass().getMethod("maxZ");
+                }
+            }
+            return new BlockPos(
+                ((Number) aabbMaxX.invoke(box)).intValue(),
+                ((Number) aabbMaxY.invoke(box)).intValue(),
+                ((Number) aabbMaxZ.invoke(box)).intValue());
         } catch (Throwable ignored) {
         }
         return null;
@@ -688,13 +725,17 @@ public final class VS2Compat {
         return null;
     }
 
+    /** Volume cap for the full-ship seat scan so huge hulls cannot stall the server thread. */
+    private static final long MAX_STATIC_SCAN_VOLUME = 500_000L;
+
     /**
-     * Unoccupied Create SeatBlocks belonging to the given ship, scanned outward from
-     * worldCenter (same scan shape as the auto-transport seat fallback and /transport inspect).
-     * The anchor is a world-space position, but a ship's blocks live in shipyard space:
-     * the anchor is converted via the ship's world-to-ship transform (ship-local ≡
-     * shipyard in VS2.3, same convention as tryStaticSeat's getMountPosInShip origin)
-     * so the scan actually sees the ship's SeatBlocks.
+     * Unoccupied Create SeatBlocks belonging to the given ship, found by scanning the
+     * ship's WHOLE voxel AABB in shipyard space (free seats can sit anywhere on a large
+     * ship; a box around the clicked anchor misses them). Falls back to a box around
+     * the converted anchor when VS2 exposes no voxel AABB. Columns in unloaded shipyard
+     * chunks are skipped so the scan never forces chunk loads. Every click also logs a
+     * per-ship block census and a block-type histogram of the target ship's blocks, so
+     * a scan that finds no seats still identifies what the ship is built from.
      */
     public static List<BlockPos> findFreeStaticSeats(Level level, Object ship, Vec3 worldCenter, int maxSeats) {
         List<BlockPos> seats = new ArrayList<>();
@@ -702,60 +743,194 @@ public final class VS2Compat {
         if (!available || ship == null || maxSeats <= 0 || !(level instanceof ServerLevel serverLevel)) {
             return seats;
         }
-        int seatBlocks = 0;
-        int rejectedShip = 0;
-        int occupiedSeats = 0;
-        int nonAirBlocks = 0;
-        List<String> sampleBlocks = new ArrayList<>();
         try {
             long shipId = ((Number) getShipId.invoke(ship)).longValue();
             Vec3 shipLocalCenter = worldToShipLocal(ship, worldCenter);
-            BlockPos origin = BlockPos.containing(shipLocalCenter != null ? shipLocalCenter : worldCenter);
-            StevesArmyMod.LOGGER.info("[Crew] static seat scan: shipId={} anchorWorld={} -> origin={} ({}), originBlock={}",
-                shipId, formatVec3(worldCenter), origin,
-                shipLocalCenter != null ? "ship-space" : "raw world fallback",
-                level.getBlockState(origin).getBlock());
-            for (int radius = 0; radius <= 10 && seats.size() < maxSeats; radius++) {
-                for (int x = -radius; x <= radius && seats.size() < maxSeats; x++) {
-                    for (int z = -radius; z <= radius && seats.size() < maxSeats; z++) {
-                        if (Math.max(Math.abs(x), Math.abs(z)) != radius) {
+            BlockPos anchor = BlockPos.containing(shipLocalCenter != null ? shipLocalCenter : worldCenter);
+
+            BlockPos aabbMin = getShipyardMin(ship);
+            BlockPos aabbMax = getShipyardMax(ship);
+            BlockPos scanMin;
+            BlockPos scanMax;
+            String regionSource;
+            if (aabbMin != null && aabbMax != null) {
+                scanMin = aabbMin;
+                scanMax = aabbMax;
+                regionSource = "voxel-aabb";
+            } else {
+                scanMin = anchor.offset(-16, -8, -16);
+                scanMax = anchor.offset(16, 8, 16);
+                regionSource = "anchor-box(no-aabb)";
+            }
+            // Bound the work for huge hulls: clip to anchor ±48/±24 so the scan stays
+            // near where the player is aiming even on ship-sized regions.
+            long volume = (long) (scanMax.getX() - scanMin.getX() + 1)
+                * (scanMax.getY() - scanMin.getY() + 1) * (scanMax.getZ() - scanMin.getZ() + 1);
+            if (volume > MAX_STATIC_SCAN_VOLUME) {
+                scanMin = new BlockPos(
+                    Math.max(scanMin.getX(), anchor.getX() - 48),
+                    Math.max(scanMin.getY(), anchor.getY() - 24),
+                    Math.max(scanMin.getZ(), anchor.getZ() - 48));
+                scanMax = new BlockPos(
+                    Math.min(scanMax.getX(), anchor.getX() + 48),
+                    Math.min(scanMax.getY(), anchor.getY() + 24),
+                    Math.min(scanMax.getZ(), anchor.getZ() + 48));
+                regionSource += "+clipped";
+            }
+
+            StevesArmyMod.LOGGER.info("[Crew] static seat scan: shipId={} anchorWorld={} anchorShipSpace={} region={} {}..{}",
+                shipId, formatVec3(worldCenter), anchor, regionSource, scanMin, scanMax);
+
+            // Ship attribution is chunk-granular in VS2, so resolve it once per chunk.
+            Map<Long, Long> chunkShipIds = new HashMap<>();
+            Map<Long, Integer> perShipBlocks = new HashMap<>();
+            Map<String, Integer> shipBlockTypes = new HashMap<>();
+            int seatBlocks = 0;
+            int occupiedSeats = 0;
+            int unloadedColumns = 0;
+            int scannedBlocks = 0;
+
+            for (int x = scanMin.getX(); x <= scanMax.getX(); x++) {
+                for (int z = scanMin.getZ(); z <= scanMax.getZ(); z++) {
+                    if (!isChunkLoaded(serverLevel, new BlockPos(x, scanMin.getY(), z))) {
+                        unloadedColumns++;
+                        continue;
+                    }
+                    for (int y = scanMin.getY(); y <= scanMax.getY(); y++) {
+                        BlockPos candidate = new BlockPos(x, y, z);
+                        BlockState blockState = level.getBlockState(candidate);
+                        if (blockState.isAir()) {
                             continue;
                         }
-                        for (int y = -2; y <= 2 && seats.size() < maxSeats; y++) {
-                            BlockPos candidate = origin.offset(x, y, z);
-                            BlockState blockState = level.getBlockState(candidate);
-                            if (!blockState.isAir()) {
-                                nonAirBlocks++;
-                                String blockName = blockState.getBlock().toString();
-                                if (sampleBlocks.size() < 5 && !sampleBlocks.contains(blockName)) {
-                                    sampleBlocks.add(blockName);
-                                }
-                            }
-                            if (!createSeatBlockClass.isInstance(blockState.getBlock())) {
-                                continue;
-                            }
-                            seatBlocks++;
-                            Object seatShip = reflect(getShipObjectManagingPos, level, candidate);
-                            if (seatShip == null || ((Number) getShipId.invoke(seatShip)).longValue() != shipId) {
-                                rejectedShip++;
-                                continue;
-                            }
-                            if (isCreateSeatOccupied(serverLevel, candidate)) {
-                                occupiedSeats++;
-                                continue;
-                            }
-                            seats.add(candidate);
+                        scannedBlocks++;
+                        Long chunkKey = ChunkPos.asLong(x >> 4, z >> 4);
+                        Long cachedShipId = chunkShipIds.get(chunkKey);
+                        if (cachedShipId == null) {
+                            cachedShipId = resolveManagingShipId(level, x, scanMin.getY(), z);
+                            chunkShipIds.put(chunkKey, cachedShipId);
                         }
+                        long managingShipId = cachedShipId;
+                        perShipBlocks.merge(managingShipId, 1, Integer::sum);
+                        if (managingShipId != shipId) {
+                            continue;
+                        }
+                        shipBlockTypes.merge(registryName(blockState), 1, Integer::sum);
+                        if (!createSeatBlockClass.isInstance(blockState.getBlock())) {
+                            continue;
+                        }
+                        seatBlocks++;
+                        if (isCreateSeatOccupied(serverLevel, candidate)) {
+                            occupiedSeats++;
+                            continue;
+                        }
+                        seats.add(candidate);
                     }
                 }
             }
+            seats.sort(Comparator.comparingDouble(pos -> pos.distSqr(anchor)));
+
+            int shipBlockTotal = 0;
+            List<Map.Entry<String, Integer>> types = new ArrayList<>(shipBlockTypes.entrySet());
+            types.sort(Map.Entry.<String, Integer>comparingByValue().reversed());
+            List<String> topBlocks = new ArrayList<>();
+            List<String> seatSuspects = new ArrayList<>();
+            for (Map.Entry<String, Integer> type : types) {
+                shipBlockTotal += type.getValue();
+                if (topBlocks.size() < 8) {
+                    topBlocks.add(type.getKey() + " x" + type.getValue());
+                }
+                String name = type.getKey();
+                if ((name.contains("seat") || name.contains("chair") || name.contains("bench"))
+                    && !name.equals("create:seat")) {
+                    seatSuspects.add(name + " x" + type.getValue());
+                }
+            }
+
+            List<String> shipCounts = new ArrayList<>();
+            List<Map.Entry<Long, Integer>> ships = new ArrayList<>(perShipBlocks.entrySet());
+            ships.sort(Map.Entry.<Long, Integer>comparingByValue().reversed());
+            for (Map.Entry<Long, Integer> entry : ships) {
+                if (shipCounts.size() >= 4) {
+                    break;
+                }
+                shipCounts.add((entry.getKey() == -1L ? "world" : entry.getKey()) + ":" + entry.getValue());
+            }
+
             StevesArmyMod.LOGGER.info(
-                "[Crew] static seat scan result: shipId={} origin={} seatBlocks={} shipRejected={} occupied={} nonAirBlocks={} sampleBlocks={}",
-                shipId, origin, seatBlocks, rejectedShip, occupiedSeats, nonAirBlocks, sampleBlocks);
+                "[Crew] static seat scan result: shipId={} scannedBlocks={} unloadedColumns={} perShipBlocks=[{}] shipBlocks={} seatBlocks={} occupied={} free={} topBlocks=[{}] seatSuspects=[{}]",
+                shipId, scannedBlocks, unloadedColumns, String.join(", ", shipCounts),
+                shipBlockTotal, seatBlocks, occupiedSeats, seats.size(),
+                String.join(", ", topBlocks), String.join(", ", seatSuspects));
         } catch (ReflectiveOperationException exception) {
             logReflectionFailure(exception);
         }
         return seats;
+    }
+
+    /** Id of the ship managing the block at the given coords, or -1 (world/unmanaged). */
+    private static long resolveManagingShipId(Level level, int x, int y, int z) {
+        try {
+            Object manager = reflect(getShipObjectManagingPos, level, new BlockPos(x, y, z));
+            return manager == null ? -1L : ((Number) getShipId.invoke(manager)).longValue();
+        } catch (ReflectiveOperationException exception) {
+            return -1L;
+        }
+    }
+
+    /** Compact "modid:path" name of the block held by the given state. */
+    private static String registryName(BlockState state) {
+        ResourceLocation key = ForgeRegistries.BLOCKS.getKey(state.getBlock());
+        return key == null ? state.getBlock().toString() : key.toString();
+    }
+
+    /**
+     * One-click inventory of every entity tied to the ship: entities VS2 reports as
+     * mounted to it, plus any Create/tallyho seat entity whose raw (shipyard) position
+     * falls inside the ship's voxel AABB. Identifies entity-based seats that a block
+     * scan can never see.
+     */
+    public static void logShipEntityCensus(ServerLevel level, Object ship, Vec3 anchorWorld) {
+        if (!available || ship == null) {
+            return;
+        }
+        try {
+            long shipId = ((Number) getShipId.invoke(ship)).longValue();
+            BlockPos aabbMin = getShipyardMin(ship);
+            BlockPos aabbMax = getShipyardMax(ship);
+            List<String> details = new ArrayList<>();
+            int matched = 0;
+            for (Entity entity : level.getAllEntities()) {
+                if (entity.isRemoved()) {
+                    continue;
+                }
+                boolean mountedHere = false;
+                Object mountedTo = reflect(getShipMountedTo, entity);
+                if (mountedTo != null
+                    && ((Number) getShipId.invoke(mountedTo)).longValue() == shipId) {
+                    mountedHere = true;
+                }
+                boolean seatInAabb = false;
+                if (!mountedHere && isCreateSeatEntity(entity) && aabbMin != null && aabbMax != null) {
+                    BlockPos pos = entity.blockPosition();
+                    seatInAabb = pos.getX() >= aabbMin.getX() - 2 && pos.getX() <= aabbMax.getX() + 2
+                        && pos.getY() >= aabbMin.getY() - 2 && pos.getY() <= aabbMax.getY() + 2
+                        && pos.getZ() >= aabbMin.getZ() - 2 && pos.getZ() <= aabbMax.getZ() + 2;
+                }
+                if (!mountedHere && !seatInAabb) {
+                    continue;
+                }
+                matched++;
+                if (details.size() < 10) {
+                    details.add(entity.getClass().getSimpleName() + "#"
+                        + entity.getId() + " pos=" + entity.blockPosition()
+                        + " passengers=" + entity.getPassengers().size());
+                }
+            }
+            StevesArmyMod.LOGGER.info("[Crew] ship entity census: shipId={} anchor={} matched={} details=[{}]",
+                shipId, formatVec3(anchorWorld), matched, String.join(", ", details));
+        } catch (ReflectiveOperationException exception) {
+            logReflectionFailure(exception);
+        }
     }
 
     /**
