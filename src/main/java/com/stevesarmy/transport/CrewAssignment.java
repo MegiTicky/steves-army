@@ -139,8 +139,9 @@ public final class CrewAssignment {
             }
             if (!remaining.isEmpty()) {
                 StevesArmyMod.LOGGER.warn(
-                    "[Crew] {} of {} crew could not be seated on shipId={} at anchor {}: no free handle/static seats, {} raw seat entities in reach",
-                    remaining.size(), crew.size(), shipId, anchorWorld, seatEntities.size());
+                    "[Crew] {} of {} crew could not be seated on shipId={} at anchor {}: no free handle/static seats (last static scan: {}), {} raw seat entities in reach",
+                    remaining.size(), crew.size(), shipId, anchorWorld,
+                    VS2Compat.getLastStaticScanSummary(), seatEntities.size());
             }
         }
 

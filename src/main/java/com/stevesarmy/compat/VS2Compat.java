@@ -9,6 +9,7 @@ import com.stevesarmy.squad.SquadMode;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Vec3i;
 import net.minecraft.network.protocol.game.ClientboundSetPassengersPacket;
+import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
@@ -799,6 +800,14 @@ public final class VS2Compat {
     /** Volume cap for the full-ship seat scan so huge hulls cannot stall the server thread. */
     private static final long MAX_STATIC_SCAN_VOLUME = 500_000L;
 
+    /** Seat/occupancy counts from the most recent static seat scan (server thread only). */
+    private static volatile String lastStaticScanSummary = "never-run";
+
+    /** Summary of the most recent {@link #findFreeStaticSeats} call, for failure messages. */
+    public static String getLastStaticScanSummary() {
+        return lastStaticScanSummary;
+    }
+
     /**
      * Unoccupied Create SeatBlocks belonging to the given ship, found by scanning the
      * ship's WHOLE voxel AABB in shipyard space (free seats can sit anywhere on a large
@@ -932,6 +941,8 @@ public final class VS2Compat {
                 shipId, scannedBlocks, unloadedColumns, String.join(", ", shipCounts),
                 shipBlockTotal, seatBlocks, occupiedSeats, seats.size(),
                 String.join(", ", topBlocks), String.join(", ", seatSuspects));
+            lastStaticScanSummary = "seatBlocks=" + seatBlocks + " occupied=" + occupiedSeats
+                + " free=" + seats.size();
         } catch (ReflectiveOperationException exception) {
             logReflectionFailure(exception);
         }
@@ -992,9 +1003,15 @@ public final class VS2Compat {
                 }
                 matched++;
                 if (details.size() < 10) {
-                    details.add(entity.getClass().getSimpleName() + "#"
-                        + entity.getId() + " pos=" + entity.blockPosition()
-                        + " passengers=" + entity.getPassengers().size());
+                    List<String> riders = new ArrayList<>();
+                    for (Entity passenger : entity.getPassengers()) {
+                        riders.add(describeEntity(passenger));
+                    }
+                    details.add(describeEntity(entity)
+                        + " pos=" + entity.blockPosition()
+                        + " riders=[" + String.join(", ", riders) + "]"
+                        + " vehicle=" + (entity.getVehicle() == null ? "none"
+                            : describeEntity(entity.getVehicle())));
                 }
             }
             StevesArmyMod.LOGGER.info("[Crew] ship entity census: shipId={} anchor={} matched={} details=[{}]",
@@ -1002,6 +1019,23 @@ public final class VS2Compat {
         } catch (ReflectiveOperationException exception) {
             logReflectionFailure(exception);
         }
+    }
+
+    /**
+     * Short identity of an entity for the census: class, id, name, health when living,
+     * and aliveness — enough to tell a seated crew member from a seat-riding-seat
+     * stack or a stale tallyho seat.
+     */
+    private static String describeEntity(Entity entity) {
+        StringBuilder description = new StringBuilder(entity.getClass().getSimpleName())
+            .append('#').append(entity.getId());
+        Component name = entity.getCustomName();
+        description.append(" '").append(name == null ? entity.getName().getString() : name.getString()).append('\'');
+        if (entity instanceof LivingEntity living) {
+            description.append(" hp=").append(living.getHealth());
+        }
+        description.append(entity.isAlive() ? " alive" : " DEAD");
+        return description.toString();
     }
 
     /**
@@ -1557,14 +1591,26 @@ public final class VS2Compat {
         return false;
     }
 
+    /**
+     * Occupied only when a seat entity at {@code position} actually carries an alive
+     * rider: Create's empty SeatEntities self-discard, but tallyho FlexibleSeatEntities
+     * persist forever when empty, and a bare entity at the block coords must not block
+     * a seat block. Seat entities riding each other (leftover from raw-mount tests)
+     * count as unoccupied too — the census logs the rider stack so false negatives
+     * stay diagnosable.
+     */
     private static boolean isCreateSeatOccupied(Level level, BlockPos position) {
         if (!(level instanceof ServerLevel serverLevel)) {
             return false;
         }
         for (Entity seat : serverLevel.getAllEntities()) {
-            if (createSeatEntityClass.isInstance(seat) && seat.blockPosition().equals(position)
-            ) {
-                return true;
+            if (!createSeatEntityClass.isInstance(seat) || !seat.blockPosition().equals(position)) {
+                continue;
+            }
+            for (Entity passenger : seat.getPassengers()) {
+                if (passenger != null && passenger.isAlive()) {
+                    return true;
+                }
             }
         }
         return false;
