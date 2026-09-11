@@ -702,10 +702,17 @@ public final class VS2Compat {
         if (!available || ship == null || maxSeats <= 0 || !(level instanceof ServerLevel serverLevel)) {
             return seats;
         }
+        int seatBlocks = 0;
+        int rejectedShip = 0;
+        int occupiedSeats = 0;
         try {
             long shipId = ((Number) getShipId.invoke(ship)).longValue();
             Vec3 shipLocalCenter = worldToShipLocal(ship, worldCenter);
             BlockPos origin = BlockPos.containing(shipLocalCenter != null ? shipLocalCenter : worldCenter);
+            StevesArmyMod.LOGGER.info("[Crew] static seat scan: shipId={} anchorWorld={} -> origin={} ({}), originBlock={}",
+                shipId, formatVec3(worldCenter), origin,
+                shipLocalCenter != null ? "ship-space" : "raw world fallback",
+                level.getBlockState(origin).getBlock());
             for (int radius = 0; radius <= 10 && seats.size() < maxSeats; radius++) {
                 for (int x = -radius; x <= radius && seats.size() < maxSeats; x++) {
                     for (int z = -radius; z <= radius && seats.size() < maxSeats; z++) {
@@ -718,11 +725,14 @@ public final class VS2Compat {
                             if (!createSeatBlockClass.isInstance(blockState.getBlock())) {
                                 continue;
                             }
+                            seatBlocks++;
                             Object seatShip = reflect(getShipObjectManagingPos, level, candidate);
                             if (seatShip == null || ((Number) getShipId.invoke(seatShip)).longValue() != shipId) {
+                                rejectedShip++;
                                 continue;
                             }
                             if (isCreateSeatOccupied(serverLevel, candidate)) {
+                                occupiedSeats++;
                                 continue;
                             }
                             seats.add(candidate);
@@ -730,6 +740,8 @@ public final class VS2Compat {
                     }
                 }
             }
+            StevesArmyMod.LOGGER.info("[Crew] static seat scan result: shipId={} origin={} seatBlocks={} shipRejected={} occupied={}",
+                shipId, origin, seatBlocks, rejectedShip, occupiedSeats);
         } catch (ReflectiveOperationException exception) {
             logReflectionFailure(exception);
         }
