@@ -313,13 +313,19 @@ public final class VS2Compat {
     /** Id of the ship managing the given world/shipyard position, or null. */
     @Nullable
     public static Long getShipIdAt(Level level, double x, double y, double z) {
+        Object ship = getShipObjectAtWorldPos(level, x, y, z);
+        return ship == null ? null : getShipIdOf(ship);
+    }
+
+    /** Ship object managing the given world position, or null. */
+    @Nullable
+    public static Object getShipObjectAtWorldPos(Level level, double x, double y, double z) {
         initialize();
         if (!available) {
             return null;
         }
         try {
-            Object ship = reflect(getShipObjectManagingPosDouble, level, x, y, z);
-            return getShipIdOf(ship);
+            return reflect(getShipObjectManagingPosDouble, level, x, y, z);
         } catch (ReflectiveOperationException exception) {
             return null;
         }
@@ -362,96 +368,6 @@ public final class VS2Compat {
             }
         }
         return seat.position();
-    }
-
-    /**
-     * First Create/VSAW seat entity the view ray passes through within reach, or null.
-     * Seats on ships live at shipyard coordinates, and VS2's MixinLevel rewrites the
-     * query box of every Level.getEntities call (shipyard boxes are pushed back to
-     * world space), so ProjectileUtil-based picking can never see them from either
-     * frame. All loaded entities are therefore enumerated directly and the view ray
-     * is tested against each seat's bounding box translated to world space — pure
-     * math, no level entity queries.
-     */
-    @Nullable
-    public static Entity findSeatAlongLook(Player player, double reach) {
-        initialize();
-        if (createSeatEntityClass == null) {
-            StevesArmyMod.LOGGER.info("[CrewStick] pick skipped: Create SeatEntity class unresolved");
-            return null;
-        }
-        Level level = player.level();
-        Vec3 eye = player.getEyePosition();
-        Vec3 end = eye.add(player.getLookAngle().scale(reach));
-
-        Entity best = null;
-        Vec3 bestWorldPos = null;
-        double bestDistSqr = Double.MAX_VALUE;
-        int seatEntitiesSeen = 0;
-        for (Entity entity : allEntities(level)) {
-            if (entity.isRemoved() || !entity.isAlive()
-                || !createSeatEntityClass.isInstance(entity)) {
-                continue;
-            }
-            seatEntitiesSeen++;
-            Vec3 raw = entity.position();
-            Vec3 worldPos = raw;
-            Object ship = shipAtRawPosition(level, raw);
-            if (ship != null) {
-                Vec3 transformed = shipToWorldPosition(ship, raw);
-                if (transformed == null) {
-                    continue;
-                }
-                worldPos = transformed;
-            }
-            AABB worldBox = entity.getBoundingBox()
-                .move(worldPos.x - raw.x, worldPos.y - raw.y, worldPos.z - raw.z)
-                .inflate(entity.getPickRadius());
-            Optional<Vec3> hit = worldBox.clip(eye, end);
-            if (hit.isEmpty()) {
-                StevesArmyMod.LOGGER.info("[CrewStick] pick: seat={} raw={} world={} eye={} ray missed AABB",
-                    entity.getId(), formatVec3(raw), formatVec3(worldPos), formatVec3(eye));
-                continue;
-            }
-            double distSqr = eye.distanceToSqr(hit.get());
-            if (distSqr < bestDistSqr) {
-                bestDistSqr = distSqr;
-                best = entity;
-                bestWorldPos = worldPos;
-            }
-        }
-        if (best != null) {
-            StevesArmyMod.LOGGER.info("[Crew] seat pick: entity={} world={}",
-                best.getId(), formatVec3(bestWorldPos));
-        } else {
-            StevesArmyMod.LOGGER.info(
-                "[CrewStick] pick miss: seat entities seen={} (empty Create seats discard their entity - ships hold SeatBlocks, not entities)",
-                seatEntitiesSeen);
-        }
-        return best;
-    }
-
-    /** All loaded entities on either side (server: getAllEntities, client: entitiesForRendering). */
-    private static Iterable<Entity> allEntities(Level level) {
-        if (level instanceof ServerLevel serverLevel) {
-            return serverLevel.getAllEntities();
-        }
-        // Client branch only ever executes on the physical client, so the
-        // ClientLevel reference never resolves on a dedicated server.
-        return ((net.minecraft.client.multiplayer.ClientLevel) level).entitiesForRendering();
-    }
-
-    /** Ship managing the given raw (shipyard or world) position, or null. */
-    @Nullable
-    private static Object shipAtRawPosition(Level level, Vec3 raw) {
-        if (!available) {
-            return null;
-        }
-        try {
-            return reflect(getShipObjectManagingPosDouble, level, raw.x, raw.y, raw.z);
-        } catch (ReflectiveOperationException exception) {
-            return null;
-        }
     }
 
     /**
@@ -775,6 +691,10 @@ public final class VS2Compat {
     /**
      * Unoccupied Create SeatBlocks belonging to the given ship, scanned outward from
      * worldCenter (same scan shape as the auto-transport seat fallback and /transport inspect).
+     * The anchor is a world-space position, but a ship's blocks live in shipyard space:
+     * the anchor is converted via the ship's world-to-ship transform (ship-local ≡
+     * shipyard in VS2.3, same convention as tryStaticSeat's getMountPosInShip origin)
+     * so the scan actually sees the ship's SeatBlocks.
      */
     public static List<BlockPos> findFreeStaticSeats(Level level, Object ship, Vec3 worldCenter, int maxSeats) {
         List<BlockPos> seats = new ArrayList<>();
@@ -784,7 +704,8 @@ public final class VS2Compat {
         }
         try {
             long shipId = ((Number) getShipId.invoke(ship)).longValue();
-            BlockPos origin = BlockPos.containing(worldCenter);
+            Vec3 shipLocalCenter = worldToShipLocal(ship, worldCenter);
+            BlockPos origin = BlockPos.containing(shipLocalCenter != null ? shipLocalCenter : worldCenter);
             for (int radius = 0; radius <= 10 && seats.size() < maxSeats; radius++) {
                 for (int x = -radius; x <= radius && seats.size() < maxSeats; x++) {
                     for (int z = -radius; z <= radius && seats.size() < maxSeats; z++) {
@@ -860,15 +781,28 @@ public final class VS2Compat {
      */
     public static double getShipAwareBlockHitDistance(Level level, Vec3 from, Vec3 to,
                                                        @Nullable Entity source) {
+        Vec3 hit = getShipAwareBlockHitLocation(level, from, to, source);
+        return hit == null ? Double.POSITIVE_INFINITY : from.distanceTo(hit);
+    }
+
+    /**
+     * World-space location of the nearest ship-aware block hit along the ray, or null.
+     * Used by the crew stick/egg to anchor on the ship the player is aiming at — the
+     * soldier-flow way (ship + anchor position, never via a seat entity: empty Create
+     * seats discard their entity, so ships hold SeatBlocks, not pickable entities).
+     */
+    @Nullable
+    public static Vec3 getShipAwareBlockHitLocation(Level level, Vec3 from, Vec3 to,
+                                                    @Nullable Entity source) {
         if (!isEnabled()) {
-            return Double.POSITIVE_INFINITY;
+            return null;
         }
         // Fail closed on absurd endpoints: a clip mixing world and shipyard
         // coordinates would march through unloaded chunks with blocking loads
         // and freeze the server tick.
         if (Math.abs(from.x) > 1.0E6D || Math.abs(from.z) > 1.0E6D
             || Math.abs(to.x) > 1.0E6D || Math.abs(to.z) > 1.0E6D) {
-            return Double.POSITIVE_INFINITY;
+            return null;
         }
 
         try {
@@ -889,17 +823,17 @@ public final class VS2Compat {
                     || (vanillaHit.getType() == HitResult.Type.BLOCK
                         && hit.getLocation().distanceToSqr(from)
                             >= vanillaHit.getLocation().distanceToSqr(from))) {
-                    return Double.POSITIVE_INFINITY;
+                    return null;
                 }
             }
             if (hit.getType() != HitResult.Type.BLOCK) {
-                return Double.POSITIVE_INFINITY;
+                return null;
             }
 
-            return from.distanceTo(hit.getLocation());
+            return hit.getLocation();
         } catch (ReflectiveOperationException | RuntimeException exception) {
             logReflectionFailure(exception);
-            return Double.POSITIVE_INFINITY;
+            return null;
         }
     }
 

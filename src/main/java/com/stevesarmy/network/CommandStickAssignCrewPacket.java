@@ -12,6 +12,7 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.network.NetworkEvent;
 
 import java.util.ArrayList;
@@ -19,21 +20,29 @@ import java.util.List;
 import java.util.function.Supplier;
 
 /**
- * Crew assign stick: assign the client-selected crew to the shift-clicked seat, then
- * to the seat ship's other free seats. The server re-validates the held item, seat,
- * and every crew id.
+ * Crew assign stick: assign the client-selected crew to free seats on the ship under
+ * the clicked block. The server re-validates the held item and every crew id, resolves
+ * the ship from the anchor (crosshair ship first, else the ship near the player), and
+ * seats crew through the shared infantry MOUNT machinery ({@link CrewAssignment}) —
+ * the soldier flow: ship + anchor position, never a specific seat entity.
  */
 public class CommandStickAssignCrewPacket {
-    private final int seatEntityId;
+    private final double x;
+    private final double y;
+    private final double z;
     private final List<Integer> crewIds;
 
-    public CommandStickAssignCrewPacket(int seatEntityId, List<Integer> crewIds) {
-        this.seatEntityId = seatEntityId;
+    public CommandStickAssignCrewPacket(Vec3 anchor, List<Integer> crewIds) {
+        this.x = anchor.x;
+        this.y = anchor.y;
+        this.z = anchor.z;
         this.crewIds = List.copyOf(crewIds);
     }
 
     public CommandStickAssignCrewPacket(FriendlyByteBuf buf) {
-        this.seatEntityId = buf.readVarInt();
+        this.x = buf.readDouble();
+        this.y = buf.readDouble();
+        this.z = buf.readDouble();
         int count = buf.readVarInt();
         List<Integer> ids = new ArrayList<>(count);
         for (int i = 0; i < count; i++) {
@@ -43,7 +52,9 @@ public class CommandStickAssignCrewPacket {
     }
 
     public static void encode(CommandStickAssignCrewPacket msg, FriendlyByteBuf buf) {
-        buf.writeVarInt(msg.seatEntityId);
+        buf.writeDouble(msg.x);
+        buf.writeDouble(msg.y);
+        buf.writeDouble(msg.z);
         buf.writeVarInt(msg.crewIds.size());
         for (int id : msg.crewIds) {
             buf.writeVarInt(id);
@@ -62,14 +73,16 @@ public class CommandStickAssignCrewPacket {
                     mainHand.getItem());
                 return;
             }
-            Entity seat = level.getEntity(msg.seatEntityId);
-            if (seat == null || seat.isRemoved() || !VS2Compat.isCreateSeatEntity(seat)) {
-                StevesArmyMod.LOGGER.info(
-                    "[CrewStick] packet dropped: seat id {} -> {} (removed={}, createSeat={})",
-                    msg.seatEntityId,
-                    seat == null ? "null" : seat.getClass().getSimpleName(),
-                    seat != null && seat.isRemoved(),
-                    seat != null && VS2Compat.isCreateSeatEntity(seat));
+            Vec3 anchor = new Vec3(msg.x, msg.y, msg.z);
+            Object ship = VS2Compat.getShipObjectAtWorldPos(level, msg.x, msg.y, msg.z);
+            if (ship == null) {
+                ship = VS2Compat.resolveMountShipNearPlayer(level, sender);
+            }
+            if (ship == null) {
+                StevesArmyMod.LOGGER.info("[CrewStick] packet dropped: no ship at anchor {} or near player",
+                    anchor);
+                sender.displayClientMessage(
+                    Component.translatable("transport.steves_army.feedback.no_vehicle"), true);
                 return;
             }
             List<SoldierEntity> crew = new ArrayList<>();
@@ -88,9 +101,9 @@ public class CommandStickAssignCrewPacket {
                     msg.crewIds.size());
                 return;
             }
-            StevesArmyMod.LOGGER.info("[CrewStick] packet accepted: seat={} crew={}/{}",
-                seat.getId(), crew.size(), msg.crewIds.size());
-            int seated = CrewAssignment.assignToClickedSeat(level, seat, crew);
+            StevesArmyMod.LOGGER.info("[CrewStick] packet accepted: anchor={} crew={}/{} shipId={}",
+                anchor, crew.size(), msg.crewIds.size(), VS2Compat.getShipIdOf(ship));
+            int seated = CrewAssignment.mountCrewOnShip(level, ship, anchor, crew);
             sender.displayClientMessage(
                 Component.translatable("transport.steves_army.feedback.crew_assigned", seated, crew.size()), true);
         });

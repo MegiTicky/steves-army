@@ -25,7 +25,7 @@ import java.util.List;
  * (e.g. tallyho's FlexibleSeatEntity) the entity interact event fires, so handle the
  * crew stick and crew egg here too. Create's SeatEntity is not pickable and never
  * reaches this handler — the CrewAssignStickItem and VehicleCrewSpawnEggItem cover it
- * with their own view-ray raytrace. Cancelling here prevents the player from sitting
+ * with a ship-aware block raytrace. Cancelling here prevents the player from sitting
  * on the seat and stops the click falling through to the stick's reposition action.
  */
 @Mod.EventBusSubscriber(modid = StevesArmyMod.MODID)
@@ -53,7 +53,10 @@ public final class CrewSeatInteractHandler {
                 if (selected.isEmpty()) {
                     player.displayClientMessage(Component.literal("No crew selected"), true);
                 } else {
-                    NetworkHandler.INSTANCE.sendToServer(new CommandStickAssignCrewPacket(target.getId(), selected));
+                    // Anchor on the clicked seat's world position — the same
+                    // position-based packet the block raytrace sends.
+                    NetworkHandler.INSTANCE.sendToServer(new CommandStickAssignCrewPacket(
+                        VS2Compat.getSeatWorldPosition(target), selected));
                 }
             }
             event.setCanceled(true);
@@ -64,7 +67,8 @@ public final class CrewSeatInteractHandler {
         if (mainHand.getItem() instanceof VehicleCrewSpawnEggItem) {
             if (!event.getLevel().isClientSide) {
                 VehicleCrewSpawnEggItem.spawnCrewOnSeat(
-                    (net.minecraft.server.level.ServerLevel) event.getLevel(), target, player, mainHand);
+                    (net.minecraft.server.level.ServerLevel) event.getLevel(),
+                    VS2Compat.getSeatWorldPosition(target), player, mainHand);
             }
             event.setCanceled(true);
             event.setCancellationResult(InteractionResult.SUCCESS);
