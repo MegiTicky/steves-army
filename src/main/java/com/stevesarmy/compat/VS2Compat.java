@@ -7,6 +7,7 @@ import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.entity.SoldierRole;
 import com.stevesarmy.squad.SquadMode;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.core.Vec3i;
 import net.minecraft.network.protocol.game.ClientboundSetPassengersPacket;
 import net.minecraft.network.chat.Component;
@@ -403,19 +404,64 @@ public final class VS2Compat {
                 }
             }
 
-            Long managingId = getShipIdOf(managingShip);
-            Object selected = null;
-            String decision;
-            if (managingShip != null && managingId != null) {
-                for (int i = 0; i < intersecting.size(); i++) {
-                    Long candidateId = getShipIdOf(intersecting.get(i));
-                    if (managingId.equals(candidateId)) {
-                        selected = intersecting.get(i);
-                        break;
+            // Geometric pick for multi-ship builds (tanks assembled as several stacked
+            // ships): the ship the player actually clicked is the one whose own voxel
+            // body contains the anchor, judged by the LOCAL block at the transformed
+            // position — not just AABB overlap, which every stacked sub-ship satisfies.
+            // A raycast hit lies on a block face, so BlockPos.containing can land in the
+            // neighbouring air block; the six face neighbours are checked too.
+            // Unloaded/no-transform candidates are "unavailable": invisible to the
+            // geometric tiers but still reachable through the legacy fallbacks.
+            List<String> geoVerdicts = new ArrayList<>();
+            Object solidCandidate = null;
+            Object airCandidate = null;
+            Object managingInIntersecting = null;
+            ServerLevel serverLevel = level instanceof ServerLevel ? (ServerLevel) level : null;
+            for (Object candidate : intersecting) {
+                Long candidateId = getShipIdOf(candidate);
+                if (managingShip != null && managingInIntersecting == null
+                    && getShipIdOf(managingShip) != null && getShipIdOf(managingShip).equals(candidateId)) {
+                    managingInIntersecting = candidate;
+                }
+                String verdict;
+                Vec3 local = worldToShipLocal(candidate, anchor);
+                BlockPos converted = local == null ? null
+                    : BlockPos.containing(local.x, local.y, local.z);
+                BlockPos aabbMin = converted == null ? null : getShipyardMin(candidate);
+                BlockPos aabbMax = converted == null ? null : getShipyardMax(candidate);
+                boolean contained = converted != null && aabbMin != null && aabbMax != null
+                    && converted.getX() >= aabbMin.getX() - 1 && converted.getX() <= aabbMax.getX() + 1
+                    && converted.getY() >= aabbMin.getY() - 1 && converted.getY() <= aabbMax.getY() + 1
+                    && converted.getZ() >= aabbMin.getZ() - 1 && converted.getZ() <= aabbMax.getZ() + 1;
+                if (!contained) {
+                    verdict = local == null ? "no-transform" : "outside";
+                } else if (serverLevel == null || !isChunkLoaded(serverLevel, converted)) {
+                    verdict = "unloaded";
+                } else if (hasSolidBlockNear(serverLevel, converted)) {
+                    verdict = "contains-anchor-solid";
+                    if (solidCandidate == null) {
+                        solidCandidate = candidate;
+                    }
+                } else {
+                    verdict = "contains-anchor-air";
+                    if (airCandidate == null) {
+                        airCandidate = candidate;
                     }
                 }
+                geoVerdicts.add((candidateId == null ? "?" : candidateId) + ":" + verdict);
             }
-            if (selected != null) {
+
+            Long managingId = getShipIdOf(managingShip);
+            Object selected;
+            String decision;
+            if (solidCandidate != null) {
+                selected = solidCandidate;
+                decision = "contains-anchor-solid";
+            } else if (airCandidate != null) {
+                selected = airCandidate;
+                decision = "contains-anchor-air";
+            } else if (managingInIntersecting != null) {
+                selected = managingInIntersecting;
                 decision = "managing-match";
             } else if (intersecting.size() == 1) {
                 selected = intersecting.get(0);
@@ -424,13 +470,14 @@ public final class VS2Compat {
                 selected = managingShip;
                 decision = "no-intersection-managing-fallback";
             } else {
+                selected = null;
                 decision = "ambiguous-intersection-near-player-fallback";
             }
 
             StevesArmyMod.LOGGER.info(
-                "[VS2] crew anchor resolver: anchor={} managingShipId={} intersectingShipIds=[{}] selectedShipId={} decision={}",
+                "[VS2] crew anchor resolver: anchor={} managingShipId={} intersectingShipIds=[{}] geo=[{}] selectedShipId={} decision={}",
                 formatVec3(anchor), managingId, String.join(", ", candidateIds),
-                getShipIdOf(selected), decision);
+                String.join(", ", geoVerdicts), getShipIdOf(selected), decision);
             return selected;
         } catch (ReflectiveOperationException | RuntimeException exception) {
             StevesArmyMod.LOGGER.warn(
@@ -444,6 +491,23 @@ public final class VS2Compat {
     public static void markHandleDismount(SoldierEntity soldier) {
         getOrCreateState(soldier).handleDismountGraceTicks =
             StevesArmyConfig.VEHICLE_HANDLES_DISMOUNT_GRACE.get();
+    }
+
+    /**
+     * True when the block at {@code pos} or any face neighbour is non-air. Raycast hits
+     * lie on block faces, so {@code BlockPos.containing} at the hit point can land in
+     * the adjacent air block; the neighbours decide whether the hit touched this ship.
+     */
+    private static boolean hasSolidBlockNear(ServerLevel level, BlockPos pos) {
+        if (!level.getBlockState(pos).isAir()) {
+            return true;
+        }
+        for (Direction direction : Direction.values()) {
+            if (!level.getBlockState(pos.relative(direction)).isAir()) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** Remembers the handle owning a just-attached seat so later releases can exit at it. */
