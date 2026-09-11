@@ -466,7 +466,7 @@ public final class StationGunnerAI {
             state.target = best;
 
             ExposureCalculator.AimPointResult aimPoint =
-                ExposureCalculator.getBestAimPoint(state.soldier, best);
+                ExposureCalculator.getTopmostVisibleAimPoint(state.soldier, best);
             boolean inLos = TargetAcquisition.hasLineOfSight(state.soldier, best);
             updateAimQuality(state, best, inLos);
             if (aimPoint != null && aimPoint.canShoot() && inLos
@@ -603,7 +603,7 @@ public final class StationGunnerAI {
         }
 
         ExposureCalculator.AimPointResult aimPoint =
-            ExposureCalculator.getBestAimPoint(state.soldier, subject);
+            ExposureCalculator.getTopmostVisibleAimPoint(state.soldier, subject);
         boolean aimOk = aimPoint != null && aimPoint.canShoot();
         chain.add("aim=" + (aimOk ? aimPoint.type.displayName : "noShot"));
         if (blocker == null && !aimOk) {

@@ -286,6 +286,51 @@ public class ExposureCalculator {
         return new AimPointResult(target.getEyePosition(), AimPointType.FALLBACK, false, false, 1.0);
     }
 
+    /**
+     * Station-gunner aim-point selection. When the target is fully exposed this is
+     * the same priority pick as {@link #getBestAimPoint} (upper torso — biggest
+     * target). When any body point is blocked the target is partially covered:
+     * points just above the cover edge clear it by tenths of a block, less than
+     * the gun's dispersion at range, so rounds walk onto the cover. In that case
+     * the topmost visible point wins instead — it has the most clearance above
+     * the obstruction.
+     */
+    public static AimPointResult getTopmostVisibleAimPoint(LivingEntity observer, LivingEntity target) {
+        if (observer.level() != target.level()) {
+            return new AimPointResult(target.getEyePosition(), AimPointType.FALLBACK, false, false, 1.0);
+        }
+
+        net.minecraft.world.level.Level level = target.level();
+        Vec3 observerEye = DetectionViewpoint.getEyePosition(observer);
+
+        TargetPoint[] targetPoints = getTargetPointsWithPriority(target);
+
+        TargetPoint bestByPriority = null;
+        TargetPoint topmost = null;
+        boolean anyBlocked = false;
+
+        for (TargetPoint point : targetPoints) {
+            VisibilityRay.Result visibility = getVisibility(level, observerEye, point.position, observer, null);
+            if (visibility.hasContact()) {
+                if (bestByPriority == null || point.type.priority > bestByPriority.type.priority) {
+                    bestByPriority = point;
+                }
+                if (topmost == null || point.position.y > topmost.position.y) {
+                    topmost = point;
+                }
+            } else {
+                anyBlocked = true;
+            }
+        }
+
+        if (bestByPriority == null) {
+            return new AimPointResult(target.getEyePosition(), AimPointType.FALLBACK, false, false, 1.0);
+        }
+        TargetPoint chosen = anyBlocked ? topmost : bestByPriority;
+        VisibilityRay.Result visibility = getVisibility(level, observerEye, chosen.position, observer, null);
+        return new AimPointResult(chosen.position, chosen.type, true, true, visibility.concealment());
+    }
+
     private static TargetPoint[] getTargetPointsWithPriority(LivingEntity target) {
         Vec3 basePos = target.position();
         float height = target.getBbHeight();
