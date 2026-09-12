@@ -16,6 +16,7 @@ import com.stevesarmy.squad.FireDiscipline;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.util.Mth;
+import net.minecraft.world.level.Level;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
@@ -512,6 +513,9 @@ public final class StationGunnerAI {
                 // error does not mean the target is reachable — hold fire off-arc.
                 boolean inArc = !TallyhoCompat.isTargetOutsideLimits(state.station,
                     aimTargetForStation(state, aimPoint.position));
+                // The soldier's LOS is not the gun's lane: remote crews can spot a
+                // target the barrel has no sight line to. Never fire from a blocked lane.
+                boolean laneClear = hasFiringLane(state, level, aimPoint.position);
                 fireGateReached = true;
 
                 // Infantry-style dynamic shot threshold, scaled by the crew's fire
@@ -543,6 +547,7 @@ public final class StationGunnerAI {
                     && state.detection.isTargetDetected(best)
                     && aimError <= FIRE_TOLERANCE_DEGREES
                     && inArc
+                    && laneClear
                     && fireBurstGate(state)) {
                     float yawSigma = AimAccuracyManager.getYawSigma(state.aimQuality)
                         + (float) aimPoint.concealment * 2.00F;
@@ -664,6 +669,12 @@ public final class StationGunnerAI {
             blocker = "arc";
         }
 
+        boolean lane = !aimOk || hasFiringLane(state, state.soldier.level(), aimPoint.position);
+        chain.add("lane=" + (!aimOk ? "-" : lane ? "ok" : "BLOCKED"));
+        if (blocker == null && aimOk && !lane) {
+            blocker = "lane";
+        }
+
         String fireState;
         if (blocker != null) {
             fireState = "blocked";
@@ -759,6 +770,14 @@ public final class StationGunnerAI {
                 double distSqr = state.cameraWorld.distanceToSqr(
                     Vec3.atCenterOf(knowledge.lastKnownPosition));
                 if (distSqr < bestDistSqr) {
+                    Vec3 claimBase = knowledge.lastVisibleAimPoint != null
+                        ? knowledge.lastVisibleAimPoint
+                        : Vec3.atCenterOf(knowledge.lastKnownPosition).add(0.0, 1.0, 0.0);
+                    if (!hasFiringLane(state, level, claimBase)) {
+                        // No lane to the last-known spot: the gun would only
+                        // hose terrain. Leave the threat for someone who can.
+                        continue;
+                    }
                     bestDistSqr = distSqr;
                     bestThreat = knowledge;
                 }
@@ -815,7 +834,10 @@ public final class StationGunnerAI {
         float error = TallyhoCompat.aimTowards(state.station, suppressionTarget, traverse, 0.0F, 0.0F);
         if (error <= FIRE_TOLERANCE_DEGREES && fireBurstGate(state)
             // Out-of-arc suppression positions clamp to the arc edge; never fire there.
-            && !TallyhoCompat.isTargetOutsideLimits(state.station, suppressionTarget)) {
+            && !TallyhoCompat.isTargetOutsideLimits(state.station, suppressionTarget)
+            // The beaten zone re-rolls each burst, so re-check the lane to the
+            // live aim point, not just the position claimed at selection time.
+            && hasFiringLane(state, level, state.suppressionAimPos)) {
             TallyhoCompat.fire(state.station, state.soldier);
             logFireCall(state, "suppress", threat.threatEntityId);
             state.bloom = Math.min(StevesArmyConfig.VEHICLE_CREW_BLOOM_MAX.get().floatValue(),
@@ -958,6 +980,22 @@ public final class StationGunnerAI {
      */
     private static Vec3 aimTargetForStation(StationState state, Vec3 worldTarget) {
         return state.station.position().add(worldTarget.subtract(state.cameraWorld));
+    }
+
+    /**
+     * True when the gun's camera has a clear firing lane to a WORLD-space aim
+     * position — terrain, buildings, ships, and smoke all block. The soldier is
+     * passed as the observer so crew rays get ship-aware blocking plus the
+     * self-hull escape (the camera sits inside its own hull). The gun can see a
+     * position without seeing the enemy hiding at it: suppressing a spot the
+     * barrel has no lane to is exactly the "shooting into nowhere" bug.
+     */
+    private static boolean hasFiringLane(StationState state, Level level, Vec3 worldAimPos) {
+        if (state.cameraWorld == null) {
+            return false;
+        }
+        return VisibilityRay.traceContactOnly(level, state.cameraWorld, worldAimPos, state.soldier)
+            .hasContact();
     }
 
     /** World-space candidate scan around the camera's world position. */
