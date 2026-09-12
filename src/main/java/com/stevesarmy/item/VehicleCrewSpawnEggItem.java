@@ -33,6 +33,10 @@ import java.util.function.Supplier;
  * Sneak-right-click while aiming at the ship spawns the crew directly seated near the
  * aimed block (ships hold SeatBlocks, not pickable seat entities — Create discards an
  * empty seat's entity — so the click raytraces blocks with VS2's ship-aware clip).
+ *
+ * Both paths restore the pick-block EntityTag (owner, squad, inventory loadout) the
+ * same way {@link SoldierSpawnEggItem} does for infantry — vanilla ForgeSpawnEggItem
+ * spawning would drop the mod's SoldierInventory.
  */
 public class VehicleCrewSpawnEggItem extends ForgeSpawnEggItem {
 
@@ -53,7 +57,10 @@ public class VehicleCrewSpawnEggItem extends ForgeSpawnEggItem {
             }
             return InteractionResultHolder.sidedSuccess(stack, level.isClientSide);
         }
-        return super.use(level, player, hand);
+        if (!level.isClientSide) {
+            spawnCrewStanding((ServerLevel) level, player.position(), player, stack);
+        }
+        return InteractionResultHolder.sidedSuccess(stack, level.isClientSide);
     }
 
     @Override
@@ -70,7 +77,10 @@ public class VehicleCrewSpawnEggItem extends ForgeSpawnEggItem {
                 return InteractionResult.sidedSuccess(level.isClientSide);
             }
         }
-        return super.useOn(context);
+        if (player != null && !level.isClientSide) {
+            spawnCrewStanding((ServerLevel) level, context.getClickLocation(), player, context.getItemInHand());
+        }
+        return InteractionResult.sidedSuccess(level.isClientSide);
     }
 
     /**
@@ -84,20 +94,68 @@ public class VehicleCrewSpawnEggItem extends ForgeSpawnEggItem {
             ? blockHit : null;
     }
 
-    /** Shared server-side "spawn crew seated here" used by the egg item and the seat interact handler. */
-    public static void spawnCrewOnSeat(ServerLevel level, Vec3 anchor, BlockPos hitBlock,
-                                       Player player, ItemStack eggStack) {
+    /** EntityTag carried by the egg stack, or null. */
+    @Nullable
+    private static CompoundTag eggEntityTag(ItemStack eggStack) {
+        return eggStack.getTag() != null && eggStack.getTag().contains("EntityTag")
+            ? eggStack.getTag().getCompound("EntityTag") : null;
+    }
+
+    /**
+     * Creates the crew entity and restores pick-block state (owner, squad, inventory
+     * loadout) — the shared front half of both spawn paths.
+     */
+    @Nullable
+    private static VehicleCrewEntity createCrew(ServerLevel level, Vec3 pos, Player player,
+                                                @Nullable CompoundTag entityTag) {
         VehicleCrewEntity crew = ModEntities.VEHICLE_CREW.get().create(level);
+        if (crew == null) {
+            return null;
+        }
+        crew.moveTo(pos.x, pos.y, pos.z, player.getYRot(), 0.0F);
+        crew.maybeRandomizeSkin();
+        if (entityTag != null) {
+            crew.fillFromPickBlockData(entityTag);
+        }
+        return crew;
+    }
+
+    /** Non-sneak spawn: identical EntityTag handling to the infantry egg. */
+    private static void spawnCrewStanding(ServerLevel level, Vec3 pos, Player player, ItemStack eggStack) {
+        VehicleCrewEntity crew = createCrew(level, pos, player, eggEntityTag(eggStack));
         if (crew == null) {
             return;
         }
-        crew.moveTo(anchor.x, anchor.y, anchor.z, player.getYRot(), 0.0F);
-        crew.maybeRandomizeSkin();
+        SoldierSpawner.SpawnResult result = SoldierSpawner.finishSpawn(level, crew, player, false);
+        if (!result.success()) {
+            return;
+        }
+        if (!player.isCreative()) {
+            eggStack.shrink(1);
+        }
+    }
 
-        CompoundTag entityTag = eggStack.getTag() != null && eggStack.getTag().contains("EntityTag")
-            ? eggStack.getTag().getCompound("EntityTag") : null;
-        if (entityTag != null) {
-            crew.fillFromPickBlockData(entityTag);
+    /** Shared server-side "spawn crew seated here" used by the egg item and the seat interact handler. */
+    public static void spawnCrewOnSeat(ServerLevel level, Vec3 anchor, BlockPos hitBlock,
+                                       Player player, ItemStack eggStack) {
+        spawnCrewOnSeat(level, anchor, hitBlock, player, eggStack, null);
+    }
+
+    /**
+     * Seat spawn with an optional recorded EntityTag used when the egg stack carries
+     * none of its own — the VSAW vehicle setup block replays crew spawns this way,
+     * passing the inventory loadout recorded at record time.
+     */
+    public static void spawnCrewOnSeat(ServerLevel level, Vec3 anchor, BlockPos hitBlock,
+                                       Player player, ItemStack eggStack,
+                                       @Nullable CompoundTag recordedEntityTag) {
+        CompoundTag entityTag = eggEntityTag(eggStack);
+        if (entityTag == null) {
+            entityTag = recordedEntityTag;
+        }
+        VehicleCrewEntity crew = createCrew(level, anchor, player, entityTag);
+        if (crew == null) {
+            return;
         }
 
         SoldierSpawner.SpawnResult result = SoldierSpawner.finishSpawn(level, crew, player, false);
@@ -117,9 +175,6 @@ public class VehicleCrewSpawnEggItem extends ForgeSpawnEggItem {
         if (ship == null && player instanceof ServerPlayer serverPlayer) {
             ship = VS2Compat.resolveMountShipNearPlayer(level, serverPlayer);
         }
-        if (ship == null && player instanceof ServerPlayer serverPlayer) {
-            ship = VS2Compat.resolveMountShipNearPlayer(level, serverPlayer);
-        }
         // Exact seat first: the aimed/recorded block, so aiming at a seat seats exactly
         // there. Every miss falls through to the tiered mount below (unchanged).
         int seated = ship != null && CrewAssignment.seatAtExactPosition(level, ship, hitBlock, crew) ? 1 : 0;
@@ -134,7 +189,8 @@ public class VehicleCrewSpawnEggItem extends ForgeSpawnEggItem {
         if (!player.isCreative()) {
             eggStack.shrink(1);
         }
-        player.displayClientMessage(
-            Component.translatable("transport.steves_army.feedback.crew_deployed"), true);
+        player.displayClientMessage(Component.translatable(seated > 0
+            ? "transport.steves_army.feedback.crew_deployed"
+            : "transport.steves_army.feedback.crew_standing"), true);
     }
 }

@@ -80,10 +80,23 @@ public final class VehicleCrewApi {
      */
     public static void spawnCrewOnVehicle(@Nullable ServerPlayer owner, ServerLevel level,
                                           BlockPos supportPos, Vec3 positionOffset) {
+        spawnCrewOnVehicle(owner, level, supportPos, positionOffset, null);
+    }
+
+    /**
+     * {@link #spawnCrewOnVehicle} with the crew's recorded pick-block EntityTag
+     * (owner, squad, inventory loadout — the same data a pick-blocked egg carries).
+     * VSAW's vehicle setup block should record the crew's
+     * {@code SoldierInventory.save()} NBT at record time and pass it here on replay;
+     * without it the crew spawns bare. The tag is ignored when null.
+     */
+    public static void spawnCrewOnVehicle(@Nullable ServerPlayer owner, ServerLevel level,
+                                          BlockPos supportPos, Vec3 positionOffset,
+                                          @Nullable net.minecraft.nbt.CompoundTag recordedEntityTag) {
         if (owner == null) {
             return;
         }
         VehicleCrewSpawnEggItem.spawnCrewOnSeat(level, Vec3.atCenterOf(supportPos).add(positionOffset),
-                supportPos, owner, new ItemStack(ModItems.VEHICLE_CREW_SPAWN_EGG.get()));
+                supportPos, owner, new ItemStack(ModItems.VEHICLE_CREW_SPAWN_EGG.get()), recordedEntityTag);
     }
 }

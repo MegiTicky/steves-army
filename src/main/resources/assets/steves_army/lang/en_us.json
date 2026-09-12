@@ -58,6 +58,7 @@
     "transport.steves_army.feedback.crew_assigned": "Assigned %s of %s crew",
     "transport.steves_army.feedback.crew_seat_occupied": "That seat is occupied",
     "transport.steves_army.feedback.crew_deployed": "Vehicle crew deployed to seat",
+    "transport.steves_army.feedback.crew_standing": "Vehicle crew spawned standing — could not reach a seat",
     "transport.steves_army.feedback.crew_dismounted": "Vehicle crew dismounted",
     "transport.steves_army.feedback.crew_not_mounted": "That crew is not mounted",
     "item.steves_army.resupply_pouch": "Resupply Pouch"
