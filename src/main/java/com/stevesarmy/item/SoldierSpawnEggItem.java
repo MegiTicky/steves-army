@@ -18,7 +18,6 @@ import net.minecraft.world.item.context.UseOnContext;
 import net.minecraft.world.level.Level;
 import net.minecraftforge.common.ForgeSpawnEggItem;
 
-import java.util.UUID;
 import java.util.function.Supplier;
 
 public class SoldierSpawnEggItem extends ForgeSpawnEggItem {
@@ -96,14 +95,12 @@ public class SoldierSpawnEggItem extends ForgeSpawnEggItem {
         }
         StevesArmyMod.LOGGER.info("[SoldierSpawnEgg] After fill, main hand item: {}", soldier.getMainHandItem().toString());
         
-        if (!hasEntityTag || !stackTag.getCompound("EntityTag").hasUUID("Owner")) {
-            if (player != null) {
-                soldier.setOwnerUUID(player.getUUID());
-                StevesArmyMod.LOGGER.info("[SoldierSpawnEgg] Set owner to player: {}", player.getUUID());
-            }
+        if (player != null) {
+            soldier.setOwnerUUID(player.getUUID());
+            StevesArmyMod.LOGGER.info("[SoldierSpawnEgg] Set owner to player: {}", player.getUUID());
         }
 
-        SoldierSpawner.SpawnResult spawnResult = SoldierSpawner.finishSpawn(serverLevel, soldier, player, false);
+        SoldierSpawner.SpawnResult spawnResult = SoldierSpawner.finishSpawn(serverLevel, soldier, player, true);
         if (!spawnResult.success()) {
             return InteractionResult.FAIL;
         }
@@ -127,15 +124,10 @@ public class SoldierSpawnEggItem extends ForgeSpawnEggItem {
         StevesArmyMod.LOGGER.info("[SoldierSpawnEgg] === fillSoldierFromEntityTag ===");
         StevesArmyMod.LOGGER.info("[SoldierSpawnEgg] Setting position to: {}", pos);
         soldier.setPos(pos.getX() + 0.5, pos.getY() + 1.0, pos.getZ() + 0.5);
-        
-        if (entityTag.hasUUID("Owner")) {
-            UUID owner = entityTag.getUUID("Owner");
-            StevesArmyMod.LOGGER.info("[SoldierSpawnEgg] Restoring owner: {}", owner);
-            soldier.setOwnerUUID(owner);
-        } else {
-            StevesArmyMod.LOGGER.info("[SoldierSpawnEgg] No owner in EntityTag");
-        }
-        
+
+        // Ownership and squad are not restored from the egg: whoever spawns it owns it
+        // and it joins their squad (finishSpawn), so cloned eggs can't stay loyal to
+        // the original owner. Loadout and tactical state below still restore.
         if (entityTag.contains("FollowState")) {
             int state = entityTag.getInt("FollowState");
             StevesArmyMod.LOGGER.info("[SoldierSpawnEgg] Restoring FollowState: {}", state);
@@ -148,14 +140,6 @@ public class SoldierSpawnEggItem extends ForgeSpawnEggItem {
             if (modeOrdinal >= 0 && modeOrdinal < modes.length) {
                 StevesArmyMod.LOGGER.info("[SoldierSpawnEgg] Restoring SquadMode: {} ({})", modeOrdinal, modes[modeOrdinal]);
                 soldier.setSquadMode(modes[modeOrdinal]);
-            }
-        }
-        
-        if (entityTag.contains("HasSquad") && entityTag.getBoolean("HasSquad")) {
-            if (entityTag.hasUUID("SquadId")) {
-                UUID squadId = entityTag.getUUID("SquadId");
-                StevesArmyMod.LOGGER.info("[SoldierSpawnEgg] Restoring SquadId: {}", squadId);
-                soldier.setSquadId(squadId);
             }
         }
         

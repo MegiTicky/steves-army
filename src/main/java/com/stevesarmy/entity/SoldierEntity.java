@@ -591,7 +591,6 @@ public class SoldierEntity extends PathfinderMob implements Container {
         CompoundTag tag = new CompoundTag();
         tag.put("Inventory", inventory.save());
         tag.putInt("Role", getRole().ordinal());
-        getOwnerUUID().ifPresent(owner -> tag.putUUID("Owner", owner));
         tag.putInt("FollowState", getFollowState());
         tag.putInt("SquadMode", getSquadMode().ordinal());
         UUID squadId = getSquadId();
@@ -631,12 +630,12 @@ public class SoldierEntity extends PathfinderMob implements Container {
 
     /**
      * Restores the persistent soldier state carried by a pick-blocked spawn egg.
-     * Position is not touched; the caller places the entity.
+     * Position is not touched; the caller places the entity. Ownership and squad
+     * membership are deliberately not restored — the player spawning the egg
+     * becomes the owner via {@link SoldierSpawner#finishSpawn}, so a traded or
+     * cloned egg never stays loyal to the player it was picked from.
      */
     public void fillFromPickBlockData(CompoundTag entityTag) {
-        if (entityTag.hasUUID("Owner")) {
-            setOwnerUUID(entityTag.getUUID("Owner"));
-        }
         if (entityTag.contains("FollowState")) {
             setFollowState(entityTag.getInt("FollowState"));
         }
@@ -646,10 +645,6 @@ public class SoldierEntity extends PathfinderMob implements Container {
             if (modeOrdinal >= 0 && modeOrdinal < modes.length) {
                 setSquadMode(modes[modeOrdinal]);
             }
-        }
-        if (entityTag.contains("HasSquad") && entityTag.getBoolean("HasSquad")
-            && entityTag.hasUUID("SquadId")) {
-            setSquadId(entityTag.getUUID("SquadId"));
         }
         if (entityTag.contains("HoldPos")) {
             setHoldPosition(BlockPos.of(entityTag.getLong("HoldPos")));

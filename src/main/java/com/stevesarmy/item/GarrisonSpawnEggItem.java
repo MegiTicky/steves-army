@@ -46,7 +46,7 @@ public class GarrisonSpawnEggItem extends ForgeSpawnEggItem {
             garrison.fillFromPickBlockData(entityTag);
         }
 
-        SoldierSpawner.SpawnResult result = SoldierSpawner.finishSpawn((ServerLevel) level, garrison, player, false);
+        SoldierSpawner.SpawnResult result = SoldierSpawner.finishSpawn((ServerLevel) level, garrison, player, true);
         if (!result.success()) {
             return InteractionResult.FAIL;
         }

@@ -46,7 +46,7 @@ public class SupportSpawnEggItem extends ForgeSpawnEggItem {
             support.fillFromPickBlockData(entityTag);
         }
 
-        SoldierSpawner.SpawnResult result = SoldierSpawner.finishSpawn((ServerLevel) level, support, player, false);
+        SoldierSpawner.SpawnResult result = SoldierSpawner.finishSpawn((ServerLevel) level, support, player, true);
         if (!result.success()) {
             return InteractionResult.FAIL;
         }

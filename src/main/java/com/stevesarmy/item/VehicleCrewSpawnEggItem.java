@@ -34,9 +34,10 @@ import java.util.function.Supplier;
  * aimed block (ships hold SeatBlocks, not pickable seat entities — Create discards an
  * empty seat's entity — so the click raytraces blocks with VS2's ship-aware clip).
  *
- * Both paths restore the pick-block EntityTag (owner, squad, inventory loadout) the
+ * Both paths restore the pick-block EntityTag (inventory loadout, tactical state) the
  * same way {@link SoldierSpawnEggItem} does for infantry — vanilla ForgeSpawnEggItem
- * spawning would drop the mod's SoldierInventory.
+ * spawning would drop the mod's SoldierInventory. Ownership and squad are never
+ * restored from the egg: whoever spawns it becomes the owner.
  */
 public class VehicleCrewSpawnEggItem extends ForgeSpawnEggItem {
 
@@ -126,7 +127,7 @@ public class VehicleCrewSpawnEggItem extends ForgeSpawnEggItem {
         if (crew == null) {
             return;
         }
-        SoldierSpawner.SpawnResult result = SoldierSpawner.finishSpawn(level, crew, player, false);
+        SoldierSpawner.SpawnResult result = SoldierSpawner.finishSpawn(level, crew, player, true);
         if (!result.success()) {
             return;
         }
@@ -158,7 +159,7 @@ public class VehicleCrewSpawnEggItem extends ForgeSpawnEggItem {
             return;
         }
 
-        SoldierSpawner.SpawnResult result = SoldierSpawner.finishSpawn(level, crew, player, false);
+        SoldierSpawner.SpawnResult result = SoldierSpawner.finishSpawn(level, crew, player, true);
         if (!result.success()) {
             return;
         }

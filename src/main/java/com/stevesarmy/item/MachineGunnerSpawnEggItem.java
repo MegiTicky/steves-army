@@ -45,7 +45,7 @@ public class MachineGunnerSpawnEggItem extends ForgeSpawnEggItem {
             gunner.fillFromPickBlockData(entityTag);
         }
 
-        SoldierSpawner.SpawnResult result = SoldierSpawner.finishSpawn((ServerLevel) level, gunner, player, false);
+        SoldierSpawner.SpawnResult result = SoldierSpawner.finishSpawn((ServerLevel) level, gunner, player, true);
         if (!result.success()) {
             return InteractionResult.FAIL;
         }

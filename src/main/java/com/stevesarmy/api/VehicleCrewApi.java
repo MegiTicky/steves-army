@@ -85,10 +85,11 @@ public final class VehicleCrewApi {
 
     /**
      * {@link #spawnCrewOnVehicle} with the crew's recorded pick-block EntityTag
-     * (owner, squad, inventory loadout — the same data a pick-blocked egg carries).
+     * (inventory loadout, tactical state — the same data a pick-blocked egg carries).
      * VSAW's vehicle setup block should record the crew's
      * {@code SoldierInventory.save()} NBT at record time and pass it here on replay;
-     * without it the crew spawns bare. The tag is ignored when null.
+     * without it the crew spawns bare. The tag is ignored when null. Ownership and
+     * squad are never restored from the tag — the crew belongs to {@code owner}.
      */
     public static void spawnCrewOnVehicle(@Nullable ServerPlayer owner, ServerLevel level,
                                           BlockPos supportPos, Vec3 positionOffset,
