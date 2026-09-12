@@ -64,6 +64,11 @@ public final class VS2Compat {
     private static final double RESEAT_PIN_EPSILON = 2.0;
     /** Ticks between station duty scans for a seated crew soldier without a station. */
     private static final int CREW_DUTY_SCAN_INTERVAL_TICKS = 20;
+    /**
+     * World-space distance within which a seat entity of unknown ship is attributed
+     * to the clicked ship — its rendered world position matches the clicked seat block.
+     */
+    private static final double SEAT_CLICK_WORLD_TOLERANCE_SQR = 3.0 * 3.0;
 
     private static volatile boolean initialized;
     private static volatile boolean available;
@@ -837,6 +842,18 @@ public final class VS2Compat {
     public static boolean seatSoldierDirect(SoldierEntity soldier, Level level, BlockPos seatBlockPos) {
         initialize();
         if (!available) return false;
+        // Mounting onto a taken seat block would stack a second SeatEntity on the
+        // same shipyard position; that duplicate is what later hijacks player seat
+        // clicks across ships (Create's occupant swap). Refuse and let the caller
+        // fall back to another seat or the reseat timeout.
+        if (!createSeatBlockClass.isInstance(level.getBlockState(seatBlockPos).getBlock())) {
+            StevesArmyMod.LOGGER.info("[VS2] seatSoldierDirect: no SeatBlock at {} — refusing", seatBlockPos);
+            return false;
+        }
+        if (level instanceof ServerLevel serverLevel && isCreateSeatOccupied(serverLevel, seatBlockPos)) {
+            StevesArmyMod.LOGGER.info("[VS2] seatSoldierDirect: seat {} occupied — refusing duplicate mount", seatBlockPos);
+            return false;
+        }
         try {
             // Resolve the ship at the seat position for logging
             Object ship = null;
@@ -1174,6 +1191,207 @@ public final class VS2Compat {
     }
 
     /**
+     * Result of classifying a player's right-click on a seat block. Ship blocks are
+     * interacted with in shipyard space, and Create's SeatBlock.use scans that space
+     * for seat entities — so a seat entity from ANOTHER ship sharing the clicked
+     * shipyard position hijacks the click and Create ejects its occupant. The
+     * classification separates the ship's own seats from foreign ones so the click
+     * can be re-routed to the seat the player actually aimed at.
+     */
+    public static final class PlayerSeatClick {
+        private final BlockPos seatPos;
+        @Nullable private final Entity freeSeat;
+        @Nullable private final Entity playerOccupant;
+        @Nullable private final Entity soldierOccupant;
+        private final boolean foreignSeatPresent;
+
+        private PlayerSeatClick(BlockPos seatPos, @Nullable Entity freeSeat,
+                                @Nullable Entity playerOccupant, @Nullable Entity soldierOccupant,
+                                boolean foreignSeatPresent) {
+            this.seatPos = seatPos;
+            this.freeSeat = freeSeat;
+            this.playerOccupant = playerOccupant;
+            this.soldierOccupant = soldierOccupant;
+            this.foreignSeatPresent = foreignSeatPresent;
+        }
+
+        /** The clicked seat block, in shipyard space. */
+        public BlockPos seatPos() {
+            return seatPos;
+        }
+
+        /** A same-ship seat entity at the clicked block with no passenger, or null. */
+        @Nullable
+        public Entity freeSeat() {
+            return freeSeat;
+        }
+
+        /** A same-ship seat entity at the clicked block already carrying a player, or null. */
+        @Nullable
+        public Entity playerOccupant() {
+            return playerOccupant;
+        }
+
+        /** A same-ship seat entity at the clicked block carrying an alive soldier, or null. */
+        @Nullable
+        public Entity soldierOccupant() {
+            return soldierOccupant;
+        }
+
+        /** True when a seat entity of another ship shares the clicked shipyard position. */
+        public boolean foreignSeatPresent() {
+            return foreignSeatPresent;
+        }
+    }
+
+    /**
+     * Classifies a player click on the seat block at {@code pos} (shipyard space, as
+     * Forge delivers interaction positions for ship blocks). Returns null when the
+     * block is not a Create SeatBlock on a ship — the click is then none of our
+     * business and Create handles it natively. Safe on both sides.
+     */
+    @Nullable
+    public static PlayerSeatClick classifyPlayerSeatClick(Level level, BlockPos pos) {
+        initialize();
+        if (!available || createSeatBlockClass == null) {
+            return null;
+        }
+        if (!createSeatBlockClass.isInstance(level.getBlockState(pos).getBlock())) {
+            return null;
+        }
+        Object ship = getShipObjectAtBlockPos(level, pos);
+        Long shipId = getShipIdOf(ship);
+        if (ship == null || shipId == null) {
+            return null;
+        }
+
+        Vec3 seatWorld = null;
+        try {
+            Object converted = reflect(toWorldCoordinates, ship,
+                pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5);
+            if (converted instanceof org.joml.Vector3dc v) {
+                seatWorld = new Vec3(v.x(), v.y(), v.z());
+            }
+        } catch (ReflectiveOperationException ignored) {
+        }
+
+        Entity freeSeat = null;
+        Entity playerOccupant = null;
+        Entity soldierOccupant = null;
+        boolean foreignSeatPresent = false;
+        for (Entity seat : scanSeatEntities(level, pos)) {
+            Long seatShipId = getShipIdOf(getShipUnder(seat));
+            boolean sameShip;
+            if (seatShipId != null) {
+                sameShip = seatShipId.equals(shipId);
+            } else if (seatWorld != null) {
+                // Ship lookup misses for stale/persistent seat entities; attribute by
+                // where the seat actually renders in the world instead.
+                Vec3 rendered = getSeatWorldPosition(seat);
+                sameShip = rendered != null
+                    && rendered.distanceToSqr(seatWorld) <= SEAT_CLICK_WORLD_TOLERANCE_SQR;
+            } else {
+                sameShip = false;
+            }
+            if (!sameShip) {
+                foreignSeatPresent = true;
+                continue;
+            }
+            Entity occupant = firstAlivePassenger(seat);
+            if (occupant instanceof SoldierEntity) {
+                if (soldierOccupant == null) {
+                    soldierOccupant = seat;
+                }
+            } else if (occupant instanceof Player) {
+                if (playerOccupant == null) {
+                    playerOccupant = seat;
+                }
+            } else if (freeSeat == null) {
+                freeSeat = seat;
+            }
+        }
+        return new PlayerSeatClick(pos.immutable(), freeSeat, playerOccupant, soldierOccupant,
+            foreignSeatPresent);
+    }
+
+    /** Create seat entities inside the block's AABB — the same scan SeatBlock.use performs. */
+    @SuppressWarnings("unchecked")
+    private static List<Entity> scanSeatEntities(Level level, BlockPos pos) {
+        if (createSeatEntityClass == null) {
+            return List.of();
+        }
+        return (List<Entity>) level.getEntitiesOfClass(
+            (Class<? extends Entity>) createSeatEntityClass, new AABB(pos));
+    }
+
+    @Nullable
+    private static Entity firstAlivePassenger(Entity entity) {
+        for (Entity passenger : entity.getPassengers()) {
+            if (passenger != null && passenger.isAlive()) {
+                return passenger;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Seats a player on an existing seat entity. Player mounts pass through
+     * SoldierMountHandler un-gated, so no authorization is needed. Returns true
+     * when the player is now a passenger of {@code seat}.
+     */
+    public static boolean seatPlayerOnSeatEntity(ServerLevel level, ServerPlayer player, Entity seat) {
+        initialize();
+        if (!available || player.isPassenger() || seat.isRemoved()
+            || !isCreateSeatEntity(seat) || !seat.getPassengers().isEmpty()) {
+            return false;
+        }
+        player.startRiding(seat, true);
+        if (!player.isPassenger() || player.getVehicle() != seat) {
+            return false;
+        }
+        syncPlayerSeatMount(level, player, seat, getSeatWorldPosition(seat));
+        return true;
+    }
+
+    /**
+     * Seats a player on the static SeatBlock at the shipyard position by creating a
+     * fresh seat entity there — the same {@code SeatBlock.sitDown} call Create's use()
+     * makes. Occupancy is judged per ship: a seat entity from ANOTHER ship sharing
+     * the shipyard position must not block the clicked seat, but a taken seat on the
+     * same ship refuses the mount. Returns true when the player is mounted.
+     */
+    public static boolean sitPlayerAtShipyardSeat(ServerLevel level, ServerPlayer player, BlockPos seatPos) {
+        initialize();
+        if (!available || createSeatSitDown == null || createSeatBlockClass == null || player.isPassenger()) {
+            return false;
+        }
+        if (!createSeatBlockClass.isInstance(level.getBlockState(seatPos).getBlock())) {
+            return false;
+        }
+        Long shipId = getShipIdAt(level, seatPos.getX() + 0.5, seatPos.getY() + 0.5, seatPos.getZ() + 0.5);
+        for (Entity seat : scanSeatEntities(level, seatPos)) {
+            Long seatShipId = getShipIdOf(getShipUnder(seat));
+            // Unattributable entities count as same-ship here: refuse the mount rather
+            // than risk double-booking one seat.
+            boolean sameShip = shipId == null || seatShipId == null || seatShipId.equals(shipId);
+            if (sameShip && !seat.getPassengers().isEmpty()) {
+                return false;
+            }
+        }
+        try {
+            createSeatSitDown.invoke(null, level, seatPos, player);
+        } catch (ReflectiveOperationException exception) {
+            logReflectionFailure(exception);
+            return false;
+        }
+        if (!player.isPassenger()) {
+            return false;
+        }
+        syncPlayerSeatMount(level, player, player.getVehicle(), Vec3.atCenterOf(seatPos));
+        return true;
+    }
+
+    /**
      * syncTransportState equivalent for a player takeover: shipyard anchors are
      * not vanilla-tracked, so the mounting player and everyone near the seat
      * need the anchor's add-entity packet before the passenger packet.
@@ -1183,7 +1401,13 @@ public final class VS2Compat {
         if (anchor == null) {
             return;
         }
-        Vec3 refPos = capture.worldPos();
+        syncPlayerSeatMount(level, player, anchor, capture.worldPos());
+    }
+
+    private static void syncPlayerSeatMount(ServerLevel level, ServerPlayer player, Entity anchor, Vec3 refPos) {
+        if (anchor == null) {
+            return;
+        }
         java.util.Set<ServerPlayer> recipients = new java.util.HashSet<>();
         recipients.add(player);
         for (ServerPlayer other : level.getServer().getPlayerList().getPlayers()) {
@@ -1197,7 +1421,7 @@ public final class VS2Compat {
             recipient.connection.send(spawnPacket);
             recipient.connection.send(passengersPacket);
         }
-        StevesArmyMod.LOGGER.info("[Respawn] Synced seat takeover mount player={} anchor={} recipients={}",
+        StevesArmyMod.LOGGER.info("[VS2] Synced player seat mount player={} anchor={} recipients={}",
             player.getName().getString(), anchor.getId(), recipients.size());
     }
 
