@@ -56,6 +56,12 @@ public final class VS2Compat {
     private static final int FULL_SEAT_RETRY_TICKS = 100;
     /** Ticks the owner must be off-ship before a FOLLOW soldier is released (debounce). */
     private static final int RELEASE_DEBOUNCE_TICKS = 40;
+    /** Ticks between re-seat attempts while a reloaded soldier waits for its seat. */
+    private static final int RESEAT_RETRY_INTERVAL_TICKS = 20;
+    /** Ticks a reseat wait may run before giving up and extracting the soldier. */
+    private static final int RESEAT_WAIT_TIMEOUT_TICKS = 600;
+    /** Seat-distance beyond which a waiting soldier is re-pinned to the seat position. */
+    private static final double RESEAT_PIN_EPSILON = 2.0;
     /** Ticks between station duty scans for a seated crew soldier without a station. */
     private static final int CREW_DUTY_SCAN_INTERVAL_TICKS = 20;
 
@@ -116,12 +122,10 @@ public final class VS2Compat {
             if (state.reboardBlockTicks > 0) {
                 state.reboardBlockTicks--;
             }
-            updateTransport(soldier, state);
-            // Transported soldiers freeze completely - crew included. A crew
-            // soldier's claimed station is driven by StationGunnerAI (station
-            // side, strict world space), so the soldier itself does no
-            // computation while riding a VS object.
-            return isTransported(soldier, state);
+            // True also while a reseat wait pins a reloaded soldier at its seat's
+            // world position - the AI must stay frozen then, or its goals would
+            // fight the pin.
+            return updateTransport(soldier, state);
         }
 
         if (state.reboardBlockTicks > 0) {
@@ -137,8 +141,7 @@ public final class VS2Compat {
         // explicit-only so it could never re-board.
         if (soldier.isPassenger() && soldier.getRole() == SoldierRole.VEHICLE_CREW
             && adoptReloadedShipSeat(soldier, state)) {
-            updateTransport(soldier, state);
-            return isTransported(soldier, state);
+            return updateTransport(soldier, state);
         }
 
         if (soldier.isPassenger()) {
@@ -149,7 +152,7 @@ public final class VS2Compat {
         // scrapped while unloaded, or a pre-persistence save the adoption fallback
         // could not resolve) has no ground under it. Move it to its last on-foot
         // world position instead of letting it fall out of the world.
-        if (!isWorldPlausible(soldier.position())) {
+        if (!isSaneWorldPos(soldier.level(), soldier.position())) {
             recoverFromImplausiblePosition(soldier, state);
         }
 
@@ -247,8 +250,9 @@ public final class VS2Compat {
      */
     private static boolean adoptReloadedShipSeat(SoldierEntity soldier, SoldierState state) {
         Entity vehicle = soldier.getVehicle();
-        if (vehicle == null || createSeatEntityClass == null
-            || !createSeatEntityClass.isInstance(vehicle)) {
+        // Any seat-like entity: Create SeatEntities plus tallyho's FlexibleSeatEntity
+        // (the raw fallback tier), both living at shipyard coordinates on ships.
+        if (vehicle == null || !isSeatLikeEntity(vehicle)) {
             return false;
         }
         try {
@@ -427,6 +431,19 @@ public final class VS2Compat {
         return pos != null
             && Math.abs(pos.x) <= WORLD_COORD_LIMIT
             && Math.abs(pos.z) <= WORLD_COORD_LIMIT;
+    }
+
+    /**
+     * A position where the soldier can actually exist: world-plausible x/z and
+     * inside the world vertically. A reload can leave a released soldier at the
+     * seat's world y minus the ship's y-offset a second time (observed: y=-246
+     * over a void world with the floor at -60) - plausible x/z, already in the
+     * void. Only the full check may gate a recovery decision.
+     */
+    private static boolean isSaneWorldPos(Level level, @Nullable Vec3 pos) {
+        return isWorldPlausible(pos)
+            && pos.y >= level.getMinBuildHeight() - 8
+            && pos.y <= level.getMaxBuildHeight() + 64;
     }
 
     /**
@@ -862,8 +879,16 @@ public final class VS2Compat {
                 state.seatRetryCooldownTicks = 0;
                 state.reboardBlockTicks = 0;
                 state.crewSeated = soldier.getRole() == SoldierRole.VEHICLE_CREW;
-
+                state.reseatWaitTicks = 0;
+                // Egg-spawned crew are mounted without ever standing on foot, so the
+                // on-foot safe-position memory would stay empty forever. Remember the
+                // pre-mount spot (the spawn ground) as the recovery target if the ship
+                // is ever gone.
                 Vec3 prePos = soldier.position();
+                if (isWorldPlausible(prePos)) {
+                    state.lastSafeWorldPosition = BlockPos.containing(prePos.x, prePos.y, prePos.z);
+                }
+
                 soldier.getVehicle().positionRider(soldier);
                 Vec3 postPos = soldier.position();
 
@@ -2161,7 +2186,11 @@ public final class VS2Compat {
         StationGunnerAI.assignSeatedSoldier(soldier, state.transportShipId);
     }
 
-    private static void updateTransport(SoldierEntity soldier, SoldierState state) {
+    /**
+     * Keeps a transported soldier seated and returns true while its AI must stay
+     * frozen (seated, held, or pinned during a reseat wait); false once released.
+     */
+    private static boolean updateTransport(SoldierEntity soldier, SoldierState state) {
         // Command-driven mounts (transportOwnerId == null) are kept regardless of owner state.
         if (state.transportOwnerId == null) {
             if (soldier.isPassenger() && state.transportAnchorId != null
@@ -2169,34 +2198,31 @@ public final class VS2Compat {
                 soldier.getVehicle().positionRider(soldier);
                 stopMovement(soldier);
                 tickSeatedCrewDuty(soldier, state);
-                return;
+                return true;
             }
-            StevesArmyMod.LOGGER.info("[VS2] Command-driven transport lost soldier={} passenger={} expectedAnchor={}",
-                soldier.getId(), soldier.isPassenger(), state.transportAnchorId);
-            Entity oldSeat = state.transportAnchorId != null && soldier.level() instanceof ServerLevel sl
-                ? sl.getEntity(state.transportAnchorId) : null;
-            clearShipDraggingState(soldier);
-            if (soldier.isPassenger()) {
-                soldier.stopRiding();
-            }
-            clearShipDraggingState(soldier);
-            Vec3 postReleasePos = soldier.position();
-            // Send empty passenger list after dismount.
-            if (oldSeat != null) {
-                syncTransportState(soldier, oldSeat, false);
-            }
-            StevesArmyMod.LOGGER.info("[VS2] Command transport release soldier={} postPos={}",
-                soldier.getId(), formatVec3(postReleasePos));
-            clearTransportState(state);
-            return;
+            // The seat entity did not survive the reload (Create SeatEntities discard
+            // on their first tick when vanilla's passenger link has not resolved yet)
+            // or was removed mid-session. Command-driven crew must stay aboard: re-seat
+            // on the same ship instead of releasing - a release leaves the soldier
+            // wherever the load-time ship transform left it (observed: the seat's
+            // world y minus the ship's y-offset a second time, well into the void).
+            return waitForReseat(soldier, state);
         }
 
         Entity anchor = getEntity(soldier, state.transportAnchorId);
         if (anchor == null || !soldier.isPassenger() || soldier.getVehicle() != anchor) {
             StevesArmyMod.LOGGER.info("[VS2] Releasing transport soldier={} anchor={} passenger={}",
                 soldier.getId(), anchor == null ? "missing" : anchor.getId(), soldier.isPassenger());
+            // Owner-linked infantry release back to the owner - but never from a
+            // void position left by the load-time transform.
+            if (!isSaneWorldPos(soldier.level(), soldier.position())) {
+                Vec3 converted = convertShipyardPosition(soldier.level(), soldier.position(), state);
+                if (converted != null && isSaneWorldPos(soldier.level(), converted)) {
+                    pinToPosition(soldier, converted);
+                }
+            }
             releaseAndClear(soldier, state);
-            return;
+            return false;
         }
 
         // Keep the rider's stored position on its seat. Seats on VS objects live in
@@ -2212,14 +2238,14 @@ public final class VS2Compat {
         // FOLLOW soldiers release when the owner is no longer on the ship.
         if (soldier.getSquadMode() == SquadMode.HOLD) {
             stopMovement(soldier);
-            return;
+            return true;
         }
 
         // Vehicle crew seats are command-driven: they stay aboard regardless of where
         // the owner is, even if a legacy owner-linked state somehow exists.
         if (soldier.getRole() == SoldierRole.VEHICLE_CREW) {
             stopMovement(soldier);
-            return;
+            return true;
         }
 
         LivingEntity owner = getOwner(soldier, state.transportOwnerId);
@@ -2227,7 +2253,7 @@ public final class VS2Compat {
         if (ownerOnShip) {
             state.ownerOffShipCount = 0;
             stopMovement(soldier);
-            return;
+            return true;
         }
 
         // The owner-on-ship check flickers false for a couple of ticks while VS2
@@ -2238,13 +2264,132 @@ public final class VS2Compat {
         state.ownerOffShipCount++;
         if (state.ownerOffShipCount < RELEASE_DEBOUNCE_TICKS) {
             stopMovement(soldier);
-            return;
+            return true;
         }
 
         StevesArmyMod.LOGGER.info("[VS2] Releasing transport soldier={} anchor={} passenger={} owner={} ownerOnShip={} offShipStreak={}",
             soldier.getId(), anchor.getId(), soldier.isPassenger(),
             owner == null ? "missing" : owner.getId(), ownerOnShip, state.ownerOffShipCount);
         releaseAndClear(soldier, state);
+        return false;
+    }
+
+    /**
+     * Holds a command-driven soldier whose seat vanished (reload race or removed
+     * seat) at its seat's current world position while re-seating it on the same
+     * ship. Returns true while waiting or re-seated; false once the soldier was
+     * extracted and its AI may run again.
+     */
+    private static boolean waitForReseat(SoldierEntity soldier, SoldierState state) {
+        boolean firstDetection = state.reseatWaitTicks == 0;
+        state.reseatWaitTicks++;
+        Level level = soldier.level();
+        Vec3 pinTarget = state.transportSeatPosition != null && level instanceof ServerLevel serverLevel
+            ? staticSeatWorldPos(serverLevel, state.transportSeatPosition) : null;
+
+        // Re-pin every tick: a reload can leave the position double-transformed
+        // (ship y-offset applied twice - observed y=-246 over a void world with the
+        // floor at -60), and only the seat's live world position is trustworthy.
+        if (pinTarget != null && soldier.position().distanceTo(pinTarget) > RESEAT_PIN_EPSILON) {
+            if (firstDetection) {
+                StevesArmyMod.LOGGER.info("[VS2] Transport seat lost soldier={} passenger={} expectedAnchor={} shipId={} seatPos={} - reseat wait, pin {} -> {}",
+                    soldier.getId(), soldier.isPassenger(), state.transportAnchorId, state.transportShipId,
+                    state.transportSeatPosition, formatVec3(soldier.position()), formatVec3(pinTarget));
+                clearShipDraggingState(soldier);
+            }
+            pinToPosition(soldier, pinTarget);
+        } else if (firstDetection) {
+            StevesArmyMod.LOGGER.info("[VS2] Transport seat lost soldier={} passenger={} expectedAnchor={} shipId={} seatPos={} - reseat wait, pinTarget={}",
+                soldier.getId(), soldier.isPassenger(), state.transportAnchorId, state.transportShipId,
+                state.transportSeatPosition, pinTarget == null ? "none" : formatVec3(pinTarget));
+            clearShipDraggingState(soldier);
+        }
+
+        // No seat to pin to and the current position is already lethal (below the
+        // world floor): do not leave the soldier falling for the whole wait window.
+        if (pinTarget == null && !isSaneWorldPos(level, soldier.position())) {
+            StevesArmyMod.LOGGER.warn("[VS2] Reseat wait has no pin target and soldier={} is at an unsafe position - extracting",
+                soldier.getId());
+            extractFromReseatWait(soldier, state, pinTarget);
+            return false;
+        }
+
+        if (state.reseatWaitTicks > RESEAT_WAIT_TIMEOUT_TICKS) {
+            StevesArmyMod.LOGGER.warn("[VS2] Reseat wait timed out soldier={} shipId={} - extracting at {}",
+                soldier.getId(), state.transportShipId, formatVec3(soldier.position()));
+            extractFromReseatWait(soldier, state, pinTarget);
+            return false;
+        }
+
+        if (state.reseatWaitTicks % RESEAT_RETRY_INTERVAL_TICKS == 0) {
+            tryReseat(soldier, state, pinTarget);
+        }
+        stopMovement(soldier);
+        return true;
+    }
+
+    /** Gives up the reseat wait: land the soldier on a sane position, then clear the transport state. */
+    private static void extractFromReseatWait(SoldierEntity soldier, SoldierState state, @Nullable Vec3 pinTarget) {
+        clearShipDraggingState(soldier);
+        Vec3 converted = pinTarget != null ? pinTarget
+            : convertShipyardPosition(soldier.level(), soldier.position(), state);
+        if (converted != null && isSaneWorldPos(soldier.level(), converted)) {
+            pinToPosition(soldier, converted);
+        } else {
+            extractToSafeWorldPosition(soldier, state);
+        }
+        clearTransportState(state);
+    }
+
+    /** One re-seat attempt: the original seat block, any free static seat, then a contraption seat. */
+    private static boolean tryReseat(SoldierEntity soldier, SoldierState state, @Nullable Vec3 anchorWorld) {
+        if (!(soldier.level() instanceof ServerLevel serverLevel) || state.transportShipId == null) {
+            return false;
+        }
+        if (state.transportSeatPosition != null && isChunkLoaded(serverLevel, state.transportSeatPosition)
+            && seatSoldierDirect(soldier, serverLevel, state.transportSeatPosition)) {
+            logReseat(soldier, state, state.transportSeatPosition);
+            return true;
+        }
+        Object ship = state.transportSeatPosition != null
+            ? shipAtShipyardPos(serverLevel, state.transportSeatPosition) : null;
+        if (ship != null && anchorWorld != null) {
+            for (BlockPos seat : findFreeStaticSeats(serverLevel, ship, anchorWorld, 1)) {
+                if (seatSoldierDirect(soldier, serverLevel, seat)) {
+                    logReseat(soldier, state, seat);
+                    return true;
+                }
+            }
+        }
+        // Contraption/handle mounts have no seat-block position to fall back to.
+        if (state.transportSeatPosition == null
+            && seatSoldierOnShipContraption(serverLevel, state.transportShipId, soldier) != null) {
+            logReseat(soldier, state, null);
+            return true;
+        }
+        return false;
+    }
+
+    private static void logReseat(SoldierEntity soldier, SoldierState state, @Nullable BlockPos seat) {
+        StevesArmyMod.LOGGER.info("[VS2] Re-seated reloaded soldier={} seat={} after {} ticks",
+            soldier.getId(), seat, state.reseatWaitTicks);
+        state.reseatWaitTicks = 0;
+    }
+
+    /** Teleports the soldier to a world position and kills its momentum. */
+    private static void pinToPosition(SoldierEntity soldier, Vec3 position) {
+        soldier.moveTo(position.x, position.y, position.z, soldier.getYRot(), soldier.getXRot());
+        soldier.setDeltaMovement(Vec3.ZERO);
+    }
+
+    @Nullable
+    private static Object shipAtShipyardPos(ServerLevel level, BlockPos shipyardPos) {
+        try {
+            return reflect(getShipObjectManagingPos, level, (Vec3i) shipyardPos);
+        } catch (ReflectiveOperationException exception) {
+            logReflectionFailure(exception);
+            return null;
+        }
     }
 
     private static void releaseAndClear(SoldierEntity soldier, SoldierState state) {
@@ -2277,6 +2422,7 @@ public final class VS2Compat {
         state.transportShipId = null;
         state.transportSeatPosition = null;
         state.crewSeated = false;
+        state.reseatWaitTicks = 0;
     }
 
     private static boolean isTransported(SoldierEntity soldier, SoldierState state) {
@@ -2609,5 +2755,7 @@ public final class VS2Compat {
         private int crewDutyScanCooldown;
         /** Throttle for the implausible-position recovery WARN log. */
         private long lastRecoveryLog;
+        /** Ticks spent waiting for a re-seat after the transport seat vanished. */
+        private int reseatWaitTicks;
     }
 }
