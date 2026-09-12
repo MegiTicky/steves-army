@@ -263,6 +263,56 @@ public final class AnalogWarfareCompat {
     }
 
     /**
+     * Handle-linked mount constrained to the link whose seat sits at {@code anchorBlock}:
+     * the vehicle crew egg/API path's exact-seat tier. Seat positions are link
+     * {@code seatPos} block coordinates (shipyard space on ships), compared against the
+     * VS2 clip block / recorded support block, so the comparison holds on ships and on
+     * the ground alike. The seat entity is created only for the chosen link, never
+     * speculatively. Returns true when the soldier was seated.
+     */
+    public static boolean mountViaHandleNear(ServerLevel level, Object ship, BlockPos anchorBlock,
+                                             SoldierEntity soldier, double tolerance) {
+        for (BlockEntity handle : findHandlesForShip(level, ship, null)) {
+            if (isLocked(handle)) {
+                continue;
+            }
+            for (Object link : getLinks(handle)) {
+                BlockPos seatPos = getLinkSeatPos(link);
+                if (seatPos == null || seatPos.distSqr(anchorBlock) > tolerance * tolerance) {
+                    continue;
+                }
+                Entity seat = resolveSeat(level, handle, link);
+                if (seat == null) {
+                    seat = createSeat(level, handle, link);
+                }
+                if (seat == null || seat.isRemoved() || !seat.isAlive()
+                    || !seat.getPassengers().isEmpty()) {
+                    continue;
+                }
+                soldier.getNavigation().stop();
+                soldier.cancelCoverMovement();
+                soldier.setDeltaMovement(Vec3.ZERO);
+                if (VS2Compat.seatSoldierOnSeatEntity(soldier, seat)) {
+                    soldierHandles.put(soldier.getUUID(), handle.getBlockPos());
+                    StevesArmyMod.LOGGER.info("[VAW] handle mount (exact): soldier={} -> seat={} handle={}",
+                        soldier.getId(), seat.getId(), handle.getBlockPos());
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    @Nullable
+    private static BlockPos getLinkSeatPos(Object link) {
+        try {
+            return (BlockPos) linkSeatPos.invoke(link);
+        } catch (Exception exception) {
+            return null;
+        }
+    }
+
+    /**
      * The handle to let this soldier out through: the handle recorded at mount time
      * first, then a link scan around the seat (lattice stride, then a stride-1 box so
      * off-lattice handles are found too).

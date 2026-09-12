@@ -104,8 +104,10 @@ public final class CrewAssignment {
             List<BlockPos> seats = VS2Compat.findFreeStaticSeats(level, ship, anchorWorld, remaining.size());
             if (seats.isEmpty()) {
                 // No seat blocks anywhere on the ship — inventory its entities so the
-                // log identifies any entity-based seats a block scan cannot see.
+                // log identifies any entity-based seats a block scan cannot see, and
+                // name every station AI currently running a gun on this ship.
                 VS2Compat.logShipEntityCensus(level, ship, anchorWorld);
+                StationGunnerAI.logActiveStations(level);
             }
             for (SoldierEntity soldier : new ArrayList<>(remaining)) {
                 if (seats.isEmpty()) {
@@ -155,6 +157,71 @@ public final class CrewAssignment {
         if (VS2Compat.seatSoldierDirect(soldier, level, seatPos)) {
             StevesArmyMod.LOGGER.info("[Crew] seated soldier={} via static seat={} shipId={}",
                 soldier.getId(), seatPos, VS2Compat.getShipIdOf(ship));
+            return true;
+        }
+        return false;
+    }
+
+    /** Block-space tolerance for "the seat at the aimed/recorded block" (covers block-position rounding). */
+    private static final double EXACT_SEAT_TOLERANCE = 1.5;
+
+    /**
+     * Mounts {@code soldier} on the seat exactly at the aimed/recorded block, tried
+     * before the tiered {@link #mountCrewOnShip} fallback so an aimed-at seat is taken
+     * literally instead of "first free handle/contraption seat on the ship". All
+     * comparisons are block-space against {@code anchorBlock} (the VS2 clip block /
+     * recorded support block), which is shipyard space on ships and world space on the
+     * ground alike — no vector-space ambiguity. Every miss degrades to the tiered
+     * fallback; nothing here changes how the fallback behaves.
+     */
+    public static boolean seatAtExactPosition(ServerLevel level, Object ship, BlockPos anchorBlock,
+                                              SoldierEntity soldier) {
+        Long shipId = VS2Compat.getShipIdOf(ship);
+        if (shipId == null) {
+            return false;
+        }
+        // 1. The exact SeatBlock under the crosshair / at the recorded position.
+        if (VS2Compat.isValidStaticSeat(level, ship, anchorBlock)) {
+            prepareForMount(soldier);
+            if (VS2Compat.seatSoldierDirect(soldier, level, anchorBlock)) {
+                StevesArmyMod.LOGGER.info("[Crew] exact mount: soldier={} static seat={} shipId={}",
+                    soldier.getId(), anchorBlock, shipId);
+                return true;
+            }
+        }
+        // 2. A free seat entity at the recorded block (Create SeatEntity, tallyho
+        //    FlexibleSeatEntity), only when it belongs to this ship. Full entity scan
+        //    like the tier-4 fallback: seat entities live at raw (shipyard) positions,
+        //    so a block-space AABB query is not reliable.
+        Entity bestSeat = null;
+        double bestDistance = EXACT_SEAT_TOLERANCE * EXACT_SEAT_TOLERANCE;
+        for (Entity seat : level.getAllEntities()) {
+            if (seat.isRemoved() || !seat.getPassengers().isEmpty()
+                    || !VS2Compat.isCreateSeatEntity(seat)) {
+                continue;
+            }
+            Long seatShip = VS2Compat.getShipIdOf(VS2Compat.getShipUnder(seat));
+            if (!shipId.equals(seatShip)) {
+                continue;
+            }
+            double distance = seat.blockPosition().distSqr(anchorBlock);
+            if (distance < bestDistance) {
+                bestDistance = distance;
+                bestSeat = seat;
+            }
+        }
+        if (bestSeat != null) {
+            prepareForMount(soldier);
+            if (VS2Compat.seatSoldierOnSeatEntity(soldier, bestSeat)) {
+                StevesArmyMod.LOGGER.info("[Crew] exact mount: soldier={} seat entity={} shipId={}",
+                    soldier.getId(), bestSeat.getId(), shipId);
+                return true;
+            }
+        }
+        // 3. A handle link whose seat sits at the recorded block.
+        if (AnalogWarfareCompat.isAvailable()
+                && AnalogWarfareCompat.mountViaHandleNear(level, ship, anchorBlock, soldier,
+                    EXACT_SEAT_TOLERANCE)) {
             return true;
         }
         return false;

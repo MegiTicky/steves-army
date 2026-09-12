@@ -6,6 +6,7 @@ import com.stevesarmy.compat.TallyhoCompat;
 import com.stevesarmy.compat.VS2Compat;
 import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.entity.SoldierRole;
+import com.stevesarmy.debug.DiagnosticLogManager;
 import com.stevesarmy.network.NetworkHandler;
 import com.stevesarmy.network.VehicleCrewDebugPacket;
 import com.stevesarmy.squad.SquadData;
@@ -91,6 +92,8 @@ public final class StationGunnerAI {
         @Nullable DetectionSystem.DetectionScanResult lastScan;
         float lastAimError = Float.NaN;
         int debugState;
+        /** Fire calls since the last 60-tick status line (direct + suppression). */
+        int shotsSinceStatus;
 
         StationState(Entity station, SoldierEntity soldier, boolean gunner, Vec3 cameraWorld) {
             this.station = station;
@@ -118,9 +121,12 @@ public final class StationGunnerAI {
         }
         active.put(station.getUUID(), new StationState(station, soldier, gunner, cameraWorld));
         soldier.setVehicleCrewActive(true);
-        StevesArmyMod.LOGGER.info("[StationAI] soldier={} mans {} {} (gunner={}) shipyard={} cameraWorld={}",
+        StevesArmyMod.LOGGER.info("[StationAI] soldier={} mans {} {} (gunner={}) shipyard={} cameraWorld={} {}",
             soldier.getId(), gunner ? "hull MG" : "periscope", station.getId(), gunner,
-            station.position(), cameraWorld);
+            station.position(), cameraWorld,
+            soldier.isPassenger() ? "mounted"
+                : String.format("REMOTE d=%.1fm (soldier standing, not seated)",
+                    soldier.position().distanceTo(cameraWorld)));
         return true;
     }
 
@@ -163,6 +169,32 @@ public final class StationGunnerAI {
             if (entry.getValue().soldier == soldier) {
                 deactivate(entry.getKey(), "soldier stopped");
             }
+        }
+    }
+
+    /**
+     * One line per active station: who controls it, from where, in what mode, and
+     * how many fire calls happened since its last status line. Answers "is any crew
+     * actually controlling this gun, and who?" in one click.
+     */
+    public static void logActiveStations(ServerLevel level) {
+        if (active.isEmpty()) {
+            StevesArmyMod.LOGGER.info("[StationAI] active stations: none");
+            return;
+        }
+        for (StationState state : active.values()) {
+            if (state.station.level() != level) {
+                continue;
+            }
+            String mode = state.suppressionThreatId != null ? "suppress(threat=" + state.suppressionThreatId + ")"
+                : state.target != null ? "direct(target=" + state.target.getType() + "#" + state.target.getId() + ")"
+                : "idle";
+            StevesArmyMod.LOGGER.info("[StationAI] active station={} {} soldier={} {} d={}m mode={} shotsSinceStatus={}",
+                state.station.getId(), state.station.getClass().getSimpleName(),
+                state.soldier.getId(),
+                state.soldier.isPassenger() ? "mounted" : "REMOTE-stand",
+                String.format("%.1f", state.soldier.position().distanceTo(state.cameraWorld)),
+                mode, state.shotsSinceStatus);
         }
     }
 
@@ -404,12 +436,14 @@ public final class StationGunnerAI {
             return;
         }
 
-        // A gunner that dismounted can keep its gun while it stays close in
-        // world space; once it wanders off, hand the station back. Both
-        // positions here are world space (VS2 drags standing entities in world
+        // A gunner that dismounted can keep its gun while it stays within the
+        // station-reach of the camera — the same bound the duty scan uses to
+        // claim it. Once it wanders off, hand the station back. Both positions
+        // here are world space (VS2 drags standing entities in world
         // coordinates), so the comparison is safe.
+        double leash = StevesArmyConfig.VEHICLE_CREW_STATION_REACH.get();
         if (!soldier.isPassenger()
-            && soldier.position().distanceToSqr(state.cameraWorld) > 64.0D * 64.0D) {
+            && soldier.position().distanceToSqr(state.cameraWorld) > leash * leash) {
             deactivate(stationId, "gunner left");
             return;
         }
@@ -517,6 +551,7 @@ public final class StationGunnerAI {
                     TallyhoCompat.aimTowards(state.station, aimTargetForStation(state, aimPoint.position), traverse,
                         deviation[1], deviation[0]);
                     TallyhoCompat.fire(state.station, state.soldier);
+                    logFireCall(state, "direct", best.getType() + "#" + best.getId());
 
                     state.bloom = Math.min(StevesArmyConfig.VEHICLE_CREW_BLOOM_MAX.get().floatValue(),
                         state.bloom + StevesArmyConfig.VEHICLE_CREW_BLOOM_PER_SHOT.get().floatValue());
@@ -662,6 +697,9 @@ public final class StationGunnerAI {
             return;
         }
         state.statusTick = 0;
+        status.append(" shots=").append(state.shotsSinceStatus)
+            .append(state.soldier.isPassenger() ? " mounted" : " REMOTE");
+        state.shotsSinceStatus = 0;
         StevesArmyMod.LOGGER.info("[StationAI] {} status soldier={} station={} {}",
             kind, state.soldier.getId(), state.station.getId(), status.toString());
     }
@@ -691,7 +729,8 @@ public final class StationGunnerAI {
             SquadThreatIntel.ThreatKnowledge assigned =
                 intel.getThreat(state.suppressionThreatId).orElse(null);
             if (assigned == null || !assigned.isAlive || assigned.lastKnownPosition == null
-                || intel.isThreatStale(state.suppressionThreatId, now)) {
+                || intel.isThreatStale(state.suppressionThreatId, now)
+                || !isThreatEntityAlive(level, assigned)) {
                 releaseSuppression(state, intel);
                 state.suppressionCooldownTicks = FireControl.SUPPRESSION_COOLDOWN_TICKS;
                 return;
@@ -702,7 +741,7 @@ public final class StationGunnerAI {
             SquadThreatIntel.ThreatKnowledge bestThreat = null;
             double bestDistSqr = range * range;
             for (SquadThreatIntel.ThreatKnowledge knowledge : intel.getUnsuppressedThreats()) {
-                if (knowledge.lastKnownPosition == null) {
+                if (knowledge.lastKnownPosition == null || !isThreatEntityAlive(level, knowledge)) {
                     continue;
                 }
                 double distSqr = state.cameraWorld.distanceToSqr(
@@ -736,11 +775,16 @@ public final class StationGunnerAI {
         // Re-roll the beaten zone per burst so sustained fire walks the position.
         // The null check matters: a precise target dying mid-burst hands over a
         // non-zero burstShots with no suppression aim point yet. Bloom stands in
-        // for the infantry gun's TaCZ-derived aim inaccuracy.
+        // for the infantry gun's TaCZ-derived aim inaccuracy. A live entity beats
+        // the intel snapshot — suppressing where the threat IS, not where it was
+        // when last seen (which is often a corpse's spot or empty ground).
         if (state.suppressionAimPos == null || state.suppressionBurstShots == 0) {
-            Vec3 base = threat.lastVisibleAimPoint != null
-                ? threat.lastVisibleAimPoint
-                : Vec3.atCenterOf(threat.lastKnownPosition).add(0.0, 1.0, 0.0);
+            Entity liveThreat = level.getEntity(threat.threatEntityId);
+            Vec3 base = liveThreat != null && liveThreat.isAlive()
+                ? liveThreat.getEyePosition()
+                : threat.lastVisibleAimPoint != null
+                    ? threat.lastVisibleAimPoint
+                    : Vec3.atCenterOf(threat.lastKnownPosition).add(0.0, 1.0, 0.0);
             double distance = state.cameraWorld.distanceTo(base);
             double gunSpreadMeters = distance
                 * Math.tan(Math.toRadians(state.bloom * BLOOM_SUPPRESSION_SPREAD_DEGREES));
@@ -759,6 +803,7 @@ public final class StationGunnerAI {
             aimTargetForStation(state, state.suppressionAimPos), traverse, 0.0F, 0.0F);
         if (error <= FIRE_TOLERANCE_DEGREES && fireBurstGate(state)) {
             TallyhoCompat.fire(state.station, state.soldier);
+            logFireCall(state, "suppress", threat.threatEntityId);
             state.bloom = Math.min(StevesArmyConfig.VEHICLE_CREW_BLOOM_MAX.get().floatValue(),
                 state.bloom + StevesArmyConfig.VEHICLE_CREW_BLOOM_PER_SHOT.get().floatValue());
             state.suppressionBurstShots++;
@@ -785,8 +830,34 @@ public final class StationGunnerAI {
      * Burst sizing and recovery are the DIRECT_PROFILE's job (handled in
      * {@link #tickGunner}), matching the infantry burst machinery.
      */
+    /**
+     * True when the threat's actual entity is still present and alive. Intel can lag
+     * reality (a threat killed out of sight stays {@code isAlive} until attribution or
+     * staleness), and suppressing a corpse's last-known spot is pure ghost fire.
+     */
+    private static boolean isThreatEntityAlive(ServerLevel level, SquadThreatIntel.ThreatKnowledge threat) {
+        Entity entity = level.getEntity(threat.threatEntityId);
+        return entity != null && entity.isAlive();
+    }
+
     private static boolean fireBurstGate(StationState state) {
         return TallyhoCompat.isReadyToFire(state.station) && TallyhoCompat.hasAmmo(state.station);
+    }
+
+    /**
+     * Records and (when the station-fire diagnostic is on) logs every fire call our AI
+     * makes. Tracers appearing WITHOUT these lines are not ours — tallyho's own
+     * coax fires in its tick with no controller gate (see CoaxMachineGunEntity).
+     */
+    private static void logFireCall(StationState state, String mode, @Nullable Object subject) {
+        state.shotsSinceStatus++;
+        if (DiagnosticLogManager.isStationFireLoggingEnabled()) {
+            Vec3 look = state.station.getLookAngle();
+            StevesArmyMod.LOGGER.info("[StationAI] fire st={} soldier={} mode={} subject={} yaw={} pitch={}",
+                state.station.getId(), state.soldier.getId(), mode,
+                subject == null ? "none" : subject,
+                String.format("%.1f", look.y), String.format("%.1f", look.x));
+        }
     }
 
     private static void decayBloom(StationState state) {

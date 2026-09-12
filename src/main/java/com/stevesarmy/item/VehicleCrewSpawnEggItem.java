@@ -120,7 +120,12 @@ public class VehicleCrewSpawnEggItem extends ForgeSpawnEggItem {
         if (ship == null && player instanceof ServerPlayer serverPlayer) {
             ship = VS2Compat.resolveMountShipNearPlayer(level, serverPlayer);
         }
-        int seated = ship == null ? 0 : CrewAssignment.mountCrewOnShip(level, ship, anchor, List.of(crew));
+        // Exact seat first: the aimed/recorded block, so aiming at a seat seats exactly
+        // there. Every miss falls through to the tiered mount below (unchanged).
+        int seated = ship != null && CrewAssignment.seatAtExactPosition(level, ship, hitBlock, crew) ? 1 : 0;
+        if (seated == 0) {
+            seated = ship == null ? 0 : CrewAssignment.mountCrewOnShip(level, ship, anchor, List.of(crew));
+        }
         if (seated == 0) {
             // Left standing at the anchor: the unmounted crew goal walks it to a station.
             StevesArmyMod.LOGGER.warn("[Crew] spawned crew={} could not mount near anchor {}",

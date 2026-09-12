@@ -1,10 +1,13 @@
 package com.stevesarmy.api;
 
+import com.stevesarmy.item.VehicleCrewSpawnEggItem;
+import com.stevesarmy.registry.ModItems;
 import com.stevesarmy.transport.CrewAssignment;
 import com.stevesarmy.compat.VS2Compat;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.Vec3;
 
@@ -12,7 +15,7 @@ import javax.annotation.Nullable;
 
 /**
  * Public integration surface for other mods (notably VS Analog Warfare's vehicle
- * setup block) to auto-board vehicle crew onto a vehicle.
+ * setup block) to spawn vehicle crew and auto-board them onto a vehicle.
  *
  * Call styles, most to least preferred:
  * <ol>
@@ -56,7 +59,7 @@ public final class VehicleCrewApi {
      */
     public static int assignCrewToShip(@Nullable ServerPlayer player, Level level, Vec3 anchor, int maxCrew) {
         if (player == null || !(level instanceof ServerLevel serverLevel) || !VS2Compat.isEnabled()
-            || maxCrew <= 0) {
+                || maxCrew <= 0) {
             return 0;
         }
         Object ship = VS2Compat.getShipAt(serverLevel, BlockPos.containing(anchor));
@@ -64,5 +67,23 @@ public final class VehicleCrewApi {
             return 0;
         }
         return CrewAssignment.autoAssignNear(player, serverLevel, ship, anchor);
+    }
+
+    /**
+     * Spawns one vehicle crew owned by {@code owner} at a recorded position on a
+     * vehicle and immediately tries to seat it there. Used by VSAW's vehicle setup
+     * block to replay recorded crew spawns after a schematic paste or purchase. The
+     * crew's skin is randomized and it joins {@code owner}'s squad. When no ship is
+     * found at the position the crew spawns standing there and its AI walks it to a
+     * station. Callers should check beforehand whether a crew already occupies the
+     * spot; this method does not de-duplicate.
+     */
+    public static void spawnCrewOnVehicle(@Nullable ServerPlayer owner, ServerLevel level,
+                                          BlockPos supportPos, Vec3 positionOffset) {
+        if (owner == null) {
+            return;
+        }
+        VehicleCrewSpawnEggItem.spawnCrewOnSeat(level, Vec3.atCenterOf(supportPos).add(positionOffset),
+                supportPos, owner, new ItemStack(ModItems.VEHICLE_CREW_SPAWN_EGG.get()));
     }
 }

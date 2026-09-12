@@ -13,6 +13,7 @@ public final class DiagnosticLogManager {
     private static boolean suppressionLoggingEnabled;
     private static boolean spacingLoggingEnabled;
     private static boolean holeRescueLoggingEnabled;
+    private static boolean stationFireLoggingEnabled;
     private static UUID rotationTraceSoldierId;
     private static UUID peekTraceSoldierId;
 
@@ -54,6 +55,11 @@ public final class DiagnosticLogManager {
     public static boolean isHoleRescueLoggingEnabled() { return holeRescueLoggingEnabled; }
     public static void setHoleRescueLoggingEnabled(boolean v) { holeRescueLoggingEnabled = v; }
 
+    // Vehicle crew station fire calls (hull MG / periscope). Correlates observed
+    // gunfire with the AI's fire calls; tracer bursts with no fire lines are not ours.
+    public static boolean isStationFireLoggingEnabled() { return stationFireLoggingEnabled; }
+    public static void setStationFireLoggingEnabled(boolean v) { stationFireLoggingEnabled = v; }
+
     // Targeted rotation trace. A UUID is required to avoid per-tick squad-wide output.
     public static void setRotationTraceSoldierId(UUID soldierId) { rotationTraceSoldierId = soldierId; }
     public static void clearRotationTrace() { rotationTraceSoldierId = null; }
@@ -80,6 +86,7 @@ public final class DiagnosticLogManager {
         suppressionLoggingEnabled = true;
         spacingLoggingEnabled = true;
         holeRescueLoggingEnabled = true;
+        stationFireLoggingEnabled = true;
     }
 
     /** Disable all diagnostic logging categories. */
@@ -93,6 +100,7 @@ public final class DiagnosticLogManager {
         suppressionLoggingEnabled = false;
         spacingLoggingEnabled = false;
         holeRescueLoggingEnabled = false;
+        stationFireLoggingEnabled = false;
         rotationTraceSoldierId = null;
         peekTraceSoldierId = null;
         PerformanceMetrics.setEnabled(false);
