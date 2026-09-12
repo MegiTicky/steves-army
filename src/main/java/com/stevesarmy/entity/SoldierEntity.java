@@ -530,6 +530,7 @@ public class SoldierEntity extends PathfinderMob implements Container {
         tag.putString("YsmModelId", getYsmModelId());
         tag.putString("YsmTextureId", getYsmTextureId());
         tag.putString("Skin", getSkin());
+        VS2Compat.saveTransportState(this, tag);
     }
 
     @Override
@@ -564,6 +565,7 @@ public class SoldierEntity extends PathfinderMob implements Container {
         if (tag.contains("Skin")) {
             setSkinRaw(tag.getString("Skin"));
         }
+        VS2Compat.restoreTransportState(this, tag);
     }
 
     @Override

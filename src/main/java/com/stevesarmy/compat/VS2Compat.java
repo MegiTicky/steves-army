@@ -9,6 +9,7 @@ import com.stevesarmy.squad.SquadMode;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.Vec3i;
+import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.protocol.game.ClientboundSetPassengersPacket;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
@@ -130,8 +131,26 @@ public final class VS2Compat {
             state.handleDismountGraceTicks--;
         }
 
+        // A crew soldier saved aboard a ship reloads with vanilla's passenger link
+        // intact but an empty state map. Re-adopt the seat instead of dismounting -
+        // the dismount would strand it at shipyard coordinates, and crew mounts are
+        // explicit-only so it could never re-board.
+        if (soldier.isPassenger() && soldier.getRole() == SoldierRole.VEHICLE_CREW
+            && adoptReloadedShipSeat(soldier, state)) {
+            updateTransport(soldier, state);
+            return isTransported(soldier, state);
+        }
+
         if (soldier.isPassenger()) {
             soldier.stopRiding();
+        }
+
+        // A soldier stranded at shipyard coordinates with no transport state (ship
+        // scrapped while unloaded, or a pre-persistence save the adoption fallback
+        // could not resolve) has no ground under it. Move it to its last on-foot
+        // world position instead of letting it fall out of the world.
+        if (!isWorldPlausible(soldier.position())) {
+            recoverFromImplausiblePosition(soldier, state);
         }
 
         if (tryStartTransport(soldier, state)) {
@@ -157,6 +176,133 @@ public final class VS2Compat {
         authorizedMounts.remove(soldier.getUUID());
         authorizedStaticSeats.remove(soldier.getUUID());
         AnalogWarfareCompat.forget(soldier.getUUID());
+    }
+
+    // ------------------------------------------------------------------
+    // NBT persistence of transport state (survives server/world restarts)
+    // ------------------------------------------------------------------
+
+    /**
+     * Saves the soldier's transport state so a crew soldier reloaded from disk
+     * stays seated on its shipyard-space seat instead of being dismounted by the
+     * empty-state path in {@link #prepareSoldierAi}.
+     */
+    public static void saveTransportState(SoldierEntity soldier, CompoundTag tag) {
+        if (!isEnabled()) {
+            return;
+        }
+        SoldierState state = states.get(soldier.getUUID());
+        if (state == null || state.transportAnchorId == null) {
+            return;
+        }
+        tag.putUUID("VsTransportAnchor", state.transportAnchorId);
+        if (state.transportOwnerId != null) {
+            tag.putUUID("VsTransportOwner", state.transportOwnerId);
+        }
+        if (state.transportShipId != null) {
+            tag.putLong("VsTransportShipId", state.transportShipId);
+        }
+        if (state.transportSeatPosition != null) {
+            tag.putLong("VsTransportSeatPos", state.transportSeatPosition.asLong());
+        }
+        if (state.lastSafeWorldPosition != null) {
+            tag.putLong("VsTransportSafePos", state.lastSafeWorldPosition.asLong());
+        }
+        tag.putBoolean("VsTransportCrewSeated", state.crewSeated);
+    }
+
+    /** Restores the transport state written by {@link #saveTransportState} on world load. */
+    public static void restoreTransportState(SoldierEntity soldier, CompoundTag tag) {
+        if (soldier.level().isClientSide || !isEnabled() || !tag.hasUUID("VsTransportAnchor")) {
+            return;
+        }
+        SoldierState state = getOrCreateState(soldier);
+        if (state.transportAnchorId != null) {
+            return;
+        }
+        state.transportAnchorId = tag.getUUID("VsTransportAnchor");
+        if (tag.hasUUID("VsTransportOwner")) {
+            state.transportOwnerId = tag.getUUID("VsTransportOwner");
+        }
+        if (tag.contains("VsTransportShipId")) {
+            state.transportShipId = tag.getLong("VsTransportShipId");
+        }
+        if (tag.contains("VsTransportSeatPos")) {
+            state.transportSeatPosition = BlockPos.of(tag.getLong("VsTransportSeatPos"));
+        }
+        if (tag.contains("VsTransportSafePos")) {
+            state.lastSafeWorldPosition = BlockPos.of(tag.getLong("VsTransportSafePos"));
+        }
+        state.crewSeated = tag.getBoolean("VsTransportCrewSeated")
+            || soldier.getRole() == SoldierRole.VEHICLE_CREW;
+        StevesArmyMod.LOGGER.info("[VS2] Restored transport state soldier={} anchor={} shipId={} seat={} crewSeated={}",
+            soldier.getId(), state.transportAnchorId, state.transportShipId,
+            state.transportSeatPosition, state.crewSeated);
+    }
+
+    /**
+     * Legacy-save adoption: a crew soldier that reloads seated on a Create ship
+     * seat with no persisted state. Rebuilds the state from the seat so the
+     * soldier stays aboard instead of being dismounted at shipyard coordinates.
+     */
+    private static boolean adoptReloadedShipSeat(SoldierEntity soldier, SoldierState state) {
+        Entity vehicle = soldier.getVehicle();
+        if (vehicle == null || createSeatEntityClass == null
+            || !createSeatEntityClass.isInstance(vehicle)) {
+            return false;
+        }
+        try {
+            Vec3 seatPos = vehicle.position();
+            Object ship = reflect(getShipObjectManagingPosDouble, soldier.level(), seatPos.x, seatPos.y, seatPos.z);
+            if (ship == null) {
+                return false;
+            }
+            state.transportAnchorId = vehicle.getUUID();
+            state.transportOwnerId = null;
+            state.transportShipId = getShipIdOf(ship);
+            state.transportSeatPosition = soldier.blockPosition();
+            state.crewSeated = true;
+            StevesArmyMod.LOGGER.info("[VS2] Adopted reloaded ship seat soldier={} vehicle={} shipId={}",
+                soldier.getId(), vehicle.getId(), state.transportShipId);
+            return true;
+        } catch (ReflectiveOperationException exception) {
+            logReflectionFailure(exception);
+            return false;
+        }
+    }
+
+    /**
+     * Recovers a soldier whose raw position is shipyard-scale with no transport
+     * state. Prefers the last on-foot world position, falling back to the ship
+     * conversion of the seat. Returns false (throttled WARN) when nothing works.
+     */
+    private static void recoverFromImplausiblePosition(SoldierEntity soldier, SoldierState state) {
+        long now = System.currentTimeMillis();
+        boolean logReady = now - state.lastRecoveryLog >= 5000L;
+        if (logReady) {
+            state.lastRecoveryLog = now;
+        }
+        BlockPos target = null;
+        if (state.lastSafeWorldPosition != null
+            && isWorldPlausible(Vec3.atBottomCenterOf(state.lastSafeWorldPosition))
+            && isSafeWorldPosition(soldier, state.lastSafeWorldPosition)) {
+            target = state.lastSafeWorldPosition;
+        } else {
+            Vec3 converted = convertShipyardPosition(soldier.level(), soldier.position(), state);
+            if (converted != null && isWorldPlausible(converted)) {
+                target = BlockPos.containing(converted.x, converted.y, converted.z);
+            }
+        }
+        if (target == null) {
+            if (logReady) {
+                StevesArmyMod.LOGGER.warn("[VS2] Soldier stranded at implausible position {} with no recoverable target",
+                    formatVec3(soldier.position()));
+            }
+            return;
+        }
+        StevesArmyMod.LOGGER.warn("[VS2] Recovered soldier={} stranded at implausible position: moved to {}",
+            soldier.getId(), target);
+        moveToWorldPosition(soldier, target);
     }
 
     /** True when the soldier is seated on a crew-claimed station seat (role keeps ticking AI). */
@@ -2461,5 +2607,7 @@ public final class VS2Compat {
         private int handleDismountGraceTicks;
         /** Throttle for the seated-crew station duty scan. */
         private int crewDutyScanCooldown;
+        /** Throttle for the implausible-position recovery WARN log. */
+        private long lastRecoveryLog;
     }
 }
