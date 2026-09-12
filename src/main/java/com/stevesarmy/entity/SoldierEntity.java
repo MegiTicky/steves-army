@@ -511,6 +511,21 @@ public class SoldierEntity extends PathfinderMob implements Container {
         return null;
     }
 
+    /**
+     * Sinks seated soldiers onto the cushion. The vanilla humanoid riding pose
+     * draws the body ~0.75 above the rider origin, while Create's SeatEntity puts
+     * the origin at seat-block-bottom + 0.2625 - so without this offset the body
+     * hovers ~0.5 blocks above the seat. Used by both Create's server-side rider
+     * placement and VS2's client render rebuild, so model and hitbox sink together.
+     * Tunable: raise (toward 0) if soldiers sit too low, lower if they still hover.
+     */
+    private static final double SIT_SINK = -0.5;
+
+    @Override
+    public double getMyRidingOffset() {
+        return SIT_SINK;
+    }
+
     @Override
     public void addAdditionalSaveData(CompoundTag tag) {
         super.addAdditionalSaveData(tag);
