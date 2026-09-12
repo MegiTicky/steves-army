@@ -47,6 +47,8 @@ public final class TallyhoCompat {
     private static Class<?> iTurretClass;
     private static Method turnView;                  // (double yawDelta, double pitchDelta)
     private static Method limitedRotationFromTarget; // (Vec3 worldTarget, float partialTick) -> Vec2
+    private static Method rotationFromDirection;     // (Vec3 worldDir) -> Vec2, UNLIMITED
+    private static Method limitedRotationFromDirection; // (Vec3 worldDir) -> Vec2, clamped
     private static Method isPossessed;               // () -> boolean
     private static Method handleShoot;               // (LivingEntity)
     private static Method getBaseYaw;                // () -> float
@@ -74,6 +76,12 @@ public final class TallyhoCompat {
             limitedRotationFromTarget = cameraEntityClass
                 .getDeclaredMethod("getLimitedRotationFromTarget", Vec3.class, float.class);
             limitedRotationFromTarget.setAccessible(true);
+            rotationFromDirection = cameraEntityClass
+                .getDeclaredMethod("getRotationFromDirection", Vec3.class);
+            rotationFromDirection.setAccessible(true);
+            limitedRotationFromDirection = cameraEntityClass
+                .getDeclaredMethod("getLimitedRotationFromDirection", Vec3.class);
+            limitedRotationFromDirection.setAccessible(true);
             isPossessed = cameraEntityClass.getMethod("isPossessed");
             getBaseYaw = cameraEntityClass.getMethod("getBaseYaw");
 
@@ -214,6 +222,34 @@ public final class TallyhoCompat {
             handleShoot.invoke(camera, shooter);
         } catch (Exception exception) {
             logFailure(exception);
+        }
+    }
+
+    /**
+     * True when {@code aimTarget} lies outside the camera's turret arc. tallyho's
+     * limited rotation CLAMPS out-of-arc targets to the arc edge, so an aim error of
+     * zero at the edge does not mean the target is reachable — compare the unlimited
+     * rotation against the limited one instead. {@code aimTarget} must be the same
+     * point handed to {@link #aimTowards} (the station pseudo-target).
+     */
+    public static boolean isTargetOutsideLimits(Entity camera, Vec3 aimTarget) {
+        if (!available || !cameraEntityClass.isInstance(camera)) {
+            return false;
+        }
+        Vec3 direction = aimTarget.subtract(camera.position());
+        if (direction.lengthSqr() < 1.0e-8) {
+            return false;
+        }
+        try {
+            Vec2 raw = (Vec2) rotationFromDirection.invoke(camera, direction);
+            Vec2 limited = (Vec2) limitedRotationFromDirection.invoke(camera, direction);
+            final float epsilonDegrees = 0.5F;
+            float yawDelta = Math.abs(Mth.wrapDegrees(raw.y - limited.y));
+            float pitchDelta = Math.abs(raw.x - limited.x);
+            return yawDelta > epsilonDegrees || pitchDelta > epsilonDegrees;
+        } catch (Exception exception) {
+            logFailure(exception);
+            return false;
         }
     }
 }

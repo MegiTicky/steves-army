@@ -508,6 +508,10 @@ public final class StationGunnerAI {
                 float traverse = StevesArmyConfig.VEHICLE_CREW_TRAVERSE_SPEED.get().floatValue();
                 aimError = TallyhoCompat.aimTowards(state.station,
                     aimTargetForStation(state, aimPoint.position), traverse, 0.0F, 0.0F);
+                // tallyho clamps out-of-arc targets to the arc edge, so a small aim
+                // error does not mean the target is reachable — hold fire off-arc.
+                boolean inArc = !TallyhoCompat.isTargetOutsideLimits(state.station,
+                    aimTargetForStation(state, aimPoint.position));
                 fireGateReached = true;
 
                 // Infantry-style dynamic shot threshold, scaled by the crew's fire
@@ -538,6 +542,7 @@ public final class StationGunnerAI {
                     // contact, mirroring infantry trigger discipline.
                     && state.detection.isTargetDetected(best)
                     && aimError <= FIRE_TOLERANCE_DEGREES
+                    && inArc
                     && fireBurstGate(state)) {
                     float yawSigma = AimAccuracyManager.getYawSigma(state.aimQuality)
                         + (float) aimPoint.concealment * 2.00F;
@@ -650,6 +655,13 @@ public final class StationGunnerAI {
         chain.add("friendly=" + (!aimOk ? "-" : friendly ? "safe" : "VETO"));
         if (blocker == null && aimOk && !friendly) {
             blocker = "friendly";
+        }
+
+        boolean inArc = !aimOk || !TallyhoCompat.isTargetOutsideLimits(state.station,
+            aimTargetForStation(state, aimPoint.position));
+        chain.add("arc=" + (!aimOk ? "-" : inArc ? "ok" : "OUT"));
+        if (blocker == null && aimOk && !inArc) {
+            blocker = "arc";
         }
 
         String fireState;
@@ -799,9 +811,11 @@ public final class StationGunnerAI {
             return;
         }
         float traverse = StevesArmyConfig.VEHICLE_CREW_TRAVERSE_SPEED.get().floatValue();
-        float error = TallyhoCompat.aimTowards(state.station,
-            aimTargetForStation(state, state.suppressionAimPos), traverse, 0.0F, 0.0F);
-        if (error <= FIRE_TOLERANCE_DEGREES && fireBurstGate(state)) {
+        Vec3 suppressionTarget = aimTargetForStation(state, state.suppressionAimPos);
+        float error = TallyhoCompat.aimTowards(state.station, suppressionTarget, traverse, 0.0F, 0.0F);
+        if (error <= FIRE_TOLERANCE_DEGREES && fireBurstGate(state)
+            // Out-of-arc suppression positions clamp to the arc edge; never fire there.
+            && !TallyhoCompat.isTargetOutsideLimits(state.station, suppressionTarget)) {
             TallyhoCompat.fire(state.station, state.soldier);
             logFireCall(state, "suppress", threat.threatEntityId);
             state.bloom = Math.min(StevesArmyConfig.VEHICLE_CREW_BLOOM_MAX.get().floatValue(),
