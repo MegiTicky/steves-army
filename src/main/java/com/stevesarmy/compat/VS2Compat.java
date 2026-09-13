@@ -1796,7 +1796,7 @@ public final class VS2Compat {
         double w = mob.getBbWidth() * 0.5 + 0.1;
         double h = mob.getBbHeight() * 0.5 + 0.1;
         AABB bounds = new AABB(node).inflate(w, h, w);
-        return intersectsShip(level, bounds);
+        return intersectsShipHull(level, bounds);
     }
 
     public static boolean shouldRejectNavigation(Level level, BlockPos position) {
@@ -1804,7 +1804,7 @@ public final class VS2Compat {
             return false;
         }
         AABB bounds = new AABB(position).inflate(0.35D, 0.1D, 0.35D);
-        return intersectsShip(level, bounds);
+        return intersectsShipHull(level, bounds);
     }
 
     public static boolean shouldRejectNavigation(Entity entity) {
@@ -2043,17 +2043,93 @@ public final class VS2Compat {
     }
 
     private static boolean isInsideShip(Entity entity) {
-        return intersectsShip(entity.level(), entity.getBoundingBox());
+        return intersectsShipHull(entity.level(), entity.getBoundingBox());
     }
 
-    private static boolean intersectsShip(Level level, AABB bounds) {
+    /**
+     * True when {@code bounds} actually overlaps a ship's transformed voxel hull —
+     * NOT the ship's world-space axis-aligned envelope. The envelope balloons when
+     * a craft is yawed (45° turns wrap a hull several times its size in void), and
+     * avoidance keyed on it made soldiers refuse to path anywhere near a rotated
+     * ship, or stranded them after a dismount (their own node read as "blocked").
+     * The envelope query survives only as the cheap pre-filter; every candidate
+     * ship is then checked in ship space with the same geometric pattern
+     * {@link #resolveShipAtWorldAnchor} uses for multi-ship picks.
+     */
+    public static boolean intersectsShipHull(Level level, AABB bounds) {
+        if (!isEnabled()) {
+            return false;
+        }
+        Object ships;
         try {
-            Object ships = reflect(getShipsIntersecting, level, bounds);
-            return ships instanceof Iterable<?> iterable && iterable.iterator().hasNext();
+            ships = reflect(getShipsIntersecting, level, bounds);
         } catch (ReflectiveOperationException exception) {
             logReflectionFailure(exception);
             return false;
         }
+        if (!(ships instanceof Iterable<?> iterable)) {
+            return false;
+        }
+        ServerLevel serverLevel = level instanceof ServerLevel server ? server : null;
+        for (Object ship : iterable) {
+            if (ship == null) {
+                continue;
+            }
+            if (shipOverlapsHull(serverLevel, ship, bounds)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Center + 8 corners: small caller-inflated boxes are fully covered by these. */
+    private static boolean shipOverlapsHull(@Nullable ServerLevel level, Object ship, AABB bounds) {
+        if (sampleInShipHull(level, ship, bounds.getCenter())) {
+            return true;
+        }
+        double[] xs = {bounds.minX, bounds.maxX};
+        double[] ys = {bounds.minY, bounds.maxY};
+        double[] zs = {bounds.minZ, bounds.maxZ};
+        for (double x : xs) {
+            for (double y : ys) {
+                for (double z : zs) {
+                    if (sampleInShipHull(level, ship, new Vec3(x, y, z))) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    /**
+     * One hull test: the point is "inside the ship" when its ship-local position
+     * lies within the ship's voxel AABB and the shipyard block there (or a face
+     * neighbour) is solid. Unloaded chunks and unavailable transforms/AABBs fail
+     * closed — avoidance must never open a hole into unloaded shipyard space.
+     */
+    private static boolean sampleInShipHull(@Nullable ServerLevel level, Object ship, Vec3 worldPoint) {
+        Vec3 local = worldToShipLocal(ship, worldPoint);
+        BlockPos aabbMin = local == null ? null : getShipyardMin(ship);
+        BlockPos aabbMax = local == null ? null : getShipyardMax(ship);
+        if (local == null || aabbMin == null || aabbMax == null) {
+            return true;
+        }
+        BlockPos converted = BlockPos.containing(local.x, local.y, local.z);
+        boolean contained = converted.getX() >= aabbMin.getX() - 1 && converted.getX() <= aabbMax.getX() + 1
+            && converted.getY() >= aabbMin.getY() - 1 && converted.getY() <= aabbMax.getY() + 1
+            && converted.getZ() >= aabbMin.getZ() - 1 && converted.getZ() <= aabbMax.getZ() + 1;
+        if (!contained) {
+            return false;
+        }
+        if (level == null) {
+            // No block access: treat the whole voxel box as hull (conservative).
+            return true;
+        }
+        if (!isChunkLoaded(level, converted)) {
+            return true;
+        }
+        return hasSolidBlockNear(level, converted);
     }
 
     private static boolean isBeingDraggedByShip(Entity entity) {
@@ -2777,7 +2853,7 @@ public final class VS2Compat {
         }
         Vec3 location = Vec3.atBottomCenterOf(position);
         AABB bounds = soldier.getDimensions(Pose.STANDING).makeBoundingBox(location);
-        return !intersectsShip(soldier.level(), bounds) && soldier.level().noCollision(soldier, bounds);
+        return !intersectsShipHull(soldier.level(), bounds) && soldier.level().noCollision(soldier, bounds);
     }
 
     private static void moveToWorldPosition(SoldierEntity soldier, BlockPos position) {

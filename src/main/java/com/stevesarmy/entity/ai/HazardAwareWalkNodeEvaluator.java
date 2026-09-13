@@ -14,8 +14,8 @@ import net.minecraft.world.phys.shapes.VoxelShape;
 /**
  * Custom node evaluator that returns BLOCKED for any block position
  * matching a configured hazard block, a partial obstacle, or intersecting
- * a VS2 ship bounding box, preventing A* path generation from routing
- * soldiers through these obstacles.
+ * a VS2 ship's transformed voxel hull (not the yaw-inflated world AABB),
+ * preventing A* path generation from routing soldiers through these obstacles.
  */
 public class HazardAwareWalkNodeEvaluator extends WalkNodeEvaluator {
 
