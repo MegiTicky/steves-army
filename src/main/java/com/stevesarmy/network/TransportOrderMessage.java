@@ -9,12 +9,13 @@ import com.stevesarmy.squad.FireTeam;
 import com.stevesarmy.squad.SquadTargeting;
 import com.stevesarmy.transport.CrewAssignment;
 import com.stevesarmy.transport.TransportOrder;
-import net.minecraft.core.BlockPos;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.network.NetworkEvent;
 
@@ -88,7 +89,7 @@ public class TransportOrderMessage {
             return;
         }
         Vec3 searchCenter = aimPosition;
-        Object ship = VS2Compat.getShipAt(level, BlockPos.containing(aimPosition));
+        Object ship = resolveAimedShip(sender, level, aimPosition);
         if (ship == null) {
             searchCenter = sender.position();
             ship = VS2Compat.resolveMountShipNearPlayer(level, sender);
@@ -146,6 +147,29 @@ public class TransportOrderMessage {
         }
     }
 
+    /** /vs get-ship clips 10 blocks from the crosshair. */
+    private static final double GET_SHIP_PICK_DISTANCE = 10.0;
+
+    /**
+     * Ship resolution in /vs get-ship order (the crew assign stick's order): the
+     * vanilla clip's hit block is the authoritative crosshair pick, so the ship
+     * managing that exact block wins; the geometric resolver only runs when the
+     * hit block maps to nothing — overlapping sub-ships can defeat a raw
+     * block-center lookup. Callers keep their near-player last resort.
+     */
+    private static Object resolveAimedShip(ServerPlayer sender, ServerLevel level, Vec3 aimPosition) {
+        HitResult clip = sender.pick(GET_SHIP_PICK_DISTANCE, 1.0F, false);
+        if (clip.getType() == HitResult.Type.BLOCK && clip instanceof BlockHitResult blockHit) {
+            Object ship = VS2Compat.getShipObjectAtBlockPos(level, blockHit.getBlockPos());
+            if (ship != null) {
+                StevesArmyMod.LOGGER.info("[Transport] ship resolved via vs get-ship at hit block {}: shipId={}",
+                    blockHit.getBlockPos(), VS2Compat.getShipIdOf(ship));
+                return ship;
+            }
+        }
+        return VS2Compat.resolveShipAtWorldAnchor(level, aimPosition);
+    }
+
     private static void handleMount(ServerPlayer sender, ServerLevel level,
                                     List<SoldierEntity> soldiers, Vec3 aimPosition) {
         if (!VS2Compat.isEnabled()) {
@@ -164,9 +188,10 @@ public class TransportOrderMessage {
             return;
         }
 
-        // Crosshair ship first; otherwise the ship the player rides, else the nearest ship.
+        // Crosshair ship first (vs get-ship order); otherwise the ship the player
+        // rides, else the nearest ship.
         Vec3 searchCenter = aimPosition;
-        Object ship = VS2Compat.getShipAt(level, BlockPos.containing(aimPosition));
+        Object ship = resolveAimedShip(sender, level, aimPosition);
         if (ship == null) {
             searchCenter = sender.position();
             ship = VS2Compat.resolveMountShipNearPlayer(level, sender);
