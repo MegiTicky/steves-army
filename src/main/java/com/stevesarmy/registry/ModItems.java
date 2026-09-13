@@ -65,6 +65,11 @@ public class ModItems {
         () -> new com.stevesarmy.item.EnemySoldierSpawnEggItem(new Item.Properties())
     );
 
+    public static final RegistryObject<Item> ENEMY_VEHICLE_CREW_SPAWN_EGG = ITEMS.register(
+        "enemy_vehicle_crew_spawn_egg",
+        () -> new com.stevesarmy.item.EnemyVehicleCrewSpawnEggItem(new Item.Properties())
+    );
+
     public static final RegistryObject<Item> MACHINE_GUNNER_SPAWN_EGG = ITEMS.register(
         "machine_gunner_spawn_egg",
         () -> new com.stevesarmy.item.MachineGunnerSpawnEggItem(ModEntities.MACHINE_GUNNER, 0x4A7C59, 0x8B8B00, new Item.Properties())

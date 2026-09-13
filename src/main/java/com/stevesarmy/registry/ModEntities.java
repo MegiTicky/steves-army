@@ -2,6 +2,7 @@ package com.stevesarmy.registry;
 
 import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.entity.EnemySoldierEntity;
+import com.stevesarmy.entity.EnemyVehicleCrewEntity;
 import com.stevesarmy.entity.GarrisonEntity;
 import com.stevesarmy.entity.MachineGunnerEntity;
 import com.stevesarmy.entity.SoldierEntity;
@@ -100,6 +101,15 @@ public class ModEntities {
             .build(StevesArmyMod.MODID + ":vehicle_crew")
     );
 
+    public static final RegistryObject<EntityType<EnemyVehicleCrewEntity>> ENEMY_VEHICLE_CREW = ENTITIES.register(
+        "enemy_vehicle_crew",
+        () -> EntityType.Builder.of(EnemyVehicleCrewEntity::new, MobCategory.MONSTER)
+            .sized(0.6F, 1.8F)
+            .clientTrackingRange(10)
+            .updateInterval(3)
+            .build(StevesArmyMod.MODID + ":enemy_vehicle_crew")
+    );
+
     public static final RegistryObject<EntityType<ResupplyPouchEntity>> RESUPPLY_POUCH = ENTITIES.register(
         "resupply_pouch",
         () -> EntityType.Builder.of(ResupplyPouchEntity::new, MobCategory.MISC)
@@ -163,6 +173,14 @@ public class ModEntities {
             .build());
 
         event.put(VEHICLE_CREW.get(), Monster.createMonsterAttributes()
+            .add(Attributes.MAX_HEALTH, 20.0D)
+            .add(Attributes.MOVEMENT_SPEED, 0.35D)
+            .add(Attributes.ARMOR, 4.0D)
+            .add(Attributes.ATTACK_DAMAGE, 3.0D)
+            .add(Attributes.FOLLOW_RANGE, 32.0D)
+            .build());
+
+        event.put(ENEMY_VEHICLE_CREW.get(), Monster.createMonsterAttributes()
             .add(Attributes.MAX_HEALTH, 20.0D)
             .add(Attributes.MOVEMENT_SPEED, 0.35D)
             .add(Attributes.ARMOR, 4.0D)

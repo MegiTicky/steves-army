@@ -28,6 +28,7 @@ public class ClientSetup {
         event.registerEntityRenderer(ModEntities.VEHICLE_CREW.get(), SoldierRenderer::new);
         event.registerEntityRenderer(ModEntities.TARGET.get(), TargetRenderer::new);
         event.registerEntityRenderer(ModEntities.ENEMY_SOLDIER.get(), EnemySoldierRenderer::new);
+        event.registerEntityRenderer(ModEntities.ENEMY_VEHICLE_CREW.get(), EnemySoldierRenderer::new);
         event.registerEntityRenderer(ModEntities.RESUPPLY_POUCH.get(), ResupplyPouchRenderer::new);
     }
 
