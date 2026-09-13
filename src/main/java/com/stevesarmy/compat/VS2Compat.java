@@ -1444,6 +1444,14 @@ public final class VS2Compat {
      * Returns true if the soldier was mounted.
      */
     public static boolean releaseTransport(SoldierEntity soldier) {
+        return releaseTransport(soldier, true);
+    }
+
+    /**
+     * Release with control over the handle exit. Mount-time cleanup passes false -
+     * the soldier is about to be seated again and must not teleport to the hatch.
+     */
+    public static boolean releaseTransport(SoldierEntity soldier, boolean exitAtHandle) {
         Entity vehicle = soldier.isPassenger() ? soldier.getVehicle() : null;
         if (soldier.isPassenger()) {
             soldier.stopRiding();
@@ -1451,6 +1459,14 @@ public final class VS2Compat {
         clearShipDraggingStateDirect(soldier);
         clearTransportState(soldier);
         blockAutoTransport(soldier);
+        // Exit at the hatch: the handle linked to this soldier's seat first, then the
+        // nearest handle on their ship. The resolver runs after stopRiding so the
+        // teleport lands as the final position, but the mount-time handle record
+        // still resolves (it does not need the seat entity).
+        if (exitAtHandle && vehicle != null && StevesArmyConfig.VEHICLE_HANDLES_ENABLED.get()
+            && soldier.level() instanceof ServerLevel serverLevel) {
+            AnalogWarfareCompat.exitAtNearestHandle(soldier);
+        }
         if (vehicle != null) {
             // Send empty passenger list so the anchor no longer reports the soldier.
             syncTransportState(soldier, vehicle, false);
@@ -2731,10 +2747,10 @@ public final class VS2Compat {
             soldier.getId(), formatVec3(preDismountPos), formatVec3(postReleasePos),
             String.format("%.2f", preDismountPos.distanceTo(postReleasePos)));
         clearTransportState(state);
-        // Automatic releases (owner left the ship, lost anchor) also exit at the hatch
-        // when the vehicle is parked nearby.
+        // Automatic releases (owner left the ship, lost anchor) also exit at the
+        // hatch: linked handle first, then the nearest handle on the ship.
         if (StevesArmyConfig.VEHICLE_HANDLES_ENABLED.get()) {
-            AnalogWarfareCompat.exitAtRememberedHandle(soldier);
+            AnalogWarfareCompat.exitAtNearestHandle(soldier);
         }
     }
 

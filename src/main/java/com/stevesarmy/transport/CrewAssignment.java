@@ -231,7 +231,8 @@ public final class CrewAssignment {
     private static void prepareForMount(SoldierEntity soldier) {
         StationGunnerAI.deactivateForSoldier(soldier);
         if (soldier.isPassenger()) {
-            VS2Compat.releaseTransport(soldier);
+            // No handle exit: the soldier is re-seated immediately by the mount.
+            VS2Compat.releaseTransport(soldier, false);
         }
         soldier.getNavigation().stop();
         soldier.cancelCoverMovement();

@@ -315,20 +315,23 @@ public final class AnalogWarfareCompat {
     /**
      * The handle to let this soldier out through: the handle recorded at mount time
      * first, then a link scan around the seat (lattice stride, then a stride-1 box so
-     * off-lattice handles are found too).
+     * off-lattice handles are found too). The remembered handle resolves even after
+     * the soldier has stopped riding - link scans need the seat entity, the record
+     * does not.
      */
     @Nullable
     public static BlockEntity findHandleForSoldier(ServerLevel level, SoldierEntity soldier) {
-        Entity vehicle = soldier.isPassenger() ? soldier.getVehicle() : null;
-        if (vehicle == null) {
-            return null;
-        }
         BlockPos remembered = soldierHandles.get(soldier.getUUID());
         if (remembered != null) {
             BlockEntity handle = level.getBlockEntity(remembered);
             if (isHandle(handle)) {
                 return handle;
             }
+            soldierHandles.remove(soldier.getUUID());
+        }
+        Entity vehicle = soldier.isPassenger() ? soldier.getVehicle() : null;
+        if (vehicle == null) {
+            return null;
         }
         for (BlockEntity handle : scanHandles(level, vehicle.blockPosition(), null)) {
             for (Object link : getLinks(handle)) {
@@ -393,19 +396,19 @@ public final class AnalogWarfareCompat {
     }
 
     /**
-     * Automatic-release exit path: use only the remembered handle, and only while the
-     * vehicle is close — a soldier released because the ship sailed away must not be
-     * teleported back onto it. Returns true if the exit happened.
+     * Exit path for every dismount: the handle linked to the soldier's seat first,
+     * then the nearest handle anywhere on their ship - dismounting from any seat
+     * uses the hatch, with no seat-handle link required for the fallback tier.
+     * Distance-guarded so a soldier released because the ship sailed away is not
+     * teleported back aboard. Returns true if the exit happened.
      */
-    public static boolean exitAtRememberedHandle(SoldierEntity soldier) {
-        BlockPos remembered = soldierHandles.get(soldier.getUUID());
-        if (remembered == null || !StevesArmyConfig.VEHICLE_HANDLES_ENABLED.get() || !isAvailable()
+    public static boolean exitAtNearestHandle(SoldierEntity soldier) {
+        if (!StevesArmyConfig.VEHICLE_HANDLES_ENABLED.get() || !isAvailable()
             || !(soldier.level() instanceof ServerLevel level)) {
             return false;
         }
-        BlockEntity handle = level.getBlockEntity(remembered);
-        if (!isHandle(handle)) {
-            soldierHandles.remove(soldier.getUUID());
+        BlockEntity handle = findExitHandleForSoldier(level, soldier);
+        if (handle == null) {
             return false;
         }
         Vec3 world = getHandleWorldPosition(handle);
@@ -417,6 +420,35 @@ public final class AnalogWarfareCompat {
             return true;
         }
         return false;
+    }
+
+    /**
+     * Tier 1: the handle recorded at mount time (or the seat's link match).
+     * Tier 2: any handle on the soldier's ship, nearest first - no link required.
+     */
+    @Nullable
+    public static BlockEntity findExitHandleForSoldier(ServerLevel level, SoldierEntity soldier) {
+        BlockEntity linked = findHandleForSoldier(level, soldier);
+        if (linked != null) {
+            return linked;
+        }
+        Object ship = VS2Compat.getMountedShip(soldier);
+        if (ship == null) {
+            ship = VS2Compat.resolveShipAtWorldAnchor(level, soldier.position());
+        }
+        if (ship == null) {
+            return null;
+        }
+        List<BlockEntity> handles = new ArrayList<>(findHandlesForShip(level, ship, soldier.position()));
+        handles.removeIf(handle -> {
+            Vec3 world = getHandleWorldPosition(handle);
+            return world == null || soldier.distanceToSqr(world) > EXIT_MAX_DISTANCE_SQR;
+        });
+        handles.sort(Comparator.comparingDouble(handle -> {
+            Vec3 world = getHandleWorldPosition(handle);
+            return world == null ? Double.MAX_VALUE : soldier.distanceToSqr(world);
+        }));
+        return handles.isEmpty() ? null : handles.get(0);
     }
 
     private static boolean linkMatchesSeat(Object link, Entity seat) {

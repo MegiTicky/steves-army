@@ -1,7 +1,5 @@
 package com.stevesarmy.network;
 
-import com.stevesarmy.StevesArmyConfig;
-import com.stevesarmy.compat.AnalogWarfareCompat;
 import com.stevesarmy.compat.VS2Compat;
 import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.StevesArmyMod;
@@ -13,7 +11,6 @@ import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.world.entity.Entity;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
@@ -115,30 +112,16 @@ public class TransportOrderMessage {
             sender.displayClientMessage(Component.translatable("transport.steves_army.feedback.no_soldiers"), true);
             return;
         }
-        boolean handlesAvailable = StevesArmyConfig.VEHICLE_HANDLES_ENABLED.get()
-            && AnalogWarfareCompat.isAvailable();
         int dismounted = 0;
-        int handleExits = 0;
         for (SoldierEntity soldier : soldiers) {
-            Entity vehicle = soldier.isPassenger() ? soldier.getVehicle() : null;
-            net.minecraft.world.level.block.entity.BlockEntity handle = null;
-            if (handlesAvailable && vehicle != null && soldier.level() instanceof ServerLevel serverLevel) {
-                handle = AnalogWarfareCompat.findHandleForSoldier(serverLevel, soldier);
-            }
+            // releaseTransport exits at the hatch: the handle linked to the soldier's
+            // seat first, then the nearest handle on their ship (no link required).
             if (VS2Compat.releaseTransport(soldier)) {
                 dismounted++;
-                if (handle != null) {
-                    // Linked seat: the soldier exits at the handle (the hatch)
-                    // and may stand aboard briefly before ship extraction resumes.
-                    if (AnalogWarfareCompat.teleportSoldierToHandle(soldier, handle)) {
-                        AnalogWarfareCompat.forget(soldier.getUUID());
-                        handleExits++;
-                    }
-                }
             }
         }
-        StevesArmyMod.LOGGER.info("[Transport] DISMOUNT by {}: resolved={} dismounted={} handleExits={}",
-            sender.getName().getString(), soldiers.size(), dismounted, handleExits);
+        StevesArmyMod.LOGGER.info("[Transport] DISMOUNT by {}: resolved={} dismounted={}",
+            sender.getName().getString(), soldiers.size(), dismounted);
         if (dismounted == 0) {
             sender.displayClientMessage(Component.translatable("transport.steves_army.feedback.none_mounted"), true);
         } else {
