@@ -7,6 +7,7 @@ import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.squad.FireTeam;
 import com.stevesarmy.squad.SquadTargeting;
+import com.stevesarmy.transport.CrewAssignment;
 import com.stevesarmy.transport.TransportOrder;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.FriendlyByteBuf;
@@ -17,7 +18,6 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.network.NetworkEvent;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Supplier;
 
@@ -178,35 +178,14 @@ public class TransportOrderMessage {
 
         // Crew soldiers board shipyard seats exactly like riflemen; their crew AI
         // keeps ticking once seated (crewSeated), so they still man their station.
-        List<SoldierEntity> remaining = new ArrayList<>(eligible);
-        int seated = 0;
-        int viaHandles = 0;
+        // One shared 4-tier routine — handles → Create contraption seats → static
+        // SeatBlocks → raw seat entities (tallyho) — so the wheel boards whatever
+        // the crew assign stick boards: ships whose only seats are seat entities
+        // have no SeatBlocks for a block scan to find.
+        int seated = CrewAssignment.mountCrewOnShip(level, ship, searchCenter, eligible);
 
-        // Handle-linked seats first (VS Analog Warfare vehicle mount handles);
-        // soldiers without a free link fall back to the plain free-seat scan.
-        if (StevesArmyConfig.VEHICLE_HANDLES_ENABLED.get() && AnalogWarfareCompat.isAvailable()) {
-            viaHandles = AnalogWarfareCompat.mountViaHandles(level, ship, searchCenter, remaining);
-            seated += viaHandles;
-        }
-
-        if (!remaining.isEmpty()) {
-            List<BlockPos> seats = VS2Compat.findFreeStaticSeats(level, ship, searchCenter, remaining.size());
-            for (SoldierEntity soldier : remaining) {
-                if (seats.isEmpty()) {
-                    break;
-                }
-                soldier.getNavigation().stop();
-                soldier.cancelCoverMovement();
-                soldier.setDeltaMovement(Vec3.ZERO);
-                if (VS2Compat.seatSoldierDirect(soldier, level, seats.get(0))) {
-                    seats.remove(0);
-                    seated++;
-                }
-            }
-        }
-
-        StevesArmyMod.LOGGER.info("[Transport] MOUNT by {}: eligible={} seated={} (viaHandles={}, viaFallback={})",
-            sender.getName().getString(), eligible.size(), seated, viaHandles, seated - viaHandles);
+        StevesArmyMod.LOGGER.info("[Transport] MOUNT by {}: eligible={} seated={}",
+            sender.getName().getString(), eligible.size(), seated);
         if (seated == 0) {
             sender.displayClientMessage(Component.translatable("transport.steves_army.feedback.no_free_seats"), true);
         } else {
