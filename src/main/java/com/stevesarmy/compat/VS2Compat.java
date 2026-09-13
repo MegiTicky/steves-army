@@ -1796,7 +1796,7 @@ public final class VS2Compat {
         double w = mob.getBbWidth() * 0.5 + 0.1;
         double h = mob.getBbHeight() * 0.5 + 0.1;
         AABB bounds = new AABB(node).inflate(w, h, w);
-        return intersectsShipHull(level, bounds);
+        return intersectsShipHull(level, bounds, false);
     }
 
     public static boolean shouldRejectNavigation(Level level, BlockPos position) {
@@ -1804,7 +1804,7 @@ public final class VS2Compat {
             return false;
         }
         AABB bounds = new AABB(position).inflate(0.35D, 0.1D, 0.35D);
-        return intersectsShipHull(level, bounds);
+        return intersectsShipHull(level, bounds, false);
     }
 
     public static boolean shouldRejectNavigation(Entity entity) {
@@ -2043,7 +2043,7 @@ public final class VS2Compat {
     }
 
     private static boolean isInsideShip(Entity entity) {
-        return intersectsShipHull(entity.level(), entity.getBoundingBox());
+        return intersectsShipHull(entity.level(), entity.getBoundingBox(), true);
     }
 
     /**
@@ -2055,8 +2055,16 @@ public final class VS2Compat {
      * The envelope query survives only as the cheap pre-filter; every candidate
      * ship is then checked in ship space with the same geometric pattern
      * {@link #resolveShipAtWorldAnchor} uses for multi-ship picks.
+     *
+     * @param includeNeighbourBlocks when true, a point in a block adjacent to a hull
+     *        block also counts as inside — the conservative read used by extraction,
+     *        which must notice soldiers standing ON the deck (their feet block is
+     *        air, the deck below is hull). Pathfinding passes false: counting
+     *        neighbours blocks every node within ~1 block of the hull and strands
+     *        soldiers standing right next to it (no path can start from a blocked
+     *        node), and the callers' own box inflation already provides clearance.
      */
-    public static boolean intersectsShipHull(Level level, AABB bounds) {
+    public static boolean intersectsShipHull(Level level, AABB bounds, boolean includeNeighbourBlocks) {
         if (!isEnabled()) {
             return false;
         }
@@ -2075,7 +2083,7 @@ public final class VS2Compat {
             if (ship == null) {
                 continue;
             }
-            if (shipOverlapsHull(serverLevel, ship, bounds)) {
+            if (shipOverlapsHull(serverLevel, ship, bounds, includeNeighbourBlocks)) {
                 return true;
             }
         }
@@ -2083,8 +2091,9 @@ public final class VS2Compat {
     }
 
     /** Center + 8 corners: small caller-inflated boxes are fully covered by these. */
-    private static boolean shipOverlapsHull(@Nullable ServerLevel level, Object ship, AABB bounds) {
-        if (sampleInShipHull(level, ship, bounds.getCenter())) {
+    private static boolean shipOverlapsHull(@Nullable ServerLevel level, Object ship, AABB bounds,
+                                            boolean includeNeighbourBlocks) {
+        if (sampleInShipHull(level, ship, bounds.getCenter(), includeNeighbourBlocks)) {
             return true;
         }
         double[] xs = {bounds.minX, bounds.maxX};
@@ -2093,7 +2102,7 @@ public final class VS2Compat {
         for (double x : xs) {
             for (double y : ys) {
                 for (double z : zs) {
-                    if (sampleInShipHull(level, ship, new Vec3(x, y, z))) {
+                    if (sampleInShipHull(level, ship, new Vec3(x, y, z), includeNeighbourBlocks)) {
                         return true;
                     }
                 }
@@ -2104,11 +2113,13 @@ public final class VS2Compat {
 
     /**
      * One hull test: the point is "inside the ship" when its ship-local position
-     * lies within the ship's voxel AABB and the shipyard block there (or a face
-     * neighbour) is solid. Unloaded chunks and unavailable transforms/AABBs fail
-     * closed — avoidance must never open a hole into unloaded shipyard space.
+     * lies within the ship's voxel AABB and the shipyard block there is solid
+     * (optionally counting face neighbours). Unloaded chunks and unavailable
+     * transforms/AABBs fail closed — avoidance must never open a hole into
+     * unloaded shipyard space.
      */
-    private static boolean sampleInShipHull(@Nullable ServerLevel level, Object ship, Vec3 worldPoint) {
+    private static boolean sampleInShipHull(@Nullable ServerLevel level, Object ship, Vec3 worldPoint,
+                                            boolean includeNeighbourBlocks) {
         Vec3 local = worldToShipLocal(ship, worldPoint);
         BlockPos aabbMin = local == null ? null : getShipyardMin(ship);
         BlockPos aabbMax = local == null ? null : getShipyardMax(ship);
@@ -2129,7 +2140,18 @@ public final class VS2Compat {
         if (!isChunkLoaded(level, converted)) {
             return true;
         }
-        return hasSolidBlockNear(level, converted);
+        if (!level.getBlockState(converted).isAir()) {
+            return true;
+        }
+        if (!includeNeighbourBlocks) {
+            return false;
+        }
+        for (Direction direction : Direction.values()) {
+            if (!level.getBlockState(converted.relative(direction)).isAir()) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static boolean isBeingDraggedByShip(Entity entity) {
@@ -2846,6 +2868,9 @@ public final class VS2Compat {
         return null;
     }
 
+    /** Head clearance a dismount spot must have above it: no hull blocks overhead. */
+    private static final double EXTRACTION_HEAD_CLEARANCE = 2.0;
+
     private static boolean isSafeWorldPosition(SoldierEntity soldier, BlockPos position) {
         BlockState floor = soldier.level().getBlockState(position.below());
         if (floor.getCollisionShape(soldier.level(), position.below()).isEmpty()) {
@@ -2853,7 +2878,12 @@ public final class VS2Compat {
         }
         Vec3 location = Vec3.atBottomCenterOf(position);
         AABB bounds = soldier.getDimensions(Pose.STANDING).makeBoundingBox(location);
-        return !intersectsShipHull(soldier.level(), bounds) && soldier.level().noCollision(soldier, bounds);
+        // Ship blocks don't register in the world heightmap, so without the
+        // upward extension the extraction spiral happily accepts the seabed
+        // directly under the keel. Require open space overhead too.
+        AABB clearance = bounds.expandTowards(0.0, EXTRACTION_HEAD_CLEARANCE, 0.0);
+        return !intersectsShipHull(soldier.level(), clearance, true)
+            && soldier.level().noCollision(soldier, bounds);
     }
 
     private static void moveToWorldPosition(SoldierEntity soldier, BlockPos position) {
