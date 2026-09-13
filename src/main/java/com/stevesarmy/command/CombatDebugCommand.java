@@ -5,10 +5,14 @@ import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.arguments.FloatArgumentType;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
+import com.stevesarmy.StevesArmyConfig;
 import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.skin.SoldierSkinManager;
 import com.stevesarmy.client.CombatDebugRenderer;
 import com.stevesarmy.client.model.PoseConfig;
+import com.stevesarmy.combat.ArmorDoctrineDebugManager;
+import com.stevesarmy.combat.ArmorRoleManager;
+import com.stevesarmy.combat.ArmorThreatScanner;
 import com.stevesarmy.combat.GunIntegration;
 import com.stevesarmy.combat.ThreatAwareness;
 import com.stevesarmy.combat.cover.CoverBehaviorManager;
@@ -76,6 +80,18 @@ public class CombatDebugCommand {
                     .executes(CombatDebugCommand::evaluateNearestMachineGunner)
                     .then(Commands.argument("entity", EntityArgument.entity())
                         .executes(CombatDebugCommand::evaluateMachineGunner))))
+
+            // === ARMOR DOCTRINE ===
+            .then(Commands.literal("armor")
+                .executes(CombatDebugCommand::cycleArmorDoctrineDebug)
+                .then(Commands.literal("off")
+                    .executes(ctx -> setArmorDoctrineDebug(ctx, ArmorDoctrineDebugManager.OFF)))
+                .then(Commands.literal("minimal")
+                    .executes(ctx -> setArmorDoctrineDebug(ctx, ArmorDoctrineDebugManager.MINIMAL)))
+                .then(Commands.literal("verbose")
+                    .executes(ctx -> setArmorDoctrineDebug(ctx, ArmorDoctrineDebugManager.VERBOSE)))
+                .then(Commands.argument("entity", EntityArgument.entity())
+                    .executes(CombatDebugCommand::showArmorDoctrine)))
 
             // === PERFORMANCE METRICS ===
             .then(Commands.literal("metrics")
@@ -315,6 +331,8 @@ public class CombatDebugCommand {
              "  all                 - Enable ALL debug (logging + render + combat overlay)\n" +
              "  none                - Disable ALL debug (logging + render + overlays)\n" +
              "  mg evaluate [entity] - Evaluate MG firing-position pipeline (read-only)\n" +
+             "  armor [off|minimal|verbose] - Toggle armor-doctrine debug render\n" +
+             "  armor <entity>      - Print one soldier's armor-doctrine role/gates\n" +
              "  metrics [on|off|reset] - Collect/show opt-in performance counters\n" +
             "  log cover [on|off]  - Toggle cover behavior logging\n" +
             "  log coverscore [on|off] - Toggle verbose per-candidate cover scoring traces\n" +
@@ -1008,6 +1026,78 @@ public class CombatDebugCommand {
             ), false);
         }
         
+        return 1;
+    }
+
+    private static int cycleArmorDoctrineDebug(CommandContext<CommandSourceStack> context) {
+        CommandSourceStack source = context.getSource();
+        if (!(source.getEntity() instanceof ServerPlayer player)) {
+            source.sendFailure(Component.literal("Player only command"));
+            return 0;
+        }
+        int mode = ArmorDoctrineDebugManager.cycle(player);
+        source.sendSuccess(() -> Component.literal("Armor doctrine debug: "
+            + ArmorDoctrineDebugManager.modeName(mode)), false);
+        return 1;
+    }
+
+    private static int setArmorDoctrineDebug(CommandContext<CommandSourceStack> context, int mode) {
+        CommandSourceStack source = context.getSource();
+        if (!(source.getEntity() instanceof ServerPlayer player)) {
+            source.sendFailure(Component.literal("Player only command"));
+            return 0;
+        }
+        int applied = ArmorDoctrineDebugManager.setMode(player, mode);
+        source.sendSuccess(() -> Component.literal("Armor doctrine debug: "
+            + ArmorDoctrineDebugManager.modeName(applied)), false);
+        return 1;
+    }
+
+    private static int showArmorDoctrine(CommandContext<CommandSourceStack> context) {
+        CommandSourceStack source = context.getSource();
+        LivingEntity entity;
+        try {
+            entity = (LivingEntity) EntityArgument.getEntity(context, "entity");
+        } catch (Exception exception) {
+            source.sendFailure(Component.literal("Invalid entity"));
+            return 0;
+        }
+        if (!(entity instanceof SoldierEntity soldier)) {
+            source.sendFailure(Component.literal("Entity is not a soldier"));
+            return 0;
+        }
+
+        boolean hunter = ArmorRoleManager.isArmorHunter(soldier);
+        boolean squadHasAt = ArmorRoleManager.squadHasAntiArmor(soldier);
+        source.sendSuccess(() -> Component.literal(
+            "=== ARMOR DOCTRINE: " + soldier.getId() + " ==="), false);
+        source.sendSuccess(() -> Component.literal(
+            "Role: " + (hunter ? "HUNTER" : "RIFLEMAN")
+                + " | squadHasAt=" + squadHasAt
+                + " | override=" + StevesArmyConfig.getArmorDoctrineOverride()
+                + " | tallyho=" + com.stevesarmy.compat.TallyhoCompat.isAvailable()), false);
+
+        ArmorThreatScanner.ArmorContact armor = ArmorThreatScanner.getPrimaryArmorThreat(soldier);
+        if (armor == null) {
+            source.sendSuccess(() -> Component.literal("Armor contact: none"), false);
+        } else {
+            Vec3 velocity = armor.velocity();
+            String speed = velocity != null
+                ? String.format("%.2f b/t", velocity.horizontalDistance()) : "unknown";
+            source.sendSuccess(() -> Component.literal(
+                "Armor contact: " + armor.threatId().toString().substring(0, 8)
+                    + " aim=" + formatPos(net.minecraft.core.BlockPos.containing(armor.aimPoint()))
+                    + " speed=" + speed), false);
+        }
+
+        source.sendSuccess(() -> Component.literal(
+            "Gates: exposed=" + ArmorThreatScanner.isExposedToArmor(soldier)
+                + " ducked=" + ArmorThreatScanner.shouldStayDuckedForArmor(soldier)
+                + " displace=" + ArmorThreatScanner.shouldDisplaceFromArmor(soldier)
+                + " hunterMayEngage=" + ArmorThreatScanner.mayHunterEngage(soldier)), false);
+        source.sendSuccess(() -> Component.literal(
+            "Cover: " + formatNullablePos(soldier.getCoverBehaviorManager().getCurrentCover() != null
+                ? soldier.getCoverBehaviorManager().getCurrentCover().getPosition() : null)), false);
         return 1;
     }
 

@@ -77,6 +77,16 @@ public class StevesArmyConfig {
     public static final ForgeConfigSpec.BooleanValue VEHICLE_HANDLES_ENABLED;
     public static final ForgeConfigSpec.IntValue VEHICLE_HANDLES_DISMOUNT_GRACE;
 
+    public static final ForgeConfigSpec.BooleanValue ARMOR_AWARENESS_ENABLED;
+    public static final ForgeConfigSpec.DoubleValue ARMOR_DETECTION_DISTANCE;
+    public static final ForgeConfigSpec.BooleanValue ARMOR_PATH_DISPLACEMENT_ENABLED;
+    public static final ForgeConfigSpec.DoubleValue ARMOR_PATH_CORRIDOR_WIDTH;
+    public static final ForgeConfigSpec.DoubleValue ARMOR_ENGAGEMENT_MAX_RANGE;
+    public static final ForgeConfigSpec.ConfigValue<java.util.List<? extends String>> ARMOR_AT_GUN_PATTERNS;
+    public static final ForgeConfigSpec.EnumValue<ArmorDoctrineOverride> ARMOR_DOCTRINE_OVERRIDE;
+
+    public enum ArmorDoctrineOverride { AUTO, NO_AT, FORCE_AT }
+
     public static final ForgeConfigSpec.IntValue OPTIMIZATION_LEVEL;
     public static final ForgeConfigSpec.BooleanValue RETRY_POLICY_ENABLED;
     public static final ForgeConfigSpec.BooleanValue PERCEPTION_FRAME_ENABLED;
@@ -502,6 +512,58 @@ BUILDER.pop();
                      "handle dismount before ship-extraction moves it to safe ground.",
                      "Default: 100 (5 seconds).")
             .defineInRange("dismountGraceTicks", 100, 0, 1200);
+
+        BUILDER.pop();
+
+        BUILDER.push("armorDoctrine");
+
+        ARMOR_AWARENESS_ENABLED = BUILDER
+            .comment("Soldiers detect enemy-crewed vehicle turrets (tallyho hull MG / periscope)",
+                     "as hard targets and react by role: squads without an anti-armor weapon hide,",
+                     "break line of sight, and displace out of the vehicle's path; squads with an",
+                     "anti-armor gun (see atGunIdPatterns) designate its carrier as the armor hunter,",
+                     "everyone else suppresses the vehicle to keep its crew buttoned. Requires tallyho.",
+                     "Default: true.")
+            .define("enabled", true);
+
+        ARMOR_DETECTION_DISTANCE = BUILDER
+            .comment("How far a soldier notices an actively crewed enemy vehicle turret.",
+                     "Vehicles are large and loud; detection is instant inside this range.",
+                     "Default: 48 blocks.")
+            .defineInRange("detectionDistance", 48.0, 8.0, 256.0);
+
+        ARMOR_PATH_DISPLACEMENT_ENABLED = BUILDER
+            .comment("Squads without anti-armor weapons displace away when an enemy vehicle's",
+                     "projected path closes on their cover. Player orders still override.",
+                     "Default: true.")
+            .define("pathDisplacementEnabled", true);
+
+        ARMOR_PATH_CORRIDOR_WIDTH = BUILDER
+            .comment("Width of the corridor in front of a moving vehicle that cover positions",
+                     "and soldiers avoid. Default: 12 blocks.")
+            .defineInRange("pathCorridorWidth", 12.0, 2.0, 64.0);
+
+        ARMOR_ENGAGEMENT_MAX_RANGE = BUILDER
+            .comment("Maximum range at which the designated armor hunter opens fire on a",
+                     "vehicle. Keep this inside the AT gun's effective range so rockets do",
+                     "not sail past the hull. Default: 48 blocks.")
+            .defineInRange("engagementMaxRange", 48.0, 8.0, 256.0);
+
+        ARMOR_AT_GUN_PATTERNS = BUILDER
+            .comment("Gun-ID substrings that count as anti-armor weapons. A soldier whose",
+                     "current gun ID (TaCZ gun id, e.g. tacz:rpg7) contains any pattern is",
+                     "designated the squad's armor hunter. Default: rpg / rocket / launcher.")
+            .defineList("atGunIdPatterns",
+                java.util.List.of("rpg", "rocket", "launcher"),
+                entry -> entry instanceof String);
+
+        ARMOR_DOCTRINE_OVERRIDE = BUILDER
+            .comment("Force the reaction branch for testing: AUTO uses each squad's real",
+                     "loadout; NO_AT makes every squad react as if it has no anti-armor",
+                     "weapon; FORCE_AT makes every squad count as having anti-armor support",
+                     "(riflemen will suppress the vehicle even with no hunter designated).",
+                     "Default: AUTO.")
+            .defineEnum("doctrineOverride", ArmorDoctrineOverride.AUTO);
 
         BUILDER.pop();
 
@@ -1002,6 +1064,34 @@ BUILDER.pop();
         return GROUP_BEHIND_DWELL_MULT.get().floatValue();
     }
 
+
+    public static boolean isArmorAwarenessEnabled() {
+        return ARMOR_AWARENESS_ENABLED.get();
+    }
+
+    public static double getArmorDetectionDistance() {
+        return ARMOR_DETECTION_DISTANCE.get();
+    }
+
+    public static boolean isArmorPathDisplacementEnabled() {
+        return ARMOR_PATH_DISPLACEMENT_ENABLED.get();
+    }
+
+    public static double getArmorPathCorridorWidth() {
+        return ARMOR_PATH_CORRIDOR_WIDTH.get();
+    }
+
+    public static double getArmorEngagementMaxRange() {
+        return ARMOR_ENGAGEMENT_MAX_RANGE.get();
+    }
+
+    public static java.util.List<? extends String> getArmorAtGunPatterns() {
+        return ARMOR_AT_GUN_PATTERNS.get();
+    }
+
+    public static ArmorDoctrineOverride getArmorDoctrineOverride() {
+        return ARMOR_DOCTRINE_OVERRIDE.get();
+    }
 
     /** Legacy compatibility hook; nearby-target snapshots are disabled. */
     public static int getTargetCandidateCacheTicks() {

@@ -35,6 +35,10 @@ public class SquadThreatIntel {
         public final Map<UUID, Long> suppressionHeartbeats = new HashMap<>();
         @Nullable public Vec3 lastVisibleAimPoint;
         @Nullable public Vec3 lastVisibleHeadPoint;
+        /** Armored-vehicle threat: small arms cannot destroy it; reactions are role-based. */
+        public boolean isHardTarget;
+        /** World-space blocks per tick at last sighting (armor threats only). */
+        @Nullable public Vec3 lastKnownVelocity;
 
         public ThreatKnowledge(UUID threatEntityId) {
             this.threatEntityId = threatEntityId;
@@ -59,6 +63,12 @@ public class SquadThreatIntel {
             tag.putFloat("Accuracy", accuracy);
             tag.putBoolean("IsAlive", isAlive);
             tag.putBoolean("IsSuppressed", isSuppressed);
+            tag.putBoolean("IsHardTarget", isHardTarget);
+            if (lastKnownVelocity != null) {
+                tag.putDouble("VelX", lastKnownVelocity.x);
+                tag.putDouble("VelY", lastKnownVelocity.y);
+                tag.putDouble("VelZ", lastKnownVelocity.z);
+            }
             if (suppressedBy != null) {
                 tag.putUUID("SuppressedBy", suppressedBy);
             }
@@ -100,6 +110,11 @@ public class SquadThreatIntel {
             knowledge.accuracy = tag.getFloat("Accuracy");
             knowledge.isAlive = tag.getBoolean("IsAlive");
             knowledge.isSuppressed = tag.getBoolean("IsSuppressed");
+            knowledge.isHardTarget = tag.getBoolean("IsHardTarget");
+            if (tag.contains("VelX")) {
+                knowledge.lastKnownVelocity = new Vec3(
+                    tag.getDouble("VelX"), tag.getDouble("VelY"), tag.getDouble("VelZ"));
+            }
             if (tag.contains("SuppressedBy")) {
                 knowledge.suppressedBy = tag.getUUID("SuppressedBy");
             }
@@ -394,5 +409,47 @@ public class SquadThreatIntel {
         return (int) knownThreats.values().stream()
             .filter(t -> t.isAlive && t.isSuppressed)
             .count();
+    }
+
+    /**
+     * Publishes or refreshes an armored-vehicle sighting. Hard targets use the
+     * position-based threat store like soft targets; {@code aimPoint} is the
+     * vehicle's gun/optic position and {@code velocity} its world-space motion
+     * in blocks per tick, both used for cover scoring and path displacement.
+     */
+    public void reportHardTarget(UUID reporterId, UUID threatId, BlockPos hullPos,
+                                 @Nullable Vec3 aimPoint, @Nullable Vec3 velocity,
+                                 float accuracy, Level level) {
+        ThreatKnowledge knowledge = knownThreats.get(threatId);
+        if (knowledge != null && !knowledge.isAlive) {
+            return;
+        }
+        if (knowledge == null) {
+            knowledge = new ThreatKnowledge(threatId);
+        }
+        knowledge.lastKnownPosition = hullPos;
+        knowledge.lastSeenTime = level.getGameTime();
+        knowledge.lastSeenBySoldier = reporterId;
+        knowledge.lastVisibleAimPoint = aimPoint;
+        knowledge.lastKnownVelocity = velocity;
+        knowledge.accuracy = Math.max(knowledge.accuracy, accuracy);
+        knowledge.isAlive = true;
+        knowledge.isHardTarget = true;
+        knownThreats.put(threatId, knowledge);
+    }
+
+    /** Fresh (not stale) armored-vehicle threats known to the squad, nearest first. */
+    public List<ThreatKnowledge> getHardTargetThreats(long currentGameTime) {
+        return knownThreats.values().stream()
+            .filter(t -> t.isAlive && t.isHardTarget)
+            .filter(t -> currentGameTime - t.lastSeenTime <= STALE_TIMEOUT_TICKS)
+            .sorted(Comparator.comparingDouble(t -> -t.accuracy))
+            .collect(Collectors.toList());
+    }
+
+    public boolean isHardTarget(UUID threatId, long currentGameTime) {
+        ThreatKnowledge knowledge = knownThreats.get(threatId);
+        return knowledge != null && knowledge.isHardTarget
+            && currentGameTime - knowledge.lastSeenTime <= STALE_TIMEOUT_TICKS;
     }
 }

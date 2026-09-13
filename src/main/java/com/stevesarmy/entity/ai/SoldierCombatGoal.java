@@ -3,6 +3,8 @@ package com.stevesarmy.entity.ai;
 import com.stevesarmy.StevesArmyConfig;
 import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.combat.AimAccuracyManager;
+import com.stevesarmy.combat.ArmorRoleManager;
+import com.stevesarmy.combat.ArmorThreatScanner;
 import com.stevesarmy.combat.CombatTargetQueryCache;
 import com.stevesarmy.combat.DetectionSystem;
 import com.stevesarmy.combat.EnemyContactTracker;
@@ -116,6 +118,14 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
     private int suppressionFirstShotTick = -1;
     private long suppressionLastSeenTick = -1;
     private Vec3 suppressionTargetAimPoint = null;
+
+    // Armor doctrine: the designated hunter engages hard targets directly and
+    // displaces after each shot (shoot & scoot).
+    private int armorShotCooldownTicks = 0;
+    private int armorEngagementStartTick = -1;
+    private boolean armorShotFired = false;
+    private static final int ARMOR_SHOT_SPACING_TICKS = 60;
+    private static final int ARMOR_DISENGAGE_TICKS = 200;
 
     private enum EngagementPostureState {
         READY,
@@ -392,7 +402,8 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
         if (soldier.isHealing()) return;
 
         threatTracker.update(soldier);
-        
+        ArmorThreatScanner.maybeScan(soldier);
+
         if (soldier.hasValidPingThreatPos()) {
             BlockPos threatPos = soldier.getPingThreatPos();
             if (threatPos != null) {
@@ -499,7 +510,20 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
             updateDebugSync();
             return;
         }
-        
+
+        // The armor hunter's engagement of a hard target outranks soft-target
+        // fire (except point-blank self-defense, checked inside). The peek
+        // cycle keeps ticking so the hunter ducks back into cover between
+        // shots like any suppressed soldier.
+        if (hasGun && tryArmorEngagement()) {
+            CoverBehaviorManager coverManager = soldier.getCoverBehaviorManager();
+            if (coverManager.isInCover()) {
+                tickCoverPeekCycle(coverManager);
+            }
+            updateDebugSync();
+            return;
+        }
+
         if (target != null && target.isAlive()) {
             LivingEntity combatTarget = target;
             tickCombat(hasGun);
@@ -2277,14 +2301,17 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
             intel.getAssignedThreatForSoldier(soldier.getUUID());
         if (existingAssignment.isPresent()) {
             pendingSuppressionThreat = existingAssignment.get();
+            boolean hunterMustNotSuppressVehicle = pendingSuppressionThreat.isHardTarget
+                && ArmorRoleManager.isArmorHunter(soldier);
             if (pendingSuppressionThreat.isAlive
+                && !hunterMustNotSuppressVehicle
                 && !intel.isThreatStale(pendingSuppressionThreat.threatEntityId, soldier.level().getGameTime())) {
                 return true;
             }
             intel.releaseThreatSuppression(pendingSuppressionThreat.threatEntityId, soldier.getUUID());
             pendingSuppressionThreat = null;
         }
-        
+
         List<SquadThreatIntel.ThreatKnowledge> suppressibleThreats = intel.getAllThreats().stream()
             .filter(threat -> threat.isAlive)
             .sorted(Comparator.comparingDouble(threat -> -threat.accuracy))
@@ -2292,11 +2319,12 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
         if (suppressibleThreats.isEmpty()) {
             return false;
         }
-        
+
         for (SquadThreatIntel.ThreatKnowledge threat : suppressibleThreats) {
             if (!threat.isAlive) continue;
             if (intel.isThreatStale(threat.threatEntityId, soldier.level().getGameTime())) continue;
             if (threat.lastKnownPosition == null) continue;
+            if (threat.isHardTarget && !isHardTargetSuppressible()) continue;
             
             double dist = soldier.position().distanceTo(threat.lastKnownPosition.getCenter());
             if (dist > SUPPRESSION_MAX_RANGE) continue;
@@ -2323,6 +2351,116 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
             return 1;
         }
         return machineGunnerPipeline && hasReadySquadMachineGunner(threat) ? 1 : 2;
+    }
+
+    /**
+     * Doctrine gate for claiming a vehicle as a suppression target: rifles
+     * keep its crew buttoned only when the squad has anti-armor support, and
+     * the hunter never does — the hunter engages through the armor path.
+     */
+    private boolean isHardTargetSuppressible() {
+        if (!ArmorRoleManager.squadHasAntiArmor(soldier)) {
+            return false;
+        }
+        return !ArmorRoleManager.isArmorHunter(soldier);
+    }
+
+    /**
+     * Doctrine engagement of a hard target by the squad's designated armor
+     * hunter: aim at the vehicle's gun position and fire through the
+     * position-based gun path (vehicles are not LivingEntity targets), then
+     * request displacement for the reload window (shoot & scoot). Returns
+     * true while engaged so soft-target combat yields; point-blank infantry
+     * always overrides the hunt.
+     */
+    private boolean tryArmorEngagement() {
+        if (armorShotCooldownTicks > 0) {
+            armorShotCooldownTicks--;
+        }
+        if (!ArmorRoleManager.isArmorHunter(soldier) || soldier.isCqbEngagementHold()) {
+            return false;
+        }
+
+        ArmorThreatScanner.ArmorContact armor = ArmorThreatScanner.getPrimaryArmorThreat(soldier);
+        if (armor == null) {
+            armorEngagementStartTick = -1;
+            return false;
+        }
+
+        if (target != null && target.isAlive()
+            && soldier.distanceToSqr(target) <= SoldierEntity.CQB_RANGE * SoldierEntity.CQB_RANGE) {
+            return false;
+        }
+
+        double maxRange = StevesArmyConfig.getArmorEngagementMaxRange();
+        if (soldier.distanceToSqr(armor.aimPoint()) > maxRange * maxRange
+            || !TargetAcquisition.hasNearLineOfSightToPosition(soldier, armor.aimPoint(), SUPPRESSION_LOS_TOLERANCE)) {
+            return false;
+        }
+
+        // Fire window: crew suppressed, already pinned, or in the open.
+        if (!ArmorThreatScanner.mayHunterEngage(soldier)) {
+            return false;
+        }
+
+        if (GunIntegration.isReloading(soldier) || GunIntegration.isBolting(soldier)
+            || GunIntegration.isDrawing(soldier)) {
+            return false;
+        }
+
+        boolean inCover = soldier.getCoverBehaviorManager().isInCover();
+        if (inCover && soldier.getPeekController().getState() != PeekController.State.EXPOSED) {
+            return false;
+        }
+
+        if (armorEngagementStartTick < 0) {
+            armorEngagementStartTick = soldier.tickCount;
+            if (isSuppressing) {
+                cancelAllSuppression();
+            }
+            if (isDebugLogging()) {
+                StevesArmyMod.LOGGER.info("[ArmorEngage] Soldier {} hunter engaging vehicle {} at {}",
+                    soldier.getId(), armor.threatId(), armor.aimPoint());
+            }
+        } else if (soldier.tickCount - armorEngagementStartTick > ARMOR_DISENGAGE_TICKS) {
+            armorEngagementStartTick = -1;
+            return false;
+        }
+
+        if (!prepareToFire(armor.aimPoint(), false)) {
+            return true;
+        }
+        soldier.getLookControl().setLookAt(
+            armor.aimPoint().x, armor.aimPoint().y, armor.aimPoint().z, 30.0F, 30.0F);
+        GunIntegration.aim(soldier, true);
+        wasAiming = true;
+
+        if (GunIntegration.getAimProgress(soldier) < ADS_THRESHOLD) {
+            return true;
+        }
+        if (GunIntegration.getShootCoolDown(soldier) > 0 || armorShotCooldownTicks > 0) {
+            return true;
+        }
+
+        GunIntegration.ShootResult result = GunIntegration.shootAtPosition(soldier, armor.aimPoint());
+        switch (result) {
+            case SUCCESS -> {
+                armorShotCooldownTicks = ARMOR_SHOT_SPACING_TICKS;
+                if (soldier.getCoverBehaviorManager().isInCover()) {
+                    soldier.getCoverBehaviorManager().onPeekShot();
+                }
+                // Shoot & scoot: clear the position during the reload window.
+                soldier.getCoverBehaviorManager().requestContinuousSuppressionReposition();
+                if (isDebugLogging()) {
+                    StevesArmyMod.LOGGER.info("[ArmorEngage] Soldier {} fired at vehicle {}, displacing",
+                        soldier.getId(), armor.threatId());
+                }
+            }
+            case NEED_BOLT -> GunIntegration.bolt(soldier);
+            case NO_AMMO, NOT_GUN -> armorEngagementStartTick = -1;
+            default -> { }
+        }
+        return true;
     }
 
     private boolean hasReadySquadMachineGunner(SquadThreatIntel.ThreatKnowledge threat) {

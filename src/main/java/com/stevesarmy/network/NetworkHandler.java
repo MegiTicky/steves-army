@@ -156,6 +156,10 @@ public class NetworkHandler {
             VehicleCrewDebugPacket::encode,
             VehicleCrewDebugPacket::new,
             VehicleCrewDebugPacket::handle);
+        INSTANCE.registerMessage(id++, ArmorDoctrineDebugPacket.class,
+            ArmorDoctrineDebugPacket::encode,
+            ArmorDoctrineDebugPacket::new,
+            ArmorDoctrineDebugPacket::handle);
         INSTANCE.registerMessage(id++, VehicleCrewDismountPacket.class,
             VehicleCrewDismountPacket::encode,
             VehicleCrewDismountPacket::new,

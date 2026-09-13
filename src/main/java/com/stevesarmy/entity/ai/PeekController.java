@@ -1,6 +1,7 @@
 package com.stevesarmy.entity.ai;
 
 import com.stevesarmy.StevesArmyMod;
+import com.stevesarmy.combat.ArmorThreatScanner;
 import com.stevesarmy.combat.GunIntegration;
 import com.stevesarmy.combat.TargetAcquisition;
 import com.stevesarmy.combat.ThreatAwareness;
@@ -614,6 +615,11 @@ public class PeekController {
         if (soldier.hasEmergencyEngagementPosture()) {
             soldier.tracePeek("suppression-override", "reason=emergency-engagement");
             return false;
+        }
+
+        if (ArmorThreatScanner.shouldStayDuckedForArmor(soldier)) {
+            soldier.tracePeek("suppression-override", "reason=armor-los");
+            return true;
         }
 
         var suppressionTracker = soldier.getCoverBehaviorManager().getSuppressionTracker();

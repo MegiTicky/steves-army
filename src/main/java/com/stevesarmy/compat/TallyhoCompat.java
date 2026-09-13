@@ -125,6 +125,11 @@ public final class TallyhoCompat {
         return available && periscopeClass == entity.getClass();
     }
 
+    /** True for any crewable vehicle station entity (hull MG or periscope camera). */
+    public static boolean isCameraEntity(Entity entity) {
+        return available && (hullMgClass == entity.getClass() || periscopeClass == entity.getClass());
+    }
+
     /** True when a player is currently possessing the camera (players outrank crew). */
     public static boolean isPlayerPossessed(Entity camera) {
         if (!available || !cameraEntityClass.isInstance(camera)) {
