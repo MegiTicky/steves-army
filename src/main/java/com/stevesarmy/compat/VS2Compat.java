@@ -1517,6 +1517,44 @@ public final class VS2Compat {
     }
 
     /**
+     * Ship an entity is aboard, tolerant of how VS2 tracks it: explicit mount
+     * first, then the ship managing the entity's exact position (world or
+     * shipyard coordinates), then a small world-space intersection scan for
+     * riders whose tracked position lands between managed blocks (open-topped
+     * vehicles, seat offsets while a ship moves).
+     */
+    @Nullable
+    public static Object resolveShipNearEntity(@Nullable Entity entity) {
+        if (entity == null || entity.level().isClientSide) {
+            return null;
+        }
+        Object mounted = getMountedShip(entity);
+        if (mounted != null) {
+            return mounted;
+        }
+        initialize();
+        if (!available) {
+            return null;
+        }
+        try {
+            Object atPos = reflect(getShipObjectManagingPosDouble, entity.level(),
+                entity.getX(), entity.getY(), entity.getZ());
+            if (atPos != null) {
+                return atPos;
+            }
+        } catch (ReflectiveOperationException exception) {
+            logReflectionFailure(exception);
+        }
+        for (double radius : new double[] {2.0, 4.0, 8.0}) {
+            Object ship = firstShipIntersecting(entity.level(), entity.position(), radius);
+            if (ship != null) {
+                return ship;
+            }
+        }
+        return null;
+    }
+
+    /**
      * Ship the vehicle-wheel MOUNT order targets when the crosshair is not on a vehicle:
      * the ship the player is mounted to, else the nearest ship within 64 blocks.
      */

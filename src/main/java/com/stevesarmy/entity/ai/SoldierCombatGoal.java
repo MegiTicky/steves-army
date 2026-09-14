@@ -2609,7 +2609,7 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
     }
 
     private boolean atCarrierCached;
-    private int atCarrierCheckTick = Integer.MIN_VALUE;
+    private int atCarrierCheckTick = -1000;
 
     /**
      * Heavy-fire ping for AT carriers: level the marked structure itself.
