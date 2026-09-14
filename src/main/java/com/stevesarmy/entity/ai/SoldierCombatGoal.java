@@ -2574,6 +2574,10 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
         if (!GunIntegration.isAnyGunLoaded() || !GunIntegration.hasGun(soldier)) {
             return;
         }
+        // Soldiers without a launcher have no policy to apply; skip the scan.
+        if (!isAtCarrier()) {
+            return;
+        }
         if (SoldierWeaponSelector.update(soldier, wantsLauncher())) {
             resetAim(null);
             weaponSwapCooldownTicks = WEAPON_SWAP_COOLDOWN_TICKS;

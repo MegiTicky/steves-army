@@ -84,7 +84,8 @@ public class SoldierInventoryMenu extends AbstractContainerMenu {
     }
 
     private void addMainHandSlot() {
-        this.addSlot(new Slot(soldierInventory, SoldierInventory.SLOT_SIDEARM, 8, 90) {
+        // Sits on the texture's pre-existing second weapon slot graphic.
+        this.addSlot(new Slot(soldierInventory, SoldierInventory.SLOT_SIDEARM, 44, 90) {
             @Override
             public int getMaxStackSize() { return 1; }
 
