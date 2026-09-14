@@ -13,9 +13,6 @@ import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
 import com.stevesarmy.StevesArmyMod;
-import com.stevesarmy.StevesArmyConfig;
-import com.stevesarmy.combat.ArmorRoleManager;
-import com.stevesarmy.combat.ArmorThreatScanner;
 import com.stevesarmy.combat.ExposureCalculator;
 import com.stevesarmy.combat.ModBlockTags;
 import com.stevesarmy.combat.VisibilityRay;
@@ -476,24 +473,6 @@ public class CoverFinder {
             firingAccessScore = 0.0f;
         }
 
-        // Armor doctrine: while an unkillable vehicle threatens a non-hunter,
-        // firing lanes toward it are worthless (nobody peeks at a tank),
-        // staying blind to its gun becomes the goal instead of a flaw, and
-        // positions inside its projected path are rejected outright.
-        if (soldier instanceof SoldierEntity se) {
-            ArmorThreatScanner.ArmorContact armorContact = ArmorThreatScanner.getPrimaryArmorThreat(se);
-            if (armorContact != null && !ArmorRoleManager.isArmorHunter(se)) {
-                firingQuality = 0.0f;
-                firingAccessScore = 0.0f;
-                fightability = 0.0f;
-                blindPenalty = 0.0f;
-                if (ArmorThreatScanner.pathThreatens(se, Vec3.atCenterOf(coverPoint.getPosition()),
-                        StevesArmyConfig.getArmorPathCorridorWidth())) {
-                    return 0.0f;
-                }
-            }
-        }
-
         float weightedScore;
         if (isAttackMode) {
             weightedScore = (float)(primaryProtection * PRIMARY_PROTECTION_WEIGHT +
@@ -582,21 +561,6 @@ public class CoverFinder {
             fightability = 0.0f;
             firingQuality = 0.0f;
             firingAccessScore = 0.0f;
-        }
-
-        // Armor doctrine (see the twin scoring method above).
-        if (soldier instanceof SoldierEntity se) {
-            ArmorThreatScanner.ArmorContact armorContact = ArmorThreatScanner.getPrimaryArmorThreat(se);
-            if (armorContact != null && !ArmorRoleManager.isArmorHunter(se)) {
-                firingQuality = 0.0f;
-                firingAccessScore = 0.0f;
-                fightability = 0.0f;
-                blindPenalty = 0.0f;
-                if (ArmorThreatScanner.pathThreatens(se, Vec3.atCenterOf(coverPoint.getPosition()),
-                        StevesArmyConfig.getArmorPathCorridorWidth())) {
-                    return 0.0f;
-                }
-            }
         }
 
         float weightedScore;

@@ -2426,8 +2426,8 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
      * Doctrine engagement of a hard target by the squad's designated armor
      * hunter: resolve a firing solution against the vehicle's hull (the gun
      * position when visible, otherwise any visible hull block), fire through
-     * the position-based gun path (vehicles are not LivingEntity targets),
-     * then request displacement for the reload window (shoot & scoot).
+     * the position-based gun path (vehicles are not LivingEntity targets).
+     * Movement stays vanilla-doctrine: no armor-driven displacement yet.
      * Returns true while engaged so soft-target combat yields; point-blank
      * infantry always overrides the hunt.
      */
@@ -2524,11 +2524,9 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
                 if (soldier.getCoverBehaviorManager().isInCover()) {
                     soldier.getCoverBehaviorManager().onPeekShot();
                 }
-                // Shoot & scoot: clear the position during the reload window.
-                soldier.getCoverBehaviorManager().requestContinuousSuppressionReposition();
                 ArmorThreatScanner.setEngageBlockReason(soldier, "firing");
                 if (isDebugLogging()) {
-                    StevesArmyMod.LOGGER.info("[ArmorEngage] Soldier {} fired at vehicle {}, displacing",
+                    StevesArmyMod.LOGGER.info("[ArmorEngage] Soldier {} fired at vehicle {}",
                         soldier.getId(), armor.threatId());
                 }
             }

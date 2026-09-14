@@ -2,11 +2,8 @@ package com.stevesarmy.entity.ai;
 
 import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.StevesArmyConfig;
-import com.stevesarmy.combat.ArmorRoleManager;
-import com.stevesarmy.combat.ArmorThreatScanner;
 import com.stevesarmy.combat.ThreatAwareness;
 import com.stevesarmy.combat.VisibilityRay;
-import com.stevesarmy.compat.TallyhoCompat;
 import com.stevesarmy.combat.cover.*;
 import com.stevesarmy.squad.FireTeamSuppressionTracker;
 import com.stevesarmy.squad.SmokeDeploymentCoordinator;
@@ -963,58 +960,11 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
      * the primary threat direction (rifleman behavior).
      */
     private Vec3 getCoverSearchDirection() {
-        Vec3 armorDirection = getArmorCoverDirection();
-        if (armorDirection != null) {
-            return armorDirection;
-        }
         Vec3 preferred = soldier.getPreferredCoverEvaluationDirection();
         if (preferred != null) {
             return preferred;
         }
         return getThreats().getPrimaryDirection(soldier.position());
-    }
-
-    /**
-     * Direction toward a known enemy vehicle, so protection rays and peek
-     * positions face its gun even though the vehicle is not a LivingEntity
-     * threat. Hunters use it to build firing lanes toward the armor; everyone
-     * else uses it to stay behind something.
-     */
-    private Vec3 getArmorCoverDirection() {
-        if (!StevesArmyConfig.isArmorAwarenessEnabled() || !TallyhoCompat.isAvailable()) {
-            return null;
-        }
-        ArmorThreatScanner.ArmorContact armor = ArmorThreatScanner.getPrimaryArmorThreat(soldier);
-        if (armor == null) {
-            return null;
-        }
-        Vec3 toArmor = armor.aimPoint().subtract(soldier.position());
-        return toArmor.lengthSqr() < 1.0e-4 ? null : toArmor.normalize();
-    }
-
-    /**
-     * No-anti-armor displacement: when the vehicle sees the soldier or its
-     * projected path is closing on their cover, queue a reposition away from
-     * the path. Player orders (HOLD) pin the soldier in place instead.
-     */
-    private void trackArmorThreat() {
-        if (!StevesArmyConfig.isArmorAwarenessEnabled() || !StevesArmyConfig.isArmorPathDisplacementEnabled()) {
-            return;
-        }
-        if (soldier.getSquadMode() == SquadMode.HOLD) {
-            return;
-        }
-        if (!ArmorThreatScanner.shouldDisplaceFromArmor(soldier)) {
-            return;
-        }
-        CoverBehaviorManager coverManager = getCoverManager();
-        if (!coverManager.isContinuousSuppressionRepositionRequested()) {
-            coverManager.requestContinuousSuppressionReposition();
-            if (DiagnosticLogManager.isCoverLoggingEnabled()) {
-                StevesArmyMod.LOGGER.info("[ArmorDoctrine] Soldier {} displacing out of vehicle path/LOS",
-                    soldier.getId());
-            }
-        }
     }
 
     /**
@@ -1582,7 +1532,6 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
         PerformanceMetrics.recordCoverPopulation(state.name(), coverSearchPending, asyncPilotPending,
             getCoverManager().getTargetCover() != null);
         trackSuppressionEpisode();
-        trackArmorThreat();
 
         if (soldier.isHealing()) {
             if (canContinueHealingInCover()) {
