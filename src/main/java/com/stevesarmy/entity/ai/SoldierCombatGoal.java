@@ -12,6 +12,7 @@ import com.stevesarmy.combat.ExposureCalculator;
 import com.stevesarmy.combat.FireControl;
 import com.stevesarmy.combat.FireControl.DirectFireWeaponProfile;
 import com.stevesarmy.combat.FireControl.SuppressionWeaponProfile;
+import com.stevesarmy.combat.FirePersonality;
 import com.stevesarmy.combat.FriendlyFireChecker;
 import com.stevesarmy.combat.GunIntegration;
 import com.stevesarmy.combat.TargetAcquisition;
@@ -23,6 +24,7 @@ import com.stevesarmy.combat.cover.CoverFinder;
 import com.stevesarmy.combat.cover.CoverPoint;
 import com.stevesarmy.combat.cover.CoverProtectionContext;
 import com.stevesarmy.combat.cover.CoverType;
+import com.stevesarmy.combat.cover.SuppressionTracker;
 import com.stevesarmy.debug.DiagnosticLogManager;
 import com.stevesarmy.debug.PerformanceMetrics;
 import com.stevesarmy.entity.SoldierEntity;
@@ -32,6 +34,7 @@ import com.stevesarmy.inventory.SoldierInventory;
 import com.stevesarmy.network.NetworkHandler;
 import com.stevesarmy.network.PotentialTargetsDebugMessage;
 import com.stevesarmy.squad.FireDiscipline;
+import com.stevesarmy.squad.FireTeamSuppressionTracker;
 import com.stevesarmy.squad.SquadData;
 import com.stevesarmy.squad.SquadManager;
 import com.stevesarmy.squad.SquadThreatIntel;
@@ -218,6 +221,14 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
     private int directBurstShotLimit = 0;
     private float directBurstContinuationThreshold = 0.0f;
 
+    // Dynamic firing: per-engagement personality plus ineffective-burst tracking.
+    private FirePersonality firePersonality;
+    private float burstStartTargetHealth = -1.0f;
+    private int ineffectiveBurstStreak = 0;
+    private int lastShotTick = Integer.MIN_VALUE;
+    private int suppressionCadenceTicks = 1;
+    private int suppressionBurstTarget = 0;
+
     public static void setDebugLoggingEnabled(boolean enabled) {
         DiagnosticLogManager.setAttackLoggingEnabled(enabled);
     }
@@ -344,6 +355,7 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
             aimQuality = 0.0f;
             trackedTargetUUID = null;
             resetDirectFireBurst();
+            resetDynamicFiringState();
             return;
         }
         if (trackedTargetUUID == null || !trackedTargetUUID.equals(newTarget.getUUID())) {
@@ -351,7 +363,17 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
             float switchReset = StevesArmyConfig.getAimQualitySwitchReset();
             aimQuality *= switchReset;
             resetDirectFireBurst();
+            resetDynamicFiringState();
         }
+    }
+
+    /** A new engagement rolls a fresh personality and clears the miss-streak ratchet. */
+    private void resetDynamicFiringState() {
+        firePersonality = StevesArmyConfig.isDynamicFiringEnabled()
+            ? FirePersonality.roll(soldier.getRandom()) : null;
+        ineffectiveBurstStreak = 0;
+        burstStartTargetHealth = -1.0f;
+        lastShotTick = Integer.MIN_VALUE;
     }
     
     private ExposureCalculator.AimPointResult getOrComputeAimPoint() {
@@ -1261,11 +1283,18 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
             return;
         }
         
+        // Frustration cools one step at a time while the soldier holds fire.
+        if (dynamicFiringEnabled() && ineffectiveBurstStreak > 0 && lastShotTick != Integer.MIN_VALUE
+                && soldier.tickCount - lastShotTick > StevesArmyConfig.getFiringMissStreakDecayTicks()) {
+            ineffectiveBurstStreak--;
+            lastShotTick = soldier.tickCount - StevesArmyConfig.getFiringMissStreakDecayTicks();
+        }
+
         updateAimQuality();
-        
+
         float targetAimQ = AimAccuracyManager.getTargetAimQuality(soldier, target);
-        float thresholdScale = lastShotNeededBolt || GunIntegration.isBolting(soldier) 
-            ? StevesArmyConfig.getAimQualitySlowGunThresholdScale() 
+        float thresholdScale = lastShotNeededBolt || GunIntegration.isBolting(soldier)
+            ? StevesArmyConfig.getAimQualitySlowGunThresholdScale()
             : StevesArmyConfig.getAimQualityThresholdScale();
         FireDiscipline discipline = soldier.getFireDiscipline();
         if (discipline == FireDiscipline.CONSERVE) {
@@ -1276,13 +1305,20 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
         if (mobileFire) {
             thresholdScale = Math.min(thresholdScale, 0.20f);
         }
+        thresholdScale = applyDynamicThresholdModifiers(thresholdScale, discipline);
         float shotThreshold = Math.max(mobileFire ? MOBILE_FIRE_THRESHOLD_FLOOR : 0.15f,
             targetAimQ * thresholdScale);
 
         DirectFireWeaponProfile directProfile = getDirectFireWeaponProfile();
-        int requestedBurstShotLimit = mobileFire
-            ? Math.min(directProfile.burstShots, MOBILE_FIRE_MAX_BURST_SHOTS)
-            : directProfile.burstShots;
+        int requestedBurstShotLimit;
+        if (mobileFire) {
+            requestedBurstShotLimit = Math.min(directProfile.burstShots, MOBILE_FIRE_MAX_BURST_SHOTS);
+        } else if (dynamicFiringEnabled() && directProfile.burstShots > 1) {
+            requestedBurstShotLimit = FireControl.rollBurstShots(directProfile.burstShots,
+                burstBias(), soldier.getRandom());
+        } else {
+            requestedBurstShotLimit = directProfile.burstShots;
+        }
         if (directBurstCooldownTicks > 0) {
             directBurstCooldownTicks--;
             if (isDebugLogging() && (directBurstCooldownTicks == 0 || directBurstCooldownTicks % 5 == 0)) {
@@ -1314,7 +1350,13 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
 
         if (!directBurstActive && aimQuality < shotThreshold) {
             targetReevaluateCounter++;
-            if (targetReevaluateCounter >= StevesArmyConfig.getTargetReevaluateInterval()) {
+            int reevaluateInterval = StevesArmyConfig.getTargetReevaluateInterval();
+            if (dynamicFiringEnabled() && ineffectiveBurstStreak >= 2) {
+                // Repeatedly ineffective against this target: look for a better
+                // answer twice as often instead of hammering the same shot.
+                reevaluateInterval = Math.max(5, reevaluateInterval / 2);
+            }
+            if (targetReevaluateCounter >= reevaluateInterval) {
                 targetReevaluateCounter = 0;
                 Optional<LivingEntity> betterTarget = findBetterTarget(aimQuality);
                 if (betterTarget.isPresent()) {
@@ -1358,6 +1400,17 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
         // The accuracy model is angular dispersion, not a hit/miss roll.
         float yawSigma = AimAccuracyManager.getYawSigma(aimQuality);
         float pitchSigma = AimAccuracyManager.getPitchSigma(aimQuality);
+        // Dynamic firing: suppression shakes the shot; disciplined duty fire
+        // accepts a reduced share of the shake. The ±2.5σ clamp downstream
+        // bounds the extremes.
+        float suppression = effectiveSuppressionLevel();
+        if (suppression > 0.0f) {
+            float shakeShare = discipline == FireDiscipline.SUPPRESSIVE
+                ? StevesArmyConfig.getFiringDutySuppressionFactor() : 1.0f;
+            float shake = 1.0f + suppression * StevesArmyConfig.getSuppressionSigmaScale() * shakeShare;
+            yawSigma *= shake;
+            pitchSigma *= shake;
+        }
         // Vegetation makes a partly visible target difficult to track rather
         // than treating every visible silhouette as a clean shooting solution.
         yawSigma += (float) aimPoint.concealment * 2.00f;
@@ -1387,6 +1440,7 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
                 beginDirectFireBurst(directProfile, requestedBurstShotLimit, mobileFire, continuationThreshold);
             }
             directBurstShotsFired++;
+            lastShotTick = soldier.tickCount;
             if (isDebugLogging()) {
                 StevesArmyMod.LOGGER.info("[DirectBurst] soldier={} shot={}/{} profile={} mobile={}",
                     soldier.getId(), directBurstShotsFired, directBurstShotLimit,
@@ -1544,6 +1598,9 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
             boolean mobileFire = isMobileSuppressiveFireAllowed();
             float targetAimQuality = AimAccuracyManager.getTargetAimQuality(soldier, target);
             float buildRate = AimAccuracyManager.getBuildRate(soldier, target);
+            if (dynamicFiringEnabled()) {
+                buildRate *= buildBias();
+            }
             if (soldier.isFiringProne()) {
                 buildRate *= FIRING_PRONE_AIM_BUILD_MULTIPLIER;
             }
@@ -2684,8 +2741,139 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
         return FireControl.directBurstContinuationThreshold(soldier.getFireDiscipline(), startThreshold);
     }
 
+    // --- Dynamic firing gate ---------------------------------------------------
+
+    private static boolean dynamicFiringEnabled() {
+        return StevesArmyConfig.isDynamicFiringEnabled();
+    }
+
+    private static boolean isFiringDebugLogging() {
+        return DiagnosticLogManager.isFiringLoggingEnabled();
+    }
+
+    /** Pull a raw personality bias toward 1.0 by the configured strength. */
+    private static float scaledBias(float rawBias) {
+        return Mth.lerp(StevesArmyConfig.getFiringPersonalityStrength(), 1.0f, rawBias);
+    }
+
+    private float burstBias() {
+        return firePersonality != null ? scaledBias(firePersonality.burstBias()) : 1.0f;
+    }
+
+    private float gapBias() {
+        return firePersonality != null ? scaledBias(firePersonality.gapBias()) : 1.0f;
+    }
+
+    private float thresholdBias() {
+        return firePersonality != null ? scaledBias(firePersonality.thresholdBias()) : 1.0f;
+    }
+
+    private float cadenceBias() {
+        return firePersonality != null ? scaledBias(firePersonality.cadenceBias()) : 1.0f;
+    }
+
+    private float buildBias() {
+        return firePersonality != null ? scaledBias(firePersonality.buildBias()) : 1.0f;
+    }
+
+    /**
+     * Blended suppression driving the firing gate: the soldier's own pressure,
+     * floored by a configured share of the fireteam's aggregated level.
+     */
+    private float effectiveSuppressionLevel() {
+        if (!dynamicFiringEnabled()) return 0.0f;
+        SuppressionTracker tracker = soldier.getCoverBehaviorManager().getSuppressionTracker();
+        float individual = tracker != null ? tracker.getSuppressionLevel() : 0.0f;
+        float team = FireTeamSuppressionTracker.getLevel(soldier);
+        return Math.max(individual, StevesArmyConfig.getFiringFireteamBlend() * team);
+    }
+
+    /**
+     * Reshapes how picky the current firing solution must be: personality sets
+     * the baseline, suppression shifts urgency for soldiers under their own
+     * orders (STANDARD discipline only — CONSERVE and SUPPRESSIVE are doctrine),
+     * and an ineffective-burst streak demands a better shot before trying again.
+     */
+    private float applyDynamicThresholdModifiers(float scale, FireDiscipline discipline) {
+        if (!dynamicFiringEnabled()) return scale;
+
+        scale *= thresholdBias();
+
+        float suppression = effectiveSuppressionLevel();
+        if (suppression > 0.0f && discipline == FireDiscipline.STANDARD) {
+            if (StevesArmyConfig.getSuppressedFireMode() == StevesArmyConfig.SuppressedFireMode.SPRAY) {
+                scale *= 1.0f - suppression * StevesArmyConfig.getSuppressionThresholdRelief();
+            } else {
+                scale *= 1.0f + suppression * StevesArmyConfig.getSuppressionThresholdTighten();
+            }
+        }
+
+        if (ineffectiveBurstStreak > 0) {
+            scale *= 1.0f + ineffectiveBurstStreak * StevesArmyConfig.getFiringMissStreakStep();
+        }
+
+        return scale;
+    }
+
+    private float getDisciplineGapMultiplier() {
+        return switch (soldier.getFireDiscipline()) {
+            case CONSERVE -> 1.4f;
+            case SUPPRESSIVE -> 0.7f;
+            default -> 1.0f;
+        };
+    }
+
+    private int rollDirectRecoveryTicks(int baseTicks) {
+        if (!dynamicFiringEnabled() || baseTicks <= 0) return baseTicks;
+        float bias = gapBias() * getDisciplineGapMultiplier();
+        if (ineffectiveBurstStreak > 0) {
+            bias *= 1.0f + ineffectiveBurstStreak * StevesArmyConfig.getFiringMissStreakRecoveryScale();
+        }
+        return FireControl.rollRecoveryTicks(baseTicks, bias, soldier.getRandom());
+    }
+
+    /** Suppressed gunners hose: team pressure shortens the pause after duty bursts. */
+    private int rollSuppressionPauseTicks(int baseTicks, float hoseFactor) {
+        if (!dynamicFiringEnabled() || baseTicks <= 0) return baseTicks;
+        float bias = gapBias() * getDisciplineGapMultiplier() / Math.max(hoseFactor, 1.0f);
+        return FireControl.rollRecoveryTicks(baseTicks, bias, soldier.getRandom());
+    }
+
+    /**
+     * Judge the previous direct burst: if the target is untouched the streak
+     * ratchets (harder gate, longer next recovery); damage or death resets it.
+     * Called when the next burst begins — the inter-burst gap doubles as the
+     * impact window for the previous burst's rounds.
+     */
+    private void evaluatePreviousBurstEffect() {
+        if (target == null) {
+            burstStartTargetHealth = -1.0f;
+            return;
+        }
+        if (dynamicFiringEnabled() && burstStartTargetHealth >= 0.0f) {
+            boolean ineffective = !target.isDeadOrDying()
+                && target.getHealth() >= burstStartTargetHealth - 0.1f;
+            int cap = StevesArmyConfig.getFiringMissStreakCap();
+            if (ineffective && ineffectiveBurstStreak < cap) {
+                ineffectiveBurstStreak++;
+                if (isFiringDebugLogging()) {
+                    StevesArmyMod.LOGGER.info("[FiringGate] soldier={} burst ineffective, streak={}/{}",
+                        soldier.getId(), ineffectiveBurstStreak, cap);
+                }
+            } else if (!ineffective && ineffectiveBurstStreak > 0) {
+                if (isFiringDebugLogging()) {
+                    StevesArmyMod.LOGGER.info("[FiringGate] soldier={} burst landed, streak reset",
+                        soldier.getId());
+                }
+                ineffectiveBurstStreak = 0;
+            }
+        }
+        burstStartTargetHealth = target.isDeadOrDying() ? -1.0f : target.getHealth();
+    }
+
     private void beginDirectFireBurst(DirectFireWeaponProfile profile, int shotLimit, boolean mobile,
                                       float continuationThreshold) {
+        evaluatePreviousBurstEffect();
         directBurstProfile = profile;
         directBurstShotLimit = shotLimit;
         directBurstContinuationThreshold = continuationThreshold;
@@ -2695,6 +2883,14 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
             StevesArmyMod.LOGGER.info("[DirectBurst] soldier={} start profile={} shots={} mobile={} continuation={}",
                 soldier.getId(), profile, shotLimit, mobile, String.format("%.3f", continuationThreshold));
         }
+        if (isFiringDebugLogging()) {
+            StevesArmyMod.LOGGER.info(
+                "[FiringGate] soldier={} burst start profile={} rolledShots={} effSup={} streak={} aggression={} steadiness={}",
+                soldier.getId(), profile, shotLimit,
+                String.format("%.2f", effectiveSuppressionLevel()), ineffectiveBurstStreak,
+                firePersonality != null ? String.format("%.2f", firePersonality.aggression()) : "-",
+                firePersonality != null ? String.format("%.2f", firePersonality.steadiness()) : "-");
+        }
     }
 
     private void finishDirectFireBurst(String reason) {
@@ -2703,7 +2899,7 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
         int shotsFired = directBurstShotsFired;
         directBurstActive = false;
         directBurstShotsFired = 0;
-        directBurstCooldownTicks = profile.recoveryTicks;
+        directBurstCooldownTicks = rollDirectRecoveryTicks(profile.recoveryTicks);
         directBurstProfile = null;
         directBurstShotLimit = 0;
         directBurstContinuationThreshold = 0.0f;
@@ -2731,6 +2927,8 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
         burstCooldownTicks = 0;
         ticksSinceLastBurstShot = 0;
         burstWaitingForBolt = false;
+        suppressionBurstTarget = 0;
+        suppressionCadenceTicks = 1;
     }
 
     private void trySuppressireFire(@javax.annotation.Nullable Vec3 visibleContactAimPoint) {
@@ -2859,8 +3057,19 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
         burstWaitingForBolt = false;
         
         SuppressionWeaponProfile profile = getSuppressionWeaponProfile();
-        int burstTarget = profile.burstShots;
-        int ticksBetweenShots = getTicksBetweenBurstShots();
+        // Pressure lengthens duty bursts and shortens their gaps: a suppressed
+        // gunner hoses. The burst's shape rolls once, on its first shot.
+        float hoseFactor = 1.0f + effectiveSuppressionLevel() * 0.5f;
+        if (burstShotsFired == 0) {
+            suppressionBurstTarget = dynamicFiringEnabled()
+                ? FireControl.rollBurstShots(profile.burstShots, burstBias() * hoseFactor, soldier.getRandom())
+                : profile.burstShots;
+            suppressionCadenceTicks = dynamicFiringEnabled()
+                ? Math.max(1, Math.round(getTicksBetweenBurstShots() * cadenceBias()))
+                : getTicksBetweenBurstShots();
+        }
+        int burstTarget = suppressionBurstTarget;
+        int ticksBetweenShots = suppressionCadenceTicks;
         if (burstShotsFired > 0 && burstShotsFired < burstTarget) {
             ticksSinceLastBurstShot++;
             if (ticksSinceLastBurstShot < ticksBetweenShots) {
@@ -2898,11 +3107,12 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
                     * getFiringProneRecoilLossMultiplier());
                 
                 if (burstShotsFired >= burstTarget) {
+                    int pauseTicks = rollSuppressionPauseTicks(profile.pauseTicks, hoseFactor);
                     if (isSuppressionDebugLogging()) {
                         StevesArmyMod.LOGGER.info("[Suppression] Soldier {} burst complete, starting cooldown ({} ticks)",
-                            soldier.getId(), profile.pauseTicks);
+                            soldier.getId(), pauseTicks);
                     }
-                    burstCooldownTicks = profile.pauseTicks;
+                    burstCooldownTicks = pauseTicks;
                     burstShotsFired = 0;
                 }
             }
@@ -3150,7 +3360,16 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
                 return;
             }
         }
-        int burstTarget = getBurstTarget();
+        // The ping burst's shape rolls once, on its first shot.
+        if (burstShotsFired == 0) {
+            suppressionBurstTarget = dynamicFiringEnabled()
+                ? FireControl.rollBurstShots(getBurstTarget(), burstBias(), soldier.getRandom())
+                : getBurstTarget();
+            suppressionCadenceTicks = dynamicFiringEnabled()
+                ? Math.max(1, Math.round(getTicksBetweenBurstShots() * cadenceBias()))
+                : getTicksBetweenBurstShots();
+        }
+        int burstTarget = suppressionBurstTarget;
         Vec3 finalTarget = getPingSuppressionBurstTarget(burstTarget);
         
         soldier.getLookControl().setLookAt(finalTarget.x, finalTarget.y, finalTarget.z, 30.0F, 30.0F);
@@ -3223,12 +3442,16 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
                     * getFiringProneRecoilLossMultiplier());
                 
                 if (burstShotsFired >= burstTarget) {
-                    float burstInterval = getBurstIntervalSeconds();
-                    if (isSuppressionDebugLogging()) {
-                        StevesArmyMod.LOGGER.info("[SuppressPing] Soldier {} burst complete, starting cooldown ({}s)",
-                            soldier.getId(), burstInterval);
+                    int cooldownTicks = (int) (getBurstIntervalSeconds() * 20);
+                    if (dynamicFiringEnabled()) {
+                        cooldownTicks = FireControl.rollRecoveryTicks(cooldownTicks,
+                            gapBias() * getDisciplineGapMultiplier(), soldier.getRandom());
                     }
-                    burstCooldownTicks = (int) (burstInterval * 20);
+                    if (isSuppressionDebugLogging()) {
+                        StevesArmyMod.LOGGER.info("[SuppressPing] Soldier {} burst complete, starting cooldown ({} ticks)",
+                            soldier.getId(), cooldownTicks);
+                    }
+                    burstCooldownTicks = cooldownTicks;
                     burstShotsFired = 0;
                 }
             }

@@ -14,6 +14,7 @@ public final class DiagnosticLogManager {
     private static boolean spacingLoggingEnabled;
     private static boolean holeRescueLoggingEnabled;
     private static boolean stationFireLoggingEnabled;
+    private static boolean firingLoggingEnabled;
     private static UUID rotationTraceSoldierId;
     private static UUID peekTraceSoldierId;
 
@@ -60,6 +61,10 @@ public final class DiagnosticLogManager {
     public static boolean isStationFireLoggingEnabled() { return stationFireLoggingEnabled; }
     public static void setStationFireLoggingEnabled(boolean v) { stationFireLoggingEnabled = v; }
 
+    // Dynamic firing gate: burst rolls, threshold composition, streak ratchet.
+    public static boolean isFiringLoggingEnabled() { return firingLoggingEnabled; }
+    public static void setFiringLoggingEnabled(boolean v) { firingLoggingEnabled = v; }
+
     // Targeted rotation trace. A UUID is required to avoid per-tick squad-wide output.
     public static void setRotationTraceSoldierId(UUID soldierId) { rotationTraceSoldierId = soldierId; }
     public static void clearRotationTrace() { rotationTraceSoldierId = null; }
@@ -87,6 +92,7 @@ public final class DiagnosticLogManager {
         spacingLoggingEnabled = true;
         holeRescueLoggingEnabled = true;
         stationFireLoggingEnabled = true;
+        firingLoggingEnabled = true;
     }
 
     /** Disable all diagnostic logging categories. */
@@ -101,6 +107,7 @@ public final class DiagnosticLogManager {
         spacingLoggingEnabled = false;
         holeRescueLoggingEnabled = false;
         stationFireLoggingEnabled = false;
+        firingLoggingEnabled = false;
         rotationTraceSoldierId = null;
         peekTraceSoldierId = null;
         PerformanceMetrics.setEnabled(false);

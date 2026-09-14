@@ -181,6 +181,13 @@ public class CombatDebugCommand {
                         .executes(ctx -> togglePeekTrace(ctx, true)))
                     .then(Commands.literal("off")
                         .executes(ctx -> togglePeekTrace(ctx, false)))
+                )
+                .then(Commands.literal("firing")
+                    .executes(ctx -> toggleFiringLogging(ctx, null))
+                    .then(Commands.literal("on")
+                        .executes(ctx -> toggleFiringLogging(ctx, true)))
+                    .then(Commands.literal("off")
+                        .executes(ctx -> toggleFiringLogging(ctx, false)))
                 ))
 
             // === RENDER TOGGLES ===
@@ -519,6 +526,20 @@ public class CombatDebugCommand {
         DiagnosticLogManager.setHoleRescueLoggingEnabled(newState);
         context.getSource().sendSuccess(() -> Component.literal(
             "Hole rescue logging: " + (newState ? "ON" : "OFF")
+        ), true);
+        return 1;
+    }
+
+    private static int toggleFiringLogging(CommandContext<CommandSourceStack> context, Boolean enable) {
+        boolean newState;
+        if (enable != null) {
+            newState = enable;
+        } else {
+            newState = !DiagnosticLogManager.isFiringLoggingEnabled();
+        }
+        DiagnosticLogManager.setFiringLoggingEnabled(newState);
+        context.getSource().sendSuccess(() -> Component.literal(
+            "Dynamic firing logging: " + (newState ? "ON" : "OFF")
         ), true);
         return 1;
     }

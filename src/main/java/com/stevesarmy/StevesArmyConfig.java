@@ -18,6 +18,22 @@ public class StevesArmyConfig {
     public static final ForgeConfigSpec.DoubleValue AIM_QUALITY_SWITCH_RESET;
     public static final ForgeConfigSpec.DoubleValue TARGET_SWITCH_IMPROVEMENT;
     public static final ForgeConfigSpec.IntValue TARGET_REEVALUATE_INTERVAL;
+
+    public static final ForgeConfigSpec.BooleanValue DYNAMIC_FIRING_ENABLED;
+    public static final ForgeConfigSpec.DoubleValue FIRING_PERSONALITY_STRENGTH;
+    public static final ForgeConfigSpec.EnumValue<SuppressedFireMode> SUPPRESSED_FIRE_MODE;
+    public static final ForgeConfigSpec.DoubleValue SUPPRESSION_THRESHOLD_RELIEF;
+    public static final ForgeConfigSpec.DoubleValue SUPPRESSION_THRESHOLD_TIGHTEN;
+    public static final ForgeConfigSpec.DoubleValue SUPPRESSION_SIGMA_SCALE;
+    public static final ForgeConfigSpec.DoubleValue FIRING_FIRETEAM_BLEND;
+    public static final ForgeConfigSpec.DoubleValue FIRING_DUTY_SUPPRESSION_FACTOR;
+    public static final ForgeConfigSpec.DoubleValue FIRING_MISS_STREAK_STEP;
+    public static final ForgeConfigSpec.IntValue FIRING_MISS_STREAK_CAP;
+    public static final ForgeConfigSpec.DoubleValue FIRING_MISS_STREAK_RECOVERY_SCALE;
+    public static final ForgeConfigSpec.IntValue FIRING_MISS_STREAK_DECAY_TICKS;
+
+    /** How a suppressed soldier reacts when returning direct fire. */
+    public enum SuppressedFireMode { SPRAY, HOLD }
     public static final ForgeConfigSpec.BooleanValue SQUAD_FRIENDLY_FIRE;
     public static final ForgeConfigSpec.DoubleValue THREAT_SMOOTH_BLEND_FACTOR;
     public static final ForgeConfigSpec.IntValue THREAT_SMOOTH_DECAY_TIME_MS;
@@ -190,7 +206,81 @@ public class StevesArmyConfig {
             .comment("Ticks between target re-evaluation. Default 20 (1 second).",
                      "Lower values = more responsive but higher CPU usage.")
             .defineInRange("targetReevaluateInterval", 20, 5, 100);
-        
+
+        BUILDER.pop();
+
+        BUILDER.push("dynamic_firing");
+
+        DYNAMIC_FIRING_ENABLED = BUILDER
+            .comment("Master switch for the dynamic firing gate: per-soldier firing personalities,",
+                     "variable burst lengths/gaps, suppression-driven aim, and the missed-target",
+                     "streak ratchet. When false, firing uses the exact legacy fixed pacing.",
+                     "Default: true")
+            .define("dynamicFiringEnabled", true);
+
+        FIRING_PERSONALITY_STRENGTH = BUILDER
+            .comment("How strongly a soldier's per-engagement personality skews pacing (0.0 to 1.0).",
+                     "0.0 = all soldiers pace identically (legacy), 1.0 = full bias ranges",
+                     "(burst 0.8-1.3x, gap 0.8-1.25x, threshold 0.9-1.1x, cadence 0.9-1.15x, build 0.85-1.2x).",
+                     "Default: 0.6")
+            .defineInRange("personalityStrength", 0.6, 0.0, 1.0);
+
+        SUPPRESSED_FIRE_MODE = BUILDER
+            .comment("Reaction of a pressured/pinned soldier returning direct fire:",
+                     "SPRAY = lowers the aim gate so they shoot back sooner and less accurately.",
+                     "HOLD = raises the aim gate so they stop exposing and button up.",
+                     "Default: SPRAY")
+            .defineEnum("suppressedFireMode", SuppressedFireMode.SPRAY);
+
+        SUPPRESSION_THRESHOLD_RELIEF = BUILDER
+            .comment("SPRAY mode: aim-gate reduction at full suppression (0.0 to 1.0).",
+                     "thresholdScale *= 1 - suppression * relief. Default: 0.35")
+            .defineInRange("suppressionThresholdRelief", 0.35, 0.0, 1.0);
+
+        SUPPRESSION_THRESHOLD_TIGHTEN = BUILDER
+            .comment("HOLD mode: aim-gate increase at full suppression (0.0 to 1.0).",
+                     "thresholdScale *= 1 + suppression * tighten. Default: 0.40")
+            .defineInRange("suppressionThresholdTighten", 0.40, 0.0, 1.0);
+
+        SUPPRESSION_SIGMA_SCALE = BUILDER
+            .comment("How much shot dispersion widens at full suppression (0.0 to 5.0).",
+                     "sigma *= 1 + suppression * scale. Suppressive-discipline duty fire takes a",
+                     "reduced share of the shake. The +-2.5 sigma clamp always applies. Default: 2.0")
+            .defineInRange("suppressionSigmaScale", 2.0, 0.0, 5.0);
+
+        FIRING_FIRETEAM_BLEND = BUILDER
+            .comment("How much fireteam-level suppression feeds the individual's firing state (0.0 to 1.0).",
+                     "effective = max(individual, blend * fireteamLevel). 0.0 = individual only.",
+                     "Default: 0.5")
+            .defineInRange("fireteamBlend", 0.5, 0.0, 1.0);
+
+        FIRING_DUTY_SUPPRESSION_FACTOR = BUILDER
+            .comment("Fraction of the suppression dispersion shake taken while firing under",
+                     "SUPPRESSIVE discipline (0.0 to 1.0) — duty fire accepts the shake as the",
+                     "price of base fire. Default: 0.3")
+            .defineInRange("dutySuppressionFactor", 0.3, 0.0, 1.0);
+
+        FIRING_MISS_STREAK_STEP = BUILDER
+            .comment("Aim-gate increase per ineffective burst on the same target (0.0 to 0.5).",
+                     "A burst is ineffective when the target takes no damage from it. The soldier",
+                     "demands a better firing solution instead of hammering the same shot.",
+                     "Default: 0.12")
+            .defineInRange("missStreakStep", 0.12, 0.0, 0.5);
+
+        FIRING_MISS_STREAK_CAP = BUILDER
+            .comment("Maximum counted ineffective bursts (0 to 8). Default: 4")
+            .defineInRange("missStreakCap", 4, 0, 8);
+
+        FIRING_MISS_STREAK_RECOVERY_SCALE = BUILDER
+            .comment("Extra burst recovery per ineffective burst (0.0 to 2.0): the soldier takes",
+                     "time to re-aim instead of re-engaging instantly. Default: 0.5")
+            .defineInRange("missStreakRecoveryScale", 0.5, 0.0, 2.0);
+
+        FIRING_MISS_STREAK_DECAY_TICKS = BUILDER
+            .comment("Ticks without shooting for one streak step to cool off (20 to 600).",
+                     "Default: 100 (5 seconds per step)")
+            .defineInRange("missStreakDecayTicks", 100, 20, 600);
+
         BUILDER.pop();
         
         BUILDER.push("friendly_fire");
@@ -810,7 +900,55 @@ BUILDER.pop();
     public static int getTargetReevaluateInterval() {
         return TARGET_REEVALUATE_INTERVAL.get();
     }
-    
+
+    public static boolean isDynamicFiringEnabled() {
+        return DYNAMIC_FIRING_ENABLED.get();
+    }
+
+    public static float getFiringPersonalityStrength() {
+        return FIRING_PERSONALITY_STRENGTH.get().floatValue();
+    }
+
+    public static SuppressedFireMode getSuppressedFireMode() {
+        return SUPPRESSED_FIRE_MODE.get();
+    }
+
+    public static float getSuppressionThresholdRelief() {
+        return SUPPRESSION_THRESHOLD_RELIEF.get().floatValue();
+    }
+
+    public static float getSuppressionThresholdTighten() {
+        return SUPPRESSION_THRESHOLD_TIGHTEN.get().floatValue();
+    }
+
+    public static float getSuppressionSigmaScale() {
+        return SUPPRESSION_SIGMA_SCALE.get().floatValue();
+    }
+
+    public static float getFiringFireteamBlend() {
+        return FIRING_FIRETEAM_BLEND.get().floatValue();
+    }
+
+    public static float getFiringDutySuppressionFactor() {
+        return FIRING_DUTY_SUPPRESSION_FACTOR.get().floatValue();
+    }
+
+    public static float getFiringMissStreakStep() {
+        return FIRING_MISS_STREAK_STEP.get().floatValue();
+    }
+
+    public static int getFiringMissStreakCap() {
+        return FIRING_MISS_STREAK_CAP.get();
+    }
+
+    public static float getFiringMissStreakRecoveryScale() {
+        return FIRING_MISS_STREAK_RECOVERY_SCALE.get().floatValue();
+    }
+
+    public static int getFiringMissStreakDecayTicks() {
+        return FIRING_MISS_STREAK_DECAY_TICKS.get();
+    }
+
     public static boolean getSquadFriendlyFire() {
         return SQUAD_FRIENDLY_FIRE.get();
     }

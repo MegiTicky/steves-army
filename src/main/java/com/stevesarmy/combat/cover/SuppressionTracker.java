@@ -238,10 +238,6 @@ public class SuppressionTracker {
         return suppressionEventSequence;
     }
 
-    public float getAccuracyModifier() {
-        return 1.0f - (suppressionLevel * 0.9f);
-    }
-
     public boolean canPeek() {
         if (isPinned()) {
             return false;

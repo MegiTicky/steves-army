@@ -51,6 +51,28 @@ public final class FireControl {
         }
     }
 
+    // --- Dynamic burst pacing ----------------------------------------------------
+
+    /**
+     * Roll this burst's shot count from the weapon's base, scaled by bias.
+     * The bias carries the per-soldier personality; the ±0.75 rounding window
+     * adds burst-to-burst variety on top, so no two bursts are identical.
+     */
+    public static int rollBurstShots(int baseShots, float bias, RandomSource random) {
+        double scaled = baseShots * Mth.clamp(bias, 0.5f, 2.0f);
+        int min = (int) Math.max(1, Math.floor(scaled - 0.75));
+        int max = (int) Math.max(min, Math.ceil(scaled + 0.75));
+        return min + random.nextInt(max - min + 1);
+    }
+
+    /** Roll a burst recovery/gap from its base, same variance model as {@link #rollBurstShots}. */
+    public static int rollRecoveryTicks(int baseTicks, float bias, RandomSource random) {
+        double scaled = Math.max(0, baseTicks) * Mth.clamp(bias, 0.5f, 2.0f);
+        int min = (int) Math.max(0, Math.floor(scaled - 1.5));
+        int max = (int) Math.max(min, Math.ceil(scaled + 1.5));
+        return min + random.nextInt(max - min + 1);
+    }
+
     // --- Suppression pacing ----------------------------------------------------
 
     public static final int SUPPRESSION_PLAN_MAX_TICKS = 200;
