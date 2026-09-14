@@ -17,6 +17,11 @@ import java.util.stream.Collectors;
 
 public class SquadThreatIntel {
 
+    /** Enemy vehicle classes (War Thunder-style marker tiers). */
+    public static final int VC_VEHICLE = 0;
+    public static final int VC_HULL_MG = 1;
+    public static final int VC_TANK = 2;
+
     private final Map<UUID, ThreatKnowledge> knownThreats = new HashMap<>();
     private static final long THREAT_MEMORY_TICKS = 600;
     private static final long STALE_TIMEOUT_TICKS = 120;
@@ -45,6 +50,8 @@ public class SquadThreatIntel {
          * part of the vehicle instead of only the gun position.
          */
         @Nullable public Vec3[] lastKnownHullCorners;
+        /** Vehicle classification: {@link SquadThreatIntel#VC_VEHICLE}..{@link SquadThreatIntel#VC_TANK}. */
+        public int vehicleClass = VC_VEHICLE;
 
         public ThreatKnowledge(UUID threatEntityId) {
             this.threatEntityId = threatEntityId;
@@ -70,6 +77,7 @@ public class SquadThreatIntel {
             tag.putBoolean("IsAlive", isAlive);
             tag.putBoolean("IsSuppressed", isSuppressed);
             tag.putBoolean("IsHardTarget", isHardTarget);
+            tag.putInt("VehicleClass", vehicleClass);
             if (lastKnownVelocity != null) {
                 tag.putDouble("VelX", lastKnownVelocity.x);
                 tag.putDouble("VelY", lastKnownVelocity.y);
@@ -128,6 +136,7 @@ public class SquadThreatIntel {
             knowledge.isAlive = tag.getBoolean("IsAlive");
             knowledge.isSuppressed = tag.getBoolean("IsSuppressed");
             knowledge.isHardTarget = tag.getBoolean("IsHardTarget");
+            knowledge.vehicleClass = tag.getInt("VehicleClass");
             if (tag.contains("VelX")) {
                 knowledge.lastKnownVelocity = new Vec3(
                     tag.getDouble("VelX"), tag.getDouble("VelY"), tag.getDouble("VelZ"));
@@ -451,6 +460,19 @@ public class SquadThreatIntel {
     public void reportHardTarget(UUID reporterId, UUID threatId, BlockPos hullPos,
                                  @Nullable Vec3 aimPoint, @Nullable Vec3 velocity,
                                  @Nullable Vec3[] hullCorners, float accuracy, Level level) {
+        reportHardTarget(reporterId, threatId, hullPos, aimPoint, velocity, hullCorners,
+            accuracy, level, VC_HULL_MG);
+    }
+
+    /**
+     * Publishes or refreshes an enemy-vehicle sighting. {@code vehicleClass}
+     * merges upward (tank &gt; hull MG &gt; vehicle) so observers that saw only
+     * part of the vehicle still converge on the strongest known class.
+     */
+    public void reportHardTarget(UUID reporterId, UUID threatId, BlockPos hullPos,
+                                 @Nullable Vec3 aimPoint, @Nullable Vec3 velocity,
+                                 @Nullable Vec3[] hullCorners, float accuracy, Level level,
+                                 int vehicleClass) {
         ThreatKnowledge knowledge = knownThreats.get(threatId);
         if (knowledge != null && !knowledge.isAlive) {
             return;
@@ -467,6 +489,7 @@ public class SquadThreatIntel {
         knowledge.accuracy = Math.max(knowledge.accuracy, accuracy);
         knowledge.isAlive = true;
         knowledge.isHardTarget = true;
+        knowledge.vehicleClass = Math.max(knowledge.vehicleClass, vehicleClass);
         knownThreats.put(threatId, knowledge);
     }
 

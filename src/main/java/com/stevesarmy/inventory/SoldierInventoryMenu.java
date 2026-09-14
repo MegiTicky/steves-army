@@ -22,7 +22,7 @@ import net.minecraftforge.api.distmarker.OnlyIn;
 import javax.annotation.Nullable;
 
 public class SoldierInventoryMenu extends AbstractContainerMenu {
-    private static final int SOLDIER_MENU_SLOT_COUNT = SoldierInventory.INVENTORY_SIZE - 1;
+    private static final int SOLDIER_MENU_SLOT_COUNT = SoldierInventory.INVENTORY_SIZE;
     private static final ResourceLocation[] TEXTURE_EMPTY_ARMOR_SLOTS = new ResourceLocation[]{
         InventoryMenu.EMPTY_ARMOR_SLOT_HELMET,
         InventoryMenu.EMPTY_ARMOR_SLOT_CHESTPLATE,
@@ -84,6 +84,15 @@ public class SoldierInventoryMenu extends AbstractContainerMenu {
     }
 
     private void addMainHandSlot() {
+        this.addSlot(new Slot(soldierInventory, SoldierInventory.SLOT_SIDEARM, 8, 90) {
+            @Override
+            public int getMaxStackSize() { return 1; }
+
+            @Override
+            public boolean mayPlace(ItemStack stack) {
+                return GunIntegration.isGun(stack);
+            }
+        });
         this.addSlot(new Slot(soldierInventory, SoldierInventory.SLOT_MAIN_HAND, 26, 90) {
             @Override
             public boolean mayPlace(ItemStack stack) {
@@ -171,14 +180,9 @@ public class SoldierInventoryMenu extends AbstractContainerMenu {
     }
 
     public ItemStack getSoldierInventoryItem(int inventorySlot) {
-        if (inventorySlot == SoldierInventory.SLOT_OFF_HAND) {
-            return ItemStack.EMPTY;
-        }
         if (inventorySlot >= 0 && inventorySlot < SoldierInventory.INVENTORY_SIZE) {
-            int menuSlot = inventorySlot < SoldierInventory.SLOT_OFF_HAND
-                ? inventorySlot
-                : inventorySlot - 1;
-            return this.getSlot(menuSlot).getItem();
+            // Soldier container slots and menu indices now align 1:1.
+            return this.slots.get(inventorySlot).getItem();
         }
         return ItemStack.EMPTY;
     }

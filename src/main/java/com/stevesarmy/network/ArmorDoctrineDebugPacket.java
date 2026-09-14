@@ -22,7 +22,8 @@ public final class ArmorDoctrineDebugPacket {
     private static final int MAX_SOLDIERS = 48;
 
     public record Contact(UUID threatId, Vec3 aimPoint, Vec3 hullCenter, Vec3 velocity,
-                          Vec3[] hullCorners, boolean suppressed, long ageTicks, double accuracy) {}
+                          Vec3[] hullCorners, boolean suppressed, long ageTicks, double accuracy,
+                          int vehicleClass) {}
 
     public record Soldier(UUID soldierId, Vec3 pos, boolean hunter, boolean squadHasAt,
                           boolean exposed, boolean displace, boolean ducked,
@@ -45,7 +46,8 @@ public final class ArmorDoctrineDebugPacket {
         List<Contact> decodedContacts = new ArrayList<>(contactCount);
         for (int i = 0; i < contactCount; i++) {
             decodedContacts.add(new Contact(buf.readUUID(), readVec(buf), readVec(buf),
-                readNullableVec(buf), readVecArray(buf), buf.readBoolean(), buf.readVarInt(), buf.readFloat()));
+                readNullableVec(buf), readVecArray(buf), buf.readBoolean(), buf.readVarInt(),
+                buf.readFloat(), buf.readVarInt()));
         }
         int soldierCount = Math.min(buf.readVarInt(), MAX_SOLDIERS);
         List<Soldier> decodedSoldiers = new ArrayList<>(soldierCount);
@@ -71,6 +73,7 @@ public final class ArmorDoctrineDebugPacket {
             buf.writeBoolean(contact.suppressed());
             buf.writeVarInt((int) Math.min(contact.ageTicks(), Integer.MAX_VALUE));
             buf.writeFloat((float) contact.accuracy());
+            buf.writeVarInt(contact.vehicleClass());
         }
         buf.writeVarInt(Math.min(packet.soldiers.size(), MAX_SOLDIERS));
         for (int i = 0; i < packet.soldiers.size() && i < MAX_SOLDIERS; i++) {

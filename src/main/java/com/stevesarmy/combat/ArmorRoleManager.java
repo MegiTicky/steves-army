@@ -81,7 +81,7 @@ public final class ArmorRoleManager {
                 if (!(serverLevel.getEntity(memberId) instanceof SoldierEntity member) || !member.isAlive()) {
                     continue;
                 }
-                if (gunMatchesAtPattern(member)) {
+                if (carriesAtGun(member)) {
                     hunters.add(memberId);
                 }
             }
@@ -97,11 +97,35 @@ public final class ArmorRoleManager {
             .orElse(List.of()));
     }
 
+    /**
+     * True when any persistent slot (sidearm, main hand, general) carries an
+     * anti-armor gun. Hunter designation is inventory-based so a hunter whose
+     * launcher is stashed while he fights with the sidearm keeps the role.
+     */
+    private static boolean carriesAtGun(SoldierEntity soldier) {
+        com.stevesarmy.inventory.SoldierInventory inv = soldier.getSoldierInventory();
+        if (inv == null) {
+            return isAtGunStack(soldier.getMainHandItem());
+        }
+        for (int slot = com.stevesarmy.inventory.SoldierInventory.SLOT_SIDEARM;
+             slot < com.stevesarmy.inventory.SoldierInventory.INVENTORY_SIZE; slot++) {
+            if (isAtGunStack(inv.getItem(slot))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private static boolean gunMatchesAtPattern(SoldierEntity soldier) {
-        if (!GunIntegration.isAnyGunLoaded() || !GunIntegration.hasGun(soldier)) {
+        return isAtGunStack(soldier.getMainHandItem());
+    }
+
+    /** True when this stack's gun ID matches the configured anti-armor patterns. */
+    public static boolean isAtGunStack(net.minecraft.world.item.ItemStack stack) {
+        if (!GunIntegration.isGun(stack)) {
             return false;
         }
-        String gunId = GunIntegration.getGunId(soldier);
+        String gunId = GunIntegration.getGunId(stack);
         if (gunId == null || gunId.isEmpty()) {
             return false;
         }

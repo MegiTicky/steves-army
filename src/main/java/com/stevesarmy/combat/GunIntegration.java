@@ -101,6 +101,31 @@ public class GunIntegration {
     public static boolean isManualBolt(LivingEntity entity) { return gunHandler.isManualBolt(entity); }
     public static boolean useInventoryAmmo(LivingEntity entity) { return gunHandler.useInventoryAmmo(entity); }
     public static String getGunId(LivingEntity entity) { return gunHandler.getGunId(entity); }
+
+    /**
+     * Gun ID (e.g. {@code tacz:rpg7}) for any gun ItemStack, independent of
+     * what the entity currently holds. Empty string when not a readable gun.
+     */
+    public static String getGunId(ItemStack stack) {
+        if (stack == null || stack.isEmpty()) return "";
+        if (vpbLoaded && VpbGunHandler.isVpbGun(stack)) {
+            return VPB_HANDLER.getGunId(stack);
+        }
+        if (taczLoaded && isTaczGun(stack)) {
+            try {
+                Class<?> iGunClass = Class.forName("com.tacz.guns.api.item.IGun");
+                Method getIGunOrNull = iGunClass.getMethod("getIGunOrNull", ItemStack.class);
+                Object iGun = getIGunOrNull.invoke(null, stack);
+                if (iGun == null) return "";
+                Method getGunIdMethod = iGunClass.getMethod("getGunId", ItemStack.class);
+                Object gunId = getGunIdMethod.invoke(iGun, stack);
+                return gunId != null ? gunId.toString() : "";
+            } catch (Exception e) {
+                return "";
+            }
+        }
+        return "";
+    }
     public static String getAmmoId(LivingEntity entity) { return gunHandler.getAmmoId(entity); }
     public static int getCurrentAmmo(ItemStack gunStack) { return gunHandler.getCurrentAmmo(gunStack); }
     public static String getAmmoId(ItemStack gunStack) { return gunHandler.getAmmoId(gunStack); }

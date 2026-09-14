@@ -100,6 +100,8 @@ public class StevesArmyConfig {
     public static final ForgeConfigSpec.DoubleValue ARMOR_ENGAGEMENT_MAX_RANGE;
     public static final ForgeConfigSpec.ConfigValue<java.util.List<? extends String>> ARMOR_AT_GUN_PATTERNS;
     public static final ForgeConfigSpec.EnumValue<ArmorDoctrineOverride> ARMOR_DOCTRINE_OVERRIDE;
+    public static final ForgeConfigSpec.IntValue AT_PING_ROCKET_BUDGET;
+    public static final ForgeConfigSpec.IntValue LAUNCHER_RESERVE_FLOOR;
 
     public enum ArmorDoctrineOverride { AUTO, NO_AT, FORCE_AT }
 
@@ -654,6 +656,18 @@ BUILDER.pop();
                      "(riflemen will suppress the vehicle even with no hunter designated).",
                      "Default: AUTO.")
             .defineEnum("doctrineOverride", ArmorDoctrineOverride.AUTO);
+
+        AT_PING_ROCKET_BUDGET = BUILDER
+            .comment("Launcher rounds an AT soldier may spend on one heavy-fire suppression",
+                     "ping, firing at solid structure instead of window/opening points so the",
+                     "position itself is levelled. Default: 2.")
+            .defineInRange("atPingRocketBudget", 2, 0, 16);
+
+        LAUNCHER_RESERVE_FLOOR = BUILDER
+            .comment("Launcher rounds an AT soldier keeps in reserve for tanks: heavy-fire",
+                     "pings stop firing at this floor. A spotted enemy vehicle overrides the",
+                     "floor (armor defense outranks the reserve). Default: 1.")
+            .defineInRange("launcherReserveFloor", 1, 0, 16);
 
         BUILDER.pop();
 
@@ -1229,6 +1243,14 @@ BUILDER.pop();
 
     public static ArmorDoctrineOverride getArmorDoctrineOverride() {
         return ARMOR_DOCTRINE_OVERRIDE.get();
+    }
+
+    public static int getAtPingRocketBudget() {
+        return AT_PING_ROCKET_BUDGET.get();
+    }
+
+    public static int getLauncherReserveFloor() {
+        return LAUNCHER_RESERVE_FLOOR.get();
     }
 
     /** Legacy compatibility hook; nearby-target snapshots are disabled. */

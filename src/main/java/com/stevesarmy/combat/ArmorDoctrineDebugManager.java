@@ -140,7 +140,8 @@ public final class ArmorDoctrineDebugManager {
             out.add(new ArmorDoctrineDebugPacket.Contact(
                 knowledge.threatEntityId, aim, hull, knowledge.lastKnownVelocity,
                 knowledge.lastKnownHullCorners,
-                knowledge.isSuppressed, gameTime - knowledge.lastSeenTime, knowledge.accuracy));
+                knowledge.isSuppressed, gameTime - knowledge.lastSeenTime, knowledge.accuracy,
+                knowledge.vehicleClass));
         }
     }
 

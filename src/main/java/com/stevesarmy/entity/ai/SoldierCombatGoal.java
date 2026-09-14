@@ -15,6 +15,7 @@ import com.stevesarmy.combat.FireControl.SuppressionWeaponProfile;
 import com.stevesarmy.combat.FirePersonality;
 import com.stevesarmy.combat.FriendlyFireChecker;
 import com.stevesarmy.combat.GunIntegration;
+import com.stevesarmy.combat.SoldierWeaponSelector;
 import com.stevesarmy.combat.TargetAcquisition;
 import com.stevesarmy.combat.ThreatAwareness;
 import com.stevesarmy.combat.ThreatTracker;
@@ -122,13 +123,21 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
     private long suppressionLastSeenTick = -1;
     private Vec3 suppressionTargetAimPoint = null;
 
-    // Armor doctrine: the designated hunter engages hard targets directly and
-    // displaces after each shot (shoot & scoot).
+    // Armor doctrine: the designated hunter engages hard targets directly.
     private int armorShotCooldownTicks = 0;
     private int armorEngagementStartTick = -1;
     private boolean armorShotFired = false;
     private static final int ARMOR_SHOT_SPACING_TICKS = 60;
     private static final int ARMOR_DISENGAGE_TICKS = 200;
+
+    // Sidearm policy: swap pacing plus the heavy-fire (rocket) ping budget.
+    private int weaponSwapCooldownTicks = 0;
+    private static final int WEAPON_SWAP_COOLDOWN_TICKS = 40;
+    private int atPingShotsFired = 0;
+    private Vec3 atPingAimPoint = null;
+    private int atPingAimTick = -100;
+    private static final int AT_PING_AIM_REFRESH_TICKS = 10;
+    private static final int AT_PING_SHOT_SPACING_TICKS = 60;
 
     private enum EngagementPostureState {
         READY,
@@ -494,6 +503,7 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
         }
 
         maintainSuppressionAssignment();
+        tickWeaponSelection();
 
         // Last-seen suppression must yield to a real visible target immediately,
         // including while the soldier is exposed from cover. Use a fresh scan so
@@ -563,7 +573,7 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
             if (inCover) {
                 tickCoverPeekCycle(coverManager);
             }
-            
+
             if (hasGun && isSuppressing) {
                 trySuppressireFire(null);
             } else {
@@ -571,7 +581,11 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
             }
 
             if (!isSuppressing && hasGun && shouldSuppressPingTarget()) {
-                trySuppressPingFire();
+                if (isAtCarrier()) {
+                    tryAtPingFire();
+                } else {
+                    trySuppressPingFire();
+                }
             } else if (!isSuppressing) {
                 isPingSuppressing = false;
             }
@@ -1144,7 +1158,11 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
                 isSuppressing = true;
                 trySuppressireFire(null);
             } else if (shouldSuppressPingTarget()) {
-                trySuppressPingFire();
+                if (isAtCarrier()) {
+                    tryAtPingFire();
+                } else {
+                    trySuppressPingFire();
+                }
             } else {
                 isSuppressing = false;
                 isPingSuppressing = false;
@@ -1180,6 +1198,8 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
             soldier.clearPingSuppressPos();
             isPingSuppressing = false;
             pingSuppressRemainingTicks = 0;
+            atPingShotsFired = 0;
+            atPingAimPoint = null;
         }
         
         resetBurstState();
@@ -2439,6 +2459,10 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
             ArmorThreatScanner.setEngageBlockReason(soldier, "notHunter");
             return false;
         }
+        if (!SoldierWeaponSelector.hasLauncher(soldier)) {
+            ArmorThreatScanner.setEngageBlockReason(soldier, "noLauncher");
+            return false;
+        }
 
         ArmorThreatScanner.ArmorContact armor = ArmorThreatScanner.getPrimaryArmorThreat(soldier);
         if (armor == null) {
@@ -2535,6 +2559,165 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
             default -> { }
         }
         return true;
+    }
+
+    /**
+     * Sidearm doctrine: AT carriers hold a normal gun (sidearm slot when
+     * loaded) and raise the launcher only while a vehicle is spotted or a
+     * heavy-fire ping is active. Soldiers without an AT gun are untouched.
+     */
+    private void tickWeaponSelection() {
+        if (weaponSwapCooldownTicks > 0) {
+            weaponSwapCooldownTicks--;
+            return;
+        }
+        if (!GunIntegration.isAnyGunLoaded() || !GunIntegration.hasGun(soldier)) {
+            return;
+        }
+        if (SoldierWeaponSelector.update(soldier, wantsLauncher())) {
+            resetAim(null);
+            weaponSwapCooldownTicks = WEAPON_SWAP_COOLDOWN_TICKS;
+        }
+    }
+
+    private boolean wantsLauncher() {
+        if (isAtCarrier() && soldier.hasValidPingSuppressPos()) {
+            return true;
+        }
+        if (!ArmorRoleManager.isArmorHunter(soldier)) {
+            return false;
+        }
+        if (ArmorThreatScanner.getPrimaryArmorThreat(soldier) == null) {
+            return false;
+        }
+        // Point-blank infantry overrides the hunt; fight it with the sidearm.
+        return target == null || !target.isAlive()
+            || soldier.distanceToSqr(target) > SoldierEntity.CQB_RANGE * SoldierEntity.CQB_RANGE;
+    }
+
+    /** True when the soldier carries an anti-armor gun anywhere in inventory (cached briefly). */
+    private boolean isAtCarrier() {
+        if (soldier.tickCount - atCarrierCheckTick >= 40) {
+            atCarrierCached = SoldierWeaponSelector.hasLauncher(soldier);
+            atCarrierCheckTick = soldier.tickCount;
+        }
+        return atCarrierCached;
+    }
+
+    private boolean atCarrierCached;
+    private int atCarrierCheckTick = Integer.MIN_VALUE;
+
+    /**
+     * Heavy-fire ping for AT carriers: level the marked structure itself.
+     * Rockets aim at the first solid surface on the eye-to-ping line (never a
+     * window/opening point), bounded by the configured per-ping budget and a
+     * reserve floor that a spotted vehicle overrides.
+     */
+    private void tryAtPingFire() {
+        isPingSuppressing = true;
+
+        int budget = StevesArmyConfig.getAtPingRocketBudget();
+        if (atPingShotsFired >= budget) {
+            finishAtPing("budget");
+            return;
+        }
+        boolean tankKnown = ArmorThreatScanner.getPrimaryArmorThreat(soldier) != null;
+        if (!tankKnown && SoldierWeaponSelector.countLauncherAmmo(soldier)
+                <= StevesArmyConfig.getLauncherReserveFloor()) {
+            finishAtPing("reserve");
+            return;
+        }
+
+        // Same exposure rules as rifle suppression: no firing from behind cover.
+        CoverBehaviorManager coverManager = soldier.getCoverBehaviorManager();
+        if (coverManager.isInCover()
+            && soldier.getPeekController().getState() != PeekController.State.EXPOSED) {
+            return;
+        }
+
+        if (atPingAimPoint == null
+            || soldier.tickCount - atPingAimTick >= AT_PING_AIM_REFRESH_TICKS) {
+            atPingAimPoint = findStructureImpactPoint();
+            atPingAimTick = soldier.tickCount;
+        }
+        if (atPingAimPoint == null) {
+            return;
+        }
+
+        if (GunIntegration.isReloading(soldier) || GunIntegration.isBolting(soldier)
+            || GunIntegration.isDrawing(soldier)) {
+            return;
+        }
+        if (!prepareToFire(atPingAimPoint, false)) {
+            return;
+        }
+        soldier.getLookControl().setLookAt(atPingAimPoint.x, atPingAimPoint.y, atPingAimPoint.z, 30.0F, 30.0F);
+        GunIntegration.aim(soldier, true);
+        wasAiming = true;
+        if (GunIntegration.getAimProgress(soldier) < ADS_THRESHOLD) {
+            return;
+        }
+        if (armorShotCooldownTicks > 0) {
+            armorShotCooldownTicks--;
+            return;
+        }
+        if (GunIntegration.getShootCoolDown(soldier) > 0) {
+            return;
+        }
+
+        GunIntegration.ShootResult result = GunIntegration.shootAtPosition(soldier, atPingAimPoint);
+        switch (result) {
+            case SUCCESS -> {
+                atPingShotsFired++;
+                armorShotCooldownTicks = AT_PING_SHOT_SPACING_TICKS;
+                if (coverManager.isInCover()) {
+                    coverManager.onPeekShot();
+                }
+                if (isSuppressionDebugLogging()) {
+                    StevesArmyMod.LOGGER.info("[SuppressPing] AT soldier {} rocket {}/{} at structure {}",
+                        soldier.getId(), atPingShotsFired, budget, atPingAimPoint);
+                }
+            }
+            case NEED_BOLT -> GunIntegration.bolt(soldier);
+            case NO_AMMO -> finishAtPing("no_ammo");
+            case NOT_DRAWN -> GunIntegration.draw(soldier);
+            default -> { }
+        }
+    }
+
+    private void finishAtPing(String reason) {
+        if (isSuppressionDebugLogging() && atPingShotsFired > 0) {
+            StevesArmyMod.LOGGER.info("[SuppressPing] AT soldier {} finished heavy fire ({}, {} rockets)",
+                soldier.getId(), reason, atPingShotsFired);
+        }
+        soldier.clearPingSuppressPos();
+        isPingSuppressing = false;
+        atPingShotsFired = 0;
+        atPingAimPoint = null;
+        resetBurstState();
+    }
+
+    /**
+     * First solid surface between the eye and the ping center, so rockets
+     * hit the building's face instead of sailing through an opening.
+     */
+    @javax.annotation.Nullable
+    private Vec3 findStructureImpactPoint() {
+        BlockPos pingPos = soldier.getPingSuppressPos();
+        if (pingPos == null) {
+            return null;
+        }
+        Vec3 center = Vec3.atCenterOf(pingPos);
+        net.minecraft.world.level.ClipContext context = new net.minecraft.world.level.ClipContext(
+            soldier.getEyePosition(), center,
+            net.minecraft.world.level.ClipContext.Block.COLLIDER,
+            net.minecraft.world.level.ClipContext.Fluid.NONE, soldier);
+        net.minecraft.world.phys.BlockHitResult hit = soldier.level().clip(context);
+        if (hit.getType() == net.minecraft.world.phys.HitResult.Type.BLOCK) {
+            return hit.getLocation();
+        }
+        // Nothing solid on the line: just fire at the marked point.
+        return center;
     }
 
     private boolean hasReadySquadMachineGunner(SquadThreatIntel.ThreatKnowledge threat) {

@@ -591,7 +591,7 @@ public class VpbGunHandler implements GunIntegration.GunHandler {
         return getGunId(entity.getMainHandItem());
     }
 
-    private String getGunId(ItemStack stack) {
+    String getGunId(ItemStack stack) {
         if (stack == null || stack.isEmpty()) return "";
         if (isVpbGun(stack)) {
             ResourceLocation rl = net.minecraftforge.registries.ForgeRegistries.ITEMS.getKey(stack.getItem());

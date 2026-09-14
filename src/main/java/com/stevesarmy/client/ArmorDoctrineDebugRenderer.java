@@ -71,6 +71,15 @@ public final class ArmorDoctrineDebugRenderer {
 
     private static void renderContactLines(BufferBuilder buffer, Matrix4f matrix, Vec3 cameraPos,
                                            ArmorDoctrineDebugPacket.Contact contact, int mode) {
+        int[] classColor = classColor(contact.vehicleClass());
+
+        // War Thunder-style marker: bracket frame above the vehicle, colored by
+        // class, with a drop line to the aim point.
+        Vec3 markerCenter = contact.aimPoint().add(0, 2.6, 0);
+        double half = 1.1;
+        square(buffer, matrix, cameraPos, markerCenter, half, classColor[0], classColor[1], classColor[2]);
+        line(buffer, matrix, cameraPos, markerCenter, contact.aimPoint(), classColor[0], classColor[1], classColor[2]);
+
         // Gun marker: aim point with a red drop line to the ground.
         line(buffer, matrix, cameraPos, contact.aimPoint(), contact.aimPoint().add(0, -3, 0), 255, 64, 64);
         cross(buffer, matrix, cameraPos, contact.aimPoint(), 0.6, 255, 96, 96);
@@ -88,6 +97,27 @@ public final class ArmorDoctrineDebugRenderer {
             int[] pathColor = contact.suppressed() ? new int[] {255, 64, 255} : new int[] {255, 160, 32};
             line(buffer, matrix, cameraPos, contact.hullCenter(), end, pathColor[0], pathColor[1], pathColor[2]);
         }
+    }
+
+    private static void square(BufferBuilder buffer, Matrix4f matrix, Vec3 cameraPos,
+                               Vec3 center, double half, int r, int g, int b) {
+        Vec3 tl = center.add(-half, half, 0);
+        Vec3 tr = center.add(half, half, 0);
+        Vec3 br = center.add(half, -half, 0);
+        Vec3 bl = center.add(-half, -half, 0);
+        line(buffer, matrix, cameraPos, tl, tr, r, g, b);
+        line(buffer, matrix, cameraPos, tr, br, r, g, b);
+        line(buffer, matrix, cameraPos, br, bl, r, g, b);
+        line(buffer, matrix, cameraPos, bl, tl, r, g, b);
+    }
+
+    /** Marker colors by vehicle class: tank red, hull MG orange, vehicle white. */
+    private static int[] classColor(int vehicleClass) {
+        return switch (vehicleClass) {
+            case com.stevesarmy.squad.SquadThreatIntel.VC_TANK -> new int[] {255, 64, 48};
+            case com.stevesarmy.squad.SquadThreatIntel.VC_HULL_MG -> new int[] {255, 160, 32};
+            default -> new int[] {255, 255, 255};
+        };
     }
 
     /**
@@ -172,15 +202,21 @@ public final class ArmorDoctrineDebugRenderer {
     private static void renderContactLabel(Font font, PoseStack poseStack, Vec3 cameraPos,
                                            ArmorDoctrineDebugPacket.Contact contact,
                                            MultiBufferSource.BufferSource buffers) {
-        StringBuilder text = new StringBuilder("VEHICLE");
+        StringBuilder text = new StringBuilder(switch (contact.vehicleClass()) {
+            case com.stevesarmy.squad.SquadThreatIntel.VC_TANK -> "TANK";
+            case com.stevesarmy.squad.SquadThreatIntel.VC_HULL_MG -> "HULL MG";
+            default -> "VEHICLE";
+        });
         if (contact.suppressed()) text.append(" [SUPPRESSED]");
         if (contact.velocity() == null || contact.velocity().horizontalDistance() < 0.01) {
             text.append(" stationary");
         } else {
             text.append(String.format(" %.1f b/t", contact.velocity().horizontalDistance()));
         }
-        billboard(font, poseStack, cameraPos, contact.aimPoint().add(0, 0.8, 0), text.toString(),
-            0, contact.suppressed() ? 0xFFFF40FF : 0xFFFFA020, buffers);
+        int[] classColor = classColor(contact.vehicleClass());
+        int argb = 0xFF000000 | (classColor[0] << 16) | (classColor[1] << 8) | classColor[2];
+        billboard(font, poseStack, cameraPos, contact.aimPoint().add(0, 4.0, 0), text.toString(),
+            0, contact.suppressed() ? 0xFFFF40FF : argb, buffers);
     }
 
     private static void renderSoldierLabel(Font font, PoseStack poseStack, Vec3 cameraPos,

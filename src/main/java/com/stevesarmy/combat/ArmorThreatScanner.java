@@ -10,6 +10,7 @@ import com.stevesarmy.squad.SquadThreatIntel;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
@@ -17,9 +18,11 @@ import net.minecraft.world.phys.Vec3;
 import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -102,6 +105,12 @@ public final class ArmorThreatScanner {
         AABB searchBox = soldier.getBoundingBox().inflate(range);
         List<Entity> cameras = serverLevel.getEntitiesOfClass(Entity.class, searchBox,
             cam -> TallyhoCompat.isCameraEntity(cam) && isHostileCamera(serverLevel, cam, soldier));
+        List<Entity> cannons = serverLevel.getEntitiesOfClass(Entity.class, searchBox,
+            ArmorThreatScanner::isCannonContraption);
+
+        // Contacts on the same ship share one identity so a hull-MG sighting and
+        // an occupancy sighting merge into a single enemy vehicle.
+        Set<Long> reportedShips = new HashSet<>();
 
         ArmorContact nearest = null;
         for (Entity camera : cameras) {
@@ -115,15 +124,56 @@ public final class ArmorThreatScanner {
                 continue;
             }
             Vec3[] hullCorners = ship != null ? shipHullCorners(ship) : null;
+            Long shipId = VS2Compat.getShipIdOf(ship);
+            if (shipId != null) {
+                reportedShips.add(shipId);
+            }
+            UUID contactId = contactIdFor(ship, camera.getUUID());
+            int vehicleClass = TallyhoCompat.isHullMG(camera)
+                ? SquadThreatIntel.VC_HULL_MG : SquadThreatIntel.VC_VEHICLE;
+            vehicleClass = upgradeForCannons(cannons, hullCenter, vehicleClass);
 
-            Vec3 velocity = estimateVelocity(camera.getUUID(), hullCenter, gameTime);
-            intel.reportHardTarget(soldier.getUUID(), camera.getUUID(),
-                BlockPos.containing(hullCenter), aimPoint, velocity, hullCorners, 1.0f, serverLevel);
+            Vec3 velocity = estimateVelocity(contactId, hullCenter, gameTime);
+            intel.reportHardTarget(soldier.getUUID(), contactId,
+                BlockPos.containing(hullCenter), aimPoint, velocity, hullCorners, 1.0f,
+                serverLevel, vehicleClass);
 
             double distSqr = soldier.distanceToSqr(aimPoint);
             if (nearest == null || distSqr < soldier.distanceToSqr(nearest.aimPoint())) {
-                nearest = new ArmorContact(camera.getUUID(), aimPoint, hullCenter, velocity,
+                nearest = new ArmorContact(contactId, aimPoint, hullCenter, velocity,
                     hullCorners, gameTime);
+            }
+        }
+
+        // Enemy-occupied ships without a crewed station still read as enemy
+        // vehicles (APC): any hostile soldier or player standing on a ship.
+        List<LivingEntity> occupants = serverLevel.getEntitiesOfClass(LivingEntity.class, searchBox,
+            occupant -> !soldier.isFriendlyTo(occupant));
+        for (Entity occupant : occupants) {
+            Object ship = VS2Compat.getShipObjectAtWorldPos(serverLevel,
+                occupant.getX(), occupant.getY(), occupant.getZ());
+            if (ship == null) {
+                continue;
+            }
+            Long shipId = VS2Compat.getShipIdOf(ship);
+            if (shipId == null || !reportedShips.add(shipId)) {
+                continue;
+            }
+            Vec3 hullCenter = shipCenterWorld(ship);
+            if (hullCenter == null || !VS2Compat.isWorldPlausible(hullCenter)) {
+                continue;
+            }
+            UUID contactId = shipThreatId(shipId);
+            Vec3[] hullCorners = shipHullCorners(ship);
+            int vehicleClass = upgradeForCannons(cannons, hullCenter, SquadThreatIntel.VC_VEHICLE);
+            Vec3 velocity = estimateVelocity(contactId, hullCenter, gameTime);
+            intel.reportHardTarget(soldier.getUUID(), contactId,
+                BlockPos.containing(hullCenter), occupant.getEyePosition(), velocity,
+                hullCorners, 0.8f, serverLevel, vehicleClass);
+            double distSqr = soldier.distanceToSqr(hullCenter);
+            if (nearest == null || distSqr < soldier.distanceToSqr(nearest.aimPoint())) {
+                nearest = new ArmorContact(contactId, occupant.getEyePosition(), hullCenter,
+                    velocity, hullCorners, gameTime);
             }
         }
 
@@ -323,6 +373,58 @@ public final class ArmorThreatScanner {
         }
         Entity crew = level.getEntity(claimant);
         return crew instanceof SoldierEntity crewSoldier && !observer.isFriendlyTo(crewSoldier);
+    }
+
+    /**
+     * World-space proximity to a CBC cannon contraption upgrades a contact to a
+     * tank. Association deliberately ignores ship identity: the cannon entity
+     * may live on a different (attached) ship than the hull-MG camera, so only
+     * the world-space distance to the hull decides.
+     */
+    private static final double CANNON_ASSOCIATION_RANGE = 32.0;
+    private static final String CBC_PITCH_CONTRAPTION_CLASS =
+        "rbasamoyai.createbigcannons.cannon_control.contraption.PitchOrientedContraptionEntity";
+    private static volatile boolean cannonClassChecked;
+    private static Class<?> cannonContraptionClass;
+
+    private static boolean isCannonContraption(Entity entity) {
+        if (!cannonClassChecked) {
+            cannonClassChecked = true;
+            try {
+                cannonContraptionClass = Class.forName(CBC_PITCH_CONTRAPTION_CLASS);
+            } catch (ClassNotFoundException | LinkageError ignored) {
+                cannonContraptionClass = null;
+            }
+        }
+        return cannonContraptionClass != null && cannonContraptionClass == entity.getClass();
+    }
+
+    private static int upgradeForCannons(List<Entity> cannons, Vec3 hullCenter, int vehicleClass) {
+        if (vehicleClass >= SquadThreatIntel.VC_TANK || cannons.isEmpty()) {
+            return vehicleClass;
+        }
+        for (Entity cannon : cannons) {
+            Vec3 pos = VS2Compat.stationCameraWorldPos(VS2Compat.getShipUnder(cannon), cannon);
+            if (pos == null || !VS2Compat.isWorldPlausible(pos)) {
+                continue;
+            }
+            if (pos.distanceTo(hullCenter) <= CANNON_ASSOCIATION_RANGE) {
+                return SquadThreatIntel.VC_TANK;
+            }
+        }
+        return vehicleClass;
+    }
+
+    /** Contact identity: the ship when known, otherwise the station entity itself. */
+    private static UUID contactIdFor(Object ship, UUID fallback) {
+        Long shipId = VS2Compat.getShipIdOf(ship);
+        return shipId != null ? shipThreatId(shipId) : fallback;
+    }
+
+    /** Stable synthetic threat id for a ship, shared by every observer. */
+    private static UUID shipThreatId(long shipId) {
+        return UUID.nameUUIDFromBytes(
+            ("stevesarmy:ship:" + shipId).getBytes(java.nio.charset.StandardCharsets.UTF_8));
     }
 
     @Nullable
