@@ -139,6 +139,11 @@ public final class ArmorDoctrineDebugRenderer {
         if (soldier.coverPos() != null) {
             line(buffer, matrix, cameraPos, soldier.pos(), soldier.coverPos(), 160, 160, 160);
         }
+        // Resolved firing solution: where the AI believes the shootable hull is.
+        if (soldier.firingSolution() != null) {
+            line(buffer, matrix, cameraPos, soldier.pos(), soldier.firingSolution(), 64, 224, 255);
+            cross(buffer, matrix, cameraPos, soldier.firingSolution(), 0.35, 64, 224, 255);
+        }
     }
 
     private static ArmorDoctrineDebugPacket.Contact findContact(

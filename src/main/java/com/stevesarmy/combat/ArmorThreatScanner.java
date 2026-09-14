@@ -15,6 +15,7 @@ import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 
 import javax.annotation.Nullable;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -55,6 +56,9 @@ public final class ArmorThreatScanner {
     private static final Map<UUID, PrevSighting> lastSightingByThreat = new HashMap<>();
     /** Last gate that blocked the armor hunter's engagement, for debug rendering. */
     private static final Map<UUID, String> engageBlockReasonBySoldier = new HashMap<>();
+    /** Last resolved firing-solution point per soldier, for debug rendering. */
+    private static final Map<UUID, FiringSolutionDebug> firingSolutionBySoldier = new HashMap<>();
+    private static final long FIRING_SOLUTION_FRESH_TICKS = 40;
     private static long lastPruneGameTime = Long.MIN_VALUE;
 
     private record PrevSighting(Vec3 hullCenter, long gameTime) {}
@@ -273,6 +277,28 @@ public final class ArmorThreatScanner {
         return engageBlockReasonBySoldier.getOrDefault(soldier.getUUID(), "idle");
     }
 
+    private record FiringSolutionDebug(Vec3 point, long gameTime) {}
+
+    private static void rememberFiringSolution(SoldierEntity soldier, Vec3 point) {
+        firingSolutionBySoldier.put(soldier.getUUID(),
+            new FiringSolutionDebug(point, soldier.level().getGameTime()));
+    }
+
+    private static void forgetFiringSolution(SoldierEntity soldier) {
+        firingSolutionBySoldier.remove(soldier.getUUID());
+    }
+
+    /** Last resolved firing-solution point, for debug rendering; null when stale. */
+    @Nullable
+    public static Vec3 getLastFiringSolution(SoldierEntity soldier) {
+        FiringSolutionDebug debug = firingSolutionBySoldier.get(soldier.getUUID());
+        if (debug == null
+            || soldier.level().getGameTime() - debug.gameTime() > FIRING_SOLUTION_FRESH_TICKS) {
+            return null;
+        }
+        return debug.point();
+    }
+
     private static boolean isArmorSuppressed(SoldierEntity soldier) {
         ArmorContact armor = getPrimaryArmorThreat(soldier);
         if (armor == null) {
@@ -347,29 +373,75 @@ public final class ArmorThreatScanner {
     }
 
     /**
-     * Resolves the point the soldier can actually shoot at on a hard target:
-     * the gun position when visible, otherwise the hull center or any hull
-     * corner with a clear (near-tolerated) ray. Doctrine: line of sight to any
-     * block of the vehicle counts, not just the gun optic. Null when nothing
-     * on the vehicle is visible.
+     * Resolves the point the soldier can actually shoot at on a hard target.
+     * Doctrine: line of sight to any block of the vehicle counts, not just the
+     * gun optic. The gun position is used when its ray is near-clear; hull
+     * samples are bounding-box envelope coordinates that usually float in air,
+     * so a sample only counts where the ray actually meets ship geometry — the
+     * soldier aims at that surface point, pulled slightly toward the eye so
+     * the shot connects. Null when nothing on the vehicle is shootable.
      */
     @Nullable
     public static Vec3 findFiringSolution(SoldierEntity soldier, ArmorContact armor) {
         if (TargetAcquisition.hasNearLineOfSightToPosition(soldier, armor.aimPoint(), LOS_TOLERANCE)) {
+            rememberFiringSolution(soldier, armor.aimPoint());
             return armor.aimPoint();
         }
-        if (TargetAcquisition.hasNearLineOfSightToPosition(soldier, armor.hullCenter(), LOS_TOLERANCE)) {
-            return armor.hullCenter();
-        }
+        Vec3 eye = soldier.getEyePosition();
+        AABB region = hullRegion(armor);
+        List<Vec3> candidates = new ArrayList<>(9);
+        candidates.add(armor.hullCenter());
         if (armor.hullCorners() != null) {
-            for (Vec3 corner : armor.hullCorners()) {
-                if (TargetAcquisition.hasNearLineOfSightToPosition(soldier, corner, LOS_TOLERANCE)) {
-                    return corner;
-                }
-            }
+            candidates.addAll(java.util.Arrays.asList(armor.hullCorners()));
         }
+        for (Vec3 candidate : candidates) {
+            Vec3 direction = candidate.subtract(eye);
+            double distance = direction.length();
+            if (distance < 1.0e-4) {
+                continue;
+            }
+            double hit = VS2Compat.getShipAwareBlockHitDistance(
+                soldier.level(), eye, candidate, soldier);
+            if (!Double.isFinite(hit) || hit < MIN_SURFACE_DISTANCE
+                || hit > distance + HULL_HIT_TOLERANCE) {
+                // The ray reaches the sample without meeting hull geometry in
+                // front of it: the sample is envelope air, not a target.
+                continue;
+            }
+            Vec3 unit = direction.scale(1.0 / distance);
+            Vec3 surface = eye.add(unit.scale(hit));
+            if (!region.contains(surface.x, surface.y, surface.z)) {
+                // Solid, but not this vehicle: terrain or an unrelated ship.
+                continue;
+            }
+            Vec3 solution = eye.add(unit.scale(Math.max(hit - SURFACE_PULLBACK, MIN_SURFACE_DISTANCE)));
+            rememberFiringSolution(soldier, solution);
+            return solution;
+        }
+        forgetFiringSolution(soldier);
         return null;
     }
+
+    /** World-space test region around the hull for accepting ray-hit surfaces. */
+    private static AABB hullRegion(ArmorContact armor) {
+        Vec3[] corners = armor.hullCorners();
+        if (corners == null || corners.length == 0) {
+            return new AABB(armor.hullCenter(), armor.hullCenter()).inflate(2.0);
+        }
+        double minX = Double.MAX_VALUE, minY = Double.MAX_VALUE, minZ = Double.MAX_VALUE;
+        double maxX = -Double.MAX_VALUE, maxY = -Double.MAX_VALUE, maxZ = -Double.MAX_VALUE;
+        for (Vec3 corner : corners) {
+            minX = Math.min(minX, corner.x); minY = Math.min(minY, corner.y); minZ = Math.min(minZ, corner.z);
+            maxX = Math.max(maxX, corner.x); maxY = Math.max(maxY, corner.y); maxZ = Math.max(maxZ, corner.z);
+        }
+        return new AABB(minX, minY, minZ, maxX, maxY, maxZ).inflate(2.0);
+    }
+
+    private static final double MIN_SURFACE_DISTANCE = 1.5;
+    /** How far past a hull sample a ray hit may land and still be this vehicle's surface. */
+    private static final double HULL_HIT_TOLERANCE = 2.0;
+    /** Pull the aim point this far off the surface toward the shooter. */
+    private static final double SURFACE_PULLBACK = 0.4;
 
     /**
      * {@link #findFiringSolution} for a squad-intel knowledge entry — used by
@@ -410,6 +482,8 @@ public final class ArmorThreatScanner {
         lastSightingByThreat.entrySet().removeIf(
             entry -> gameTime - entry.getValue().gameTime() > VELOCITY_TRAIL_MAX_TICKS * 4);
         lastScanTickBySoldier.clear();
+        firingSolutionBySoldier.entrySet().removeIf(
+            entry -> gameTime - entry.getValue().gameTime() > FIRING_SOLUTION_FRESH_TICKS * 10);
         cacheBySoldier.entrySet().removeIf(
             entry -> gameTime - entry.getValue().scanGameTime > SOLDIER_CACHE_FRESH_TICKS * 100);
     }

@@ -26,7 +26,8 @@ public final class ArmorDoctrineDebugPacket {
 
     public record Soldier(UUID soldierId, Vec3 pos, boolean hunter, boolean squadHasAt,
                           boolean exposed, boolean displace, boolean ducked,
-                          Vec3 coverPos, UUID suppressionTargetId, String blockReason) {}
+                          Vec3 coverPos, UUID suppressionTargetId,
+                          Vec3 firingSolution, String blockReason) {}
 
     private final int mode;
     private final List<Contact> contacts;
@@ -51,7 +52,7 @@ public final class ArmorDoctrineDebugPacket {
         for (int i = 0; i < soldierCount; i++) {
             decodedSoldiers.add(new Soldier(buf.readUUID(), readVec(buf), buf.readBoolean(),
                 buf.readBoolean(), buf.readBoolean(), buf.readBoolean(), buf.readBoolean(),
-                readNullableVec(buf), readNullableUuid(buf), buf.readUtf()));
+                readNullableVec(buf), readNullableUuid(buf), readNullableVec(buf), buf.readUtf()));
         }
         contacts = List.copyOf(decodedContacts);
         soldiers = List.copyOf(decodedSoldiers);
@@ -83,6 +84,7 @@ public final class ArmorDoctrineDebugPacket {
             buf.writeBoolean(soldier.ducked());
             writeNullableVec(buf, soldier.coverPos());
             writeNullableUuid(buf, soldier.suppressionTargetId());
+            writeNullableVec(buf, soldier.firingSolution());
             buf.writeUtf(soldier.blockReason() == null ? "idle" : soldier.blockReason());
         }
     }

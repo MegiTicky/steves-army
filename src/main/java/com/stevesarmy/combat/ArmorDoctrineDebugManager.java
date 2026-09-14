@@ -122,6 +122,7 @@ public final class ArmorDoctrineDebugManager {
                 ArmorThreatScanner.shouldStayDuckedForArmor(soldier),
                 currentCoverPos(soldier),
                 hardSuppressionTarget(intel, soldier),
+                ArmorThreatScanner.getLastFiringSolution(soldier),
                 ArmorThreatScanner.getEngageBlockReason(soldier)));
         }
 
