@@ -78,10 +78,35 @@ public final class ArmorDoctrineDebugRenderer {
         // Hull footprint: white ground cross.
         cross(buffer, matrix, cameraPos, contact.hullCenter(), 1.2, 255, 255, 255);
 
+        // Hull silhouette box (VERBOSE): the surface any-block hull LOS tests against.
+        if (mode == ArmorDoctrineDebugManager.VERBOSE) {
+            renderHullBox(buffer, matrix, cameraPos, contact);
+        }
+
         if (contact.velocity() != null && contact.velocity().horizontalDistance() >= 0.01) {
             Vec3 end = contact.hullCenter().add(contact.velocity().scale(PATH_LOOKAHEAD_TICKS));
             int[] pathColor = contact.suppressed() ? new int[] {255, 64, 255} : new int[] {255, 160, 32};
             line(buffer, matrix, cameraPos, contact.hullCenter(), end, pathColor[0], pathColor[1], pathColor[2]);
+        }
+    }
+
+    /**
+     * Draws the hull corner box. Corners arrive ordered cx*4 + cy*2 + cz
+     * (z fastest), so flipping one index bit walks to the edge neighbor.
+     */
+    private static void renderHullBox(BufferBuilder buffer, Matrix4f matrix, Vec3 cameraPos,
+                                      ArmorDoctrineDebugPacket.Contact contact) {
+        Vec3[] corners = contact.hullCorners();
+        if (corners == null || corners.length != 8) {
+            return;
+        }
+        for (int i = 0; i < 8; i++) {
+            for (int bit = 0; bit < 3; bit++) {
+                int j = i ^ (1 << bit);
+                if (j > i) {
+                    line(buffer, matrix, cameraPos, corners[i], corners[j], 255, 255, 255);
+                }
+            }
         }
     }
 
@@ -158,6 +183,9 @@ public final class ArmorDoctrineDebugRenderer {
                                            MultiBufferSource.BufferSource buffers) {
         StringBuilder text = new StringBuilder(soldier.hunter() ? "HUNTER" : "RIFLEMAN");
         if (!soldier.squadHasAt() && !soldier.hunter()) text.append(" no-AT");
+        if (soldier.hunter() && soldier.blockReason() != null) {
+            text.append(" ").append(soldier.blockReason());
+        }
         if (soldier.exposed()) text.append(" exposed");
         if (soldier.ducked()) text.append(" ducked");
         if (soldier.displace()) text.append(" DISPLACE");

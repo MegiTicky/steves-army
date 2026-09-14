@@ -121,7 +121,8 @@ public final class ArmorDoctrineDebugManager {
                 ArmorThreatScanner.shouldDisplaceFromArmor(soldier),
                 ArmorThreatScanner.shouldStayDuckedForArmor(soldier),
                 currentCoverPos(soldier),
-                hardSuppressionTarget(intel, soldier)));
+                hardSuppressionTarget(intel, soldier),
+                ArmorThreatScanner.getEngageBlockReason(soldier)));
         }
 
         NetworkHandler.sendTo(player, new ArmorDoctrineDebugPacket(mode, contacts, soldiers));
@@ -137,6 +138,7 @@ public final class ArmorDoctrineDebugManager {
             Vec3 aim = knowledge.lastVisibleAimPoint != null ? knowledge.lastVisibleAimPoint : hull;
             out.add(new ArmorDoctrineDebugPacket.Contact(
                 knowledge.threatEntityId, aim, hull, knowledge.lastKnownVelocity,
+                knowledge.lastKnownHullCorners,
                 knowledge.isSuppressed, gameTime - knowledge.lastSeenTime, knowledge.accuracy));
         }
     }

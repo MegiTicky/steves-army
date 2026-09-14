@@ -22,11 +22,11 @@ public final class ArmorDoctrineDebugPacket {
     private static final int MAX_SOLDIERS = 48;
 
     public record Contact(UUID threatId, Vec3 aimPoint, Vec3 hullCenter, Vec3 velocity,
-                          boolean suppressed, long ageTicks, double accuracy) {}
+                          Vec3[] hullCorners, boolean suppressed, long ageTicks, double accuracy) {}
 
     public record Soldier(UUID soldierId, Vec3 pos, boolean hunter, boolean squadHasAt,
                           boolean exposed, boolean displace, boolean ducked,
-                          Vec3 coverPos, UUID suppressionTargetId) {}
+                          Vec3 coverPos, UUID suppressionTargetId, String blockReason) {}
 
     private final int mode;
     private final List<Contact> contacts;
@@ -44,14 +44,14 @@ public final class ArmorDoctrineDebugPacket {
         List<Contact> decodedContacts = new ArrayList<>(contactCount);
         for (int i = 0; i < contactCount; i++) {
             decodedContacts.add(new Contact(buf.readUUID(), readVec(buf), readVec(buf),
-                readNullableVec(buf), buf.readBoolean(), buf.readVarInt(), buf.readFloat()));
+                readNullableVec(buf), readVecArray(buf), buf.readBoolean(), buf.readVarInt(), buf.readFloat()));
         }
         int soldierCount = Math.min(buf.readVarInt(), MAX_SOLDIERS);
         List<Soldier> decodedSoldiers = new ArrayList<>(soldierCount);
         for (int i = 0; i < soldierCount; i++) {
             decodedSoldiers.add(new Soldier(buf.readUUID(), readVec(buf), buf.readBoolean(),
                 buf.readBoolean(), buf.readBoolean(), buf.readBoolean(), buf.readBoolean(),
-                readNullableVec(buf), readNullableUuid(buf)));
+                readNullableVec(buf), readNullableUuid(buf), buf.readUtf()));
         }
         contacts = List.copyOf(decodedContacts);
         soldiers = List.copyOf(decodedSoldiers);
@@ -66,6 +66,7 @@ public final class ArmorDoctrineDebugPacket {
             writeVec(buf, contact.aimPoint());
             writeVec(buf, contact.hullCenter());
             writeNullableVec(buf, contact.velocity());
+            writeVecArray(buf, contact.hullCorners());
             buf.writeBoolean(contact.suppressed());
             buf.writeVarInt((int) Math.min(contact.ageTicks(), Integer.MAX_VALUE));
             buf.writeFloat((float) contact.accuracy());
@@ -82,6 +83,7 @@ public final class ArmorDoctrineDebugPacket {
             buf.writeBoolean(soldier.ducked());
             writeNullableVec(buf, soldier.coverPos());
             writeNullableUuid(buf, soldier.suppressionTargetId());
+            buf.writeUtf(soldier.blockReason() == null ? "idle" : soldier.blockReason());
         }
     }
 
@@ -112,6 +114,29 @@ public final class ArmorDoctrineDebugPacket {
 
     private static Vec3 readNullableVec(FriendlyByteBuf buf) {
         return buf.readBoolean() ? readVec(buf) : null;
+    }
+
+    private static void writeVecArray(FriendlyByteBuf buf, Vec3[] values) {
+        if (values == null) {
+            buf.writeVarInt(0);
+            return;
+        }
+        buf.writeVarInt(values.length);
+        for (Vec3 value : values) {
+            writeVec(buf, value);
+        }
+    }
+
+    private static Vec3[] readVecArray(FriendlyByteBuf buf) {
+        int count = Math.min(buf.readVarInt(), 8);
+        if (count == 0) {
+            return null;
+        }
+        Vec3[] values = new Vec3[count];
+        for (int i = 0; i < count; i++) {
+            values[i] = readVec(buf);
+        }
+        return values;
     }
 
     private static void writeNullableUuid(FriendlyByteBuf buf, UUID value) {

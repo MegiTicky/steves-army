@@ -2,21 +2,31 @@ package com.stevesarmy.item;
 
 import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.combat.GunIntegration;
+import com.stevesarmy.compat.VS2Compat;
 import com.stevesarmy.entity.EnemySoldierEntity;
 import com.stevesarmy.entity.EnemyVehicleCrewEntity;
 import com.stevesarmy.inventory.SoldierInventory;
 import com.stevesarmy.registry.ModEntities;
+import com.stevesarmy.transport.CrewAssignment;
 import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.network.chat.Component;
 
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
+import net.minecraft.world.InteractionResultHolder;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.context.UseOnContext;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.HitResult;
+import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.common.ForgeSpawnEggItem;
 
 import java.lang.reflect.Method;
@@ -31,9 +41,23 @@ import java.lang.reflect.Method;
 public class EnemyVehicleCrewSpawnEggItem extends ForgeSpawnEggItem {
 
     private static final String AK47_GUN_ID = "tacz:ak47";
+    private static final double SEAT_REACH = 6.0;
 
     public EnemyVehicleCrewSpawnEggItem(Properties props) {
         super(ModEntities.ENEMY_VEHICLE_CREW, 0xFF4444, 0x4682B4, props);
+    }
+
+    @Override
+    public InteractionResultHolder<ItemStack> use(Level level, Player player, InteractionHand hand) {
+        ItemStack stack = player.getItemInHand(hand);
+        BlockHitResult hit = player.isShiftKeyDown() ? findAimHit(player) : null;
+        if (hit == null) {
+            return super.use(level, player, hand);
+        }
+        if (!level.isClientSide) {
+            spawnEnemyCrewOnSeat((ServerLevel) level, hit.getLocation(), hit.getBlockPos(), player, stack);
+        }
+        return InteractionResultHolder.sidedSuccess(stack, level.isClientSide);
     }
 
     @Override
@@ -43,51 +67,92 @@ public class EnemyVehicleCrewSpawnEggItem extends ForgeSpawnEggItem {
             return InteractionResult.SUCCESS;
         }
 
-        BlockPos pos = context.getClickedPos();
-        ItemStack stack = context.getItemInHand();
-
-        ServerLevel serverLevel = (ServerLevel) level;
-
-        EntityType<?> entityType = this.getType(stack.getTag());
-        if (entityType == null) {
-            StevesArmyMod.LOGGER.warn("[EnemyCrewEgg] EntityType is null!");
-            return InteractionResult.FAIL;
+        Player player = context.getPlayer();
+        if (player != null && player.isShiftKeyDown()) {
+            BlockHitResult hit = findAimHit(player);
+            if (hit != null) {
+                return spawnEnemyCrewOnSeat((ServerLevel) level, hit.getLocation(), hit.getBlockPos(),
+                    player, context.getItemInHand());
+            }
         }
+        return spawnStandingEnemyCrew((ServerLevel) level, context.getClickLocation(),
+            player, context.getItemInHand());
+    }
 
-        EnemySoldierEntity enemy = (EnemySoldierEntity) entityType.create(serverLevel);
+    private static BlockHitResult findAimHit(Player player) {
+        HitResult hit = player.pick(SEAT_REACH, 1.0F, false);
+        return hit.getType() == HitResult.Type.BLOCK && hit instanceof BlockHitResult blockHit
+            ? blockHit : null;
+    }
+
+    private InteractionResult spawnStandingEnemyCrew(ServerLevel level, Vec3 pos, Player player, ItemStack stack) {
+        EnemyVehicleCrewEntity enemy = createEnemyCrew(level, pos, stack);
         if (enemy == null) {
-            StevesArmyMod.LOGGER.warn("[EnemyCrewEgg] Failed to create enemy crew entity!");
             return InteractionResult.FAIL;
         }
-
-        enemy.maybeRandomizeSkin();
-
-        CompoundTag stackTag = stack.getTag();
-        if (stackTag != null && stackTag.contains("EntityTag")) {
-            CompoundTag entityTag = stackTag.getCompound("EntityTag");
-            fillEnemyFromEntityTag(enemy, entityTag, pos);
-        } else {
-            enemy.setPos(pos.getX() + 0.5, pos.getY() + 1.0, pos.getZ() + 0.5);
-        }
-
-        enemy.setPersistenceRequired();
-        serverLevel.addFreshEntity(enemy);
-
-        if (context.getPlayer() != null && !context.getPlayer().isCreative()) {
-            stack.shrink(1);
-        }
-
-        ItemStack mainHand = enemy.getMainHandItem();
-        if (mainHand.isEmpty()) {
-            equipAk47(enemy);
-        }
-        enemy.configureInfiniteReserveAmmo();
-
+        finishSpawn(level, enemy, player, stack);
         return InteractionResult.SUCCESS;
     }
 
-    private void fillEnemyFromEntityTag(EnemySoldierEntity enemy, CompoundTag entityTag, BlockPos pos) {
-        enemy.setPos(pos.getX() + 0.5, pos.getY() + 1.0, pos.getZ() + 0.5);
+    /** Spawn a hostile crewman and seat it through the same shared crew mount path. */
+    public InteractionResult spawnEnemyCrewOnSeat(ServerLevel level, Vec3 anchor, BlockPos hitBlock,
+                                                   Player player, ItemStack stack) {
+        EnemyVehicleCrewEntity enemy = createEnemyCrew(level, anchor, stack);
+        if (enemy == null) {
+            return InteractionResult.FAIL;
+        }
+        finishSpawn(level, enemy, player, stack);
+
+        Object ship = VS2Compat.getShipObjectAtBlockPos(level, hitBlock);
+        if (ship == null) {
+            ship = VS2Compat.resolveShipAtWorldAnchor(level, anchor);
+        }
+        if (ship == null && player instanceof ServerPlayer serverPlayer) {
+            ship = VS2Compat.resolveMountShipNearPlayer(level, serverPlayer);
+        }
+        int seated = ship != null && CrewAssignment.seatAtExactPosition(level, ship, hitBlock, enemy) ? 1 : 0;
+        if (seated == 0 && ship != null) {
+            seated = CrewAssignment.mountCrewOnShip(level, ship, anchor, java.util.List.of(enemy));
+        }
+        player.displayClientMessage(Component.translatable(seated > 0
+            ? "transport.steves_army.feedback.enemy_crew_deployed"
+            : "transport.steves_army.feedback.enemy_crew_standing"), true);
+        return InteractionResult.SUCCESS;
+    }
+
+    private EnemyVehicleCrewEntity createEnemyCrew(ServerLevel level, Vec3 pos, ItemStack stack) {
+        EntityType<?> entityType = this.getType(stack.getTag());
+        if (entityType == null) {
+            StevesArmyMod.LOGGER.warn("[EnemyCrewEgg] EntityType is null!");
+            return null;
+        }
+        if (!(entityType.create(level) instanceof EnemyVehicleCrewEntity enemy)) {
+            StevesArmyMod.LOGGER.warn("[EnemyCrewEgg] Refused non-vehicle-crew EntityType {}", entityType);
+            return null;
+        }
+
+        enemy.moveTo(pos.x, pos.y, pos.z, 0.0F, 0.0F);
+        enemy.maybeRandomizeSkin();
+        CompoundTag stackTag = stack.getTag();
+        if (stackTag != null && stackTag.contains("EntityTag")) {
+            fillEnemyFromEntityTag(enemy, stackTag.getCompound("EntityTag"));
+        }
+        return enemy;
+    }
+
+    private void finishSpawn(ServerLevel level, EnemyVehicleCrewEntity enemy, Player player, ItemStack stack) {
+        enemy.setPersistenceRequired();
+        level.addFreshEntity(enemy);
+        if (player != null && !player.getAbilities().instabuild) {
+            stack.shrink(1);
+        }
+        if (enemy.getMainHandItem().isEmpty()) {
+            equipAk47(enemy);
+        }
+        enemy.configureInfiniteReserveAmmo();
+    }
+
+    private void fillEnemyFromEntityTag(EnemySoldierEntity enemy, CompoundTag entityTag) {
 
         if (entityTag.contains("DefendPosition")) {
             enemy.setDefendPosition(BlockPos.of(entityTag.getLong("DefendPosition")));

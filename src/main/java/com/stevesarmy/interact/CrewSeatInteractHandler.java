@@ -3,8 +3,9 @@ package com.stevesarmy.interact;
 import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.compat.VS2Compat;
 import com.stevesarmy.entity.SoldierEntity;
-import com.stevesarmy.item.CommandStickSelection;
+import com.stevesarmy.item.CreativeCommandStickItem;
 import com.stevesarmy.item.CrewAssignStickItem;
+import com.stevesarmy.item.EnemyVehicleCrewSpawnEggItem;
 import com.stevesarmy.item.VehicleCrewSpawnEggItem;
 import com.stevesarmy.network.CommandStickAssignCrewPacket;
 import com.stevesarmy.network.NetworkHandler;
@@ -21,7 +22,6 @@ import net.minecraftforge.event.entity.player.PlayerInteractEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
 
-import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -67,9 +67,12 @@ public final class CrewSeatInteractHandler {
             return;
         }
 
-        if (mainHand.getItem() instanceof CrewAssignStickItem) {
+        boolean ownedCrewTool = mainHand.getItem() instanceof CrewAssignStickItem;
+        boolean creativeCrewTool = mainHand.getItem() instanceof CreativeCommandStickItem
+            && player.getAbilities().instabuild;
+        if (ownedCrewTool || creativeCrewTool) {
             if (event.getLevel().isClientSide) {
-                List<Integer> selected = new ArrayList<>(CommandStickSelection.getSelectedIds());
+                List<Integer> selected = CrewAssignStickItem.selectedVehicleCrewIds(player, ownedCrewTool);
                 if (selected.isEmpty()) {
                     player.displayClientMessage(Component.literal("No crew selected"), true);
                 } else {
@@ -87,6 +90,17 @@ public final class CrewSeatInteractHandler {
         if (mainHand.getItem() instanceof VehicleCrewSpawnEggItem) {
             if (!event.getLevel().isClientSide) {
                 VehicleCrewSpawnEggItem.spawnCrewOnSeat(
+                    (net.minecraft.server.level.ServerLevel) event.getLevel(),
+                    VS2Compat.getSeatWorldPosition(target), target.blockPosition(), player, mainHand);
+            }
+            event.setCanceled(true);
+            event.setCancellationResult(InteractionResult.SUCCESS);
+            return;
+        }
+
+        if (mainHand.getItem() instanceof EnemyVehicleCrewSpawnEggItem enemyEgg) {
+            if (!event.getLevel().isClientSide) {
+                enemyEgg.spawnEnemyCrewOnSeat(
                     (net.minecraft.server.level.ServerLevel) event.getLevel(),
                     VS2Compat.getSeatWorldPosition(target), target.blockPosition(), player, mainHand);
             }

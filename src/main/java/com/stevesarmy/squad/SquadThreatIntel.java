@@ -39,6 +39,12 @@ public class SquadThreatIntel {
         public boolean isHardTarget;
         /** World-space blocks per tick at last sighting (armor threats only). */
         @Nullable public Vec3 lastKnownVelocity;
+        /**
+         * World-space hull silhouette corners (ship-space AABB corners transformed
+         * to world at last sighting), so line-of-sight can be tested against any
+         * part of the vehicle instead of only the gun position.
+         */
+        @Nullable public Vec3[] lastKnownHullCorners;
 
         public ThreatKnowledge(UUID threatEntityId) {
             this.threatEntityId = threatEntityId;
@@ -68,6 +74,17 @@ public class SquadThreatIntel {
                 tag.putDouble("VelX", lastKnownVelocity.x);
                 tag.putDouble("VelY", lastKnownVelocity.y);
                 tag.putDouble("VelZ", lastKnownVelocity.z);
+            }
+            if (lastKnownHullCorners != null) {
+                ListTag cornerList = new ListTag();
+                for (Vec3 corner : lastKnownHullCorners) {
+                    CompoundTag cornerTag = new CompoundTag();
+                    cornerTag.putDouble("X", corner.x);
+                    cornerTag.putDouble("Y", corner.y);
+                    cornerTag.putDouble("Z", corner.z);
+                    cornerList.add(cornerTag);
+                }
+                tag.put("HullCorners", cornerList);
             }
             if (suppressedBy != null) {
                 tag.putUUID("SuppressedBy", suppressedBy);
@@ -114,6 +131,18 @@ public class SquadThreatIntel {
             if (tag.contains("VelX")) {
                 knowledge.lastKnownVelocity = new Vec3(
                     tag.getDouble("VelX"), tag.getDouble("VelY"), tag.getDouble("VelZ"));
+            }
+            if (tag.contains("HullCorners")) {
+                ListTag cornerList = tag.getList("HullCorners", Tag.TAG_COMPOUND);
+                if (!cornerList.isEmpty()) {
+                    Vec3[] corners = new Vec3[cornerList.size()];
+                    for (int i = 0; i < cornerList.size(); i++) {
+                        CompoundTag cornerTag = cornerList.getCompound(i);
+                        corners[i] = new Vec3(cornerTag.getDouble("X"),
+                            cornerTag.getDouble("Y"), cornerTag.getDouble("Z"));
+                    }
+                    knowledge.lastKnownHullCorners = corners;
+                }
             }
             if (tag.contains("SuppressedBy")) {
                 knowledge.suppressedBy = tag.getUUID("SuppressedBy");
@@ -416,10 +445,12 @@ public class SquadThreatIntel {
      * position-based threat store like soft targets; {@code aimPoint} is the
      * vehicle's gun/optic position and {@code velocity} its world-space motion
      * in blocks per tick, both used for cover scoring and path displacement.
+     * {@code hullCorners} carries the vehicle's world-space silhouette so firing
+     * solutions can accept line of sight to any part of the hull.
      */
     public void reportHardTarget(UUID reporterId, UUID threatId, BlockPos hullPos,
                                  @Nullable Vec3 aimPoint, @Nullable Vec3 velocity,
-                                 float accuracy, Level level) {
+                                 @Nullable Vec3[] hullCorners, float accuracy, Level level) {
         ThreatKnowledge knowledge = knownThreats.get(threatId);
         if (knowledge != null && !knowledge.isAlive) {
             return;
@@ -432,6 +463,7 @@ public class SquadThreatIntel {
         knowledge.lastSeenBySoldier = reporterId;
         knowledge.lastVisibleAimPoint = aimPoint;
         knowledge.lastKnownVelocity = velocity;
+        knowledge.lastKnownHullCorners = hullCorners;
         knowledge.accuracy = Math.max(knowledge.accuracy, accuracy);
         knowledge.isAlive = true;
         knowledge.isHardTarget = true;

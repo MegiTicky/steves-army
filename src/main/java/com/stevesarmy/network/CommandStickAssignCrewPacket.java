@@ -4,6 +4,7 @@ import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.compat.VS2Compat;
 import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.entity.SoldierRole;
+import com.stevesarmy.item.CreativeCommandStickItem;
 import com.stevesarmy.item.CrewAssignStickItem;
 import com.stevesarmy.transport.CrewAssignment;
 import net.minecraft.core.BlockPos;
@@ -73,8 +74,11 @@ public class CommandStickAssignCrewPacket {
                 return;
             }
             ItemStack mainHand = sender.getMainHandItem();
-            if (!(mainHand.getItem() instanceof CrewAssignStickItem)) {
-                StevesArmyMod.LOGGER.info("[CrewStick] packet dropped: main hand is {} (assign stick required)",
+            boolean ownedCrewTool = mainHand.getItem() instanceof CrewAssignStickItem;
+            boolean creativeCrewTool = mainHand.getItem() instanceof CreativeCommandStickItem
+                && sender.getAbilities().instabuild;
+            if (!ownedCrewTool && !creativeCrewTool) {
+                StevesArmyMod.LOGGER.info("[CrewStick] packet dropped: main hand is {} (crew assignment tool required)",
                     mainHand.getItem());
                 return;
             }
@@ -105,14 +109,14 @@ public class CommandStickAssignCrewPacket {
                 Entity entity = level.getEntity(id);
                 if (entity instanceof SoldierEntity soldier
                     && soldier.getRole() == SoldierRole.VEHICLE_CREW
-                    && soldier.isOwnedBy(sender)
+                    && (creativeCrewTool || soldier.isOwnedBy(sender))
                     && !crew.contains(soldier)) {
                     crew.add(soldier);
                 }
             }
             if (crew.isEmpty()) {
                 StevesArmyMod.LOGGER.info(
-                    "[CrewStick] packet dropped: none of the {} ids resolved to owned vehicle crew",
+                    "[CrewStick] packet dropped: none of the {} ids resolved to permitted vehicle crew",
                     msg.crewIds.size());
                 return;
             }

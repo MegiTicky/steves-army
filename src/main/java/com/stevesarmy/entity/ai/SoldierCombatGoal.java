@@ -2424,49 +2424,63 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
 
     /**
      * Doctrine engagement of a hard target by the squad's designated armor
-     * hunter: aim at the vehicle's gun position and fire through the
-     * position-based gun path (vehicles are not LivingEntity targets), then
-     * request displacement for the reload window (shoot & scoot). Returns
-     * true while engaged so soft-target combat yields; point-blank infantry
-     * always overrides the hunt.
+     * hunter: resolve a firing solution against the vehicle's hull (the gun
+     * position when visible, otherwise any visible hull block), fire through
+     * the position-based gun path (vehicles are not LivingEntity targets),
+     * then request displacement for the reload window (shoot & scoot).
+     * Returns true while engaged so soft-target combat yields; point-blank
+     * infantry always overrides the hunt.
      */
     private boolean tryArmorEngagement() {
         if (armorShotCooldownTicks > 0) {
             armorShotCooldownTicks--;
         }
         if (!ArmorRoleManager.isArmorHunter(soldier) || soldier.isCqbEngagementHold()) {
+            ArmorThreatScanner.setEngageBlockReason(soldier, "notHunter");
             return false;
         }
 
         ArmorThreatScanner.ArmorContact armor = ArmorThreatScanner.getPrimaryArmorThreat(soldier);
         if (armor == null) {
             armorEngagementStartTick = -1;
+            ArmorThreatScanner.setEngageBlockReason(soldier, "noContact");
             return false;
         }
 
         if (target != null && target.isAlive()
             && soldier.distanceToSqr(target) <= SoldierEntity.CQB_RANGE * SoldierEntity.CQB_RANGE) {
+            ArmorThreatScanner.setEngageBlockReason(soldier, "cqb");
             return false;
         }
 
         double maxRange = StevesArmyConfig.getArmorEngagementMaxRange();
-        if (soldier.distanceToSqr(armor.aimPoint()) > maxRange * maxRange
-            || !TargetAcquisition.hasNearLineOfSightToPosition(soldier, armor.aimPoint(), SUPPRESSION_LOS_TOLERANCE)) {
+        if (soldier.distanceToSqr(armor.aimPoint()) > maxRange * maxRange) {
+            ArmorThreatScanner.setEngageBlockReason(soldier, "range");
             return false;
         }
 
-        // Fire window: crew suppressed, already pinned, or in the open.
+        // Fire window: crew suppressed, already pinned, committed peek, or in the open.
         if (!ArmorThreatScanner.mayHunterEngage(soldier)) {
+            ArmorThreatScanner.setEngageBlockReason(soldier, "window");
             return false;
         }
 
         if (GunIntegration.isReloading(soldier) || GunIntegration.isBolting(soldier)
             || GunIntegration.isDrawing(soldier)) {
+            ArmorThreatScanner.setEngageBlockReason(soldier, "reload");
             return false;
         }
 
         boolean inCover = soldier.getCoverBehaviorManager().isInCover();
         if (inCover && soldier.getPeekController().getState() != PeekController.State.EXPOSED) {
+            ArmorThreatScanner.setEngageBlockReason(soldier, "ducked");
+            return false;
+        }
+
+        // Doctrine: LOS to any block of the vehicle counts, not just the gun optic.
+        Vec3 firingSolution = ArmorThreatScanner.findFiringSolution(soldier, armor);
+        if (firingSolution == null) {
+            ArmorThreatScanner.setEngageBlockReason(soldier, "noLOS");
             return false;
         }
 
@@ -2477,29 +2491,33 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
             }
             if (isDebugLogging()) {
                 StevesArmyMod.LOGGER.info("[ArmorEngage] Soldier {} hunter engaging vehicle {} at {}",
-                    soldier.getId(), armor.threatId(), armor.aimPoint());
+                    soldier.getId(), armor.threatId(), firingSolution);
             }
         } else if (soldier.tickCount - armorEngagementStartTick > ARMOR_DISENGAGE_TICKS) {
             armorEngagementStartTick = -1;
+            ArmorThreatScanner.setEngageBlockReason(soldier, "timeout");
             return false;
         }
 
-        if (!prepareToFire(armor.aimPoint(), false)) {
+        if (!prepareToFire(firingSolution, false)) {
+            ArmorThreatScanner.setEngageBlockReason(soldier, "posture");
             return true;
         }
         soldier.getLookControl().setLookAt(
-            armor.aimPoint().x, armor.aimPoint().y, armor.aimPoint().z, 30.0F, 30.0F);
+            firingSolution.x, firingSolution.y, firingSolution.z, 30.0F, 30.0F);
         GunIntegration.aim(soldier, true);
         wasAiming = true;
 
         if (GunIntegration.getAimProgress(soldier) < ADS_THRESHOLD) {
+            ArmorThreatScanner.setEngageBlockReason(soldier, "aiming");
             return true;
         }
         if (GunIntegration.getShootCoolDown(soldier) > 0 || armorShotCooldownTicks > 0) {
+            ArmorThreatScanner.setEngageBlockReason(soldier, "cooldown");
             return true;
         }
 
-        GunIntegration.ShootResult result = GunIntegration.shootAtPosition(soldier, armor.aimPoint());
+        GunIntegration.ShootResult result = GunIntegration.shootAtPosition(soldier, firingSolution);
         switch (result) {
             case SUCCESS -> {
                 armorShotCooldownTicks = ARMOR_SHOT_SPACING_TICKS;
@@ -2508,6 +2526,7 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
                 }
                 // Shoot & scoot: clear the position during the reload window.
                 soldier.getCoverBehaviorManager().requestContinuousSuppressionReposition();
+                ArmorThreatScanner.setEngageBlockReason(soldier, "firing");
                 if (isDebugLogging()) {
                     StevesArmyMod.LOGGER.info("[ArmorEngage] Soldier {} fired at vehicle {}, displacing",
                         soldier.getId(), armor.threatId());
@@ -3008,8 +3027,22 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
         Vec3 targetPos = visibleContactAimPoint != null ? visibleContactAimPoint
             : suppressionTargetAimPoint != null ? suppressionTargetAimPoint
             : Vec3.atCenterOf(suppressionTargetPos).add(0, 1.0, 0);
-        
-        if (!TargetAcquisition.hasNearLineOfSightToPosition(soldier, targetPos, SUPPRESSION_LOS_TOLERANCE)) {
+
+        // Buttoning a vehicle: LOS to any block of the hull counts, and the
+        // spray aims at a visible hull point rather than the masked gun optic.
+        SquadThreatIntel.ThreatKnowledge suppressionKnowledge = intel.getThreat(suppressionTargetUUID).orElse(null);
+        if (suppressionKnowledge != null && suppressionKnowledge.isHardTarget) {
+            Vec3 hullSolution = ArmorThreatScanner.findFiringSolution(soldier, suppressionKnowledge);
+            if (hullSolution == null) {
+                if (isSuppressionDebugLogging()) {
+                    StevesArmyMod.LOGGER.info("[Suppression] Soldier {} has no hull LOS to vehicle {}, clearing assignment",
+                        soldier.getId(), suppressionTargetPos);
+                }
+                cancelAllSuppression();
+                return;
+            }
+            targetPos = hullSolution;
+        } else if (!TargetAcquisition.hasNearLineOfSightToPosition(soldier, targetPos, SUPPRESSION_LOS_TOLERANCE)) {
             if (isSuppressionDebugLogging()) {
                 StevesArmyMod.LOGGER.info("[Suppression] Soldier {} has no LOS to suppression target at {}, clearing assignment",
                     soldier.getId(), suppressionTargetPos);

@@ -45,7 +45,7 @@ public class CrewAssignStickItem extends CommandStickItem {
         if (level.isClientSide) {
             StevesArmyMod.LOGGER.info("[CrewStick] use: shift={} hand={}", player.isShiftKeyDown(), hand);
         }
-        if (player.isShiftKeyDown() && level.isClientSide && tryAssign(player)) {
+        if (player.isShiftKeyDown() && level.isClientSide && tryAssign(player, true)) {
             return InteractionResultHolder.success(stack);
         }
         return super.use(level, player, hand);
@@ -58,7 +58,7 @@ public class CrewAssignStickItem extends CommandStickItem {
         if (player != null && level.isClientSide) {
             StevesArmyMod.LOGGER.info("[CrewStick] useOn: shift={}", player.isShiftKeyDown());
         }
-        if (player != null && player.isShiftKeyDown() && level.isClientSide && tryAssign(player)) {
+        if (player != null && player.isShiftKeyDown() && level.isClientSide && tryAssign(player, true)) {
             return InteractionResult.SUCCESS;
         }
         return super.useOn(context);
@@ -69,10 +69,14 @@ public class CrewAssignStickItem extends CommandStickItem {
      * the aimed block and consumes the click. Returns false when nothing is in reach
      * so the base reposition runs.
      */
-    private static boolean tryAssign(Player player) {
+    /**
+     * Sends an assignment request for the selected vehicle crew. The dedicated Crew
+     * Assign Stick requires ownership; Creative Command Stick callers pass false.
+     */
+    public static boolean tryAssign(Player player, boolean requireOwnership) {
         BlockHitResult hit = findAimHit(player);
         Vec3 anchor = hit == null ? null : hit.getLocation();
-        List<Integer> selected = new ArrayList<>(CommandStickSelection.getSelectedIds());
+        List<Integer> selected = selectedVehicleCrewIds(player, requireOwnership);
         StevesArmyMod.LOGGER.info("[CrewStick] assign click: anchor={} block={} selected={}",
             anchor == null ? "none" : formatVec3(anchor),
             hit == null ? "none" : hit.getBlockPos(), selected.size());
@@ -87,6 +91,19 @@ public class CrewAssignStickItem extends CommandStickItem {
         NetworkHandler.INSTANCE.sendToServer(
             new CommandStickAssignCrewPacket(anchor, hit.getBlockPos(), selected));
         return true;
+    }
+
+    /** Selected vehicle crew that the caller is permitted to target on the client. */
+    public static List<Integer> selectedVehicleCrewIds(Player player, boolean requireOwnership) {
+        List<Integer> crewIds = new ArrayList<>();
+        for (int id : CommandStickSelection.getSelectedIds()) {
+            if (player.level().getEntity(id) instanceof SoldierEntity soldier
+                && soldier.getRole() == SoldierRole.VEHICLE_CREW
+                && (!requireOwnership || soldier.isOwnedBy(player))) {
+                crewIds.add(id);
+            }
+        }
+        return crewIds;
     }
 
     /**

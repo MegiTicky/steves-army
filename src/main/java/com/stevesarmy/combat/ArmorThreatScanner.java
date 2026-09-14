@@ -37,7 +37,8 @@ import java.util.UUID;
  */
 public final class ArmorThreatScanner {
     public record ArmorContact(UUID threatId, Vec3 aimPoint, Vec3 hullCenter,
-                               @Nullable Vec3 velocity, long seenTick) {}
+                               @Nullable Vec3 velocity, @Nullable Vec3[] hullCorners,
+                               long seenTick) {}
 
     private static final int SCAN_INTERVAL_TICKS = 10;
     /** Sighting trail length for velocity estimation (ticks). */
@@ -52,6 +53,8 @@ public final class ArmorThreatScanner {
     private static final Map<UUID, Long> lastScanTickBySoldier = new HashMap<>();
     private static final Map<UUID, SoldierCache> cacheBySoldier = new HashMap<>();
     private static final Map<UUID, PrevSighting> lastSightingByThreat = new HashMap<>();
+    /** Last gate that blocked the armor hunter's engagement, for debug rendering. */
+    private static final Map<UUID, String> engageBlockReasonBySoldier = new HashMap<>();
     private static long lastPruneGameTime = Long.MIN_VALUE;
 
     private record PrevSighting(Vec3 hullCenter, long gameTime) {}
@@ -107,14 +110,16 @@ public final class ArmorThreatScanner {
             if (hullCenter == null || !VS2Compat.isWorldPlausible(hullCenter)) {
                 continue;
             }
+            Vec3[] hullCorners = ship != null ? shipHullCorners(ship) : null;
 
             Vec3 velocity = estimateVelocity(camera.getUUID(), hullCenter, gameTime);
             intel.reportHardTarget(soldier.getUUID(), camera.getUUID(),
-                BlockPos.containing(hullCenter), aimPoint, velocity, 1.0f, serverLevel);
+                BlockPos.containing(hullCenter), aimPoint, velocity, hullCorners, 1.0f, serverLevel);
 
             double distSqr = soldier.distanceToSqr(aimPoint);
             if (nearest == null || distSqr < soldier.distanceToSqr(nearest.aimPoint())) {
-                nearest = new ArmorContact(camera.getUUID(), aimPoint, hullCenter, velocity, gameTime);
+                nearest = new ArmorContact(camera.getUUID(), aimPoint, hullCenter, velocity,
+                    hullCorners, gameTime);
             }
         }
 
@@ -140,7 +145,7 @@ public final class ArmorThreatScanner {
             Vec3 hull = Vec3.atCenterOf(knowledge.lastKnownPosition);
             Vec3 aim = knowledge.lastVisibleAimPoint != null ? knowledge.lastVisibleAimPoint : hull;
             return new ArmorContact(knowledge.threatEntityId, aim, hull,
-                knowledge.lastKnownVelocity, knowledge.lastSeenTime);
+                knowledge.lastKnownVelocity, knowledge.lastKnownHullCorners, knowledge.lastSeenTime);
         }
         return null;
     }
@@ -156,9 +161,12 @@ public final class ArmorThreatScanner {
 
     /**
      * Peek gate for infantry facing armor: stay under cover while the vehicle
-     * has line of sight. The designated hunter may rise once squad-mates have
-     * the vehicle suppressed (its crew is buttoned); without anti-armor
-     * support nobody peeks at a tank at all.
+     * has line of sight. Two soldiers are exempt because their doctrine job is
+     * to shoot at the vehicle, which requires rising out of cover: the
+     * designated hunter (its peek cadence is the normal peek cycle), and any
+     * soldier currently assigned to suppress the vehicle's crew. Without
+     * anti-armor support nobody holds either job, so a no-AT squad still never
+     * peeks at a tank at all.
      */
     public static boolean shouldStayDuckedForArmor(SoldierEntity soldier) {
         if (!StevesArmyConfig.isArmorAwarenessEnabled() || !TallyhoCompat.isAvailable()) {
@@ -170,10 +178,25 @@ public final class ArmorThreatScanner {
         if (!isExposedToArmor(soldier)) {
             return false;
         }
-        if (ArmorRoleManager.isArmorHunter(soldier) && isArmorSuppressed(soldier)) {
+        if (ArmorRoleManager.isArmorHunter(soldier) || hasHardTargetSuppressionAssignment(soldier)) {
             return false;
         }
         return true;
+    }
+
+    /** True when this soldier's current suppression assignment is the hard target. */
+    public static boolean hasHardTargetSuppressionAssignment(SoldierEntity soldier) {
+        UUID squadId = soldier.getSquadId();
+        if (squadId == null || !(soldier.level() instanceof net.minecraft.server.level.ServerLevel serverLevel)) {
+            return false;
+        }
+        SquadThreatIntel intel = SquadManager.get(serverLevel).getSquadById(squadId)
+            .map(SquadData::getThreatIntel).orElse(null);
+        if (intel == null) {
+            return false;
+        }
+        return intel.getAssignedThreatForSoldier(soldier.getUUID())
+            .map(assignment -> assignment.isHardTarget).orElse(false);
     }
 
     /**
@@ -225,15 +248,29 @@ public final class ArmorThreatScanner {
 
     /**
      * Fire window for the armor hunter: squad-mates have the vehicle's crew
-     * suppressed, or the hunter is already in the open or pinned — hiding has
-     * stopped paying, so take the shot.
+     * suppressed, the hunter is already in the open, pinned, or committed to
+     * an exposed peek — hiding has stopped paying, so take the shot.
      */
     public static boolean mayHunterEngage(SoldierEntity soldier) {
         if (isArmorSuppressed(soldier)) {
             return true;
         }
         boolean inCover = soldier.getCoverBehaviorManager().isInCover();
-        return !inCover || soldier.getCoverBehaviorManager().isPinned();
+        if (!inCover || soldier.getCoverBehaviorManager().isPinned()) {
+            return true;
+        }
+        return soldier.getPeekController().getState()
+            == com.stevesarmy.entity.ai.PeekController.State.EXPOSED;
+    }
+
+    /** Records the gate currently blocking this hunter's armor engagement (debug). */
+    public static void setEngageBlockReason(SoldierEntity soldier, String reason) {
+        engageBlockReasonBySoldier.put(soldier.getUUID(), reason);
+    }
+
+    /** Last recorded armor-engagement block reason, or "idle". */
+    public static String getEngageBlockReason(SoldierEntity soldier) {
+        return engageBlockReasonBySoldier.getOrDefault(soldier.getUUID(), "idle");
     }
 
     private static boolean isArmorSuppressed(SoldierEntity soldier) {
@@ -274,6 +311,80 @@ public final class ArmorThreatScanner {
             (min.getY() + max.getY()) / 2.0,
             (min.getZ() + max.getZ()) / 2.0);
         return VS2Compat.shipToWorldPosition(ship, local);
+    }
+
+    /**
+     * The ship-space bounding-box corners transformed to world space, so line
+     * of sight can be tested against the whole hull silhouette instead of only
+     * the gun position. Null when the ship gives no bounds or a corner fails
+     * the world-plausibility gate (degrades callers to gun-point checks).
+     */
+    @Nullable
+    private static Vec3[] shipHullCorners(Object ship) {
+        BlockPos min = VS2Compat.getShipyardMin(ship);
+        BlockPos max = VS2Compat.getShipyardMax(ship);
+        if (min == null || max == null) {
+            return null;
+        }
+        Vec3[] corners = new Vec3[8];
+        int index = 0;
+        for (int cx = 0; cx < 2; cx++) {
+            for (int cy = 0; cy < 2; cy++) {
+                for (int cz = 0; cz < 2; cz++) {
+                    Vec3 local = new Vec3(
+                        cx == 0 ? min.getX() : max.getX(),
+                        cy == 0 ? min.getY() : max.getY(),
+                        cz == 0 ? min.getZ() : max.getZ());
+                    Vec3 world = VS2Compat.shipToWorldPosition(ship, local);
+                    if (world == null || !VS2Compat.isWorldPlausible(world)) {
+                        return null;
+                    }
+                    corners[index++] = world;
+                }
+            }
+        }
+        return corners;
+    }
+
+    /**
+     * Resolves the point the soldier can actually shoot at on a hard target:
+     * the gun position when visible, otherwise the hull center or any hull
+     * corner with a clear (near-tolerated) ray. Doctrine: line of sight to any
+     * block of the vehicle counts, not just the gun optic. Null when nothing
+     * on the vehicle is visible.
+     */
+    @Nullable
+    public static Vec3 findFiringSolution(SoldierEntity soldier, ArmorContact armor) {
+        if (TargetAcquisition.hasNearLineOfSightToPosition(soldier, armor.aimPoint(), LOS_TOLERANCE)) {
+            return armor.aimPoint();
+        }
+        if (TargetAcquisition.hasNearLineOfSightToPosition(soldier, armor.hullCenter(), LOS_TOLERANCE)) {
+            return armor.hullCenter();
+        }
+        if (armor.hullCorners() != null) {
+            for (Vec3 corner : armor.hullCorners()) {
+                if (TargetAcquisition.hasNearLineOfSightToPosition(soldier, corner, LOS_TOLERANCE)) {
+                    return corner;
+                }
+            }
+        }
+        return null;
+    }
+
+    /**
+     * {@link #findFiringSolution} for a squad-intel knowledge entry — used by
+     * the suppression path, which reads the shared threat store rather than a
+     * fresh scan contact.
+     */
+    @Nullable
+    public static Vec3 findFiringSolution(SoldierEntity soldier, SquadThreatIntel.ThreatKnowledge knowledge) {
+        if (knowledge.lastKnownPosition == null) {
+            return null;
+        }
+        Vec3 hull = Vec3.atCenterOf(knowledge.lastKnownPosition);
+        Vec3 aim = knowledge.lastVisibleAimPoint != null ? knowledge.lastVisibleAimPoint : hull;
+        return findFiringSolution(soldier, new ArmorContact(knowledge.threatEntityId, aim, hull,
+            knowledge.lastKnownVelocity, knowledge.lastKnownHullCorners, knowledge.lastSeenTime));
     }
 
     /** Blocks per tick between this and the previous world sighting of the vehicle. */
