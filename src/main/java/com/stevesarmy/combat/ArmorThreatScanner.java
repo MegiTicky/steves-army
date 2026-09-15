@@ -1,10 +1,8 @@
 package com.stevesarmy.combat;
 
 import com.stevesarmy.StevesArmyConfig;
-import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.compat.TallyhoCompat;
 import com.stevesarmy.compat.VS2Compat;
-import com.stevesarmy.debug.DiagnosticLogManager;
 import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.squad.SquadData;
 import com.stevesarmy.squad.SquadManager;
@@ -12,7 +10,6 @@ import com.stevesarmy.squad.SquadThreatIntel;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.Entity;
-import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
@@ -20,11 +17,9 @@ import net.minecraft.world.phys.Vec3;
 import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -78,9 +73,7 @@ public final class ArmorThreatScanner {
      * and wherever tallyho or the feature is disabled.
      */
     public static void maybeScan(SoldierEntity soldier) {
-        // Occupancy-based vehicle detection needs only VS2; the camera loop
-        // below additionally requires tallyho.
-        if (!StevesArmyConfig.isArmorAwarenessEnabled()) {
+        if (!StevesArmyConfig.isArmorAwarenessEnabled() || !TallyhoCompat.isAvailable()) {
             return;
         }
         if (!(soldier.level() instanceof ServerLevel serverLevel)) {
@@ -107,16 +100,10 @@ public final class ArmorThreatScanner {
 
         double range = StevesArmyConfig.getArmorDetectionDistance();
         AABB searchBox = soldier.getBoundingBox().inflate(range);
-        List<Entity> cameras = TallyhoCompat.isAvailable()
-            ? serverLevel.getEntitiesOfClass(Entity.class, searchBox,
-                cam -> TallyhoCompat.isCameraEntity(cam) && isHostileCamera(serverLevel, cam, soldier))
-            : List.of();
+        List<Entity> cameras = serverLevel.getEntitiesOfClass(Entity.class, searchBox,
+            cam -> TallyhoCompat.isCameraEntity(cam) && isHostileCamera(serverLevel, cam, soldier));
         List<Entity> cannons = serverLevel.getEntitiesOfClass(Entity.class, searchBox,
             ArmorThreatScanner::isCannonContraption);
-
-        // Contacts on the same ship share one identity so a hull-MG sighting and
-        // an occupancy sighting merge into a single enemy vehicle.
-        Set<Long> reportedShips = new HashSet<>();
 
         ArmorContact nearest = null;
         for (Entity camera : cameras) {
@@ -130,10 +117,6 @@ public final class ArmorThreatScanner {
                 continue;
             }
             Vec3[] hullCorners = ship != null ? shipHullCorners(ship) : null;
-            Long shipId = VS2Compat.getShipIdOf(ship);
-            if (shipId != null) {
-                reportedShips.add(shipId);
-            }
             UUID contactId = contactIdFor(ship, camera.getUUID());
             int vehicleClass = TallyhoCompat.isHullMG(camera)
                 ? SquadThreatIntel.VC_HULL_MG : SquadThreatIntel.VC_VEHICLE;
@@ -148,45 +131,6 @@ public final class ArmorThreatScanner {
             if (nearest == null || distSqr < soldier.distanceToSqr(nearest.aimPoint())) {
                 nearest = new ArmorContact(contactId, aimPoint, hullCenter, velocity,
                     hullCorners, gameTime);
-            }
-        }
-
-        // Enemy-occupied ships without a crewed station still read as enemy
-        // vehicles (APC): any hostile soldier or player standing on a ship.
-        List<LivingEntity> occupants = serverLevel.getEntitiesOfClass(LivingEntity.class, searchBox,
-            occupant -> !soldier.isFriendlyTo(occupant));
-        for (Entity occupant : occupants) {
-            if (occupant == soldier) {
-                continue;
-            }
-            Object ship = VS2Compat.resolveShipNearEntity(occupant);
-            if (ship == null) {
-                continue;
-            }
-            Long shipId = VS2Compat.getShipIdOf(ship);
-            if (shipId == null || !reportedShips.add(shipId)) {
-                continue;
-            }
-            Vec3 hullCenter = shipCenterWorld(ship);
-            if (hullCenter == null || !VS2Compat.isWorldPlausible(hullCenter)) {
-                continue;
-            }
-            UUID contactId = shipThreatId(shipId);
-            boolean firstSighting = intel.getThreat(contactId).isEmpty();
-            Vec3[] hullCorners = shipHullCorners(ship);
-            int vehicleClass = upgradeForCannons(cannons, hullCenter, SquadThreatIntel.VC_VEHICLE);
-            Vec3 velocity = estimateVelocity(contactId, hullCenter, gameTime);
-            intel.reportHardTarget(soldier.getUUID(), contactId,
-                BlockPos.containing(hullCenter), occupant.getEyePosition(), velocity,
-                hullCorners, 0.8f, serverLevel, vehicleClass);
-            if (firstSighting && DiagnosticLogManager.isCoverLoggingEnabled()) {
-                StevesArmyMod.LOGGER.info("[ArmorDoctrine] Soldier {} spotted enemy {} aboard ship {} (class {}) at {}",
-                    soldier.getId(), occupant.getName().getString(), shipId, vehicleClass, hullCenter);
-            }
-            double distSqr = soldier.distanceToSqr(hullCenter);
-            if (nearest == null || distSqr < soldier.distanceToSqr(nearest.aimPoint())) {
-                nearest = new ArmorContact(contactId, occupant.getEyePosition(), hullCenter,
-                    velocity, hullCorners, gameTime);
             }
         }
 
@@ -236,7 +180,7 @@ public final class ArmorThreatScanner {
      * peeks at a tank at all.
      */
     public static boolean shouldStayDuckedForArmor(SoldierEntity soldier) {
-        if (!StevesArmyConfig.isArmorAwarenessEnabled()) {
+        if (!StevesArmyConfig.isArmorAwarenessEnabled() || !TallyhoCompat.isAvailable()) {
             return false;
         }
         if (getPrimaryArmorThreat(soldier) == null) {
@@ -300,7 +244,8 @@ public final class ArmorThreatScanner {
      */
     public static boolean shouldDisplaceFromArmor(SoldierEntity soldier) {
         if (!StevesArmyConfig.isArmorAwarenessEnabled()
-            || !StevesArmyConfig.isArmorPathDisplacementEnabled()) {
+            || !StevesArmyConfig.isArmorPathDisplacementEnabled()
+            || !TallyhoCompat.isAvailable()) {
             return false;
         }
         if (ArmorRoleManager.isArmorHunter(soldier)) {

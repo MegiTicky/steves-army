@@ -1,7 +1,6 @@
 package com.stevesarmy.entity.ai;
 
 import com.stevesarmy.StevesArmyMod;
-import com.stevesarmy.combat.ArmorThreatScanner;
 import com.stevesarmy.combat.GunIntegration;
 import com.stevesarmy.combat.TargetAcquisition;
 import com.stevesarmy.combat.ThreatAwareness;
@@ -310,20 +309,7 @@ public class PeekController {
             BlockPos suppressPos = soldier.getPingSuppressPos();
             threatDir = Vec3.atCenterOf(suppressPos).subtract(soldier.position()).normalize();
         }
-
-        // A vehicle is not a LivingEntity, so it never reaches ThreatAwareness
-        // or the target slot. The armor contact is the only peek direction for
-        // a tank-only engagement (hunter rising to shoot, rifleman buttoning).
-        if (threatDir == null || threatDir.lengthSqr() <= 0.001) {
-            ArmorThreatScanner.ArmorContact armor = ArmorThreatScanner.getPrimaryArmorThreat(soldier);
-            if (armor != null) {
-                Vec3 toArmor = armor.aimPoint().subtract(soldier.position());
-                if (toArmor.lengthSqr() > 0.001) {
-                    threatDir = toArmor.normalize();
-                }
-            }
-        }
-
+        
         if (threatDir == null || threatDir.lengthSqr() <= 0.001) {
             return;
         }
@@ -628,11 +614,6 @@ public class PeekController {
         if (soldier.hasEmergencyEngagementPosture()) {
             soldier.tracePeek("suppression-override", "reason=emergency-engagement");
             return false;
-        }
-
-        if (ArmorThreatScanner.shouldStayDuckedForArmor(soldier)) {
-            soldier.tracePeek("suppression-override", "reason=armor-los");
-            return true;
         }
 
         var suppressionTracker = soldier.getCoverBehaviorManager().getSuppressionTracker();
