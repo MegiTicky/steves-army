@@ -102,6 +102,7 @@ public class StevesArmyConfig {
     public static final ForgeConfigSpec.EnumValue<ArmorDoctrineOverride> ARMOR_DOCTRINE_OVERRIDE;
     public static final ForgeConfigSpec.IntValue AT_PING_ROCKET_BUDGET;
     public static final ForgeConfigSpec.IntValue LAUNCHER_RESERVE_FLOOR;
+    public static final ForgeConfigSpec.BooleanValue OCCUPANCY_VEHICLE_DETECTION;
 
     public enum ArmorDoctrineOverride { AUTO, NO_AT, FORCE_AT }
 
@@ -610,11 +611,13 @@ BUILDER.pop();
         BUILDER.push("armorDoctrine");
 
         ARMOR_AWARENESS_ENABLED = BUILDER
-            .comment("Soldiers detect enemy-crewed vehicle turrets (tallyho hull MG / periscope)",
-                     "as hard targets and react by role: squads without an anti-armor weapon hide,",
-                     "break line of sight, and displace out of the vehicle's path; squads with an",
-                     "anti-armor gun (see atGunIdPatterns) designate its carrier as the armor hunter,",
-                     "everyone else suppresses the vehicle to keep its crew buttoned. Requires tallyho.",
+            .comment("Soldiers detect enemy-crewed vehicles as hard targets and react by",
+                     "role: squads without an anti-armor weapon hide, break line of sight,",
+                     "and displace out of the vehicle's path; squads with an anti-armor gun",
+                     "(see atGunIdPatterns) designate its carrier as the armor hunter,",
+                     "everyone else suppresses the vehicle to keep its crew buttoned.",
+                     "Vehicles are spotted via crewed tallyho turrets (requires tallyho) or",
+                     "via crewed occupancy (see occupancyVehicleDetection, no tallyho needed).",
                      "Default: true.")
             .define("enabled", true);
 
@@ -668,6 +671,13 @@ BUILDER.pop();
                      "pings stop firing at this floor. A spotted enemy vehicle overrides the",
                      "floor (armor defense outranks the reserve). Default: 1.")
             .defineInRange("launcherReserveFloor", 1, 0, 16);
+
+        OCCUPANCY_VEHICLE_DETECTION = BUILDER
+            .comment("Detect ships as enemy vehicles when enemy CREW are aboard: a soldier",
+                     "with the vehicle-crew role, or anyone riding a seat on the hull.",
+                     "Infantry merely standing on a ship or dock never triggers a contact.",
+                     "Works without tallyho. Default: true.")
+            .define("occupancyVehicleDetection", true);
 
         BUILDER.pop();
 
@@ -1251,6 +1261,10 @@ BUILDER.pop();
 
     public static int getLauncherReserveFloor() {
         return LAUNCHER_RESERVE_FLOOR.get();
+    }
+
+    public static boolean isOccupancyVehicleDetectionEnabled() {
+        return OCCUPANCY_VEHICLE_DETECTION.get();
     }
 
     /** Legacy compatibility hook; nearby-target snapshots are disabled. */

@@ -1,7 +1,6 @@
 package com.stevesarmy.combat;
 
 import com.stevesarmy.StevesArmyMod;
-import com.stevesarmy.compat.TallyhoCompat;
 import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.network.ArmorDoctrineDebugPacket;
 import com.stevesarmy.network.NetworkHandler;
@@ -96,10 +95,6 @@ public final class ArmorDoctrineDebugManager {
             return;
         }
         ServerLevel level = player.serverLevel();
-        if (!TallyhoCompat.isAvailable()) {
-            NetworkHandler.sendTo(player, new ArmorDoctrineDebugPacket(mode, List.of(), List.of()));
-            return;
-        }
 
         List<ArmorDoctrineDebugPacket.Contact> contacts = new ArrayList<>();
         List<ArmorDoctrineDebugPacket.Soldier> soldiers = new ArrayList<>();

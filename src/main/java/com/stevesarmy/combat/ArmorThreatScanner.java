@@ -1,15 +1,19 @@
 package com.stevesarmy.combat;
 
 import com.stevesarmy.StevesArmyConfig;
+import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.compat.TallyhoCompat;
 import com.stevesarmy.compat.VS2Compat;
+import com.stevesarmy.debug.DiagnosticLogManager;
 import com.stevesarmy.entity.SoldierEntity;
+import com.stevesarmy.entity.SoldierRole;
 import com.stevesarmy.squad.SquadData;
 import com.stevesarmy.squad.SquadManager;
 import com.stevesarmy.squad.SquadThreatIntel;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
@@ -17,18 +21,25 @@ import net.minecraft.world.phys.Vec3;
 import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 /**
- * Periodic scan for enemy-crewed vehicle turrets (tallyho hull MG / periscope
- * cameras). A hostile sighting is published into the squad's shared threat
- * intel as a "hard target" — small arms cannot destroy it, so soldiers react
- * by role: squads without an anti-armor gun hide, keep out of the vehicle's
- * sight, and displace off its path; squads with one designate its carrier as
- * the armor hunter while everyone else keeps the vehicle suppressed.
+ * Periodic scan for enemy-crewed vehicles. Two detection paths feed the same
+ * shared-threat-intel "hard target" record: crewed tallyho turret cameras
+ * (hull MG / periscope, requires tallyho), and crewed occupancy — a ship
+ * carrying enemy vehicle crew (a VEHICLE_CREW-role soldier or anyone riding a
+ * seat on the hull) reads as an enemy vehicle such as an APC. Infantry merely
+ * standing on a ship or dock never qualifies: the occupancy gate is crew
+ * identity, never position alone. A hostile sighting is published into the
+ * squad's shared threat intel as a "hard target" — small arms cannot destroy
+ * it, so soldiers react by role: squads without an anti-armor gun keep their
+ * distance, and squads with one designate its carrier as the armor hunter
+ * while everyone else keeps the vehicle suppressed.
  *
  * Cameras may sit in shipyard space on VS2 ships, so world positions go
  * through {@link VS2Compat#stationCameraWorldPos} and are plausibility-gated
@@ -70,10 +81,11 @@ public final class ArmorThreatScanner {
     /**
      * Runs the armor scan for the soldier at a staggered interval. Safe to
      * call every tick; a no-op for vehicle crew soldiers (they man a station)
-     * and wherever tallyho or the feature is disabled.
+     * and wherever the feature is disabled. The turret-camera path needs
+     * tallyho; crewed-occupancy detection does not.
      */
     public static void maybeScan(SoldierEntity soldier) {
-        if (!StevesArmyConfig.isArmorAwarenessEnabled() || !TallyhoCompat.isAvailable()) {
+        if (!StevesArmyConfig.isArmorAwarenessEnabled()) {
             return;
         }
         if (!(soldier.level() instanceof ServerLevel serverLevel)) {
@@ -100,37 +112,91 @@ public final class ArmorThreatScanner {
 
         double range = StevesArmyConfig.getArmorDetectionDistance();
         AABB searchBox = soldier.getBoundingBox().inflate(range);
-        List<Entity> cameras = serverLevel.getEntitiesOfClass(Entity.class, searchBox,
-            cam -> TallyhoCompat.isCameraEntity(cam) && isHostileCamera(serverLevel, cam, soldier));
         List<Entity> cannons = serverLevel.getEntitiesOfClass(Entity.class, searchBox,
             ArmorThreatScanner::isCannonContraption);
 
         ArmorContact nearest = null;
-        for (Entity camera : cameras) {
-            Object ship = VS2Compat.getShipUnder(camera);
-            Vec3 aimPoint = VS2Compat.stationCameraWorldPos(ship, camera);
-            if (!VS2Compat.isWorldPlausible(aimPoint)) {
-                continue;
-            }
-            Vec3 hullCenter = ship != null ? shipCenterWorld(ship) : aimPoint;
-            if (hullCenter == null || !VS2Compat.isWorldPlausible(hullCenter)) {
-                continue;
-            }
-            Vec3[] hullCorners = ship != null ? shipHullCorners(ship) : null;
-            UUID contactId = contactIdFor(ship, camera.getUUID());
-            int vehicleClass = TallyhoCompat.isHullMG(camera)
-                ? SquadThreatIntel.VC_HULL_MG : SquadThreatIntel.VC_VEHICLE;
-            vehicleClass = upgradeForCannons(cannons, hullCenter, vehicleClass);
+        Set<Long> scannedShipIds = new HashSet<>();
+        if (TallyhoCompat.isAvailable()) {
+            List<Entity> cameras = serverLevel.getEntitiesOfClass(Entity.class, searchBox,
+                cam -> TallyhoCompat.isCameraEntity(cam) && isHostileCamera(serverLevel, cam, soldier));
+            for (Entity camera : cameras) {
+                Object ship = VS2Compat.getShipUnder(camera);
+                Vec3 aimPoint = VS2Compat.stationCameraWorldPos(ship, camera);
+                if (!VS2Compat.isWorldPlausible(aimPoint)) {
+                    continue;
+                }
+                Vec3 hullCenter = ship != null ? shipCenterWorld(ship) : aimPoint;
+                if (hullCenter == null || !VS2Compat.isWorldPlausible(hullCenter)) {
+                    continue;
+                }
+                Vec3[] hullCorners = ship != null ? shipHullCorners(ship) : null;
+                UUID contactId = contactIdFor(ship, camera.getUUID());
+                Long shipId = VS2Compat.getShipIdOf(ship);
+                if (shipId != null) {
+                    scannedShipIds.add(shipId);
+                }
+                int vehicleClass = TallyhoCompat.isHullMG(camera)
+                    ? SquadThreatIntel.VC_HULL_MG : SquadThreatIntel.VC_VEHICLE;
+                vehicleClass = upgradeForCannons(cannons, hullCenter, vehicleClass);
 
-            Vec3 velocity = estimateVelocity(contactId, hullCenter, gameTime);
-            intel.reportHardTarget(soldier.getUUID(), contactId,
-                BlockPos.containing(hullCenter), aimPoint, velocity, hullCorners, 1.0f,
-                serverLevel, vehicleClass);
+                Vec3 velocity = estimateVelocity(contactId, hullCenter, gameTime);
+                intel.reportHardTarget(soldier.getUUID(), contactId,
+                    BlockPos.containing(hullCenter), aimPoint, velocity, hullCorners, 1.0f,
+                    serverLevel, vehicleClass);
 
-            double distSqr = soldier.distanceToSqr(aimPoint);
-            if (nearest == null || distSqr < soldier.distanceToSqr(nearest.aimPoint())) {
-                nearest = new ArmorContact(contactId, aimPoint, hullCenter, velocity,
-                    hullCorners, gameTime);
+                double distSqr = soldier.distanceToSqr(aimPoint);
+                if (nearest == null || distSqr < soldier.distanceToSqr(nearest.aimPoint())) {
+                    nearest = new ArmorContact(contactId, aimPoint, hullCenter, velocity,
+                        hullCorners, gameTime);
+                }
+            }
+        }
+
+        // Crewed-occupancy vehicles (APC): a ship counts as an enemy vehicle when
+        // enemy CREW are aboard — a vehicle-crew-role soldier or anyone riding a
+        // seat on the hull. Infantry merely standing on a ship or dock never
+        // qualifies, so ship-heavy areas cannot flood the doctrine with fake
+        // contacts the way the old position-only scan did.
+        if (StevesArmyConfig.isOccupancyVehicleDetectionEnabled()) {
+            List<LivingEntity> occupants = serverLevel.getEntitiesOfClass(LivingEntity.class, searchBox,
+                occ -> occ.isAlive() && !soldier.isFriendlyTo(occ) && isVehicleOccupant(occ));
+            for (LivingEntity occupant : occupants) {
+                Object ship = VS2Compat.resolveShipUnderEntity(occupant);
+                Long shipId = VS2Compat.getShipIdOf(ship);
+                if (shipId == null || scannedShipIds.contains(shipId)) {
+                    continue;
+                }
+                scannedShipIds.add(shipId);
+                Vec3 hullCenter = shipCenterWorld(ship);
+                if (hullCenter == null || !VS2Compat.isWorldPlausible(hullCenter)) {
+                    continue;
+                }
+                // Seated riders live at shipyard coordinates server-side; resolve a
+                // world-space aim point, degrading to the hull center.
+                Vec3 aimPoint = VS2Compat.stationCameraWorldPos(ship, occupant);
+                if (aimPoint == null) {
+                    aimPoint = hullCenter;
+                }
+                Vec3[] hullCorners = shipHullCorners(ship);
+                UUID contactId = shipThreatId(shipId);
+                boolean firstSighting = intel.getThreat(contactId).isEmpty();
+                int vehicleClass = upgradeForCannons(cannons, hullCenter, SquadThreatIntel.VC_VEHICLE);
+                Vec3 velocity = estimateVelocity(contactId, hullCenter, gameTime);
+                intel.reportHardTarget(soldier.getUUID(), contactId,
+                    BlockPos.containing(hullCenter), aimPoint, velocity, hullCorners, 0.8f,
+                    serverLevel, vehicleClass);
+                if (firstSighting && DiagnosticLogManager.isCoverLoggingEnabled()) {
+                    StevesArmyMod.LOGGER.info("[ArmorDoctrine] Soldier {} spotted enemy vehicle (ship {}, class {}) crewed by {} at {}",
+                        soldier.getId(), shipId, vehicleClass,
+                        occupant.getName().getString(), hullCenter);
+                }
+
+                double distSqr = soldier.distanceToSqr(aimPoint);
+                if (nearest == null || distSqr < soldier.distanceToSqr(nearest.aimPoint())) {
+                    nearest = new ArmorContact(contactId, aimPoint, hullCenter, velocity,
+                        hullCorners, gameTime);
+                }
             }
         }
 
@@ -138,6 +204,21 @@ public final class ArmorThreatScanner {
             && TargetAcquisition.hasNearLineOfSightToPosition(soldier, nearest.aimPoint(), LOS_TOLERANCE);
         cacheBySoldier.put(soldierId, new SoldierCache(exposed, gameTime));
         pruneIfNeeded(gameTime);
+    }
+
+    /**
+     * Crew-identity gate for occupancy vehicles: the occupant must be manning
+     * the vehicle — a soldier with the vehicle-crew role, or a rider whose
+     * mount is an entity seat/mount rather than a living creature (a horse
+     * rider is cavalry, not crew).
+     */
+    private static boolean isVehicleOccupant(Entity occupant) {
+        if (occupant instanceof SoldierEntity soldierOcc
+            && soldierOcc.getRole() == SoldierRole.VEHICLE_CREW) {
+            return true;
+        }
+        Entity vehicle = occupant.getVehicle();
+        return vehicle != null && !(vehicle instanceof LivingEntity);
     }
 
     /** Nearest fresh hard target known to the soldier's squad, or null. */
@@ -180,7 +261,7 @@ public final class ArmorThreatScanner {
      * peeks at a tank at all.
      */
     public static boolean shouldStayDuckedForArmor(SoldierEntity soldier) {
-        if (!StevesArmyConfig.isArmorAwarenessEnabled() || !TallyhoCompat.isAvailable()) {
+        if (!StevesArmyConfig.isArmorAwarenessEnabled()) {
             return false;
         }
         if (getPrimaryArmorThreat(soldier) == null) {
@@ -244,8 +325,7 @@ public final class ArmorThreatScanner {
      */
     public static boolean shouldDisplaceFromArmor(SoldierEntity soldier) {
         if (!StevesArmyConfig.isArmorAwarenessEnabled()
-            || !StevesArmyConfig.isArmorPathDisplacementEnabled()
-            || !TallyhoCompat.isAvailable()) {
+            || !StevesArmyConfig.isArmorPathDisplacementEnabled()) {
             return false;
         }
         if (ArmorRoleManager.isArmorHunter(soldier)) {

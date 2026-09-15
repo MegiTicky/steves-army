@@ -1517,6 +1517,36 @@ public final class VS2Compat {
     }
 
     /**
+     * Ship carrying the given entity, for occupancy checks. Seated riders and
+     * shipyard-space entities resolve through {@link #getShipUnder}; a world-space
+     * entity standing aboard (crew on an open deck) resolves through the
+     * ships-intersecting query, accepting only a ship whose real voxel hull overlaps
+     * the entity — ground beside the hull does not count.
+     */
+    @Nullable
+    public static Object resolveShipUnderEntity(Entity entity) {
+        Object ship = getShipUnder(entity);
+        if (ship != null || !isEnabled()
+            || !(entity.level() instanceof ServerLevel serverLevel)) {
+            return ship;
+        }
+        try {
+            Object ships = reflect(getShipsIntersecting, entity.level(), entity.getBoundingBox());
+            if (ships instanceof Iterable<?> iterable) {
+                for (Object candidate : iterable) {
+                    if (candidate != null
+                        && shipOverlapsHull(serverLevel, candidate, entity.getBoundingBox(), true)) {
+                        return candidate;
+                    }
+                }
+            }
+        } catch (ReflectiveOperationException exception) {
+            logReflectionFailure(exception);
+        }
+        return null;
+    }
+
+    /**
      * Ship the vehicle-wheel MOUNT order targets when the crosshair is not on a vehicle:
      * the ship the player is mounted to, else the nearest ship within 64 blocks.
      */
