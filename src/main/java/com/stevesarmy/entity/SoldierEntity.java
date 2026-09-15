@@ -2405,9 +2405,13 @@ public BlockPos getPingMoveTarget() {
 
     public boolean isMovingToUnoccupiedCoverDuringReload() {
         CoverBehaviorManager.CoverState state = coverBehaviorManager.getState();
+        // NO_COVER with a selected target is how findAndMoveToCover hands a fresh
+        // cover to navigation; the approach exception must cover it or a reload
+        // started mid-search rejects every candidate as a fake PATH_FAILED.
         return coverBehaviorManager.getCurrentCover() == null
             && coverBehaviorManager.getTargetCover() != null
             && (state == CoverBehaviorManager.CoverState.SEEKING_COVER
-                || state == CoverBehaviorManager.CoverState.REPOSITIONING);
+                || state == CoverBehaviorManager.CoverState.REPOSITIONING
+                || state == CoverBehaviorManager.CoverState.NO_COVER);
     }
 }

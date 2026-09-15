@@ -1743,7 +1743,7 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
             boolean movementStarted = moveToCover(pendingRetryCover);
             isRetryAttempt = false;
             pendingRetryCover = null;
-            if (!movementStarted && relocationType == RelocationType.GO_TO) {
+            if (!movementStarted && !isReloadBlockedMove() && relocationType == RelocationType.GO_TO) {
                 failGoToRelocation();
             }
             return;
@@ -1865,21 +1865,32 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
             navigation.stop();
             moveControl.moveTo(standingPos, POSITIONING_TOLERANCE, POSITIONING_SPEED, "tickSeekingCover", "recenter to target cover");
             if (moveControl.getLastResult() == CoverPositionController.MovementResult.FAILED) {
-                // Navigation is already stopped, so a rejected handoff leaves no
-                // movement driver at all. Blacklist now instead of standing
-                // driverless until the seeking timeout.
-                if (DiagnosticLogManager.isCoverLoggingEnabled()) {
-                    StevesArmyMod.LOGGER.info("[CoverGoal] Soldier {} handoff rejected (reason={}) for cover={}, blacklisting",
-                        soldier.getId(), moveControl.getLastFailureReason(), targetCover.getPosition());
+                CoverPositionController.FailureReason handoffFailReason = moveControl.getLastFailureReason();
+                if (isReloadBlockedMove()
+                    || handoffFailReason == CoverPositionController.FailureReason.RELOAD_INTERRUPTED) {
+                    // Reload hold, not a cover problem: wait for the reload; the
+                    // approach resumes afterwards.
+                    return;
                 }
-                blacklistCover(targetCover.getPosition(), BlacklistReason.POSITIONING_BLOCKED);
-                stuckTicks = 0;
-                noProgressTicks = 0;
-                lastSeekingPosition = null;
-                requestCoverSearch(soldier.hasValidAttackTarget()
-                    ? QueuedSearchMode.ATTACK_SELECTING : QueuedSearchMode.NORMAL);
+                // Navigation is already stopped, so a rejected handoff leaves no
+                // movement driver. The A*-validated route may simply not be
+                // straight-line visible from here, so retry via navigation before
+                // condemning the cover.
+                moveControl.resetFailureState();
+                if (!moveToCover(targetCover) && pendingRetryCover == null && !isReloadBlockedMove()) {
+                    if (DiagnosticLogManager.isCoverLoggingEnabled()) {
+                        StevesArmyMod.LOGGER.info("[CoverGoal] Soldier {} handoff rejected (reason={}) for cover={}, blacklisting",
+                            soldier.getId(), handoffFailReason, targetCover.getPosition());
+                    }
+                    blacklistCover(targetCover.getPosition(), BlacklistReason.POSITIONING_BLOCKED);
+                    stuckTicks = 0;
+                    noProgressTicks = 0;
+                    lastSeekingPosition = null;
+                    requestCoverSearch(soldier.hasValidAttackTarget()
+                        ? QueuedSearchMode.ATTACK_SELECTING : QueuedSearchMode.NORMAL);
+                }
+                return;
             }
-            return;
         }
 
         // Normal navigation-driven approach
@@ -1980,7 +1991,7 @@ private void tickRepositioning() {
             boolean movementStarted = moveToCover(pendingRetryCover);
             isRetryAttempt = false;
             pendingRetryCover = null;
-            if (!movementStarted && relocationType == RelocationType.GO_TO) {
+            if (!movementStarted && !isReloadBlockedMove() && relocationType == RelocationType.GO_TO) {
                 failGoToRelocation();
             }
             return;
@@ -2039,6 +2050,13 @@ private void tickRepositioning() {
         }
 
         ensureMovementAttemptTarget(targetCover);
+
+        if (isReloadBlockedMove()) {
+            // Reload hold: keep the current cover and pause reposition bookkeeping
+            // (no re-path churn, no stuck accumulation) until the reload finishes.
+            getPositionController().resetFailureState();
+            return;
+        }
 
         // Repositioning timeout: if we've been repositioning too long, abort
         if (repositioningTicks > MAX_REPOSITIONING_TICKS) {
@@ -2139,21 +2157,30 @@ private void tickRepositioning() {
                 activeSuppressionRouteMovement == RouteMovement.CRAWL ? CRAWL_ROUTE_SPEED : POSITIONING_SPEED,
                 "tickRepositioning", "recenter to target cover");
             if (moveControl.getLastResult() == CoverPositionController.MovementResult.FAILED) {
-                // Navigation is already stopped, so a rejected handoff leaves no
-                // movement driver. Blacklist now instead of standing driverless.
-                if (DiagnosticLogManager.isCoverLoggingEnabled()) {
-                    StevesArmyMod.LOGGER.info("[CoverGoal] Soldier {} reposition handoff rejected (reason={}) for cover={}, blacklisting",
-                        soldier.getId(), moveControl.getLastFailureReason(), targetCover.getPosition());
+                CoverPositionController.FailureReason handoffFailReason = moveControl.getLastFailureReason();
+                if (isReloadBlockedMove()
+                    || handoffFailReason == CoverPositionController.FailureReason.RELOAD_INTERRUPTED) {
+                    // Reload hold, not a cover problem: wait for the reload.
+                    return;
                 }
-                blacklistCover(targetCover.getPosition(), BlacklistReason.POSITIONING_BLOCKED);
-                stuckTicks = 0;
-                noProgressTicks = 0;
-                lastSeekingPosition = null;
-                if (getCoverManager().getCurrentCover() != null) {
-                    getCoverManager().setState(CoverBehaviorManager.CoverState.IN_COVER);
+                // Navigation is already stopped. Retry the final stretch via
+                // navigation before blacklisting a cover the pathfinder reached.
+                moveControl.resetFailureState();
+                if (!moveToCover(targetCover) && pendingRetryCover == null && !isReloadBlockedMove()) {
+                    if (DiagnosticLogManager.isCoverLoggingEnabled()) {
+                        StevesArmyMod.LOGGER.info("[CoverGoal] Soldier {} reposition handoff rejected (reason={}) for cover={}, blacklisting",
+                            soldier.getId(), handoffFailReason, targetCover.getPosition());
+                    }
+                    blacklistCover(targetCover.getPosition(), BlacklistReason.POSITIONING_BLOCKED);
+                    stuckTicks = 0;
+                    noProgressTicks = 0;
+                    lastSeekingPosition = null;
+                    if (getCoverManager().getCurrentCover() != null) {
+                        getCoverManager().setState(CoverBehaviorManager.CoverState.IN_COVER);
+                    }
                 }
+                return;
             }
-            return;
         }
 
         // Normal navigation-driven approach
@@ -3146,7 +3173,7 @@ private boolean shouldExitCoverForFollow() {
             getCoverManager().setTargetCover(newCover);
             getCoverManager().setState(CoverBehaviorManager.CoverState.REPOSITIONING);
             boolean movementStarted = moveToCover(newCover);
-            if (!movementStarted && pendingRetryCover == null) {
+            if (!movementStarted && pendingRetryCover == null && !isReloadBlockedMove()) {
                 if (getCoverManager().getTargetCover() != null) {
                     blacklistCover(newCover.getPosition(), BlacklistReason.PATH_FAILED);
                 }
@@ -3212,7 +3239,7 @@ private boolean shouldExitCoverForFollow() {
                             isDistantRelocationCover(cover) ? "staged" : "exact");
                     }
                     boolean movementStarted = moveToCover(cover);
-                    if (!movementStarted && pendingRetryCover == null) {
+                    if (!movementStarted && pendingRetryCover == null && !isReloadBlockedMove()) {
                         failGoToRelocation();
                         logCoverSearchPerformance(finder, searchStarted, CoverMoveResult.NO_COVER_FOUND,
                             "relocation-path-failed");
@@ -3545,14 +3572,14 @@ private boolean shouldExitCoverForFollow() {
                     attackExpectedCover = cover.getPosition();
                 }
                 boolean movementStarted = moveToCover(cover);
-                if (emergencyCoverSearchActive && !movementStarted) {
+                if (emergencyCoverSearchActive && !movementStarted && !isReloadBlockedMove()) {
                     blacklistCover(cover.getPosition(), BlacklistReason.PATH_FAILED);
                     CoverReservationManager.release(cover.getPosition(), soldier);
                     getCoverManager().clearTargetCover();
                     logCoverSearchPerformance(finder, searchStarted, CoverMoveResult.NO_COVER_FOUND, "emergency-path");
                     return CoverMoveResult.NO_COVER_FOUND;
                 }
-                if (!movementStarted && pendingRetryCover == null) {
+                if (!movementStarted && pendingRetryCover == null && !isReloadBlockedMove()) {
                     if (getCoverManager().getTargetCover() != null) {
                         blacklistCover(cover.getPosition(), BlacklistReason.PATH_FAILED);
                     }
@@ -4927,7 +4954,20 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
         if (!target.equals(movementAttemptTarget)) {
             movementAttemptTarget = target.immutable();
             movementAttemptCount = 0;
+            // A new cover must not inherit the previous cover's FAILED verdict,
+            // or the goal blacklists every candidate in a row (cover churn loop).
+            getPositionController().resetFailureState();
         }
+    }
+
+    /**
+     * True when a reload/preparation hold (not the cover itself) rejected the
+     * move. The rejection is transient: keep the target cover and reservation
+     * and retry after the reload instead of blacklisting reachable covers.
+     */
+    private boolean isReloadBlockedMove() {
+        return soldier.isPreparingOrReloading()
+            && !soldier.isMovingToUnoccupiedCoverDuringReload();
     }
 
     private boolean moveToCover(CoverPoint cover) {
@@ -4938,6 +4978,13 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
 
     /** Starts navigation without re-entering tactical-bound admission. */
     private boolean startCoverPath(CoverPoint cover) {
+        if (isReloadBlockedMove()) {
+            if (DiagnosticLogManager.isCoverLoggingEnabled()) {
+                StevesArmyMod.LOGGER.info("[PathDebug] Soldier {} cover path to {} held by reload, will retry after reload",
+                    soldier.getId(), cover.getPosition());
+            }
+            return false;
+        }
         PerformanceMetrics.recordRolePathRequest(machineGunnerPipeline);
         PerformanceMetrics.recordCoverPathRequest();
         BlockPos wallPos = cover.getPosition();

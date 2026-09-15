@@ -149,7 +149,11 @@ public class CoverPositionController extends MoveControl {
             return !this.mob.level().noCollision(this.mob, bb);
         }
 
-        for (int i = 0; i <= COLLISION_SWEEP_STEPS; i++) {
+        // Start at step 1: a tight current cell (soldier pressed against
+        // geometry) must not reject the move — only collision along the swept
+        // path counts. The dist<0.01 branch above still validates standing in
+        // the current cell.
+        for (int i = 1; i <= COLLISION_SWEEP_STEPS; i++) {
             double t = (double) i / COLLISION_SWEEP_STEPS;
             AABB sample = bb.move(dx * t, 0, dz * t);
             for (VoxelShape shape : this.mob.level().getBlockCollisions(this.mob, sample)) {
@@ -205,6 +209,19 @@ public class CoverPositionController extends MoveControl {
         this.mob.setZza(0.0F);
         this.mob.setXxa(0.0F);
         this.mob.setDeltaMovement(0, this.mob.getDeltaMovement().y, 0);
+    }
+
+    /**
+     * Drops a stale FAILED/REACHED verdict so a newly selected cover is not
+     * judged by the previous cover's outcome. Unlike clear(), this leaves any
+     * in-flight movement, navigation state, and the controlled duck-back alone.
+     */
+    public void resetFailureState() {
+        if (this.controlledReturnToCover) {
+            return;
+        }
+        this.lastResult = MovementResult.NONE;
+        this.lastFailureReason = FailureReason.NONE;
     }
 
     public void stopForReload() {
