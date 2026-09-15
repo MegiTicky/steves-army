@@ -14,6 +14,7 @@ import com.stevesarmy.combat.ArmorDoctrineDebugManager;
 import com.stevesarmy.combat.ArmorRoleManager;
 import com.stevesarmy.combat.ArmorThreatScanner;
 import com.stevesarmy.combat.GunIntegration;
+import com.stevesarmy.combat.SuppressPingDebugManager;
 import com.stevesarmy.combat.ThreatAwareness;
 import com.stevesarmy.combat.cover.CoverBehaviorManager;
 import com.stevesarmy.combat.cover.CoverDebugManager;
@@ -92,6 +93,14 @@ public class CombatDebugCommand {
                     .executes(ctx -> setArmorDoctrineDebug(ctx, ArmorDoctrineDebugManager.VERBOSE)))
                 .then(Commands.argument("entity", EntityArgument.entity())
                     .executes(CombatDebugCommand::showArmorDoctrine)))
+
+            // === SUPPRESS PING ===
+            .then(Commands.literal("suppressping")
+                .executes(ctx -> setSuppressPingDebug(ctx, true))
+                .then(Commands.literal("on")
+                    .executes(ctx -> setSuppressPingDebug(ctx, true)))
+                .then(Commands.literal("off")
+                    .executes(ctx -> setSuppressPingDebug(ctx, false))))
 
             // === PERFORMANCE METRICS ===
             .then(Commands.literal("metrics")
@@ -339,6 +348,7 @@ public class CombatDebugCommand {
              "  none                - Disable ALL debug (logging + render + overlays)\n" +
              "  mg evaluate [entity] - Evaluate MG firing-position pipeline (read-only)\n" +
              "  armor [off|minimal|verbose] - Toggle armor-doctrine debug render\n" +
+            "  suppressping [on|off] - Toggle the suppress-ping debug render\n" +
              "  armor <entity>      - Print one soldier's armor-doctrine role/gates\n" +
              "  metrics [on|off|reset] - Collect/show opt-in performance counters\n" +
             "  log cover [on|off]  - Toggle cover behavior logging\n" +
@@ -1071,6 +1081,18 @@ public class CombatDebugCommand {
         int applied = ArmorDoctrineDebugManager.setMode(player, mode);
         source.sendSuccess(() -> Component.literal("Armor doctrine debug: "
             + ArmorDoctrineDebugManager.modeName(applied)), false);
+        return 1;
+    }
+
+    private static int setSuppressPingDebug(CommandContext<CommandSourceStack> context, boolean enabled) {
+        CommandSourceStack source = context.getSource();
+        if (!(source.getEntity() instanceof ServerPlayer player)) {
+            source.sendFailure(Component.literal("Player only command"));
+            return 0;
+        }
+        SuppressPingDebugManager.setEnabled(player, enabled);
+        source.sendSuccess(() -> Component.literal("Suppress ping debug render: "
+            + (enabled ? "ON" : "OFF")), false);
         return 1;
     }
 

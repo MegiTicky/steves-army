@@ -16,6 +16,7 @@ import com.stevesarmy.combat.FirePersonality;
 import com.stevesarmy.combat.FriendlyFireChecker;
 import com.stevesarmy.combat.GunIntegration;
 import com.stevesarmy.combat.SoldierWeaponSelector;
+import com.stevesarmy.combat.SuppressPingDebugManager;
 import com.stevesarmy.combat.TargetAcquisition;
 import com.stevesarmy.combat.ThreatAwareness;
 import com.stevesarmy.combat.ThreatTracker;
@@ -34,6 +35,7 @@ import com.stevesarmy.entity.TargetEntity;
 import com.stevesarmy.inventory.SoldierInventory;
 import com.stevesarmy.network.NetworkHandler;
 import com.stevesarmy.network.PotentialTargetsDebugMessage;
+import com.stevesarmy.network.SuppressPingDebugPacket;
 import com.stevesarmy.squad.FireDiscipline;
 import com.stevesarmy.squad.FireTeamSuppressionTracker;
 import com.stevesarmy.squad.SquadData;
@@ -2332,7 +2334,45 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
             );
             
             NetworkHandler.INSTANCE.send(PacketDistributor.PLAYER.with(() -> serverPlayer), msg);
+            sendSuppressPingDebug(serverPlayer);
         }
+    }
+
+    /** Snapshot of the ping-suppress pipeline for the client debug render. */
+    private void sendSuppressPingDebug(ServerPlayer serverPlayer) {
+        if (!SuppressPingDebugManager.isEnabled(serverPlayer.getUUID())) return;
+        if (!soldier.hasValidPingSuppressPos() && pingSuppressRemainingTicks <= 0) return;
+
+        BlockPos pingPos = soldier.getPingSuppressPos();
+        Vec3 pingCentre = pingPos != null ? Vec3.atCenterOf(pingPos) : null;
+
+        List<Vec3> aimPoints = soldier.getSuppressionAimPoints();
+        List<Boolean> aimPointValid = new ArrayList<>(aimPoints.size());
+        for (Vec3 point : aimPoints) {
+            aimPointValid.add(TargetAcquisition.hasLineOfSightToPositionIgnoringSmoke(soldier, point));
+        }
+
+        NetworkHandler.INSTANCE.send(PacketDistributor.PLAYER.with(() -> serverPlayer),
+            new SuppressPingDebugPacket(true, soldier.getUUID(), soldier.position(), pingCentre,
+                pingSuppressHeavy, pingSuppressRemainingTicks, pingSuppressDurationTicks,
+                buildPingStatusLine(), pingSuppressionTarget, aimPoints, aimPointValid));
+    }
+
+    private String buildPingStatusLine() {
+        StringBuilder status = new StringBuilder();
+        status.append(isPingSuppressing ? "firing" : "pending");
+        status.append(" peek=").append(soldier.getPeekController().getState());
+        status.append(String.format(" ads=%.0f%%", GunIntegration.getAimProgress(soldier) * 100.0f));
+        status.append(" burst=").append(burstShotsFired).append('/').append(suppressionBurstTarget);
+        if (burstCooldownTicks > 0) status.append(" cd=").append(burstCooldownTicks);
+        if (pingNoTargetTicks > 0) status.append(" noLane=").append(pingNoTargetTicks);
+        if (GunIntegration.isReloading(soldier)) status.append(" reload");
+        if (GunIntegration.isDrawing(soldier)) status.append(" draw");
+        if (GunIntegration.isBolting(soldier)) status.append(" bolt");
+        if (!soldier.getSuppressionAimPoints().isEmpty() && pingSuppressionTarget == null) {
+            status.append(" laneBlocked");
+        }
+        return status.toString();
     }
     
     public List<PotentialTargetInfo> getPotentialTargetsForDebug(int maxCount) {

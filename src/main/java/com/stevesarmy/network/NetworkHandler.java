@@ -168,6 +168,10 @@ public class NetworkHandler {
             CommandStickAssignCrewPacket::encode,
             CommandStickAssignCrewPacket::new,
             CommandStickAssignCrewPacket::handle);
+        INSTANCE.registerMessage(id++, SuppressPingDebugPacket.class,
+            SuppressPingDebugPacket::encode,
+            SuppressPingDebugPacket::new,
+            SuppressPingDebugPacket::handle);
     }
 
     @SuppressWarnings({"rawtypes", "unchecked"})
