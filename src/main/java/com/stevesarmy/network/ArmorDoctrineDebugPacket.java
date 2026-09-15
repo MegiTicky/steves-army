@@ -25,10 +25,12 @@ public final class ArmorDoctrineDebugPacket {
                           Vec3[] hullCorners, boolean suppressed, long ageTicks, double accuracy,
                           int vehicleClass) {}
 
-    public record Soldier(UUID soldierId, Vec3 pos, boolean hunter, boolean squadHasAt,
-                          boolean exposed, boolean displace, boolean ducked,
-                          Vec3 coverPos, UUID suppressionTargetId,
-                          Vec3 firingSolution, String blockReason) {}
+    public record Soldier(UUID soldierId, Vec3 pos, boolean hunter, boolean launcherHeld,
+                          boolean launcherStored, boolean vehicleSelected, double contactDistance,
+                          String heldGunId, String peekState, boolean lowCrouching, boolean crawlMoving,
+                          boolean reloading, boolean bolting, boolean drawing, float adsProgress,
+                          long shootCooldown, int ammo, Vec3 coverPos, Vec3 firingSolution,
+                          String combatState) {}
 
     private final int mode;
     private final List<Contact> contacts;
@@ -53,8 +55,10 @@ public final class ArmorDoctrineDebugPacket {
         List<Soldier> decodedSoldiers = new ArrayList<>(soldierCount);
         for (int i = 0; i < soldierCount; i++) {
             decodedSoldiers.add(new Soldier(buf.readUUID(), readVec(buf), buf.readBoolean(),
-                buf.readBoolean(), buf.readBoolean(), buf.readBoolean(), buf.readBoolean(),
-                readNullableVec(buf), readNullableUuid(buf), readNullableVec(buf), buf.readUtf()));
+                buf.readBoolean(), buf.readBoolean(), buf.readBoolean(), buf.readDouble(),
+                buf.readUtf(), buf.readUtf(), buf.readBoolean(), buf.readBoolean(), buf.readBoolean(),
+                buf.readBoolean(), buf.readBoolean(), buf.readFloat(), buf.readLong(), buf.readVarInt(),
+                readNullableVec(buf), readNullableVec(buf), buf.readUtf()));
         }
         contacts = List.copyOf(decodedContacts);
         soldiers = List.copyOf(decodedSoldiers);
@@ -81,14 +85,23 @@ public final class ArmorDoctrineDebugPacket {
             buf.writeUUID(soldier.soldierId());
             writeVec(buf, soldier.pos());
             buf.writeBoolean(soldier.hunter());
-            buf.writeBoolean(soldier.squadHasAt());
-            buf.writeBoolean(soldier.exposed());
-            buf.writeBoolean(soldier.displace());
-            buf.writeBoolean(soldier.ducked());
+            buf.writeBoolean(soldier.launcherHeld());
+            buf.writeBoolean(soldier.launcherStored());
+            buf.writeBoolean(soldier.vehicleSelected());
+            buf.writeDouble(soldier.contactDistance());
+            buf.writeUtf(soldier.heldGunId() == null ? "" : soldier.heldGunId());
+            buf.writeUtf(soldier.peekState() == null ? "" : soldier.peekState());
+            buf.writeBoolean(soldier.lowCrouching());
+            buf.writeBoolean(soldier.crawlMoving());
+            buf.writeBoolean(soldier.reloading());
+            buf.writeBoolean(soldier.bolting());
+            buf.writeBoolean(soldier.drawing());
+            buf.writeFloat(soldier.adsProgress());
+            buf.writeLong(soldier.shootCooldown());
+            buf.writeVarInt(soldier.ammo());
             writeNullableVec(buf, soldier.coverPos());
-            writeNullableUuid(buf, soldier.suppressionTargetId());
             writeNullableVec(buf, soldier.firingSolution());
-            buf.writeUtf(soldier.blockReason() == null ? "idle" : soldier.blockReason());
+            buf.writeUtf(soldier.combatState() == null ? "idle" : soldier.combatState());
         }
     }
 

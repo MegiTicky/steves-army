@@ -143,27 +143,10 @@ public final class ArmorDoctrineDebugRenderer {
     private static void renderSoldierLines(BufferBuilder buffer, Matrix4f matrix, Vec3 cameraPos,
                                            List<ArmorDoctrineDebugPacket.Contact> contacts,
                                            ArmorDoctrineDebugPacket.Soldier soldier) {
-        ArmorDoctrineDebugPacket.Contact claimed = findContact(contacts, soldier.suppressionTargetId());
-        if (claimed != null) {
-            // Suppression claim on the vehicle: magenta.
-            line(buffer, matrix, cameraPos, soldier.pos(), claimed.aimPoint(), 255, 64, 255);
-            return;
-        }
-        if (soldier.hunter()) {
+        if (soldier.vehicleSelected()) {
             ArmorDoctrineDebugPacket.Contact nearest = nearestContact(contacts, soldier.pos());
             if (nearest != null) {
-                // Hunter: green while it can shoot, dim green when gated.
-                int[] color = soldier.ducked() ? new int[] {64, 160, 64} : new int[] {64, 255, 64};
-                line(buffer, matrix, cameraPos, soldier.pos(), nearest.aimPoint(), color[0], color[1], color[2]);
-            }
-            return;
-        }
-        if (soldier.squadHasAt()) {
-            ArmorDoctrineDebugPacket.Contact nearest = nearestContact(contacts, soldier.pos());
-            if (nearest != null && (soldier.exposed() || soldier.displace() || soldier.ducked())) {
-                int[] color = soldier.displace() ? new int[] {255, 160, 32}
-                    : soldier.ducked() ? new int[] {96, 96, 255} : new int[] {255, 220, 64};
-                line(buffer, matrix, cameraPos, soldier.pos(), nearest.aimPoint(), color[0], color[1], color[2]);
+                line(buffer, matrix, cameraPos, soldier.pos(), nearest.aimPoint(), 64, 255, 64);
             }
         }
         if (soldier.coverPos() != null) {
@@ -222,16 +205,23 @@ public final class ArmorDoctrineDebugRenderer {
     private static void renderSoldierLabel(Font font, PoseStack poseStack, Vec3 cameraPos,
                                            ArmorDoctrineDebugPacket.Soldier soldier,
                                            MultiBufferSource.BufferSource buffers) {
-        StringBuilder text = new StringBuilder(soldier.hunter() ? "HUNTER" : "RIFLEMAN");
-        if (!soldier.squadHasAt() && !soldier.hunter()) text.append(" no-AT");
-        if (soldier.hunter() && soldier.blockReason() != null) {
-            text.append(" ").append(soldier.blockReason());
+        StringBuilder text = new StringBuilder(soldier.hunter() ? "AT" : "SOLDIER");
+        text.append(" ").append(soldier.combatState());
+        if (soldier.hunter()) {
+            text.append(" held=").append(soldier.launcherHeld() ? "RPG" : "sidearm");
+            text.append(" stored=").append(soldier.launcherStored());
+            if (soldier.contactDistance() >= 0.0) {
+                text.append(String.format(" contact=%.0fm", soldier.contactDistance()));
+            }
         }
-        if (soldier.exposed()) text.append(" exposed");
-        if (soldier.ducked()) text.append(" ducked");
-        if (soldier.displace()) text.append(" DISPLACE");
-        if (soldier.suppressionTargetId() != null) text.append(" buttoning");
-        int color = soldier.hunter() ? 0xFF40FF40 : soldier.displace() ? 0xFFFFA020 : 0xFFFFFFFF;
+        text.append(" peek=").append(soldier.peekState());
+        if (soldier.lowCrouching()) text.append(soldier.crawlMoving() ? " crawl" : " prone");
+        if (soldier.reloading()) text.append(" reload");
+        if (soldier.bolting()) text.append(" bolt");
+        if (soldier.drawing()) text.append(" draw");
+        text.append(String.format(" ads=%.0f%% cd=%d ammo=%d", soldier.adsProgress() * 100.0f,
+            soldier.shootCooldown(), soldier.ammo()));
+        int color = soldier.vehicleSelected() ? 0xFF40FF40 : soldier.hunter() ? 0xFF80D080 : 0xFFFFFFFF;
         billboard(font, poseStack, cameraPos, soldier.pos().add(0, 0.5, 0), text.toString(), 0, color, buffers);
     }
 

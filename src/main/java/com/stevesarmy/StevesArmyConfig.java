@@ -95,13 +95,9 @@ public class StevesArmyConfig {
 
     public static final ForgeConfigSpec.BooleanValue ARMOR_AWARENESS_ENABLED;
     public static final ForgeConfigSpec.DoubleValue ARMOR_DETECTION_DISTANCE;
-    public static final ForgeConfigSpec.BooleanValue ARMOR_PATH_DISPLACEMENT_ENABLED;
-    public static final ForgeConfigSpec.DoubleValue ARMOR_PATH_CORRIDOR_WIDTH;
     public static final ForgeConfigSpec.DoubleValue ARMOR_ENGAGEMENT_MAX_RANGE;
     public static final ForgeConfigSpec.ConfigValue<java.util.List<? extends String>> ARMOR_AT_GUN_PATTERNS;
     public static final ForgeConfigSpec.EnumValue<ArmorDoctrineOverride> ARMOR_DOCTRINE_OVERRIDE;
-    public static final ForgeConfigSpec.IntValue AT_PING_ROCKET_BUDGET;
-    public static final ForgeConfigSpec.IntValue LAUNCHER_RESERVE_FLOOR;
     public static final ForgeConfigSpec.BooleanValue OCCUPANCY_VEHICLE_DETECTION;
 
     public enum ArmorDoctrineOverride { AUTO, NO_AT, FORCE_AT }
@@ -611,11 +607,10 @@ BUILDER.pop();
         BUILDER.push("armorDoctrine");
 
         ARMOR_AWARENESS_ENABLED = BUILDER
-            .comment("Soldiers detect enemy-crewed vehicles as hard targets and react by",
-                     "role: squads without an anti-armor weapon hide, break line of sight,",
-                     "and displace out of the vehicle's path; squads with an anti-armor gun",
-                     "(see atGunIdPatterns) designate its carrier as the armor hunter,",
-                     "everyone else suppresses the vehicle to keep its crew buttoned.",
+            .comment("Soldiers detect enemy-crewed vehicles as shared hard-target contacts.",
+                     "A launcher carrier may select the launcher and use the ordinary direct",
+                     "combat pipeline against a visible hull surface; vehicle contacts never",
+                     "change cover, peeking, posture, navigation, or rifleman behavior.",
                      "Vehicles are spotted via crewed tallyho turrets (requires tallyho) or",
                      "via crewed occupancy (see occupancyVehicleDetection, no tallyho needed).",
                      "Default: true.")
@@ -626,17 +621,6 @@ BUILDER.pop();
                      "Vehicles are large and loud; detection is instant inside this range.",
                      "Default: 48 blocks.")
             .defineInRange("detectionDistance", 48.0, 8.0, 256.0);
-
-        ARMOR_PATH_DISPLACEMENT_ENABLED = BUILDER
-            .comment("Squads without anti-armor weapons displace away when an enemy vehicle's",
-                     "projected path closes on their cover. Player orders still override.",
-                     "Default: true.")
-            .define("pathDisplacementEnabled", true);
-
-        ARMOR_PATH_CORRIDOR_WIDTH = BUILDER
-            .comment("Width of the corridor in front of a moving vehicle that cover positions",
-                     "and soldiers avoid. Default: 12 blocks.")
-            .defineInRange("pathCorridorWidth", 12.0, 2.0, 64.0);
 
         ARMOR_ENGAGEMENT_MAX_RANGE = BUILDER
             .comment("Maximum range at which the designated armor hunter opens fire on a",
@@ -659,18 +643,6 @@ BUILDER.pop();
                      "(riflemen will suppress the vehicle even with no hunter designated).",
                      "Default: AUTO.")
             .defineEnum("doctrineOverride", ArmorDoctrineOverride.AUTO);
-
-        AT_PING_ROCKET_BUDGET = BUILDER
-            .comment("Launcher rounds an AT soldier may spend on one heavy-fire suppression",
-                     "ping, firing at solid structure instead of window/opening points so the",
-                     "position itself is levelled. Default: 2.")
-            .defineInRange("atPingRocketBudget", 2, 0, 16);
-
-        LAUNCHER_RESERVE_FLOOR = BUILDER
-            .comment("Launcher rounds an AT soldier keeps in reserve for tanks: heavy-fire",
-                     "pings stop firing at this floor. A spotted enemy vehicle overrides the",
-                     "floor (armor defense outranks the reserve). Default: 1.")
-            .defineInRange("launcherReserveFloor", 1, 0, 16);
 
         OCCUPANCY_VEHICLE_DETECTION = BUILDER
             .comment("Detect ships as enemy vehicles when enemy CREW are aboard: a soldier",
@@ -1235,14 +1207,6 @@ BUILDER.pop();
         return ARMOR_DETECTION_DISTANCE.get();
     }
 
-    public static boolean isArmorPathDisplacementEnabled() {
-        return ARMOR_PATH_DISPLACEMENT_ENABLED.get();
-    }
-
-    public static double getArmorPathCorridorWidth() {
-        return ARMOR_PATH_CORRIDOR_WIDTH.get();
-    }
-
     public static double getArmorEngagementMaxRange() {
         return ARMOR_ENGAGEMENT_MAX_RANGE.get();
     }
@@ -1253,14 +1217,6 @@ BUILDER.pop();
 
     public static ArmorDoctrineOverride getArmorDoctrineOverride() {
         return ARMOR_DOCTRINE_OVERRIDE.get();
-    }
-
-    public static int getAtPingRocketBudget() {
-        return AT_PING_ROCKET_BUDGET.get();
-    }
-
-    public static int getLauncherReserveFloor() {
-        return LAUNCHER_RESERVE_FLOOR.get();
     }
 
     public static boolean isOccupancyVehicleDetectionEnabled() {

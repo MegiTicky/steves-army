@@ -55,26 +55,16 @@ public final class ArmorThreatScanner {
     private static final int SCAN_INTERVAL_TICKS = 10;
     /** Sighting trail length for velocity estimation (ticks). */
     private static final long VELOCITY_TRAIL_MAX_TICKS = 100;
-    /** Soldier-side caches must be refreshed by a scan within this window. */
-    private static final long SOLDIER_CACHE_FRESH_TICKS = 60;
     private static final int PRUNE_INTERVAL_TICKS = 200;
     private static final double LOS_TOLERANCE = 2.0;
-    /** Ticks the projected-path corridor looks ahead of a moving vehicle (~5s). */
-    private static final int PATH_LOOKAHEAD_TICKS = 100;
-
     private static final Map<UUID, Long> lastScanTickBySoldier = new HashMap<>();
-    private static final Map<UUID, SoldierCache> cacheBySoldier = new HashMap<>();
     private static final Map<UUID, PrevSighting> lastSightingByThreat = new HashMap<>();
-    /** Last gate that blocked the armor hunter's engagement, for debug rendering. */
-    private static final Map<UUID, String> engageBlockReasonBySoldier = new HashMap<>();
     /** Last resolved firing-solution point per soldier, for debug rendering. */
     private static final Map<UUID, FiringSolutionDebug> firingSolutionBySoldier = new HashMap<>();
     private static final long FIRING_SOLUTION_FRESH_TICKS = 40;
     private static long lastPruneGameTime = Long.MIN_VALUE;
 
     private record PrevSighting(Vec3 hullCenter, long gameTime) {}
-
-    private record SoldierCache(boolean exposedToArmor, long scanGameTime) {}
 
     private ArmorThreatScanner() {}
 
@@ -106,7 +96,6 @@ public final class ArmorThreatScanner {
 
         SquadThreatIntel intel = intelFor(soldier, serverLevel);
         if (intel == null) {
-            cacheBySoldier.remove(soldierId);
             return;
         }
 
@@ -200,9 +189,6 @@ public final class ArmorThreatScanner {
             }
         }
 
-        boolean exposed = nearest != null
-            && TargetAcquisition.hasNearLineOfSightToPosition(soldier, nearest.aimPoint(), LOS_TOLERANCE);
-        cacheBySoldier.put(soldierId, new SoldierCache(exposed, gameTime));
         pruneIfNeeded(gameTime);
     }
 
@@ -219,6 +205,28 @@ public final class ArmorThreatScanner {
         }
         Entity vehicle = occupant.getVehicle();
         return vehicle != null && !(vehicle instanceof LivingEntity);
+    }
+
+    private record FiringSolutionDebug(Vec3 point, long gameTime) {}
+
+    private static void rememberFiringSolution(SoldierEntity soldier, Vec3 point) {
+        firingSolutionBySoldier.put(soldier.getUUID(),
+            new FiringSolutionDebug(point, soldier.level().getGameTime()));
+    }
+
+    private static void forgetFiringSolution(SoldierEntity soldier) {
+        firingSolutionBySoldier.remove(soldier.getUUID());
+    }
+
+    /** Last resolved hull surface, or null when no current solution exists. */
+    @Nullable
+    public static Vec3 getLastFiringSolution(SoldierEntity soldier) {
+        FiringSolutionDebug debug = firingSolutionBySoldier.get(soldier.getUUID());
+        if (debug == null
+            || soldier.level().getGameTime() - debug.gameTime() > FIRING_SOLUTION_FRESH_TICKS) {
+            return null;
+        }
+        return debug.point();
     }
 
     /** Nearest fresh hard target known to the soldier's squad, or null. */
@@ -240,161 +248,6 @@ public final class ArmorThreatScanner {
                 knowledge.lastKnownVelocity, knowledge.lastKnownHullCorners, knowledge.lastSeenTime);
         }
         return null;
-    }
-
-    /** True when the soldier has line of sight to the vehicle's gun position. */
-    public static boolean isExposedToArmor(SoldierEntity soldier) {
-        SoldierCache cache = cacheBySoldier.get(soldier.getUUID());
-        if (cache == null || soldier.level().getGameTime() - cache.scanGameTime > SOLDIER_CACHE_FRESH_TICKS) {
-            return false;
-        }
-        return cache.exposedToArmor;
-    }
-
-    /**
-     * Peek gate for infantry facing armor: stay under cover while the vehicle
-     * has line of sight. Two soldiers are exempt because their doctrine job is
-     * to shoot at the vehicle, which requires rising out of cover: the
-     * designated hunter (its peek cadence is the normal peek cycle), and any
-     * soldier currently assigned to suppress the vehicle's crew. Without
-     * anti-armor support nobody holds either job, so a no-AT squad still never
-     * peeks at a tank at all.
-     */
-    public static boolean shouldStayDuckedForArmor(SoldierEntity soldier) {
-        if (!StevesArmyConfig.isArmorAwarenessEnabled()) {
-            return false;
-        }
-        if (getPrimaryArmorThreat(soldier) == null) {
-            return false;
-        }
-        if (!isExposedToArmor(soldier)) {
-            return false;
-        }
-        if (ArmorRoleManager.isArmorHunter(soldier) || hasHardTargetSuppressionAssignment(soldier)) {
-            return false;
-        }
-        return true;
-    }
-
-    /** True when this soldier's current suppression assignment is the hard target. */
-    public static boolean hasHardTargetSuppressionAssignment(SoldierEntity soldier) {
-        UUID squadId = soldier.getSquadId();
-        if (squadId == null || !(soldier.level() instanceof net.minecraft.server.level.ServerLevel serverLevel)) {
-            return false;
-        }
-        SquadThreatIntel intel = SquadManager.get(serverLevel).getSquadById(squadId)
-            .map(SquadData::getThreatIntel).orElse(null);
-        if (intel == null) {
-            return false;
-        }
-        return intel.getAssignedThreatForSoldier(soldier.getUUID())
-            .map(assignment -> assignment.isHardTarget).orElse(false);
-    }
-
-    /**
-     * True when the vehicle's projected path (hull position plus velocity)
-     * passes within {@code corridorWidth} of {@code pos}. Stationary vehicles
-     * threaten only their own footprint.
-     */
-    public static boolean pathThreatens(SoldierEntity soldier, Vec3 pos, double corridorWidth) {
-        ArmorContact armor = getPrimaryArmorThreat(soldier);
-        if (armor == null) {
-            return false;
-        }
-        Vec3 velocity = armor.velocity();
-        double speed;
-        if (velocity == null || (speed = velocity.horizontalDistance()) < 0.01) {
-            return armor.hullCenter().distanceToSqr(pos) <= corridorWidth * corridorWidth;
-        }
-        Vec3 direction = velocity.normalize();
-        Vec3 rel = pos.subtract(armor.hullCenter());
-        double along = rel.dot(direction);
-        double reach = speed * PATH_LOOKAHEAD_TICKS;
-        if (along < -corridorWidth || along > reach + corridorWidth) {
-            return false;
-        }
-        double lateral = rel.subtract(direction.scale(along)).horizontalDistance();
-        return lateral <= corridorWidth;
-    }
-
-    /**
-     * Displacement trigger for the no-anti-armor doctrine: the vehicle has
-     * line of sight to the soldier, or its projected path is closing on the
-     * soldier's position. Hunters opt out — they pick firing positions, not
-     * escape routes.
-     */
-    public static boolean shouldDisplaceFromArmor(SoldierEntity soldier) {
-        if (!StevesArmyConfig.isArmorAwarenessEnabled()
-            || !StevesArmyConfig.isArmorPathDisplacementEnabled()) {
-            return false;
-        }
-        if (ArmorRoleManager.isArmorHunter(soldier)) {
-            return false;
-        }
-        if (isExposedToArmor(soldier)) {
-            return true;
-        }
-        return pathThreatens(soldier, soldier.position(), StevesArmyConfig.getArmorPathCorridorWidth());
-    }
-
-    /**
-     * Fire window for the armor hunter: squad-mates have the vehicle's crew
-     * suppressed, the hunter is already in the open, pinned, or committed to
-     * an exposed peek — hiding has stopped paying, so take the shot.
-     */
-    public static boolean mayHunterEngage(SoldierEntity soldier) {
-        if (isArmorSuppressed(soldier)) {
-            return true;
-        }
-        boolean inCover = soldier.getCoverBehaviorManager().isInCover();
-        if (!inCover || soldier.getCoverBehaviorManager().isPinned()) {
-            return true;
-        }
-        return soldier.getPeekController().getState()
-            == com.stevesarmy.entity.ai.PeekController.State.EXPOSED;
-    }
-
-    /** Records the gate currently blocking this hunter's armor engagement (debug). */
-    public static void setEngageBlockReason(SoldierEntity soldier, String reason) {
-        engageBlockReasonBySoldier.put(soldier.getUUID(), reason);
-    }
-
-    /** Last recorded armor-engagement block reason, or "idle". */
-    public static String getEngageBlockReason(SoldierEntity soldier) {
-        return engageBlockReasonBySoldier.getOrDefault(soldier.getUUID(), "idle");
-    }
-
-    private record FiringSolutionDebug(Vec3 point, long gameTime) {}
-
-    private static void rememberFiringSolution(SoldierEntity soldier, Vec3 point) {
-        firingSolutionBySoldier.put(soldier.getUUID(),
-            new FiringSolutionDebug(point, soldier.level().getGameTime()));
-    }
-
-    private static void forgetFiringSolution(SoldierEntity soldier) {
-        firingSolutionBySoldier.remove(soldier.getUUID());
-    }
-
-    /** Last resolved firing-solution point, for debug rendering; null when stale. */
-    @Nullable
-    public static Vec3 getLastFiringSolution(SoldierEntity soldier) {
-        FiringSolutionDebug debug = firingSolutionBySoldier.get(soldier.getUUID());
-        if (debug == null
-            || soldier.level().getGameTime() - debug.gameTime() > FIRING_SOLUTION_FRESH_TICKS) {
-            return null;
-        }
-        return debug.point();
-    }
-
-    private static boolean isArmorSuppressed(SoldierEntity soldier) {
-        ArmorContact armor = getPrimaryArmorThreat(soldier);
-        if (armor == null) {
-            return false;
-        }
-        SquadThreatIntel intel = intelFor(soldier, soldier.level());
-        Optional<SquadThreatIntel.ThreatKnowledge> knowledge =
-            intel != null ? intel.getThreat(armor.threatId()) : Optional.empty();
-        return knowledge.map(k -> k.isSuppressed).orElse(false);
     }
 
     /** A station is hostile when an enemy player possesses it or an enemy soldier crews it. */
@@ -623,8 +476,6 @@ public final class ArmorThreatScanner {
         lastScanTickBySoldier.clear();
         firingSolutionBySoldier.entrySet().removeIf(
             entry -> gameTime - entry.getValue().gameTime() > FIRING_SOLUTION_FRESH_TICKS * 10);
-        cacheBySoldier.entrySet().removeIf(
-            entry -> gameTime - entry.getValue().scanGameTime > SOLDIER_CACHE_FRESH_TICKS * 100);
     }
 
     @Nullable

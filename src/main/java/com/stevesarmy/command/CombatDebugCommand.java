@@ -1112,10 +1112,14 @@ public class CombatDebugCommand {
         }
 
         source.sendSuccess(() -> Component.literal(
-            "Gates: exposed=" + ArmorThreatScanner.isExposedToArmor(soldier)
-                + " ducked=" + ArmorThreatScanner.shouldStayDuckedForArmor(soldier)
-                + " displace=" + ArmorThreatScanner.shouldDisplaceFromArmor(soldier)
-                + " hunterMayEngage=" + ArmorThreatScanner.mayHunterEngage(soldier)), false);
+            "Pipeline: held=" + com.stevesarmy.combat.GunIntegration.getGunId(soldier)
+                + " launcherHeld=" + ArmorRoleManager.isAtGunStack(soldier.getMainHandItem())
+                + " launcherStored=" + com.stevesarmy.combat.SoldierWeaponSelector.hasLauncher(soldier)
+                + " peek=" + soldier.getPeekController().getState()
+                + " lowCrouch=" + soldier.isLowCrouching()
+                + " reload=" + com.stevesarmy.combat.GunIntegration.isReloading(soldier)
+                + " ads=" + String.format("%.0f%%", com.stevesarmy.combat.GunIntegration.getAimProgress(soldier) * 100.0f)
+                + " ammo=" + com.stevesarmy.combat.GunIntegration.getCurrentAmmo(soldier)), false);
         source.sendSuccess(() -> Component.literal(
             "Cover: " + formatNullablePos(soldier.getCoverBehaviorManager().getCurrentCover() != null
                 ? soldier.getCoverBehaviorManager().getCurrentCover().getPosition() : null)), false);

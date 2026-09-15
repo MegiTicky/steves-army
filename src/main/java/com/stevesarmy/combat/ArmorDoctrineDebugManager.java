@@ -10,6 +10,7 @@ import com.stevesarmy.squad.SquadThreatIntel;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
@@ -107,18 +108,24 @@ public final class ArmorDoctrineDebugManager {
                 && visitedSquads.add(soldier.getSquadId())) {
                 collectContacts(intel, level.getGameTime(), contacts);
             }
+            ArmorThreatScanner.ArmorContact armor = ArmorThreatScanner.getPrimaryArmorThreat(soldier);
+            ItemStack held = soldier.getMainHandItem();
+            boolean hunter = ArmorRoleManager.isArmorHunter(soldier);
+            boolean launcherHeld = ArmorRoleManager.isAtGunStack(held);
+            boolean launcherStored = SoldierWeaponSelector.hasLauncher(soldier);
+            boolean visibleEntityTarget = soldier.getTarget() != null && soldier.getTarget().isAlive()
+                && TargetAcquisition.hasLineOfSight(soldier, soldier.getTarget());
+            boolean vehicleSelected = hunter && launcherHeld && armor != null && !visibleEntityTarget;
+            double contactDistance = armor == null ? -1.0 : soldier.position().distanceTo(armor.aimPoint());
+            String combatState = vehicleSelected ? "vehicle" : visibleEntityTarget ? "entity" : "idle";
             soldiers.add(new ArmorDoctrineDebugPacket.Soldier(
-                soldier.getUUID(),
-                soldier.getEyePosition(),
-                ArmorRoleManager.isArmorHunter(soldier),
-                ArmorRoleManager.squadHasAntiArmor(soldier),
-                ArmorThreatScanner.isExposedToArmor(soldier),
-                ArmorThreatScanner.shouldDisplaceFromArmor(soldier),
-                ArmorThreatScanner.shouldStayDuckedForArmor(soldier),
-                currentCoverPos(soldier),
-                hardSuppressionTarget(intel, soldier),
-                ArmorThreatScanner.getLastFiringSolution(soldier),
-                ArmorThreatScanner.getEngageBlockReason(soldier)));
+                soldier.getUUID(), soldier.getEyePosition(), hunter, launcherHeld, launcherStored,
+                vehicleSelected, contactDistance, GunIntegration.getGunId(held),
+                soldier.getPeekController().getState().name(), soldier.isLowCrouching(), soldier.isCrawlMoving(),
+                GunIntegration.isReloading(soldier), GunIntegration.isBolting(soldier), GunIntegration.isDrawing(soldier),
+                GunIntegration.getAimProgress(soldier), GunIntegration.getShootCoolDown(soldier),
+                GunIntegration.getCurrentAmmo(soldier), currentCoverPos(soldier),
+                ArmorThreatScanner.getLastFiringSolution(soldier), combatState));
         }
 
         NetworkHandler.sendTo(player, new ArmorDoctrineDebugPacket(mode, contacts, soldiers));
@@ -145,19 +152,6 @@ public final class ArmorDoctrineDebugManager {
         com.stevesarmy.combat.cover.CoverPoint cover =
             soldier.getCoverBehaviorManager().getCurrentCover();
         return cover != null ? Vec3.atCenterOf(cover.getPosition()) : null;
-    }
-
-    @Nullable
-    private static UUID hardSuppressionTarget(@Nullable SquadThreatIntel intel, SoldierEntity soldier) {
-        if (intel == null) {
-            return null;
-        }
-        Optional<SquadThreatIntel.ThreatKnowledge> assignment =
-            intel.getAssignedThreatForSoldier(soldier.getUUID());
-        if (assignment.isEmpty() || !assignment.get().isHardTarget) {
-            return null;
-        }
-        return assignment.get().threatEntityId;
     }
 
     @Nullable
