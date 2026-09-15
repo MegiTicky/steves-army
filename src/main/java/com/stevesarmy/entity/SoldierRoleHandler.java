@@ -28,6 +28,7 @@ public final class SoldierRoleHandler {
             case GARRISON -> ModEntities.GARRISON.get();
             case SUPPORT -> ModEntities.SUPPORT.get();
             case VEHICLE_CREW -> ModEntities.VEHICLE_CREW.get();
+            case ANTI_TANK -> ModEntities.ANTI_TANK.get();
         };
     }
 

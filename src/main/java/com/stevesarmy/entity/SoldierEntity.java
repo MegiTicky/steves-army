@@ -640,6 +640,7 @@ public class SoldierEntity extends PathfinderMob implements Container {
             case GARRISON -> ModItems.GARRISON_SPAWN_EGG.get();
             case SUPPORT -> ModItems.SUPPORT_SPAWN_EGG.get();
             case VEHICLE_CREW -> ModItems.VEHICLE_CREW_SPAWN_EGG.get();
+            case ANTI_TANK -> ModItems.ANTI_TANK_SPAWN_EGG.get();
         };
     }
 

@@ -110,6 +110,24 @@ public class ModEntities {
             .build(StevesArmyMod.MODID + ":enemy_vehicle_crew")
     );
 
+    public static final RegistryObject<EntityType<com.stevesarmy.entity.AntiTankEntity>> ANTI_TANK = ENTITIES.register(
+        "anti_tank",
+        () -> EntityType.Builder.of(com.stevesarmy.entity.AntiTankEntity::new, MobCategory.CREATURE)
+            .sized(0.6F, 1.8F)
+            .clientTrackingRange(10)
+            .updateInterval(3)
+            .build(StevesArmyMod.MODID + ":anti_tank")
+    );
+
+    public static final RegistryObject<EntityType<com.stevesarmy.entity.EnemyAntiTankEntity>> ENEMY_ANTI_TANK = ENTITIES.register(
+        "enemy_anti_tank",
+        () -> EntityType.Builder.of(com.stevesarmy.entity.EnemyAntiTankEntity::new, MobCategory.MONSTER)
+            .sized(0.6F, 1.8F)
+            .clientTrackingRange(10)
+            .updateInterval(3)
+            .build(StevesArmyMod.MODID + ":enemy_anti_tank")
+    );
+
     public static final RegistryObject<EntityType<ResupplyPouchEntity>> RESUPPLY_POUCH = ENTITIES.register(
         "resupply_pouch",
         () -> EntityType.Builder.of(ResupplyPouchEntity::new, MobCategory.MISC)
@@ -181,6 +199,22 @@ public class ModEntities {
             .build());
 
         event.put(ENEMY_VEHICLE_CREW.get(), Monster.createMonsterAttributes()
+            .add(Attributes.MAX_HEALTH, 20.0D)
+            .add(Attributes.MOVEMENT_SPEED, 0.35D)
+            .add(Attributes.ARMOR, 4.0D)
+            .add(Attributes.ATTACK_DAMAGE, 3.0D)
+            .add(Attributes.FOLLOW_RANGE, 32.0D)
+            .build());
+
+        event.put(ANTI_TANK.get(), Monster.createMonsterAttributes()
+            .add(Attributes.MAX_HEALTH, 20.0D)
+            .add(Attributes.MOVEMENT_SPEED, 0.35D)
+            .add(Attributes.ARMOR, 4.0D)
+            .add(Attributes.ATTACK_DAMAGE, 3.0D)
+            .add(Attributes.FOLLOW_RANGE, 32.0D)
+            .build());
+
+        event.put(ENEMY_ANTI_TANK.get(), Monster.createMonsterAttributes()
             .add(Attributes.MAX_HEALTH, 20.0D)
             .add(Attributes.MOVEMENT_SPEED, 0.35D)
             .add(Attributes.ARMOR, 4.0D)

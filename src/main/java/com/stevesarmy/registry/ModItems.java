@@ -95,6 +95,16 @@ public class ModItems {
         () -> new com.stevesarmy.item.VehicleCrewSpawnEggItem(ModEntities.VEHICLE_CREW, 0x4A7C59, 0x4682B4, new Item.Properties())
     );
 
+    public static final RegistryObject<Item> ANTI_TANK_SPAWN_EGG = ITEMS.register(
+        "anti_tank_spawn_egg",
+        () -> new com.stevesarmy.item.AntiTankSpawnEggItem(ModEntities.ANTI_TANK, 0x4A7C59, 0xB8860B, new Item.Properties())
+    );
+
+    public static final RegistryObject<Item> ENEMY_ANTI_TANK_SPAWN_EGG = ITEMS.register(
+        "enemy_anti_tank_spawn_egg",
+        () -> new com.stevesarmy.item.EnemyAntiTankSpawnEggItem(new Item.Properties())
+    );
+
     public static final RegistryObject<Item> RESUPPLY_POUCH = ITEMS.register(
         "resupply_pouch",
         () -> new Item(new Item.Properties().stacksTo(16))

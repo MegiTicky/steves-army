@@ -31,8 +31,10 @@ public class ModCreativeTab {
                 output.accept(ModItems.TEAM_GARRISON_SPAWN_EGG.get());
                 output.accept(ModItems.SUPPORT_SPAWN_EGG.get());
                 output.accept(ModItems.VEHICLE_CREW_SPAWN_EGG.get());
+                output.accept(ModItems.ANTI_TANK_SPAWN_EGG.get());
                 output.accept(ModItems.ENEMY_SOLDIER_SPAWN_EGG.get());
                 output.accept(ModItems.ENEMY_VEHICLE_CREW_SPAWN_EGG.get());
+                output.accept(ModItems.ENEMY_ANTI_TANK_SPAWN_EGG.get());
                 output.accept(ModItems.TARGET_SPAWN_EGG.get());
                 output.accept(ModItems.RESUPPLY_POUCH.get());
             })

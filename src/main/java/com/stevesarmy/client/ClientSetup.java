@@ -26,9 +26,11 @@ public class ClientSetup {
         event.registerEntityRenderer(ModEntities.GARRISON.get(), SoldierRenderer::new);
         event.registerEntityRenderer(ModEntities.TEAM_GARRISON.get(), SoldierRenderer::new);
         event.registerEntityRenderer(ModEntities.VEHICLE_CREW.get(), SoldierRenderer::new);
+        event.registerEntityRenderer(ModEntities.ANTI_TANK.get(), SoldierRenderer::new);
         event.registerEntityRenderer(ModEntities.TARGET.get(), TargetRenderer::new);
         event.registerEntityRenderer(ModEntities.ENEMY_SOLDIER.get(), EnemySoldierRenderer::new);
         event.registerEntityRenderer(ModEntities.ENEMY_VEHICLE_CREW.get(), EnemySoldierRenderer::new);
+        event.registerEntityRenderer(ModEntities.ENEMY_ANTI_TANK.get(), EnemySoldierRenderer::new);
         event.registerEntityRenderer(ModEntities.RESUPPLY_POUCH.get(), ResupplyPouchRenderer::new);
     }
 

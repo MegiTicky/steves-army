@@ -9,7 +9,10 @@ public enum SoldierRole {
     MACHINE_GUNNER,
     GARRISON,
     SUPPORT,
-    VEHICLE_CREW;
+    VEHICLE_CREW,
+    // Persisted by ordinal (SoldierEntity save data) — append new roles only,
+    // never insert between existing ones.
+    ANTI_TANK;
 
     public Component getDisplayName() {
         return Component.translatable("role.steves_army." + name().toLowerCase());

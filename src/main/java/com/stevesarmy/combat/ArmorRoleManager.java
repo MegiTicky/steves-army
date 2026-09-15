@@ -2,6 +2,7 @@ package com.stevesarmy.combat;
 
 import com.stevesarmy.StevesArmyConfig;
 import com.stevesarmy.entity.SoldierEntity;
+import com.stevesarmy.entity.SoldierRole;
 import com.stevesarmy.squad.SquadData;
 import com.stevesarmy.squad.SquadManager;
 import net.minecraft.server.level.ServerLevel;
@@ -18,12 +19,12 @@ import java.util.UUID;
 /**
  * Per-squad anti-armor capability assessment for the vehicle doctrine.
  *
- * A squad "has anti-armor" when at least one member's current gun ID matches
- * a configured pattern (TaCZ gun ids like {@code tacz:rpg7} match "rpg");
- * those members are the squad's armor hunters. Everyone else supports them by
- * suppressing the vehicle's crew; a squad with no anti-armor gun hides and
- * displaces instead of provoking the vehicle. The config override can force
- * either branch for testing.
+ * Hunter designation is ROLE-based: only {@code SoldierRole.ANTI_TANK}
+ * soldiers are candidates, and only while an AT gun (a gun ID matching a
+ * configured pattern, like {@code tacz:rpg7} matching "rpg") is somewhere in
+ * their inventory — an AT soldier without a launcher acts as a rifleman, and
+ * a rifleman who picks up a rocket launcher does not become a hunter. The
+ * config override can force either branch for testing.
  */
 public final class ArmorRoleManager {
     private static final long REFRESH_INTERVAL_TICKS = 40;
@@ -81,7 +82,7 @@ public final class ArmorRoleManager {
                 if (!(serverLevel.getEntity(memberId) instanceof SoldierEntity member) || !member.isAlive()) {
                     continue;
                 }
-                if (carriesAtGun(member)) {
+                if (member.getRole() == SoldierRole.ANTI_TANK && carriesAtGun(member)) {
                     hunters.add(memberId);
                 }
             }
@@ -99,8 +100,8 @@ public final class ArmorRoleManager {
 
     /**
      * True when any persistent slot (sidearm, main hand, general) carries an
-     * anti-armor gun. Hunter designation is inventory-based so a hunter whose
-     * launcher is stashed while he fights with the sidearm keeps the role.
+     * anti-armor gun. Role decides who hunts; this decides whether the hunter
+     * can actually fight vehicles right now (launcher stashed = rifleman duty).
      */
     private static boolean carriesAtGun(SoldierEntity soldier) {
         com.stevesarmy.inventory.SoldierInventory inv = soldier.getSoldierInventory();

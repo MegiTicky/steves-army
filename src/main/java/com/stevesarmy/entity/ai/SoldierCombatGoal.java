@@ -125,8 +125,6 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
 
     // Sidearm policy changes equipment only. Vehicle contacts are adapted into
     // the ordinary direct-fire pipeline below; they never own cover or movement.
-    private int weaponSwapCooldownTicks = 0;
-    private static final int WEAPON_SWAP_COOLDOWN_TICKS = 40;
 
     // Vehicle engagements must look like one stable fight to the cover system.
     // The latch rides out contact flicker, the streak gate keeps a peeking crew
@@ -500,7 +498,24 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
         }
 
         maintainSuppressionAssignment();
-        tickWeaponSelection();
+
+        // Branch ownership is decided before weapon selection so the held gun
+        // always matches the engagement this tick: the launcher is raised only
+        // while the vehicle branch owns the loop, and entity combat never runs
+        // with a rocket launcher waiting on a swap cooldown.
+        boolean targetVisible = target != null && target.isAlive()
+            && TargetAcquisition.hasLineOfSight(soldier, target);
+        visibleTargetStreakTicks = targetVisible ? visibleTargetStreakTicks + 1 : 0;
+
+        ArmorThreatScanner.ArmorContact activeVehicleTarget = hasGun ? getVehicleCombatTarget() : null;
+        if (activeVehicleTarget != null) {
+            vehicleEngagementTicks = VEHICLE_ENGAGEMENT_LATCH_TICKS;
+        } else if (vehicleEngagementTicks > 0) {
+            vehicleEngagementTicks--;
+        }
+        soldier.setVehicleEngagement(vehicleEngagementTicks > 0);
+
+        tickWeaponSelection(activeVehicleTarget);
 
         // Last-seen suppression must yield to a real visible target immediately,
         // including while the soldier is exposed from cover. Use a fresh scan so
@@ -543,24 +558,12 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
         // A hard target supplies only a hull aim point. It enters the same
         // direct-fire path as an entity target and never changes cover, peek,
         // posture, navigation, burst, or readiness control.
-        boolean targetVisible = target != null && target.isAlive()
-            && TargetAcquisition.hasLineOfSight(soldier, target);
-        visibleTargetStreakTicks = targetVisible ? visibleTargetStreakTicks + 1 : 0;
-
-        ArmorThreatScanner.ArmorContact vehicleTarget = hasGun ? getVehicleCombatTarget() : null;
-        if (vehicleTarget != null) {
-            vehicleEngagementTicks = VEHICLE_ENGAGEMENT_LATCH_TICKS;
-        } else if (vehicleEngagementTicks > 0) {
-            vehicleEngagementTicks--;
-        }
-        soldier.setVehicleEngagement(vehicleEngagementTicks > 0);
-
-        if (vehicleTarget != null) {
+        if (activeVehicleTarget != null) {
             // Keep a live cover-search direction at the hull: without this the
             // smooth threat direction decays mid-fight and cover searches
             // alternate between direction-led and direction-less results.
-            soldier.getThreatAwareness().onEnemyPing(BlockPos.containing(vehicleTarget.hullCenter()));
-            tickCombat(hasGun, vehicleTarget);
+            soldier.getThreatAwareness().onEnemyPing(BlockPos.containing(activeVehicleTarget.hullCenter()));
+            tickCombat(hasGun, activeVehicleTarget);
             updateDebugSync();
         } else if (target != null && target.isAlive()) {
             LivingEntity combatTarget = target;
@@ -1254,6 +1257,14 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
 
     private void tickGunCombat(@javax.annotation.Nullable ArmorThreatScanner.ArmorContact vehicleTarget) {
         boolean vehicleCombat = vehicleTarget != null;
+        // Doctrine: the launcher only ever fires at a vehicle. If entity combat
+        // owns the loop while the launcher is still in hand (swap failed or the
+        // launcher is the soldier's only gun), hold fire rather than rocket
+        // infantry.
+        if (!vehicleCombat && ArmorRoleManager.isAtGunStack(soldier.getMainHandItem())) {
+            resetDirectFireBurst();
+            return;
+        }
         CoverBehaviorManager coverManager = soldier.getCoverBehaviorManager();
         Vec3 vehicleSolution = vehicleCombat
             ? ArmorThreatScanner.findFiringSolution(soldier, vehicleTarget) : null;
@@ -2505,14 +2516,10 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
 
     /**
      * Sidearm doctrine: AT carriers hold a normal gun (sidearm slot when
-     * loaded) and raise the launcher only while a vehicle is spotted or a
-     * heavy-fire ping is active. Soldiers without an AT gun are untouched.
+     * loaded) and raise the launcher only while the vehicle branch owns the
+     * engagement. Soldiers without an AT gun are untouched.
      */
-    private void tickWeaponSelection() {
-        if (weaponSwapCooldownTicks > 0) {
-            weaponSwapCooldownTicks--;
-            return;
-        }
+    private void tickWeaponSelection(@javax.annotation.Nullable ArmorThreatScanner.ArmorContact vehicleTarget) {
         if (!GunIntegration.isAnyGunLoaded() || !GunIntegration.hasGun(soldier)) {
             return;
         }
@@ -2520,25 +2527,13 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
         if (!isAtCarrier()) {
             return;
         }
-        if (SoldierWeaponSelector.update(soldier, wantsLauncher())) {
+        // The held gun must match the engagement, immediately. Branch flips
+        // are already debounced (engagement latch + visible-sighting gate), so
+        // a mismatch only means the fight genuinely changed — fighting infantry
+        // with a rocket launcher must not wait a cooldown out, and vice versa.
+        if (SoldierWeaponSelector.update(soldier, vehicleTarget != null)) {
             resetAim(null);
-            weaponSwapCooldownTicks = WEAPON_SWAP_COOLDOWN_TICKS;
         }
-    }
-
-    private boolean wantsLauncher() {
-        if (!ArmorRoleManager.isArmorHunter(soldier)) {
-            return false;
-        }
-        if (ArmorThreatScanner.getPrimaryArmorThreat(soldier) == null) {
-            return false;
-        }
-        // A normal visible enemy always retains the direct-fire loop and the
-        // sidearm. The launcher is only selected for a vehicle-only engagement.
-        // The streak gate matches the branch debounce so a peeking crew does
-        // not bounce the held weapon every few ticks.
-        return target == null || !target.isAlive()
-            || visibleTargetStreakTicks < VEHICLE_EXIT_VISIBLE_TICKS;
     }
 
     /** True when the soldier carries an anti-armor gun anywhere in inventory (cached briefly). */

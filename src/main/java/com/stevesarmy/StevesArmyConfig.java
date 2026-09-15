@@ -629,9 +629,10 @@ BUILDER.pop();
             .defineInRange("engagementMaxRange", 48.0, 8.0, 256.0);
 
         ARMOR_AT_GUN_PATTERNS = BUILDER
-            .comment("Gun-ID substrings that count as anti-armor weapons. A soldier whose",
-                     "current gun ID (TaCZ gun id, e.g. tacz:rpg7) contains any pattern is",
-                     "designated the squad's armor hunter. Default: rpg / rocket / launcher.")
+            .comment("Gun-ID substrings that count as anti-armor weapons (TaCZ gun id,",
+                     "e.g. tacz:rpg7). An ANTI-TANK-role soldier carrying any such gun is",
+                     "designated the squad's armor hunter; other soldiers never hunt even",
+                     "if they pick a launcher up. Default: rpg / rocket / launcher.")
             .defineList("atGunIdPatterns",
                 java.util.List.of("rpg", "rocket", "launcher"),
                 entry -> entry instanceof String);
