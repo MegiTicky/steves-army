@@ -28,12 +28,13 @@ public class SuppressPingDebugPacket {
     private final int durationTicks;
     private final String statusLine;
     private final Vec3 currentTarget;
+    private final Vec3 relocTargetPos;
     private final List<Vec3> aimPoints;
     private final List<Boolean> aimPointValid;
 
     public SuppressPingDebugPacket(boolean renderEnabled, UUID soldierId, Vec3 soldierPos,
                                    Vec3 pingPos, boolean heavy, int remainingTicks, int durationTicks,
-                                   String statusLine, Vec3 currentTarget,
+                                   String statusLine, Vec3 currentTarget, Vec3 relocTargetPos,
                                    List<Vec3> aimPoints, List<Boolean> aimPointValid) {
         this.renderEnabled = renderEnabled;
         this.soldierId = soldierId;
@@ -44,6 +45,7 @@ public class SuppressPingDebugPacket {
         this.durationTicks = durationTicks;
         this.statusLine = statusLine;
         this.currentTarget = currentTarget;
+        this.relocTargetPos = relocTargetPos;
         this.aimPoints = aimPoints;
         this.aimPointValid = aimPointValid;
     }
@@ -58,6 +60,7 @@ public class SuppressPingDebugPacket {
         this.durationTicks = buf.readVarInt();
         this.statusLine = buf.readUtf();
         this.currentTarget = buf.readBoolean() ? readVec(buf) : null;
+        this.relocTargetPos = buf.readBoolean() ? readVec(buf) : null;
         int count = buf.readVarInt();
         this.aimPoints = new ArrayList<>(count);
         this.aimPointValid = new ArrayList<>(count);
@@ -89,6 +92,8 @@ public class SuppressPingDebugPacket {
         buf.writeUtf(msg.statusLine);
         buf.writeBoolean(msg.currentTarget != null);
         if (msg.currentTarget != null) writeVec(buf, msg.currentTarget);
+        buf.writeBoolean(msg.relocTargetPos != null);
+        if (msg.relocTargetPos != null) writeVec(buf, msg.relocTargetPos);
         buf.writeVarInt(msg.aimPoints.size());
         for (int i = 0; i < msg.aimPoints.size(); i++) {
             writeVec(buf, msg.aimPoints.get(i));
@@ -117,6 +122,7 @@ public class SuppressPingDebugPacket {
     public int durationTicks() { return durationTicks; }
     public String statusLine() { return statusLine; }
     public Vec3 currentTarget() { return currentTarget; }
+    public Vec3 relocTargetPos() { return relocTargetPos; }
     public List<Vec3> aimPoints() { return aimPoints; }
     public List<Boolean> aimPointValid() { return aimPointValid; }
 }

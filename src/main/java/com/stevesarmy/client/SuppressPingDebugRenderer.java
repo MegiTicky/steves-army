@@ -98,6 +98,15 @@ public final class SuppressPingDebugRenderer {
             line(buffer, matrix, cameraPos, snapshot.soldierPos(), target, color[0], color[1], color[2]);
             cross(buffer, matrix, cameraPos, target, 0.5, color[0], color[1], color[2]);
         }
+
+        // Reposition destination while seeking/moving to new cover.
+        Vec3 relocTarget = snapshot.relocTargetPos();
+        if (relocTarget != null) {
+            line(buffer, matrix, cameraPos, snapshot.soldierPos(), relocTarget, 255, 64, 255);
+            cross(buffer, matrix, cameraPos, relocTarget, 0.6, 255, 64, 255);
+            line(buffer, matrix, cameraPos, relocTarget, relocTarget.add(0, 2.2, 0), 255, 64, 255);
+            square(buffer, matrix, cameraPos, relocTarget.add(0, 1.1, 0), 0.45, 255, 64, 255);
+        }
     }
 
     private static void renderLabel(Font font, PoseStack poseStack, Vec3 cameraPos,

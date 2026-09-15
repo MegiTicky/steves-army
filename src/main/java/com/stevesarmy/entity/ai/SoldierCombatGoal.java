@@ -2352,13 +2352,26 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
             aimPointValid.add(TargetAcquisition.hasLineOfSightToPositionIgnoringSmoke(soldier, point));
         }
 
+        CoverBehaviorManager coverManager = soldier.getCoverBehaviorManager();
+        CoverBehaviorManager.CoverState coverState = coverManager.getState();
+        Vec3 relocTarget = null;
+        if (coverState == CoverBehaviorManager.CoverState.SEEKING_COVER
+            || coverState == CoverBehaviorManager.CoverState.REPOSITIONING) {
+            CoverPoint targetCover = coverManager.getTargetCover();
+            if (targetCover != null) {
+                relocTarget = Vec3.atCenterOf(targetCover.getPosition());
+            }
+        }
+
         NetworkHandler.INSTANCE.send(PacketDistributor.PLAYER.with(() -> serverPlayer),
             new SuppressPingDebugPacket(true, soldier.getUUID(), soldier.position(), pingCentre,
                 pingSuppressHeavy, pingSuppressRemainingTicks, pingSuppressDurationTicks,
-                buildPingStatusLine(), pingSuppressionTarget, aimPoints, aimPointValid));
+                buildPingStatusLine(coverState, coverManager), pingSuppressionTarget, relocTarget,
+                aimPoints, aimPointValid));
     }
 
-    private String buildPingStatusLine() {
+    private String buildPingStatusLine(CoverBehaviorManager.CoverState coverState,
+                                       CoverBehaviorManager coverManager) {
         StringBuilder status = new StringBuilder();
         status.append(isPingSuppressing ? "firing" : "pending");
         status.append(" peek=").append(soldier.getPeekController().getState());
@@ -2372,6 +2385,10 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
         if (!soldier.getSuppressionAimPoints().isEmpty() && pingSuppressionTarget == null) {
             status.append(" laneBlocked");
         }
+        status.append(" cv=").append(coverState);
+        if (coverManager.isContinuousSuppressionRepositionRequested()) status.append(" scootReq");
+        if (coverManager.isRepositionRequested()) status.append(" relocReq");
+        if (coverManager.isNonPeekableCover()) status.append(" nonPeekable");
         return status.toString();
     }
     
@@ -3620,7 +3637,9 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
     /**
      * The soldier wants to suppress but no lane into the zone validates. After
      * a short grace period, relocate (throttled) — the zone-directed threat
-     * feed aims the cover search at the ping so the new position has lanes.
+     * feed aims the cover search at the ping. Uses the CONTINUOUS_SUPPRESSION
+     * emergency channel: the routine reposition gate refuses to move while
+     * suppressed, which is exactly when a pinged soldier needs a better angle.
      */
     private void tickPingSuppressReposition() {
         pingNoTargetTicks++;
@@ -3629,10 +3648,10 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
         if (soldier.tickCount - lastPingRepositionTick < PING_REPOSITION_COOLDOWN_TICKS) return;
         lastPingRepositionTick = soldier.tickCount;
         if (isSuppressionDebugLogging()) {
-            StevesArmyMod.LOGGER.info("[SuppressPing] Soldier {} no valid lane into zone, requesting reposition",
+            StevesArmyMod.LOGGER.info("[SuppressPing] Soldier {} no valid lane into zone, requesting emergency reposition",
                 soldier.getId());
         }
-        soldier.getCoverBehaviorManager().requestReposition();
+        soldier.getCoverBehaviorManager().requestContinuousSuppressionReposition();
     }
 
     /** Every cached aim point failed LOS: clear them (cooldown-throttled) so
