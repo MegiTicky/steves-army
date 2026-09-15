@@ -23,8 +23,10 @@ import java.util.UUID;
  * soldiers are candidates, and only while an AT gun (a gun ID matching a
  * configured pattern, like {@code tacz:rpg7} matching "rpg") is somewhere in
  * their inventory — an AT soldier without a launcher acts as a rifleman, and
- * a rifleman who picks up a rocket launcher does not become a hunter. The
- * config override can force either branch for testing.
+ * a rifleman who picks up a rocket launcher does not become a hunter. Hunters
+ * also raise the launcher for a heavy-fire suppression ping, shelling the
+ * cover blocks around the pinged position. The config override can force
+ * either branch for testing.
  */
 public final class ArmorRoleManager {
     private static final long REFRESH_INTERVAL_TICKS = 40;

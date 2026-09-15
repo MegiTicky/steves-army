@@ -4,6 +4,8 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.shapes.VoxelShape;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.player.Player;
@@ -55,6 +57,14 @@ public class CoverFinder {
     // A block-center target is commonly inside the block and causes shots to hit cover.
     private static final double[] HALF_COVER_OPENING_HEIGHTS = {0.12, 0.42};
     private static final double[] HALF_COVER_LATERAL_OFFSETS = {-0.28, 0.0, 0.28};
+
+    // Heavy-weapon suppression aims AT the cover blocks themselves: the aim
+    // point sits this far proud of the impact face so the pre-shot visibility
+    // ray stays clear while the round still strikes the block.
+    private static final double HEAVY_AIM_PROUD_OFFSET = 0.15;
+    private static final int MAX_HEAVY_AIM_POINTS = 16;
+    /** Blocks closer than this to the shooter are skipped (backblast/self-damage). */
+    private static final double HEAVY_AIM_MIN_SELF_DISTANCE_SQR = 9.0;
     
     private static final double FOLLOW_MODE_MAX_OWNER_DISTANCE = 15.0;
 
@@ -1337,6 +1347,59 @@ return qualityScore + shootBonus - distancePenalty;
             }
         }
         
+        return aimPoints;
+    }
+
+    /**
+     * Heavy-weapon suppression: aim points ON the cover blocks around the ping
+     * instead of the peek openings. Each point is where a round from this
+     * soldier actually impacts a wall block (the near-face clip hit, pulled
+     * slightly proud of the surface), so an explosive round bursts against the
+     * cover and suppresses whoever hides behind it. Blocks the ray cannot clip
+     * are skipped — a rocket aimed there would overfly and waste the shot.
+     */
+    public java.util.List<Vec3> findHeavySuppressionAimPoints(
+            SoldierEntity soldier,
+            BlockPos pingCenter,
+            double radius) {
+
+        java.util.List<Vec3> aimPoints = new java.util.ArrayList<>();
+        java.util.Set<BlockPos> sampledBlocks = new java.util.HashSet<>();
+        Vec3 eye = soldier.getEyePosition();
+
+        for (CoverPoint cover : findCoverPoints(pingCenter, (int) radius)) {
+            // Shell the wall the enemy hides behind; for half cover that wall
+            // is the cover block itself.
+            java.util.List<BlockPos> targetBlocks = new java.util.ArrayList<>();
+            if (cover.getType() == CoverType.HALF) {
+                targetBlocks.add(cover.getPosition());
+            } else {
+                for (Direction protectedDir : cover.getProtectedDirections()) {
+                    targetBlocks.add(cover.getPosition().relative(protectedDir));
+                }
+            }
+
+            for (BlockPos block : targetBlocks) {
+                if (!sampledBlocks.add(block)) continue;
+                if (block.distToCenterSqr(eye) < HEAVY_AIM_MIN_SELF_DISTANCE_SQR) continue;
+
+                BlockState state = level.getBlockState(block);
+                VoxelShape shape = state.getCollisionShape(level, block);
+                if (shape.isEmpty()) continue;
+                Vec3 blockCenter = Vec3.atCenterOf(block);
+                BlockHitResult hit = shape.clip(eye, blockCenter, block);
+                if (hit == null || hit.getType() != HitResult.Type.BLOCK) continue;
+
+                Vec3 hitPos = hit.getLocation();
+                Vec3 facePoint = hitPos.add(eye.subtract(hitPos).normalize()
+                    .scale(HEAVY_AIM_PROUD_OFFSET));
+                aimPoints.add(facePoint);
+                if (aimPoints.size() >= MAX_HEAVY_AIM_POINTS) {
+                    return aimPoints;
+                }
+            }
+        }
+
         return aimPoints;
     }
 

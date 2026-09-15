@@ -178,6 +178,7 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
     private boolean isPingSuppressing = false;
     private int pingSuppressDurationTicks = 0;
     private int pingSuppressRemainingTicks = 0;
+    private boolean pingSuppressHeavy = false;
     private Vec3 pingSuppressionTarget = null;
     private Vec3 pingSuppressionSweepEnd = null;
     private Vec3 pingSuppressionShotTarget = null;
@@ -2516,8 +2517,9 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
 
     /**
      * Sidearm doctrine: AT carriers hold a normal gun (sidearm slot when
-     * loaded) and raise the launcher only while the vehicle branch owns the
-     * engagement. Soldiers without an AT gun are untouched.
+     * loaded) and raise the launcher while the vehicle branch owns the
+     * engagement or while a heavy-fire suppression ping is active. Soldiers
+     * without an AT gun are untouched.
      */
     private void tickWeaponSelection(@javax.annotation.Nullable ArmorThreatScanner.ArmorContact vehicleTarget) {
         if (!GunIntegration.isAnyGunLoaded() || !GunIntegration.hasGun(soldier)) {
@@ -2531,9 +2533,25 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
         // are already debounced (engagement latch + visible-sighting gate), so
         // a mismatch only means the fight genuinely changed — fighting infantry
         // with a rocket launcher must not wait a cooldown out, and vice versa.
-        if (SoldierWeaponSelector.update(soldier, vehicleTarget != null)) {
+        boolean launcherWanted = vehicleTarget != null || wantsHeavySuppressPing();
+        if (SoldierWeaponSelector.update(soldier, launcherWanted)) {
             resetAim(null);
         }
+    }
+
+    /**
+     * Heavy-weapon suppression: an armor hunter with launcher rounds answers a
+     * suppress ping by raising the AT gun and shelling the cover blocks instead
+     * of the peek openings. Gated to the same no-combat condition that lets the
+     * ping-suppress branch run, so the launcher is never raised while entity or
+     * vehicle combat owns the loop.
+     */
+    private boolean wantsHeavySuppressPing() {
+        if (!soldier.hasValidPingSuppressPos()) return false;
+        if (target != null && target.isAlive()) return false;
+        if (isSuppressing) return false;
+        if (!ArmorRoleManager.isArmorHunter(soldier)) return false;
+        return SoldierWeaponSelector.countLauncherAmmo(soldier) > 0;
     }
 
     /** True when the soldier carries an anti-armor gun anywhere in inventory (cached briefly). */
@@ -3260,14 +3278,18 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
             return false;
         }
         
-        int totalAmmo = getTotalAmmo();
+        boolean heavy = wantsHeavySuppressPing();
+        // Heavy fire burns launcher rounds, so its availability is measured in
+        // rockets rather than the soldier's total ammo pool.
+        int totalAmmo = heavy ? SoldierWeaponSelector.countLauncherAmmo(soldier) : getTotalAmmo();
         if (totalAmmo == 0) {
             if (isSuppressionDebugLogging()) {
-                StevesArmyMod.LOGGER.info("[SuppressPing] Soldier {} shouldSuppressPingTarget: no ammo", soldier.getId());
+                StevesArmyMod.LOGGER.info("[SuppressPing] Soldier {} shouldSuppressPingTarget: no {}",
+                    soldier.getId(), heavy ? "launcher ammo" : "ammo");
             }
             return false;
         }
-        
+
         BlockPos suppressPos = soldier.getPingSuppressPos();
         double dist = soldier.position().distanceTo(suppressPos.getCenter());
         if (dist > SUPPRESSION_MAX_RANGE) {
@@ -3277,11 +3299,12 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
             }
             return false;
         }
-        
+
         if (soldier.getSuppressionAimPoints().isEmpty()) {
             CoverFinder finder = new CoverFinder(soldier.level());
-            List<Vec3> aimPoints = finder.findSuppressionAimPoints(
-                soldier, suppressPos, SoldierEntity.SUPPRESSION_ZONE_RADIUS);
+            List<Vec3> aimPoints = heavy
+                ? finder.findHeavySuppressionAimPoints(soldier, suppressPos, SoldierEntity.SUPPRESSION_ZONE_RADIUS)
+                : finder.findSuppressionAimPoints(soldier, suppressPos, SoldierEntity.SUPPRESSION_ZONE_RADIUS);
             soldier.setSuppressionAimPoints(aimPoints);
             
             if (isSuppressionDebugLogging()) {
@@ -3354,6 +3377,7 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
             pingSuppressDurationTicks = PING_SUPPRESS_MIN_DURATION_TICKS +
                 soldier.level().random.nextInt(PING_SUPPRESS_MAX_DURATION_TICKS - PING_SUPPRESS_MIN_DURATION_TICKS);
             pingSuppressRemainingTicks = pingSuppressDurationTicks;
+            pingSuppressHeavy = wantsHeavySuppressPing();
             pingSuppressionTarget = null;
             pingSuppressionSweepEnd = null;
             pingSuppressionShotTarget = null;
@@ -3361,11 +3385,11 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
 
             boolean isMG = GunIntegration.isMachineGun(soldier);
             if (isSuppressionDebugLogging()) {
-                StevesArmyMod.LOGGER.info("[SuppressPing] Soldier {} starting suppression at {} (duration={}s, isMG={})",
-                    soldier.getId(), soldier.getPingSuppressPos(), pingSuppressDurationTicks / 20.0, isMG);
+                StevesArmyMod.LOGGER.info("[SuppressPing] Soldier {} starting suppression at {} (duration={}s, isMG={}, isHeavy={})",
+                    soldier.getId(), soldier.getPingSuppressPos(), pingSuppressDurationTicks / 20.0, isMG, pingSuppressHeavy);
             }
         }
-        
+
         pingSuppressRemainingTicks--;
         if (pingSuppressRemainingTicks <= 0 || !soldier.hasValidPingSuppressPos()) {
             if (isSuppressionDebugLogging()) {
@@ -3374,13 +3398,23 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
             soldier.clearPingSuppressPos();
             isPingSuppressing = false;
             pingSuppressRemainingTicks = 0;
+            pingSuppressHeavy = false;
             pingSuppressionTarget = null;
             pingSuppressionSweepEnd = null;
             pingSuppressionShotTarget = null;
             resetBurstState();
             return;
         }
-        
+
+        // If launcher availability flips mid-burst (rockets ran dry, hunter
+        // died), re-discover aim points under the new mode: block faces for
+        // heavy fire, peek openings for the held normal gun.
+        boolean heavyNow = wantsHeavySuppressPing();
+        if (heavyNow != pingSuppressHeavy) {
+            pingSuppressHeavy = heavyNow;
+            soldier.setSuppressionAimPoints(java.util.List.of());
+        }
+
         CoverBehaviorManager coverManager = soldier.getCoverBehaviorManager();
         if (coverManager.isInCover()) {
             PeekController.State peekState = soldier.getPeekController().getState();
@@ -3523,6 +3557,14 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
             selected = soldier.getHorizontalSpreadFallbackTarget(soldier.getPingSuppressPos());
         }
 
+        if (pingSuppressHeavy) {
+            // Heavy fire is pinned to the cover-block face points: no spread
+            // roll (a scattered rocket overflies the wall instead of striking
+            // it) and no opening-height clamp. Open-ground pings have no face
+            // points and fall through to the spread fallback selected above.
+            return TargetAcquisition.hasLineOfSightToPositionIgnoringSmoke(soldier, selected) ? selected : null;
+        }
+
         Vec3 finalTarget = calculateSuppressionSpread(selected, aimInaccuracy);
         if (!aimPointsAreEmpty(soldier)) {
             finalTarget = clampSuppressionTargetHeight(finalTarget, selected);
@@ -3551,6 +3593,13 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
     }
 
     private Vec3 getPingSuppressionBurstTarget(int burstTarget) {
+        if (pingSuppressHeavy) {
+            // Every rocket of the burst stays on the same wall face — the
+            // rifle sweep/vertical-variation logic would drag the aim off the
+            // block the explosion is meant to break.
+            pingSuppressionShotTarget = pingSuppressionTarget;
+            return pingSuppressionShotTarget;
+        }
         if (pingSuppressionShotTarget != null) return pingSuppressionShotTarget;
 
         if (pingSuppressionSweepEnd == null) {

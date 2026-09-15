@@ -625,8 +625,8 @@ BUILDER.pop();
         ARMOR_ENGAGEMENT_MAX_RANGE = BUILDER
             .comment("Maximum range at which the designated armor hunter opens fire on a",
                      "vehicle. Keep this inside the AT gun's effective range so rockets do",
-                     "not sail past the hull. Default: 48 blocks.")
-            .defineInRange("engagementMaxRange", 48.0, 8.0, 256.0);
+                     "not sail past the hull. Default: 96 blocks.")
+            .defineInRange("engagementMaxRange", 96.0, 8.0, 256.0);
 
         ARMOR_AT_GUN_PATTERNS = BUILDER
             .comment("Gun-ID substrings that count as anti-armor weapons (TaCZ gun id,",
