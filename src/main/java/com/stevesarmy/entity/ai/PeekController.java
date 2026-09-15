@@ -286,7 +286,10 @@ public class PeekController {
             nonPeekableTicks = 0;
         }
 
-        if (getTimeSinceLastPeek() < DUCK_COOLDOWN_MS || !allowPeekStart) {
+        // An active suppress ping skips the duck cooldown: repeat orders must
+        // not stall behind the previous peek cycle.
+        boolean suppressPingActive = soldier.hasValidPingSuppressPos();
+        if ((!suppressPingActive && getTimeSinceLastPeek() < DUCK_COOLDOWN_MS) || !allowPeekStart) {
             return;
         }
 

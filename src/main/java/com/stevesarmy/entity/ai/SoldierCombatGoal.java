@@ -179,11 +179,20 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
     private int pingSuppressDurationTicks = 0;
     private int pingSuppressRemainingTicks = 0;
     private boolean pingSuppressHeavy = false;
+    private int pingNoTargetTicks = 0;
+    private int lastPingRepositionTick = -1000;
+    private int aimPointsRefreshTick = 0;
+    private int aimRediscoveryCooldownTick = 0;
     private Vec3 pingSuppressionTarget = null;
     private Vec3 pingSuppressionSweepEnd = null;
     private Vec3 pingSuppressionShotTarget = null;
     private static final int PING_SUPPRESS_MIN_DURATION_TICKS = 80;   // 4 seconds
     private static final int PING_SUPPRESS_MAX_DURATION_TICKS = 200; // 10 seconds
+    private static final int PING_NO_TARGET_REPOSITION_TICKS = 40;    // 2s without a valid lane
+    private static final int PING_REPOSITION_COOLDOWN_TICKS = 100;    // at most one relocation per 5s
+    private static final int PING_AIM_POINT_REFRESH_TICKS = 40;       // re-discover aim points while moving
+    private static final int PING_AIM_REDISCOVERY_COOLDOWN_TICKS = 20;
+    private static final int PING_HEAVY_ALTERNATE_ATTEMPTS = 6;
     
     private List<LivingEntity> cachedPotentialTargets = null;
     private long cachedPotentialTargetsTick = -1;
@@ -3275,6 +3284,11 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
             }
             return false;
         }
+
+        // Aim the cover-search, reposition, and peek direction at the pinged
+        // zone while the order is active (same pattern the vehicle branch uses
+        // for hull centres) so relocation converges on positions with lanes.
+        soldier.getThreatAwareness().onEnemyPing(soldier.getPingSuppressPos());
         
         if (GunIntegration.isReloading(soldier) ||
             GunIntegration.isBolting(soldier) ||
@@ -3314,12 +3328,14 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
             return false;
         }
 
-        if (soldier.getSuppressionAimPoints().isEmpty()) {
+        if (soldier.getSuppressionAimPoints().isEmpty()
+            || soldier.tickCount >= aimPointsRefreshTick) {
             CoverFinder finder = new CoverFinder(soldier.level());
             List<Vec3> aimPoints = heavy
                 ? finder.findHeavySuppressionAimPoints(soldier, suppressPos, SoldierEntity.SUPPRESSION_ZONE_RADIUS)
                 : finder.findSuppressionAimPoints(soldier, suppressPos, SoldierEntity.SUPPRESSION_ZONE_RADIUS);
             soldier.setSuppressionAimPoints(aimPoints);
+            aimPointsRefreshTick = soldier.tickCount + PING_AIM_POINT_REFRESH_TICKS;
             
             if (isSuppressionDebugLogging()) {
                 StevesArmyMod.LOGGER.info("[SuppressPing] Soldier {} found {} aim points in zone",
@@ -3413,6 +3429,7 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
             isPingSuppressing = false;
             pingSuppressRemainingTicks = 0;
             pingSuppressHeavy = false;
+            pingNoTargetTicks = 0;
             pingSuppressionTarget = null;
             pingSuppressionSweepEnd = null;
             pingSuppressionShotTarget = null;
@@ -3447,9 +3464,11 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
             pingSuppressionSweepEnd = null;
             pingSuppressionShotTarget = null;
             if (pingSuppressionTarget == null) {
+                tickPingSuppressReposition();
                 return;
             }
         }
+        pingNoTargetTicks = 0;
         // The ping burst's shape rolls once, on its first shot.
         if (burstShotsFired == 0) {
             suppressionBurstTarget = dynamicFiringEnabled()
@@ -3559,6 +3578,32 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
     }
 
     /**
+     * The soldier wants to suppress but no lane into the zone validates. After
+     * a short grace period, relocate (throttled) — the zone-directed threat
+     * feed aims the cover search at the ping so the new position has lanes.
+     */
+    private void tickPingSuppressReposition() {
+        pingNoTargetTicks++;
+        if (pingNoTargetTicks < PING_NO_TARGET_REPOSITION_TICKS) return;
+        pingNoTargetTicks = 0;
+        if (soldier.tickCount - lastPingRepositionTick < PING_REPOSITION_COOLDOWN_TICKS) return;
+        lastPingRepositionTick = soldier.tickCount;
+        if (isSuppressionDebugLogging()) {
+            StevesArmyMod.LOGGER.info("[SuppressPing] Soldier {} no valid lane into zone, requesting reposition",
+                soldier.getId());
+        }
+        soldier.getCoverBehaviorManager().requestReposition();
+    }
+
+    /** Every cached aim point failed LOS: clear them (cooldown-throttled) so
+     *  the next tick re-discovers from the current eye position. */
+    private void clearPingAimPointsAfterFailure() {
+        if (soldier.tickCount < aimRediscoveryCooldownTick) return;
+        aimRediscoveryCooldownTick = soldier.tickCount + PING_AIM_REDISCOVERY_COOLDOWN_TICKS;
+        soldier.setSuppressionAimPoints(java.util.List.of());
+    }
+
+    /**
      * Selects a suppression target whose actual spread-adjusted shot has clear LOS.
      * The old code validated the unspread point but fired at a different point,
      * allowing horizontal or vertical spread to send bullets into cover.
@@ -3574,8 +3619,22 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
         if (pingSuppressHeavy) {
             // Heavy fire is pinned to the cover-block face points: no spread
             // roll (a scattered rocket overflies the wall instead of striking
-            // it) and no opening-height clamp. Open-ground pings have no face
-            // points and fall through to the spread fallback selected above.
+            // it) and no opening-height clamp. Rotate through alternate face
+            // points so one blocked wall doesn't silence the launcher; with no
+            // face points at all, the spread fallback selected above stands in.
+            if (!aimPointsAreEmpty(soldier)) {
+                java.util.List<Vec3> facePoints = soldier.getSuppressionAimPoints();
+                int base = Math.max(0, facePoints.indexOf(selected));
+                int attempts = Math.min(facePoints.size(), PING_HEAVY_ALTERNATE_ATTEMPTS);
+                for (int i = 0; i < attempts; i++) {
+                    Vec3 candidate = facePoints.get((base + i) % facePoints.size());
+                    if (TargetAcquisition.hasLineOfSightToPositionIgnoringSmoke(soldier, candidate)) {
+                        return candidate;
+                    }
+                }
+                clearPingAimPointsAfterFailure();
+                return null;
+            }
             return TargetAcquisition.hasLineOfSightToPositionIgnoringSmoke(soldier, selected) ? selected : null;
         }
 
@@ -3603,6 +3662,9 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
             }
         }
 
+        // Every cached point is blocked from the current position — likely we
+        // moved since discovery. Force a re-discovery (throttled).
+        clearPingAimPointsAfterFailure();
         return null;
     }
 

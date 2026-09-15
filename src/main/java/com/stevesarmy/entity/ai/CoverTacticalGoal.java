@@ -2641,6 +2641,12 @@ private void tickRepositioning() {
     }
 
     private boolean shouldAllowPressuredPeek() {
+        // A suppress ping is an explicit order to fire into the zone: peek
+        // deterministically instead of gambling on the pressured-peek roll.
+        // Pinned soldiers never reach this call (the caller excludes them).
+        if (soldier.hasValidPingSuppressPos()) {
+            return true;
+        }
         float ftLevel = FireTeamSuppressionTracker.getLevel(soldier);
         if (ftLevel >= StevesArmyConfig.getFireteamPeekBlockThreshold()) {
             if (DiagnosticLogManager.isCoverLoggingEnabled()) {

@@ -61,6 +61,11 @@ public class MachineGunnerEntity extends SoldierEntity {
         if (candidate == null && hasValidPingThreatPos()) {
             candidate = getPingThreatPos();
         }
+        // A bare suppress ping with no threat knowledge still aims cover and
+        // lane selection at the pinged zone.
+        if (candidate == null && hasValidPingSuppressPos()) {
+            candidate = getPingSuppressPos();
+        }
         return candidate;
     }
 
