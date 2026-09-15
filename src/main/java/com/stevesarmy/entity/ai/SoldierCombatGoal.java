@@ -2483,25 +2483,16 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
             return false;
         }
 
-        // Fire window: crew suppressed, already pinned, committed peek, or in the open.
-        if (!ArmorThreatScanner.mayHunterEngage(soldier)) {
-            ArmorThreatScanner.setEngageBlockReason(soldier, "window");
-            return false;
-        }
-
         if (GunIntegration.isReloading(soldier) || GunIntegration.isBolting(soldier)
             || GunIntegration.isDrawing(soldier)) {
             ArmorThreatScanner.setEngageBlockReason(soldier, "reload");
             return false;
         }
 
-        boolean inCover = soldier.getCoverBehaviorManager().isInCover();
-        if (inCover && soldier.getPeekController().getState() != PeekController.State.EXPOSED) {
-            ArmorThreatScanner.setEngageBlockReason(soldier, "ducked");
-            return false;
-        }
-
-        // Doctrine: LOS to any block of the vehicle counts, not just the gun optic.
+        // Same firing rule as a normal soldier in cover: shoot when the target
+        // can actually be hit. Here the "target" is a hull position, so the
+        // LOS gate is the firing solution (any visible hull block) — no extra
+        // peek-state or suppression-window gates on top.
         Vec3 firingSolution = ArmorThreatScanner.findFiringSolution(soldier, armor);
         if (firingSolution == null) {
             ArmorThreatScanner.setEngageBlockReason(soldier, "noLOS");
