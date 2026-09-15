@@ -566,6 +566,19 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
             soldier.getThreatAwareness().onEnemyPing(BlockPos.containing(activeVehicleTarget.hullCenter()));
             tickCombat(hasGun, activeVehicleTarget);
             updateDebugSync();
+        } else if (hasGun && wantsHeavySuppressPing()) {
+            // The heavy suppress ping is an explicit player order: the hunter
+            // keeps the RPG up and shells the cover blocks even while enemies
+            // are visible, instead of dropping to the sidearm.
+            if (inCover) {
+                tickCoverPeekCycle(soldier.getCoverBehaviorManager());
+            }
+            if (shouldSuppressPingTarget()) {
+                trySuppressPingFire();
+            } else {
+                isPingSuppressing = false;
+            }
+            updateDebugSync();
         } else if (target != null && target.isAlive()) {
             LivingEntity combatTarget = target;
             tickCombat(hasGun, null);
@@ -2542,16 +2555,17 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
     /**
      * Heavy-weapon suppression: an armor hunter with launcher rounds answers a
      * suppress ping by raising the AT gun and shelling the cover blocks instead
-     * of the peek openings. Gated to the same no-combat condition that lets the
-     * ping-suppress branch run, so the launcher is never raised while entity or
-     * vehicle combat owns the loop.
+     * of the peek openings. The ping is an explicit player order, so it outranks
+     * autonomous entity combat and squad suppression assignments; only live
+     * vehicle contact (rocket reserved for the tank) outranks it.
      */
     private boolean wantsHeavySuppressPing() {
         if (!soldier.hasValidPingSuppressPos()) return false;
-        if (target != null && target.isAlive()) return false;
-        if (isSuppressing) return false;
         if (!ArmorRoleManager.isArmorHunter(soldier)) return false;
-        return SoldierWeaponSelector.countLauncherAmmo(soldier) > 0;
+        if (SoldierWeaponSelector.countLauncherAmmo(soldier) <= 0) return false;
+        BlockPos pingPos = soldier.getPingSuppressPos();
+        return soldier.position().distanceToSqr(pingPos.getCenter())
+            <= SUPPRESSION_MAX_RANGE * SUPPRESSION_MAX_RANGE;
     }
 
     /** True when the soldier carries an anti-armor gun anywhere in inventory (cached briefly). */
