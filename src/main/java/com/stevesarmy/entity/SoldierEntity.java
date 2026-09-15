@@ -294,6 +294,21 @@ public class SoldierEntity extends PathfinderMob implements Container {
         return cqbEngagementHold;
     }
 
+    private boolean vehicleEngagement;
+
+    /**
+     * True while the combat goal holds a live vehicle contact as its
+     * engagement. Cover reads this to pause opportunistic re-selection; the
+     * combat goal owns setting and clearing it.
+     */
+    public boolean isInVehicleEngagement() {
+        return vehicleEngagement;
+    }
+
+    public void setVehicleEngagement(boolean vehicleEngagement) {
+        this.vehicleEngagement = vehicleEngagement;
+    }
+
     public void beginCqbEngagement() {
         if (cqbEngagementHold) return;
         cqbEngagementHold = true;

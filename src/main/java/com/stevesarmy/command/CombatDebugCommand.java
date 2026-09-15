@@ -1119,7 +1119,8 @@ public class CombatDebugCommand {
                 + " lowCrouch=" + soldier.isLowCrouching()
                 + " reload=" + com.stevesarmy.combat.GunIntegration.isReloading(soldier)
                 + " ads=" + String.format("%.0f%%", com.stevesarmy.combat.GunIntegration.getAimProgress(soldier) * 100.0f)
-                + " ammo=" + com.stevesarmy.combat.GunIntegration.getCurrentAmmo(soldier)), false);
+                + " ammo=" + com.stevesarmy.combat.GunIntegration.getCurrentAmmo(soldier)
+                + " relocs=" + soldier.getCoverTacticalGoal().getRecentRepositionCount()), false);
         source.sendSuccess(() -> Component.literal(
             "Cover: " + formatNullablePos(soldier.getCoverBehaviorManager().getCurrentCover() != null
                 ? soldier.getCoverBehaviorManager().getCurrentCover().getPosition() : null)), false);

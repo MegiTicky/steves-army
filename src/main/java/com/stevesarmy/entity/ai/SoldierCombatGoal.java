@@ -128,6 +128,14 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
     private int weaponSwapCooldownTicks = 0;
     private static final int WEAPON_SWAP_COOLDOWN_TICKS = 40;
 
+    // Vehicle engagements must look like one stable fight to the cover system.
+    // The latch rides out contact flicker, the streak gate keeps a peeking crew
+    // from flipping the branch (and the held weapon) every few ticks.
+    private int vehicleEngagementTicks = 0;
+    private int visibleTargetStreakTicks = 0;
+    private static final int VEHICLE_ENGAGEMENT_LATCH_TICKS = 60;
+    private static final int VEHICLE_EXIT_VISIBLE_TICKS = 10;
+
     private enum EngagementPostureState {
         READY,
         EXITING_LOW_CROUCH,
@@ -535,8 +543,23 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
         // A hard target supplies only a hull aim point. It enters the same
         // direct-fire path as an entity target and never changes cover, peek,
         // posture, navigation, burst, or readiness control.
+        boolean targetVisible = target != null && target.isAlive()
+            && TargetAcquisition.hasLineOfSight(soldier, target);
+        visibleTargetStreakTicks = targetVisible ? visibleTargetStreakTicks + 1 : 0;
+
         ArmorThreatScanner.ArmorContact vehicleTarget = hasGun ? getVehicleCombatTarget() : null;
         if (vehicleTarget != null) {
+            vehicleEngagementTicks = VEHICLE_ENGAGEMENT_LATCH_TICKS;
+        } else if (vehicleEngagementTicks > 0) {
+            vehicleEngagementTicks--;
+        }
+        soldier.setVehicleEngagement(vehicleEngagementTicks > 0);
+
+        if (vehicleTarget != null) {
+            // Keep a live cover-search direction at the hull: without this the
+            // smooth threat direction decays mid-fight and cover searches
+            // alternate between direction-led and direction-less results.
+            soldier.getThreatAwareness().onEnemyPing(BlockPos.containing(vehicleTarget.hullCenter()));
             tickCombat(hasGun, vehicleTarget);
             updateDebugSync();
         } else if (target != null && target.isAlive()) {
@@ -1109,8 +1132,13 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
         if (!ArmorRoleManager.isArmorHunter(soldier) || soldier.isCqbEngagementHold()) {
             return null;
         }
+        // While a vehicle engagement is latched, a briefly peeking crew does
+        // not steal the loop back; a sustained sighting hands it to ordinary
+        // entity combat.
         if (target != null && target.isAlive()
-            && TargetAcquisition.hasLineOfSight(soldier, target)) {
+            && TargetAcquisition.hasLineOfSight(soldier, target)
+            && (vehicleEngagementTicks <= 0
+                || visibleTargetStreakTicks >= VEHICLE_EXIT_VISIBLE_TICKS)) {
             return null;
         }
         ArmorThreatScanner.ArmorContact armor = ArmorThreatScanner.getPrimaryArmorThreat(soldier);
@@ -1154,6 +1182,14 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
         }
 
         if (vehicleCombat) {
+            if (target != null && !TargetAcquisition.hasLineOfSight(soldier, target)) {
+                // Fighting the hull, not a hidden crew entity: drop the stale
+                // target so aim and posture serve the vehicle engagement only.
+                // Detection memory is untouched; the latch keeps findNewTarget
+                // from re-acquiring the hidden entity while this lasts.
+                this.target = null;
+                soldier.setTarget(null);
+            }
             soldier.getLookControl().setLookAt(
                 vehicleTarget.aimPoint().x, vehicleTarget.aimPoint().y, vehicleTarget.aimPoint().z, 30.0F, 30.0F);
             if (hasGun) {
@@ -2009,7 +2045,10 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
             return true;
         }
         
-        if (!potentialTargets.isEmpty()) {
+        // Hidden-fallback acquisition only when no vehicle engagement is
+        // latched: during one, invisible crew re-acquired here would fight the
+        // hull engagement for the aim/posture state every few ticks.
+        if (!potentialTargets.isEmpty() && vehicleEngagementTicks <= 0) {
             Vec3 primaryDir = threats.getPrimaryDirection(soldier.position());
             if (primaryDir != null && primaryDir.lengthSqr() > 0.001) {
                 Optional<LivingEntity> threatDirTarget = potentialTargets.stream()
@@ -2496,8 +2535,10 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
         }
         // A normal visible enemy always retains the direct-fire loop and the
         // sidearm. The launcher is only selected for a vehicle-only engagement.
+        // The streak gate matches the branch debounce so a peeking crew does
+        // not bounce the held weapon every few ticks.
         return target == null || !target.isAlive()
-            || !TargetAcquisition.hasLineOfSight(soldier, target);
+            || visibleTargetStreakTicks < VEHICLE_EXIT_VISIBLE_TICKS;
     }
 
     /** True when the soldier carries an anti-armor gun anywhere in inventory (cached briefly). */

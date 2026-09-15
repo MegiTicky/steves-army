@@ -27,4 +27,9 @@ public interface CoverGoalController {
     /** Counts a hostile hit taken while peeking/exposed at the occupied cover. */
     default void noteHitWhilePeekingAtCover() {
     }
+
+    /** Reposition decisions over the last ~5 seconds, for churn diagnostics. */
+    default int getRecentRepositionCount() {
+        return 0;
+    }
 }

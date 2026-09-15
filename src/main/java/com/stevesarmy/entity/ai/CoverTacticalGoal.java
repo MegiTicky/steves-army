@@ -477,7 +477,15 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
             if (owner != null) fingerprint = mixFingerprint(fingerprint, owner.blockPosition().asLong());
         }
         BlockPos threatPosition = getThreats().getPrimaryThreatPosition();
-        if (threatPosition != null) fingerprint = mixFingerprint(fingerprint, threatPosition.asLong());
+        if (threatPosition != null) {
+            // Crew on a moving or bobbing ship shifts block-by-block; grid
+            // quantization stops the failed-search retry gate from re-arming
+            // on every armor scan.
+            fingerprint = mixFingerprint(fingerprint, new BlockPos(
+                threatPosition.getX() & ~3,
+                threatPosition.getY() & ~3,
+                threatPosition.getZ() & ~3).asLong());
+        }
         Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
         if (threatDirection != null && threatDirection.lengthSqr() > 0.001D) {
             fingerprint = mixFingerprint(fingerprint,
@@ -3003,7 +3011,9 @@ private void tickRepositioning() {
         // Peek-disabled roles (support) skip the opportunistic hop entirely:
         // their score inputs drift constantly, so a marginal edge would reshuffle
         // them every evaluation. Real invalidation still repositions below.
-        if (canLeaveCoverNow() && !soldier.isPeekDisabled()) {
+        // A soldier fighting a vehicle hull is in the same situation: its aim
+        // point moves along the hull every scan, so marginal hops would churn.
+        if (canLeaveCoverNow() && !soldier.isPeekDisabled() && !soldier.isInVehicleEngagement()) {
             Optional<CoverPoint> betterCover = findBetterCover();
             if (betterCover.isPresent()) {
                 CoverPoint newCover = betterCover.get();
@@ -3057,7 +3067,33 @@ private boolean shouldExitCoverForFollow() {
         return true;
     }
 
+    /** Tick counts of recent reposition decisions, for churn diagnostics. */
+    private final java.util.ArrayDeque<Integer> recentRepositionTicks = new java.util.ArrayDeque<>();
+    private static final int REPOSITION_WINDOW_TICKS = 100;
+
+    private void noteReposition() {
+        int now = soldier.tickCount;
+        recentRepositionTicks.addLast(now);
+        while (!recentRepositionTicks.isEmpty()
+            && now - recentRepositionTicks.peekFirst() > REPOSITION_WINDOW_TICKS) {
+            recentRepositionTicks.removeFirst();
+        }
+    }
+
+    /** Reposition decisions over the last {@value #REPOSITION_WINDOW_TICKS} ticks. */
+    public int getRecentRepositionCount() {
+        if (!recentRepositionTicks.isEmpty()) {
+            int now = soldier.tickCount;
+            while (!recentRepositionTicks.isEmpty()
+                && now - recentRepositionTicks.peekFirst() > REPOSITION_WINDOW_TICKS) {
+                recentRepositionTicks.removeFirst();
+            }
+        }
+        return recentRepositionTicks.size();
+    }
+
     private void startRepositioning() {
+        noteReposition();
         // Normal cover navigation uses standing/crouching dimensions. Do not
         // carry the suppressed half-cover prone posture into full-speed travel.
         activeSuppressionRouteMovement = RouteMovement.NORMAL;
@@ -3076,6 +3112,7 @@ private boolean shouldExitCoverForFollow() {
     }
     
     private boolean startRepositioning(CoverPoint newCover) {
+        noteReposition();
         CoverPoint currentCover = getCoverManager().getCurrentCover();
         
         if (currentCover != null && newCover.getPosition().equals(currentCover.getPosition())) return false;
