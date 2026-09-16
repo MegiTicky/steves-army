@@ -124,6 +124,8 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
     private int suppressionFirstShotTick = -1;
     private long suppressionLastSeenTick = -1;
     private Vec3 suppressionTargetAimPoint = null;
+    private int suppressionLaneSlot = 0;
+    private float suppressionLaneSide = 1.0F;
 
     // Sidearm policy changes equipment only. Vehicle contacts are adapted into
     // the ordinary direct-fire pipeline below; they never own cover or movement.
@@ -1321,6 +1323,7 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
         suppressionPlanStartTick = -1;
         suppressionFirstShotTick = -1;
         suppressionLastSeenTick = -1;
+        suppressionLaneSlot = 0;
         pendingSuppressionThreat = null;
         isSuppressing = false;
         
@@ -2009,6 +2012,13 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
     private void preemptSuppressionForVisibleTarget() {
         Optional<LivingEntity> visibleTarget = findBestVisibleTarget(computePotentialTargets());
         if (visibleTarget.isEmpty()) {
+            // The detection pool is bounded by focused/peripheral range while a
+            // suppression claim can live out to SUPPRESSION_MAX_RANGE — in that
+            // band the pool never contains the assigned threat, so resolve him
+            // directly by UUID and check sight himself.
+            visibleTarget = findAssignedThreatDirect();
+        }
+        if (visibleTarget.isEmpty()) {
             return;
         }
 
@@ -2030,6 +2040,27 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
             StevesArmyMod.LOGGER.info("[Suppression] Soldier {} preempted last-seen threat {} for visible target {}",
                 soldier.getId(), releasedId, acquiredTarget.getName().getString());
         }
+    }
+
+    /**
+     * Tier-1 check for the assigned suppression threat regardless of the
+     * detection pool radius: if the suppressor himself has clean sight of the
+     * live enemy, last-seen suppression must yield to direct fire. Strict
+     * foliage semantics apply — a lane the bullets could not take must not
+     * pull the soldier out of suppression.
+     */
+    private Optional<LivingEntity> findAssignedThreatDirect() {
+        if (!(soldier.level() instanceof ServerLevel serverLevel) || suppressionTargetUUID == null) {
+            return Optional.empty();
+        }
+        net.minecraft.world.entity.Entity threatEntity = serverLevel.getEntity(suppressionTargetUUID);
+        if (!(threatEntity instanceof LivingEntity living) || !living.isAlive()
+            || !TargetAcquisition.isValidTarget(soldier, living)
+            || soldier.isFriendlyTo(living)
+            || soldier.distanceToSqr(living) > SUPPRESSION_MAX_RANGE * SUPPRESSION_MAX_RANGE) {
+            return Optional.empty();
+        }
+        return TargetAcquisition.hasLineOfSight(soldier, living) ? Optional.of(living) : Optional.empty();
     }
 
     private boolean findNewTarget() {
@@ -3204,6 +3235,12 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
             suppressionTargetPos = pendingSuppressionThreat.lastKnownPosition;
             suppressionTargetAimPoint = pendingSuppressionThreat.lastVisibleAimPoint;
             suppressionLastSeenTick = pendingSuppressionThreat.lastSeenTime;
+            // Dispersion slot: the first claimant holds the reported point,
+            // the second brackets it off-axis so paired guns cover a
+            // corridor instead of stacking the same spot.
+            suppressionLaneSlot = Math.max(0, intel.getSuppressionCount(suppressionTargetUUID) - 1);
+            suppressionLaneSide = ((soldier.getUUID().hashCode() ^ suppressionTargetUUID.hashCode()) & 1) == 0
+                ? 1.0F : -1.0F;
             suppressionPlanStartTick = soldier.tickCount;
             suppressionFirstShotTick = -1;
             pendingSuppressionThreat = null;
@@ -3225,6 +3262,28 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
             return;
         }
         intel.updateSuppressionHeartbeat(suppressionTargetUUID, soldier.getUUID(), soldier.level().getGameTime());
+
+        // Live squad knowledge outranks the claim-time snapshot: aim point,
+        // contact age, and expiry all follow the threat while anyone still
+        // reports it. The claim-time anchor only bridges ticks where the live
+        // point is blind from this eye, so a momentary angle change neither
+        // yanks the aim off a workable lane nor cancels the plan.
+        SquadThreatIntel.ThreatKnowledge suppressionKnowledge = intel.getThreat(suppressionTargetUUID).orElse(null);
+        if (suppressionKnowledge != null) {
+            if (suppressionKnowledge.lastKnownPosition != null) {
+                suppressionTargetPos = suppressionKnowledge.lastKnownPosition;
+            }
+            suppressionLastSeenTick = suppressionKnowledge.lastSeenTime;
+            Vec3 liveAim = suppressionKnowledge.lastVisibleAimPoint;
+            if (liveAim != null && TargetAcquisition.hasNearLineOfSightToPosition(soldier, liveAim, SUPPRESSION_LOS_TOLERANCE)) {
+                if (isSuppressionDebugLogging() && (suppressionTargetAimPoint == null
+                    || suppressionTargetAimPoint.distanceToSqr(liveAim) > 0.25)) {
+                    StevesArmyMod.LOGGER.info("[Suppression] Soldier {} aim follows live intel to {}",
+                        soldier.getId(), liveAim);
+                }
+                suppressionTargetAimPoint = liveAim;
+            }
+        }
 
         long contactAge = soldier.level().getGameTime() - suppressionLastSeenTick;
         boolean planExpired = soldier.tickCount - suppressionPlanStartTick > FireControl.SUPPRESSION_PLAN_MAX_TICKS
@@ -3249,7 +3308,6 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
 
         // Buttoning a vehicle: LOS to any block of the hull counts, and the
         // spray aims at a visible hull point rather than the masked gun optic.
-        SquadThreatIntel.ThreatKnowledge suppressionKnowledge = intel.getThreat(suppressionTargetUUID).orElse(null);
         if (suppressionKnowledge != null && suppressionKnowledge.isHardTarget) {
             Vec3 hullSolution = ArmorThreatScanner.findFiringSolution(soldier, suppressionKnowledge);
             if (hullSolution == null) {
@@ -3330,7 +3388,8 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
         }
         
         float aimInaccuracy = GunIntegration.getAimInaccuracy(soldier);
-        Vec3 spreadPos = calculateLastSeenSuppressionSpread(targetPos, aimInaccuracy, contactAge);
+        Vec3 spreadPos = calculateLastSeenSuppressionSpread(
+            offsetSuppressorAnchor(targetPos), aimInaccuracy, contactAge);
         if (!FriendlyFireChecker.isSafeToShoot(soldier, spreadPos, aimQuality)) {
             return;
         }
@@ -3387,6 +3446,21 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
             default -> {}
         }
         
+    }
+
+    /**
+     * Paired suppressors must not stack on one spot: the first claimant holds
+     * the reported point, later slots shift their anchor off the lateral axis
+     * so together the guns cover a movement corridor. The side is stable per
+     * (soldier, threat) pair.
+     */
+    private Vec3 offsetSuppressorAnchor(Vec3 anchor) {
+        if (suppressionLaneSlot <= 0) return anchor;
+        Vec3 toTarget = anchor.subtract(soldier.getEyePosition());
+        Vec3 lateral = new Vec3(-toTarget.z, 0.0, toTarget.x);
+        if (lateral.lengthSqr() < 1.0e-4) return anchor;
+        return anchor.add(lateral.normalize()
+            .scale(suppressionLaneSide * (0.5 + 0.75 * suppressionLaneSlot)));
     }
 
     private SuppressionWeaponProfile getSuppressionWeaponProfile() {
