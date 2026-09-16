@@ -192,8 +192,8 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
     private Vec3 pingSuppressionShotTarget = null;
     private static final int PING_SUPPRESS_MIN_DURATION_TICKS = 80;   // 4 seconds
     private static final int PING_SUPPRESS_MAX_DURATION_TICKS = 200; // 10 seconds
-    private static final int PING_NO_TARGET_REPOSITION_TICKS = 40;    // 2s without a valid lane
-    private static final int PING_REPOSITION_COOLDOWN_TICKS = 100;    // at most one relocation per 5s
+    private static final int PING_NO_TARGET_REPOSITION_TICKS = 20;    // 1s without a valid lane
+    private static final int PING_REPOSITION_COOLDOWN_TICKS = 40;     // at most one relocation per 2s
     private static final int PING_AIM_POINT_REFRESH_TICKS = 40;       // re-discover aim points while moving
     private static final int PING_AIM_REDISCOVERY_COOLDOWN_TICKS = 20;
     private static final int PING_HEAVY_ALTERNATE_ATTEMPTS = 6;

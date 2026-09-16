@@ -2,6 +2,7 @@ package com.stevesarmy.entity.ai;
 
 import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.StevesArmyConfig;
+import com.stevesarmy.combat.TargetAcquisition;
 import com.stevesarmy.combat.ThreatAwareness;
 import com.stevesarmy.combat.VisibilityRay;
 import com.stevesarmy.combat.cover.*;
@@ -126,7 +127,9 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
     
     private static final double FOLLOW_COVER_SEARCH_RADIUS = 15.0D;
     private static final double FOLLOW_REGROUP_DISTANCE = 10.0D;
-    private static final int RELOCATION_SEARCH_RADIUS = 12;
+    private static final int RELOCATION_SEARCH_RADIUS = 16;
+    /** Near-LOS tolerance for suppression siting: a lane blocked within this distance of a zone sample is a valid lane. */
+    private static final double SUPPRESSION_SIGHTING_TOLERANCE = 2.0D;
     private static final int FOLLOW_COVER_RETRY_TICKS = 40;
     private static final long CONTINUOUS_SUPPRESSION_REPOSITION_DELAY_MS = 8000L;
     private static final int SUPPRESSION_ROUTE_CANDIDATE_LIMIT = 8;
@@ -742,10 +745,12 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
             }
 
             suppressionPositionFailures++;
-            nextSuppressionPositionSearchTick = soldier.tickCount + SHOT_IN_COVER_RETRY_TICKS;
+            boolean exhausted = suppressionPositionFailures >= EMERGENCY_SEARCH_MAX_CONSECUTIVE_FAILURES;
+            nextSuppressionPositionSearchTick = soldier.tickCount
+                + (exhausted ? EMERGENCY_SEARCH_FAILURE_COOLDOWN_TICKS : SHOT_IN_COVER_RETRY_TICKS);
             suppressionPositionLastFailure = result == CoverMoveResult.NO_ELIGIBLE_COVER
                 ? "no reachable firing lane" : "no reachable firing position";
-            suppressionPositionStatus = suppressionPositionFailures >= EMERGENCY_SEARCH_MAX_CONSECUTIVE_FAILURES
+            suppressionPositionStatus = exhausted
                 ? SuppressionPositionStatus.FAILED : SuppressionPositionStatus.BLOCKED;
             coverManager.setState(coverManager.getCurrentCover() != null
                 ? CoverBehaviorManager.CoverState.IN_COVER : CoverBehaviorManager.CoverState.NO_COVER);
@@ -867,11 +872,17 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
 
     /** Re-arm a command-local search after its bounded retry delay. */
     private void tickSuppressionPositionRetry() {
-        if (suppressionPositionStatus != SuppressionPositionStatus.BLOCKED
+        if ((suppressionPositionStatus != SuppressionPositionStatus.BLOCKED
+            && suppressionPositionStatus != SuppressionPositionStatus.FAILED)
             || soldier.tickCount < nextSuppressionPositionSearchTick
             || !soldier.hasValidPingSuppressPos()
             || soldier.getSuppressionOrder().getGeneration() != suppressionPositionGeneration) {
             return;
+        }
+        // A re-armed exhausted search gets a fresh failure budget: without this
+        // one FAILED verdict would silence the soldier for the rest of the ping.
+        if (suppressionPositionStatus == SuppressionPositionStatus.FAILED) {
+            suppressionPositionFailures = 0;
         }
         suppressionPositionStatus = SuppressionPositionStatus.SEARCHING;
         requestEmergencySearch(QueuedSearchMode.SUPPRESSION_POSITION);
@@ -3412,19 +3423,31 @@ private boolean shouldExitCoverForFollow() {
         return candidates.isEmpty() ? CoverMoveResult.NO_COVER_FOUND : CoverMoveResult.NO_ELIGIBLE_COVER;
     }
 
-    /** Validates a concrete bullet/rocket approach from a prospective standing position. */
+    /**
+     * Validates a suppression approach from a prospective standing position.
+     * Siting uses the machine-gun near-LOS contract: a clear lane into the
+     * zone counts, and so does a lane blocked within
+     * {@link #SUPPRESSION_SIGHTING_TOLERANCE} of a sample — suppressing fire
+     * lands on or beside the target, so a wall face at the zone edge is a
+     * valid lane rather than a blocked one. Demanding a clear view *into* the
+     * zone rejected good positions (the zone is where the enemy cover is) and
+     * accepted useless ones (open sight through zone air) that then arrived
+     * blind. Smoke is ignored here; mode-correct checks still gate the
+     * actual shot at firing time.
+     */
     private boolean hasSuppressionFiringLaneFrom(Vec3 standingPosition) {
         if (suppressionPositionArea == null) return false;
         Vec3 eye = standingPosition.add(0.0D, soldier.getEyeHeight(), 0.0D);
         Vec3 center = Vec3.atCenterOf(suppressionPositionArea).add(0.0D, 0.75D, 0.0D);
         double radius = SoldierEntity.SUPPRESSION_ZONE_RADIUS * 0.65D;
         Vec3[] samples = {
-            center,
+            center, center.add(0.0D, 0.75D, 0.0D),
             center.add(radius, 0.0D, 0.0D), center.add(-radius, 0.0D, 0.0D),
             center.add(0.0D, 0.0D, radius), center.add(0.0D, 0.0D, -radius)
         };
         for (Vec3 sample : samples) {
-            if (VisibilityRay.traceFreshIgnoringSmoke(soldier.level(), eye, sample, soldier).clear()) {
+            if (TargetAcquisition.hasSuppressionSightingLane(soldier.level(), eye, sample,
+                SUPPRESSION_SIGHTING_TOLERANCE, true, soldier)) {
                 return true;
             }
         }
@@ -5451,9 +5474,11 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
             && !hasSuppressionFiringLaneFrom(soldier.getEyePosition())) {
             suppressionPositionFailures++;
             suppressionPositionLastFailure = "arrival lane blocked";
-            suppressionPositionStatus = suppressionPositionFailures >= EMERGENCY_SEARCH_MAX_CONSECUTIVE_FAILURES
+            boolean exhaustedAtArrival = suppressionPositionFailures >= EMERGENCY_SEARCH_MAX_CONSECUTIVE_FAILURES;
+            suppressionPositionStatus = exhaustedAtArrival
                 ? SuppressionPositionStatus.FAILED : SuppressionPositionStatus.BLOCKED;
-            nextSuppressionPositionSearchTick = soldier.tickCount + SHOT_IN_COVER_RETRY_TICKS;
+            nextSuppressionPositionSearchTick = soldier.tickCount
+                + (exhaustedAtArrival ? EMERGENCY_SEARCH_FAILURE_COOLDOWN_TICKS : SHOT_IN_COVER_RETRY_TICKS);
             blacklistCover(cover.getPosition(), BlacklistReason.PATH_FAILED);
             CoverReservationManager.release(cover.getPosition(), soldier);
             getCoverManager().clearTargetCover();

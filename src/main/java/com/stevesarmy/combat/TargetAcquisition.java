@@ -137,6 +137,26 @@ public class TargetAcquisition {
             || (!visibility.clear() && targetDistance - visibility.blockedDistance() <= distanceThreshold);
     }
 
+    /**
+     * Suppression siting from an arbitrary eye (relocation search / arrival
+     * revalidation): the same near-LOS contract as
+     * {@link #hasNearLineOfSightToPosition} — a clear lane counts, and so does
+     * a lane blocked within {@code distanceThreshold} of the target, because
+     * suppressing fire lands on or beside the target rather than through it.
+     * With {@code ignoreSmoke} the base clause uses the rocket rule (no solid
+     * obstruction) instead of the bullet rule (concealment below full).
+     */
+    public static boolean hasSuppressionSightingLane(Level level, Vec3 from, Vec3 targetPos,
+                                                     double distanceThreshold, boolean ignoreSmoke,
+                                                     LivingEntity exclude) {
+        VisibilityRay.Result visibility = ignoreSmoke
+            ? VisibilityRay.traceIgnoringSmoke(level, from, targetPos, exclude)
+            : VisibilityRay.trace(level, from, targetPos, exclude);
+        boolean baseViable = ignoreSmoke ? visibility.clear() : visibility.hasContact();
+        return baseViable
+            || (!visibility.clear() && from.distanceTo(targetPos) - visibility.blockedDistance() <= distanceThreshold);
+    }
+
     private static VisibilityRay.Result getPositionVisibility(LivingEntity observer, Vec3 targetPos,
                                                                boolean ignoreSmoke) {
         Vec3 from = DetectionViewpoint.getEyePosition(observer);

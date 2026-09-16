@@ -26,6 +26,8 @@ public final class SuppressionOrderController {
     private Phase phase = Phase.CANCELLED;
     private BlockReason blockReason = BlockReason.NONE;
     private boolean terminalReported;
+    private int suspendedTicks;
+    private int lastControllerTick = -1;
 
     public void start(BlockPos target, int gameTick) {
         area = target.immutable();
@@ -37,6 +39,8 @@ public final class SuppressionOrderController {
         phase = Phase.PREPARING;
         blockReason = BlockReason.NONE;
         terminalReported = false;
+        suspendedTicks = 0;
+        lastControllerTick = -1;
     }
 
     public void tick(SoldierEntity soldier) {
@@ -46,8 +50,19 @@ public final class SuppressionOrderController {
     /** Kept entity-free so lifecycle guarantees can run in Forge GameTests. */
     public void tick(int currentTick) {
         if (!isActive()) return;
-        int elapsed = currentTick - startedTick;
-        if (elapsed >= TOTAL_TIMEOUT_TICKS || (successfulShots == 0 && elapsed >= FIRST_SHOT_TIMEOUT_TICKS)) {
+        // Time spent relocating under a live order must not consume the
+        // first-shot budget — a walking soldier would otherwise have the
+        // order killed out from under him around the moment he arrives.
+        // The total timeout stays absolute so an order still cannot live forever.
+        boolean relocating = phase == Phase.RELOCATING
+            || (phase == Phase.PAUSED && blockReason == BlockReason.MOVING);
+        if (relocating && lastControllerTick >= 0) {
+            suspendedTicks += currentTick - lastControllerTick;
+        }
+        lastControllerTick = currentTick;
+        int rawElapsed = currentTick - startedTick;
+        int effectiveElapsed = rawElapsed - suspendedTicks;
+        if (rawElapsed >= TOTAL_TIMEOUT_TICKS || (successfulShots == 0 && effectiveElapsed >= FIRST_SHOT_TIMEOUT_TICKS)) {
             finish(Phase.FAILED);
         }
     }
