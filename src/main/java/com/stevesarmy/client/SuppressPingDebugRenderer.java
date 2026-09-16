@@ -33,6 +33,8 @@ public final class SuppressPingDebugRenderer {
     private static final int[] BLOCKED_COLOR = {255, 64, 64};
     private static final int[] LANE_COLOR = {64, 224, 255};
     private static final int[] FALLBACK_COLOR = {255, 255, 64};
+    private static final int[] SEARCH_COLOR = {255, 140, 0};
+    private static final int[] PATH_COLOR = {170, 200, 255};
 
     public static void render(PoseStack poseStack, Camera camera) {
         if (!ClientSuppressPingDebugData.INSTANCE.renderEnabled()) return;
@@ -107,6 +109,37 @@ public final class SuppressPingDebugRenderer {
             line(buffer, matrix, cameraPos, relocTarget, relocTarget.add(0, 2.2, 0), 255, 64, 255);
             square(buffer, matrix, cameraPos, relocTarget.add(0, 1.1, 0), 0.45, 255, 64, 255);
         }
+
+        // Relocation search fan: anchor + radius the cover search uses, with
+        // the direction it is biased toward (the ping centre).
+        Vec3 searchOrigin = snapshot.searchOrigin();
+        if (searchOrigin != null) {
+            renderCircle(buffer, matrix, cameraPos, searchOrigin, snapshot.searchRadius(),
+                SEARCH_COLOR[0], SEARCH_COLOR[1], SEARCH_COLOR[2]);
+            cross(buffer, matrix, cameraPos, searchOrigin, 0.5,
+                SEARCH_COLOR[0], SEARCH_COLOR[1], SEARCH_COLOR[2]);
+            line(buffer, matrix, cameraPos, searchOrigin, searchOrigin.add(0, 2.2, 0),
+                SEARCH_COLOR[0], SEARCH_COLOR[1], SEARCH_COLOR[2]);
+            if (snapshot.pingPos() != null) {
+                line(buffer, matrix, cameraPos, searchOrigin, snapshot.pingPos(),
+                    SEARCH_COLOR[0], SEARCH_COLOR[1], SEARCH_COLOR[2]);
+            }
+        }
+
+        // The live navigation path while repositioning.
+        List<Vec3> navPath = snapshot.navPath();
+        Vec3 prevNode = null;
+        for (Vec3 node : navPath) {
+            square(buffer, matrix, cameraPos, node, 0.12, PATH_COLOR[0], PATH_COLOR[1], PATH_COLOR[2]);
+            if (prevNode != null) {
+                line(buffer, matrix, cameraPos, prevNode, node,
+                    PATH_COLOR[0], PATH_COLOR[1], PATH_COLOR[2]);
+            }
+            prevNode = node;
+        }
+        if (prevNode != null) {
+            cross(buffer, matrix, cameraPos, prevNode, 0.4, PATH_COLOR[0], PATH_COLOR[1], PATH_COLOR[2]);
+        }
     }
 
     private static void renderLabel(Font font, PoseStack poseStack, Vec3 cameraPos,
@@ -120,6 +153,40 @@ public final class SuppressPingDebugRenderer {
         int color = snapshot.heavy() ? 0xFFFFD040 : 0xFF40FF40;
         billboard(font, poseStack, cameraPos, snapshot.soldierPos().add(0, 2.6, 0),
             text.toString(), color, buffers);
+
+        String relocLine = buildRelocLine(snapshot);
+        if (!relocLine.isEmpty()) {
+            billboard(font, poseStack, cameraPos, snapshot.soldierPos().add(0, 2.35, 0),
+                relocLine, relocLineColor(snapshot), buffers);
+        }
+    }
+
+    /** Second label line: relocation progress, or the countdown to requesting one. */
+    private static String buildRelocLine(SuppressPingDebugPacket snapshot) {
+        String status = snapshot.relocStatus();
+        if (!status.isEmpty()) {
+            StringBuilder line = new StringBuilder("RELOC ").append(status);
+            if (snapshot.relocFailures() > 0) {
+                line.append(" x").append(snapshot.relocFailures());
+                if (!snapshot.relocLastFailure().isEmpty()) {
+                    line.append(" (").append(snapshot.relocLastFailure()).append(')');
+                }
+            }
+            return line.toString();
+        }
+        if (snapshot.blindTicks() > 0) {
+            return String.format("blind %d/%d", snapshot.blindTicks(), snapshot.blindThreshold());
+        }
+        return "";
+    }
+
+    private static int relocLineColor(SuppressPingDebugPacket snapshot) {
+        switch (snapshot.relocStatus()) {
+            case "FAILED": return 0xFFFF4040;
+            case "BLOCKED": return 0xFFFFA000;
+            case "": return 0xFFFFFF40;
+            default: return 0xFFFF60FF;
+        }
     }
 
     private static void renderCircle(BufferBuilder buffer, Matrix4f matrix, Vec3 cameraPos,

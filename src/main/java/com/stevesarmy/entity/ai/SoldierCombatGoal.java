@@ -2409,11 +2409,39 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
             }
         }
 
+        // Relocation-process debug: the suppress-position search state, its
+        // failure history, and the path the soldier is actually walking.
+        CoverGoalController coverTacticalGoal = soldier.getCoverTacticalGoal();
+        int relocationGeneration = soldier.getSuppressionOrder().getGeneration();
+        CoverGoalController.SuppressionPositionStatus relocState =
+            coverTacticalGoal.getSuppressionPositionStatus(relocationGeneration);
+        String relocStatus = relocState == CoverGoalController.SuppressionPositionStatus.IDLE
+            ? "" : relocState.name();
+        int relocFailures = coverTacticalGoal.getSuppressionPositionFailures(relocationGeneration);
+        String relocLastFailure = coverTacticalGoal.getSuppressionPositionLastFailure(relocationGeneration);
+        if (relocLastFailure == null) relocLastFailure = "";
+        Vec3 searchOrigin = relocState == CoverGoalController.SuppressionPositionStatus.IDLE
+            ? null : coverTacticalGoal.getSuppressionPositionSearchOrigin(relocationGeneration);
+        float searchRadius = coverTacticalGoal.getSuppressionPositionSearchRadius();
+
+        List<Vec3> navPath = new ArrayList<>();
+        Path path = soldier.getNavigation().getPath();
+        if (path != null && !path.isDone()) {
+            int nodeCount = path.getNodeCount();
+            int stride = Math.max(1, (nodeCount + 31) / 32);
+            for (int i = 0; i < nodeCount; i += stride) {
+                navPath.add(Vec3.atBottomCenterOf(path.getNode(i).asBlockPos()).add(0, 0.1, 0));
+            }
+        }
+
         NetworkHandler.INSTANCE.send(PacketDistributor.PLAYER.with(() -> serverPlayer),
             new SuppressPingDebugPacket(true, soldier.getUUID(), soldier.position(), pingCentre,
                 pingSuppressHeavy, pingSuppressRemainingTicks, pingSuppressDurationTicks,
                 buildPingStatusLine(coverState, coverManager), pingSuppressionTarget, relocTarget,
-                aimPoints, aimPointValid));
+                aimPoints, aimPointValid,
+                relocStatus, relocFailures, relocLastFailure,
+                searchOrigin, searchRadius, navPath,
+                pingNoTargetTicks, PING_NO_TARGET_REPOSITION_TICKS));
     }
 
     /** Active player orders return before the ordinary debug-sync cadence. */

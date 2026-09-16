@@ -977,6 +977,28 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
             ? suppressionPositionStatus : SuppressionPositionStatus.IDLE;
     }
 
+    /** Debug channel: consecutive search failures for the active order. */
+    public int getSuppressionPositionFailures(int generation) {
+        return generation == suppressionPositionGeneration ? suppressionPositionFailures : 0;
+    }
+
+    /** Debug channel: why the last search failed, or null when no order is active. */
+    public String getSuppressionPositionLastFailure(int generation) {
+        if (generation != suppressionPositionGeneration) return null;
+        return "none".equals(suppressionPositionLastFailure) ? "" : suppressionPositionLastFailure;
+    }
+
+    /** Debug channel: anchor position the relocation search fans out from. */
+    public Vec3 getSuppressionPositionSearchOrigin(int generation) {
+        return generation == suppressionPositionGeneration && suppressionPositionOrigin != null
+            ? Vec3.atCenterOf(suppressionPositionOrigin) : null;
+    }
+
+    /** Debug channel: radius of the relocation search fan. */
+    public int getSuppressionPositionSearchRadius() {
+        return RELOCATION_SEARCH_RADIUS;
+    }
+
     @Override
     public void cancelSuppressionPosition(int generation) {
         if (generation != suppressionPositionGeneration) return;

@@ -1,6 +1,7 @@
 package com.stevesarmy.entity.ai;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.world.phys.Vec3;
 import com.stevesarmy.combat.cover.pure.CoverSearchResult;
 
 import javax.annotation.Nullable;
@@ -26,6 +27,28 @@ public interface CoverGoalController {
 
     default SuppressionPositionStatus getSuppressionPositionStatus(int generation) {
         return SuppressionPositionStatus.IDLE;
+    }
+
+    /** Debug channel: consecutive search failures for the active suppression-position order. */
+    default int getSuppressionPositionFailures(int generation) {
+        return 0;
+    }
+
+    /** Debug channel: why the last search failed, or null when no order is active. */
+    @Nullable
+    default String getSuppressionPositionLastFailure(int generation) {
+        return null;
+    }
+
+    /** Debug channel: anchor position the relocation search fans out from. */
+    @Nullable
+    default Vec3 getSuppressionPositionSearchOrigin(int generation) {
+        return null;
+    }
+
+    /** Debug channel: radius of the relocation search fan. */
+    default int getSuppressionPositionSearchRadius() {
+        return 0;
     }
 
     default void cancelSuppressionPosition(int generation) {
