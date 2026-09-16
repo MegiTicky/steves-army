@@ -11,7 +11,9 @@ public final class ClientSuppressPingDebugData {
     public static final ClientSuppressPingDebugData INSTANCE = new ClientSuppressPingDebugData();
 
     /** Snapshots stop arriving once a soldier's ping ends; age them out. */
-    private static final long SNAPSHOT_TTL_MS = 3000;
+    // Server refreshes active orders every five ticks; keep a brief cushion for
+    // packet jitter and render-frame stalls without leaving stale overlays up.
+    private static final long SNAPSHOT_TTL_MS = 5000;
 
     private static final class Entry {
         final SuppressPingDebugPacket packet;

@@ -115,6 +115,21 @@ public final class MachineGunnerSupportGoal extends Goal implements CoverGoalCon
     }
 
     @Override
+    public SuppressionPositionStatus requestSuppressionPosition(BlockPos area, int generation) {
+        return coverController.requestSuppressionPosition(area, generation);
+    }
+
+    @Override
+    public SuppressionPositionStatus getSuppressionPositionStatus(int generation) {
+        return coverController.getSuppressionPositionStatus(generation);
+    }
+
+    @Override
+    public void cancelSuppressionPosition(int generation) {
+        coverController.cancelSuppressionPosition(generation);
+    }
+
+    @Override
     @Nullable
     public BlockPos getProneDefensivePosition() {
         return coverController.getProneDefensivePosition();

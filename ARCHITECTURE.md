@@ -921,6 +921,16 @@ sequenceDiagram
 - Activity markers are objective-based and do not use the transient `PingManager` seven-second lifetime.
 - Movement and attack activities complete when all captured living recipients reach their objective; HOLD remains until replaced, while threat and suppression follow their existing memory windows.
 
+### Suppress-Area Orders
+
+`SUPPRESS_AREA` is a server-owned order, represented by `SuppressionOrderController`, rather than a short-lived target hint. Its lifecycle is `PREPARING`, `RELOCATING`, `FIRING`, or `PAUSED`, followed by `COMPLETED`, `FAILED`, or `CANCELLED`.
+
+- A command has 200 ticks to make its first shot, then receives a 200-tick firing budget. Reloading, posture changes, navigation, friendly-fire holds, and relocation pause that budget. Every order has a 600-tick hard limit.
+- It takes priority over direct combat and automatic last-seen suppression. A visible hostile within the five-block CQB range can temporarily interrupt for self-defense; the order resumes afterward.
+- GO_TO, SEND, ATTACK, FOLLOW, and HOLD movement are paused while the order is active and resume when it ends. A new movement command cancels the order. Support and vehicle-crew roles reject suppress-area orders.
+- After 40 ticks without a usable lane, `SoldierCombatGoal` asks `CoverGoalController` for a generation-tagged suppression position. `CoverTacticalGoal` remains the only movement owner, reports `SEARCHING`, `MOVING`, `ARRIVED`, `BLOCKED`, or `FAILED`, and ignores stale generations. This is a dedicated search, not the incoming-fire escape channel: it searches within 12 blocks of the soldier's order-start position, validates a path and firing lane to the ordered area for every candidate, retries blocked results at most three times every 20 ticks, and revalidates the lane on arrival. HOLD, FOLLOW, threat centroids, and MG anchors cannot redirect it.
+- The firing loop records its exact blocking reason (`RELOAD`, `WEAPON`, `POSTURE`, `GEOMETRY`, `ALLY`, `MOVING`, `PINNED`, or `SELF_DEFENSE`) for suppression diagnostics. Terminal success or zero-shot failure is reported once to the owner.
+
 ---
 
 ## 13. Network Layer

@@ -38,6 +38,7 @@ public class SoldierFollowOwnerGoal extends Goal {
 
     @Override
     public boolean canUse() {
+        if (soldier.hasValidPingSuppressPos()) return false;
         // Vehicle crew never walk after the player: they belong to their vehicle.
         if (soldier.getRole() == SoldierRole.VEHICLE_CREW) {
             return false;
@@ -74,6 +75,7 @@ public class SoldierFollowOwnerGoal extends Goal {
 
     @Override
     public boolean canContinueToUse() {
+        if (soldier.hasValidPingSuppressPos()) return false;
         if (soldier.getRole() == SoldierRole.VEHICLE_CREW) {
             return false;
         }

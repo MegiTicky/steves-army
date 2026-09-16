@@ -24,6 +24,7 @@ import com.stevesarmy.entity.ai.SoldierHoldPositionGoal;
 import com.stevesarmy.entity.ai.SoldierHealController;
 import com.stevesarmy.entity.ai.SoldierMoveToPingGoal;
 import com.stevesarmy.entity.ai.SoldierStrollGoal;
+import com.stevesarmy.entity.ai.SuppressionOrderController;
 import com.stevesarmy.entity.ai.CoverTacticalGoal;
 import com.stevesarmy.entity.ai.CombatGoalController;
 import com.stevesarmy.entity.ai.CoverGoalController;
@@ -256,9 +257,7 @@ public class SoldierEntity extends PathfinderMob implements Container {
     private long forcedTargetTimestamp = 0;
     private static final long FORCED_TARGET_MEMORY_MS = 10000;
     
-    private BlockPos pingSuppressPos = null;
-    private long pingSuppressTimestamp = 0;
-    private static final long PING_SUPPRESS_MEMORY_MS = 10000;
+    private final SuppressionOrderController suppressionOrder = new SuppressionOrderController();
     private java.util.List<Vec3> suppressionAimPoints = new java.util.ArrayList<>();
     private Vec3 lastSuppressionAimPoint = null;
     public static final double SUPPRESSION_ZONE_RADIUS = 15.0;
@@ -1274,6 +1273,16 @@ public class SoldierEntity extends PathfinderMob implements Container {
         if (coverBehaviorManager != null) {
             coverBehaviorManager.tickSuppression(coverBehaviorManager.isInCover());
         }
+        suppressionOrder.tick(this);
+        if (suppressionOrder.markTerminalReported()) {
+            LivingEntity owner = getOwner();
+            if (owner instanceof ServerPlayer player) {
+                String result = suppressionOrder.getPhase() == SuppressionOrderController.Phase.COMPLETED
+                    ? "completed" : "failed before firing";
+                player.sendSystemMessage(Component.literal("[Squad] Suppression order " + result
+                    + " for " + getName().getString()));
+            }
+        }
         refreshAttackTargetUnderFire();
         tickCoverStuckWatchdog();
 
@@ -1477,6 +1486,14 @@ public class SoldierEntity extends PathfinderMob implements Container {
     public void receivePing(com.stevesarmy.ping.PingType type, net.minecraft.world.phys.Vec3 position) {
         com.stevesarmy.StevesArmyMod.LOGGER.info("Soldier received ping: type={} pos={}", type, position);
         
+        if (type == com.stevesarmy.ping.PingType.SEND
+            || type == com.stevesarmy.ping.PingType.GO_TO
+            || type == com.stevesarmy.ping.PingType.ATTACK
+            || type == com.stevesarmy.ping.PingType.FOLLOW
+            || type == com.stevesarmy.ping.PingType.HOLD) {
+            clearPingSuppressPos();
+        }
+
         switch (type) {
             case SEND -> {
                 BlockPos pos = BlockPos.containing(position);
@@ -1537,8 +1554,15 @@ public class SoldierEntity extends PathfinderMob implements Container {
                 StevesArmyMod.LOGGER.info("Switched to HOLD mode, cleared all threat data");
             }
             case SUPPRESS_AREA -> {
-                pingSuppressPos = BlockPos.containing(position);
-                pingSuppressTimestamp = System.currentTimeMillis();
+                if (getRole() == SoldierRole.SUPPORT || getRole() == SoldierRole.VEHICLE_CREW || isVehicleCrewActive()) {
+                    LivingEntity owner = getOwner();
+                    if (owner instanceof ServerPlayer player) {
+                        player.sendSystemMessage(Component.literal("[Squad] " + getName().getString()
+                            + " cannot execute suppress-area orders."));
+                    }
+                    return;
+                }
+                setPingSuppressPos(BlockPos.containing(position));
                 suppressionAimPoints.clear();
                 lastSuppressionAimPoint = null;
                 
@@ -1546,7 +1570,7 @@ public class SoldierEntity extends PathfinderMob implements Container {
                     this.combatGoal.forceRestartPingSuppression();
                 }
                 
-                StevesArmyMod.LOGGER.info("Set suppress area: {}", pingSuppressPos);
+                StevesArmyMod.LOGGER.info("Set suppress area: {}", getPingSuppressPos());
             }
             case ATTACK -> {
                 setAttackTarget(BlockPos.containing(position));
@@ -1713,28 +1737,33 @@ public BlockPos getPingMoveTarget() {
     }
     
     public BlockPos getPingSuppressPos() {
-        return pingSuppressPos;
+        return suppressionOrder.getArea();
     }
     
     public boolean hasValidPingSuppressPos() {
-        return pingSuppressPos != null &&
-               System.currentTimeMillis() - pingSuppressTimestamp < PING_SUPPRESS_MEMORY_MS;
+        return suppressionOrder.isActive();
     }
 
     public void setPingSuppressPos(BlockPos pos) {
-        if (pingSuppressPos == null || !pingSuppressPos.equals(pos)) {
+        if (suppressionOrder.isActive() && coverTacticalGoal != null) {
+            coverTacticalGoal.cancelSuppressionPosition(suppressionOrder.getGeneration());
+        }
+        if (suppressionOrder.getArea() == null || !suppressionOrder.getArea().equals(pos)) {
             suppressionAimPoints.clear();
             lastSuppressionAimPoint = null;
         }
-        this.pingSuppressPos = pos;
-        this.pingSuppressTimestamp = System.currentTimeMillis();
+        suppressionOrder.start(pos, tickCount);
+        suppressionOrder.setOrigin(blockPosition());
     }
     
     public void clearPingSuppressPos() {
-        pingSuppressPos = null;
-        pingSuppressTimestamp = 0;
+        suppressionOrder.cancel();
         suppressionAimPoints.clear();
         lastSuppressionAimPoint = null;
+    }
+
+    public SuppressionOrderController getSuppressionOrder() {
+        return suppressionOrder;
     }
     
     public java.util.List<Vec3> getSuppressionAimPoints() {

@@ -26,6 +26,7 @@ public class SoldierHoldPositionGoal extends Goal {
 
     @Override
     public boolean canUse() {
+        if (soldier.hasValidPingSuppressPos()) return false;
         // ATTACK uses CoverTacticalGoal as its sole movement owner.
         if (soldier.hasValidAttackTarget()) {
             return false;
@@ -61,6 +62,7 @@ public class SoldierHoldPositionGoal extends Goal {
 
     @Override
     public boolean canContinueToUse() {
+        if (soldier.hasValidPingSuppressPos()) return false;
         if (soldier.hasValidAttackTarget()) {
             return false;
         }

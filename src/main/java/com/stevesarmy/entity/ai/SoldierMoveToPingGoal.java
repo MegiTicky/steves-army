@@ -30,6 +30,7 @@ public class SoldierMoveToPingGoal extends Goal {
         // Crew soldiers ignore move pings while seated at their station.
         if (soldier.isVehicleCrewActive() || soldier.isCrewSeated()
             || soldier.getRole() == SoldierRole.VEHICLE_CREW) return false;
+        if (soldier.hasValidPingSuppressPos()) return false;
         if (soldier.hasValidAttackTarget()) return false;
         if (soldier.isGoToHolding()) return false;
         if (!soldier.hasValidPingMoveTarget()) return false;
@@ -47,6 +48,7 @@ public class SoldierMoveToPingGoal extends Goal {
         if (!soldier.isAlive()) return false;
         if (soldier.isVehicleCrewActive() || soldier.isCrewSeated()
             || soldier.getRole() == SoldierRole.VEHICLE_CREW) return false;
+        if (soldier.hasValidPingSuppressPos()) return false;
         if (soldier.isGoToHolding()) return false;
         if (!soldier.hasValidPingMoveTarget()) return false;
         if (rawTarget == null) return false;
@@ -67,7 +69,8 @@ public class SoldierMoveToPingGoal extends Goal {
 
     @Override
     public void stop() {
-        if (!soldier.getCoverTacticalGoal().isHandlingGoToRelocation(commandGeneration)) {
+        if (!soldier.hasValidPingSuppressPos()
+            && !soldier.getCoverTacticalGoal().isHandlingGoToRelocation(commandGeneration)) {
             soldier.getNavigation().stop();
             if (!soldier.hasPersistentGoTo()) {
                 soldier.clearPingMoveTargetIfGeneration(commandGeneration);

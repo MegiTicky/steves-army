@@ -198,6 +198,7 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
     private static final int PING_AIM_REDISCOVERY_COOLDOWN_TICKS = 20;
     private static final int PING_HEAVY_ALTERNATE_ATTEMPTS = 6;
     private static final int PING_HEAVY_FLIP_HYSTERESIS_TICKS = 20;
+    private static final int PING_DEBUG_SYNC_INTERVAL_TICKS = 5;
     
     private List<LivingEntity> cachedPotentialTargets = null;
     private long cachedPotentialTargetsTick = -1;
@@ -561,12 +562,57 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
         }
 
         if (hasGun && tickReloadState()) {
+            if (soldier.getSuppressionOrder().isActive()) {
+                soldier.getSuppressionOrder().setPaused(SuppressionOrderController.BlockReason.RELOAD);
+            }
             updateDebugSync();
+            if (soldier.tickCount % PING_DEBUG_SYNC_INTERVAL_TICKS == 0) {
+                sendSuppressPingDebugToOwner();
+            }
             return;
         }
 
         if (holdCombatForNavigationTraversal(hasGun)) {
+            if (soldier.getSuppressionOrder().isActive()) {
+                soldier.getSuppressionOrder().setPaused(SuppressionOrderController.BlockReason.MOVING);
+                if (soldier.tickCount % PING_DEBUG_SYNC_INTERVAL_TICKS == 0) {
+                    sendSuppressPingDebugToOwner();
+                }
+            }
             updateDebugSync();
+            return;
+        }
+
+        // A suppress-area ping is a player order, not a target hint. It owns
+        // combat until completion; only an immediate close-range threat may
+        // borrow the loop for self-defense.
+        SuppressionOrderController suppressionOrder = soldier.getSuppressionOrder();
+        if (suppressionOrder.isActive()) {
+            boolean closeSelfDefense = target != null && target.isAlive()
+                && TargetAcquisition.hasLineOfSight(soldier, target)
+                && soldier.distanceToSqr(target) <= SoldierEntity.CQB_RANGE * SoldierEntity.CQB_RANGE;
+            if (closeSelfDefense) {
+                suppressionOrder.setPaused(SuppressionOrderController.BlockReason.SELF_DEFENSE);
+                tickCombat(hasGun, null);
+            } else {
+                // Release autonomous last-seen suppression, never the explicit order.
+                if (isSuppressing) {
+                    cancelAllSuppression();
+                }
+                soldier.setVehicleEngagement(false);
+                if (inCover) {
+                    tickCoverPeekCycle(soldier.getCoverBehaviorManager());
+                }
+                if (hasGun && shouldSuppressPingTarget()) {
+                    trySuppressPingFire();
+                } else {
+                    suppressionOrder.setPaused(SuppressionOrderController.BlockReason.WEAPON);
+                }
+            }
+            updateDebugSync();
+            if (soldier.tickCount % PING_DEBUG_SYNC_INTERVAL_TICKS == 0) {
+                sendSuppressPingDebugToOwner();
+            }
             return;
         }
 
@@ -1274,11 +1320,8 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
         pendingSuppressionThreat = null;
         isSuppressing = false;
         
-        if (isPingSuppressing || soldier.hasValidPingSuppressPos()) {
-            soldier.clearPingSuppressPos();
-            isPingSuppressing = false;
-            pingSuppressRemainingTicks = 0;
-        }
+        isPingSuppressing = false;
+        pingSuppressRemainingTicks = 0;
         
         resetBurstState();
     }
@@ -2373,6 +2416,15 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
                 aimPoints, aimPointValid));
     }
 
+    /** Active player orders return before the ordinary debug-sync cadence. */
+    private void sendSuppressPingDebugToOwner() {
+        if (soldier.level().isClientSide) return;
+        LivingEntity owner = soldier.getOwner();
+        if (owner instanceof ServerPlayer serverPlayer) {
+            sendSuppressPingDebug(serverPlayer);
+        }
+    }
+
     private String buildPingStatusLine(CoverBehaviorManager.CoverState coverState,
                                        CoverBehaviorManager coverManager) {
         StringBuilder status = new StringBuilder();
@@ -2393,6 +2445,15 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
         }
         if (pingSuppressHeavy && pingSuppressionTarget != null && lastHeavyLaneSource != null) {
             status.append(" lane=").append(lastHeavyLaneSource);
+        }
+        SuppressionOrderController order = soldier.getSuppressionOrder();
+        CoverGoalController.SuppressionPositionStatus relocation = soldier.getCoverTacticalGoal()
+            .getSuppressionPositionStatus(order.getGeneration());
+        if (relocation != CoverGoalController.SuppressionPositionStatus.IDLE) {
+            status.append(" reloc=").append(relocation);
+        }
+        if (order.getBlockReason() != SuppressionOrderController.BlockReason.NONE) {
+            status.append(" block=").append(order.getBlockReason());
         }
         status.append(" cv=").append(coverState);
         if (coverManager.isContinuousSuppressionRepositionRequested()) status.append(" scootReq");
@@ -3351,11 +3412,6 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
             return false;
         }
 
-        // Aim the cover-search, reposition, and peek direction at the pinged
-        // zone while the order is active (same pattern the vehicle branch uses
-        // for hull centres) so relocation converges on positions with lanes.
-        soldier.getThreatAwareness().onEnemyPing(soldier.getPingSuppressPos());
-        
         if (GunIntegration.isReloading(soldier) ||
             GunIntegration.isBolting(soldier) ||
             GunIntegration.isDrawing(soldier)) {
@@ -3468,11 +3524,23 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
     }
     
     private void trySuppressPingFire() {
-        if (pingSuppressRemainingTicks <= 0 && soldier.hasValidPingSuppressPos()) {
+        SuppressionOrderController order = soldier.getSuppressionOrder();
+        if (!order.isActive()) {
+            isPingSuppressing = false;
+            pingSuppressRemainingTicks = 0;
+            return;
+        }
+        CoverGoalController.SuppressionPositionStatus repositionStatus = soldier.getCoverTacticalGoal()
+            .getSuppressionPositionStatus(order.getGeneration());
+        if (repositionStatus == CoverGoalController.SuppressionPositionStatus.SEARCHING
+            || repositionStatus == CoverGoalController.SuppressionPositionStatus.MOVING) {
+            order.setPaused(SuppressionOrderController.BlockReason.MOVING);
+            return;
+        }
+        if (!isPingSuppressing) {
             isPingSuppressing = true;
-            pingSuppressDurationTicks = PING_SUPPRESS_MIN_DURATION_TICKS +
-                soldier.level().random.nextInt(PING_SUPPRESS_MAX_DURATION_TICKS - PING_SUPPRESS_MIN_DURATION_TICKS);
-            pingSuppressRemainingTicks = pingSuppressDurationTicks;
+            pingSuppressDurationTicks = SuppressionOrderController.FIRING_BUDGET_TICKS;
+            pingSuppressRemainingTicks = SuppressionOrderController.FIRING_BUDGET_TICKS;
             pingSuppressHeavy = wantsHeavySuppressPing();
             lastHeavyFlipTick = soldier.tickCount;
             pingSuppressionTarget = null;
@@ -3485,24 +3553,6 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
                 StevesArmyMod.LOGGER.info("[SuppressPing] Soldier {} starting suppression at {} (duration={}s, isMG={}, isHeavy={})",
                     soldier.getId(), soldier.getPingSuppressPos(), pingSuppressDurationTicks / 20.0, isMG, pingSuppressHeavy);
             }
-        }
-
-        pingSuppressRemainingTicks--;
-        if (pingSuppressRemainingTicks <= 0 || !soldier.hasValidPingSuppressPos()) {
-            if (isSuppressionDebugLogging()) {
-                StevesArmyMod.LOGGER.info("[SuppressPing] Soldier {} finished suppression", soldier.getId());
-            }
-            soldier.clearPingSuppressPos();
-            isPingSuppressing = false;
-            pingSuppressRemainingTicks = 0;
-            pingSuppressHeavy = false;
-            lastHeavyLaneSource = null;
-            pingNoTargetTicks = 0;
-            pingSuppressionTarget = null;
-            pingSuppressionSweepEnd = null;
-            pingSuppressionShotTarget = null;
-            resetBurstState();
-            return;
         }
 
         // If launcher availability flips mid-burst (rockets ran dry, hunter
@@ -3531,6 +3581,7 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
                 // forever without ever accumulating relocation ticks — count
                 // the blindness here too, with the same 40t/100t throttles.
                 tickPingSuppressReposition();
+                order.setPreparing(SuppressionOrderController.BlockReason.POSTURE);
                 return;
             }
         }
@@ -3540,6 +3591,7 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
             pingSuppressionSweepEnd = null;
             pingSuppressionShotTarget = null;
             if (pingSuppressionTarget == null) {
+                order.setPreparing(SuppressionOrderController.BlockReason.GEOMETRY);
                 tickPingSuppressReposition();
                 return;
             }
@@ -3563,8 +3615,12 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
         
         float adsProgress = GunIntegration.getAimProgress(soldier);
         if (adsProgress < SUPPRESSION_ADS_THRESHOLD) {
+            order.setPreparing(SuppressionOrderController.BlockReason.POSTURE);
             return;
         }
+
+        order.consumeFiringTick();
+        if (!order.isActive()) return;
         
         if (burstCooldownTicks > 0) {
             burstCooldownTicks--;
@@ -3591,17 +3647,20 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
         }
 
         if (!prepareToFire(finalTarget, false)) {
+            order.setPreparing(SuppressionOrderController.BlockReason.POSTURE);
             return;
         }
 
         VisibilityRay.Result lane = VisibilityRay.traceFreshIgnoringSmoke(
             soldier.level(), soldier.getEyePosition(), finalTarget, soldier);
         if (pingSuppressHeavy ? !lane.clear() : !lane.hasContact()) {
+            order.setPreparing(SuppressionOrderController.BlockReason.GEOMETRY);
             return;
         }
 
         // Friendly-fire check: skip this shot to avoid hitting the player or allies.
         if (!FriendlyFireChecker.isSafeToShoot(soldier, finalTarget, aimQuality)) {
+            order.setPreparing(SuppressionOrderController.BlockReason.ALLY);
             return;
         }
 
@@ -3614,6 +3673,7 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
         
         switch (result) {
             case SUCCESS -> {
+                order.recordShot();
                 burstShotsFired++;
                 ticksSinceLastBurstShot = 0;
                 pingSuppressionShotTarget = null;
@@ -3671,7 +3731,10 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
             StevesArmyMod.LOGGER.info("[SuppressPing] Soldier {} no valid lane into zone, requesting emergency reposition",
                 soldier.getId());
         }
-        soldier.getCoverBehaviorManager().requestContinuousSuppressionReposition();
+        SuppressionOrderController order = soldier.getSuppressionOrder();
+        order.beginRelocation();
+        soldier.getCoverTacticalGoal().requestSuppressionPosition(
+            soldier.getPingSuppressPos(), order.getGeneration());
     }
 
     /** Every cached aim point failed LOS: clear them (cooldown-throttled) so
@@ -3862,6 +3925,7 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
     }
     
     public void forceRestartPingSuppression() {
+        this.isPingSuppressing = false;
         this.pingSuppressRemainingTicks = 0;
         this.pingSuppressionTarget = null;
         this.pingSuppressionSweepEnd = null;

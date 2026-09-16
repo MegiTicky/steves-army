@@ -7,12 +7,29 @@ import javax.annotation.Nullable;
 
 /** Shared command-facing services exposed by a cover goal. */
 public interface CoverGoalController {
+    enum SuppressionPositionStatus { IDLE, SEARCHING, MOVING, ARRIVED, BLOCKED, FAILED }
+
     boolean requestGoToRelocation(BlockPos destination, int commandGeneration);
 
     boolean isHandlingGoToRelocation(int commandGeneration);
 
     @Nullable
     BlockPos getProneDefensivePosition();
+
+    /**
+     * A suppress-area order owns this request. The generation prevents an old
+     * path/search result from moving a soldier after the player issued a new order.
+     */
+    default SuppressionPositionStatus requestSuppressionPosition(BlockPos area, int generation) {
+        return SuppressionPositionStatus.FAILED;
+    }
+
+    default SuppressionPositionStatus getSuppressionPositionStatus(int generation) {
+        return SuppressionPositionStatus.IDLE;
+    }
+
+    default void cancelSuppressionPosition(int generation) {
+    }
 
     default void applyAsyncCoverPilotResult(CoverSearchResult result, BlockPos sourcePosition, long sourceTick) {
     }
