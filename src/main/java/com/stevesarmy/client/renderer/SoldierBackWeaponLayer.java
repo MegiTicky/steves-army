@@ -12,25 +12,28 @@ import net.minecraft.client.renderer.texture.OverlayTexture;
 import net.minecraft.client.renderer.entity.layers.RenderLayer;
 import net.minecraft.world.item.ItemDisplayContext;
 import net.minecraft.world.item.ItemStack;
+import org.joml.Vector3f;
+
+import javax.annotation.Nullable;
+import java.util.Optional;
 
 /**
  * TaCZ-style stowed-weapon display: whatever sits in the soldier's sidearm
  * slot (after a weapon swap that is always the gun not currently held) is
- * drawn lying diagonally across the back. Parented to the body part, so
- * crouch lean, half-cover rise and prone pitch all carry the weapon along.
- * Rendered in the THIRD_PERSON (held-gun) framing — gun packs author that
- * context to the in-world size, while FIXED is their oversized item-frame
- * display. Never runs under the YSM geo-model path, which bypasses the
- * layer pipeline.
+ * drawn slung across the back. The mount reproduces TaCZ's own back-gun
+ * math (HumanoidOffhandRender.renderGunItem, injected by TaCZ at
+ * ItemInHandLayer TAIL — the same pose frame this layer renders in):
+ * translate(-x/16, 1.5 - y/16, z/16), un-mirroring scale(-sx, -sy, sz),
+ * intrinsic ZYX rotation, FIXED display context, with per-gun pos/rotate/
+ * scale from the pack's authored hotbar_show. Fallback is the TaCZ default
+ * pack's AK47 mount. Body parenting adds what TaCZ's entity-anchored
+ * version lacks: the mount follows lean/crouch poses. Never runs under the
+ * YSM geo-model path, which bypasses the layer pipeline.
  */
 public class SoldierBackWeaponLayer<T extends SoldierEntity, M extends HumanoidModel<T>> extends RenderLayer<T, M> {
-    // Body-pivot frame in model space: +Y runs down the torso from the neck
-    // pivot, +Z points out the back surface. Tunables for the TaCZ look.
-    private static final double HEIGHT_FROM_PIVOT = 0.34;
-    private static final double BEHIND_SURFACE = 0.16;
-    private static final float PITCH_DEGREES = 35.0F;
-    private static final float ROLL_DEGREES = 18.0F;
-    private static final float SCALE = 1.0F;
+    /** TaCZ default pack, ak47_display.json hotbar_show slot 0. */
+    private static final GunShow FALLBACK_SHOW = new GunShow(
+        new Vector3f(-1.0F, 20.0F, 3.0F), new Vector3f(-180.0F, 0.0F, 120.0F), new Vector3f(0.5F, 0.5F, 0.5F));
 
     public SoldierBackWeaponLayer(RenderLayerParent<T, M> parent) {
         super(parent);
@@ -47,18 +50,51 @@ public class SoldierBackWeaponLayer<T extends SoldierEntity, M extends HumanoidM
         if (stowed.isEmpty()) {
             return;
         }
+        GunShow show = lookupTaczShow(stowed);
+        if (show == null) {
+            show = FALLBACK_SHOW;
+        }
 
         poseStack.pushPose();
-        ModelPart body = this.getParentModel().body;
-        body.translateAndRotate(poseStack);
-        poseStack.translate(0.0D, HEIGHT_FROM_PIVOT, BEHIND_SURFACE);
-        // Out of the back, then muzzle up and rolled into the diagonal carry.
-        poseStack.mulPose(Axis.YP.rotationDegrees(180.0F));
-        poseStack.mulPose(Axis.XP.rotationDegrees(PITCH_DEGREES));
-        poseStack.mulPose(Axis.ZP.rotationDegrees(ROLL_DEGREES));
-        poseStack.scale(SCALE, SCALE, SCALE);
-        Minecraft.getInstance().getItemRenderer().renderStatic(stowed, ItemDisplayContext.THIRD_PERSON_RIGHT_HAND,
+        this.getParentModel().body.translateAndRotate(poseStack);
+        // Verbatim HumanoidOffhandRender.renderGunItem transform chain.
+        poseStack.translate(-show.pos().x() / 16.0, 1.5 - show.pos().y() / 16.0, show.pos().z() / 16.0);
+        poseStack.scale(-show.scale().x(), -show.scale().y(), show.scale().z());
+        poseStack.mulPose(Axis.ZP.rotationDegrees(show.rot().z()));
+        poseStack.mulPose(Axis.YP.rotationDegrees(show.rot().y()));
+        poseStack.mulPose(Axis.XP.rotationDegrees(show.rot().x()));
+        Minecraft.getInstance().getItemRenderer().renderStatic(stowed, ItemDisplayContext.FIXED,
             packedLight, OverlayTexture.NO_OVERLAY, poseStack, buffer, soldier.level(), soldier.getId());
         poseStack.popPose();
     }
+
+    /**
+     * The gun's authored TaCZ back mount (hotbar_show slot 0, else any
+     * slot), or null when TaCZ is absent or the gun has no display data.
+     */
+    @Nullable
+    private static GunShow lookupTaczShow(ItemStack stack) {
+        try {
+            Class<?> api = Class.forName("com.tacz.guns.api.TimelessAPI");
+            Object result = api.getMethod("getGunDisplay", ItemStack.class).invoke(null, stack);
+            if (!(result instanceof Optional<?> optional) || optional.isEmpty()) {
+                return null;
+            }
+            Object index = optional.get();
+            Object mapObj = index.getClass().getMethod("getHotbarShow").invoke(index);
+            if (!(mapObj instanceof java.util.Map<?, ?> map) || map.isEmpty()) {
+                return null;
+            }
+            Object show = map.containsKey(0) ? map.get(0) : map.values().iterator().next();
+            Class<?> showClass = show.getClass();
+            return new GunShow(
+                (Vector3f) showClass.getMethod("getPos").invoke(show),
+                (Vector3f) showClass.getMethod("getRotate").invoke(show),
+                (Vector3f) showClass.getMethod("getScale").invoke(show));
+        } catch (ReflectiveOperationException | NoClassDefFoundError | ClassCastException ignored) {
+            return null;
+        }
+    }
+
+    private record GunShow(Vector3f pos, Vector3f rot, Vector3f scale) {}
 }
