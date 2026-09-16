@@ -740,6 +740,13 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
                 suppressionPositionStatus = SuppressionPositionStatus.MOVING;
                 suppressionPositionFailures = 0;
                 suppressionPositionLastFailure = "none";
+                // The ping order now owns movement. Clear the superseded scoot
+                // flags at move start rather than only on arrival — if the
+                // approach aborts, their leftover state would immediately fire
+                // a competing (non-ping-directed) cover search.
+                coverManager.clearRepositionRequest();
+                coverManager.clearShotInCoverRepositionRequest();
+                coverManager.clearContinuousSuppressionRepositionRequest();
                 coverManager.setState(CoverBehaviorManager.CoverState.REPOSITIONING);
                 return;
             }
@@ -886,6 +893,20 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
         }
         suppressionPositionStatus = SuppressionPositionStatus.SEARCHING;
         requestEmergencySearch(QueuedSearchMode.SUPPRESSION_POSITION);
+    }
+
+    /**
+     * A repositioning move that aborted without reaching the cover must not
+     * leave the ping channel reporting MOVING forever — the retry loop only
+     * re-arms from BLOCKED/FAILED, so a stale MOVING verdict would silence the
+     * order's relocation for the rest of the generation.
+     */
+    private void noteSuppressionMoveAborted() {
+        if (suppressionPositionStatus == SuppressionPositionStatus.MOVING
+            && soldier.getSuppressionOrder().getGeneration() == suppressionPositionGeneration) {
+            suppressionPositionStatus = SuppressionPositionStatus.BLOCKED;
+            nextSuppressionPositionSearchTick = soldier.tickCount + SHOT_IN_COVER_RETRY_TICKS;
+        }
     }
 
     private void handleQueuedAttackSearchResult(CoverMoveResult result) {
@@ -2173,7 +2194,11 @@ private void tickRepositioning() {
         // ATTACK owns the chosen bound until deterministic path recovery rejects it.
         // Its path may temporarily lead away from the objective to exit a structure,
         // so the generic threat-shift reconsideration must not replace it mid-route.
-        if (!soldier.hasValidAttackTarget() && soldier.getRandom().nextFloat() < 0.5f) {
+        // A suppress-area order likewise owns its destination: the smooth threat
+        // direction rotating under fire must not abandon a ping-directed move.
+        boolean suppressionMoveInFlight = suppressionPositionStatus == SuppressionPositionStatus.MOVING
+            && soldier.getSuppressionOrder().getGeneration() == suppressionPositionGeneration;
+        if (!soldier.hasValidAttackTarget() && !suppressionMoveInFlight && soldier.getRandom().nextFloat() < 0.5f) {
             Vec3 currentThreatDir = getThreats().getPrimaryDirection(soldier.position());
             Vec3 entryThreatDir = getCoverManager().getEntryThreatDirection();
             
@@ -2237,6 +2262,7 @@ private void tickRepositioning() {
             if (targetCover != null) {
                 blacklistCover(targetCover.getPosition(), BlacklistReason.STUCK_REPOSITIONING);
             }
+            noteSuppressionMoveAborted();
             getCoverManager().clearTargetCover();
             getPositionController().clear();
             if (currentCover != null) {
@@ -2286,11 +2312,24 @@ private void tickRepositioning() {
             if (failReason == CoverPositionController.FailureReason.HAZARD
                 || failReason == CoverPositionController.FailureReason.BLOCKED_PATH
                 || failReason == CoverPositionController.FailureReason.NO_PROGRESS) {
+                // The velocity handoff can reject a spot the soldier is
+                // effectively standing on: the destination sweep clips the
+                // cover block's own collision, or the approach grinds to a
+                // halt against it. Within the arrival distance the goal
+                // already accepts below, treat it as arrived — onCoverReached
+                // still re-validates suppression lanes from the real eye.
+                if (horizontalDist < COVER_REACHED_DISTANCE) {
+                    onCoverReached(targetCover);
+                    noProgressTicks = 0;
+                    lastSeekingPosition = null;
+                    return;
+                }
                 if (soldier.hasValidAttackTarget()) {
                     StevesArmyMod.LOGGER.info("[CoverNav] Soldier {} ({}) reposition blocked (reason={}) for cover={}, blacklisting",
                         soldier.getId(), soldier.getName().getString(), failReason, targetCover.getPosition());
                 }
                 blacklistCover(targetCover.getPosition(), BlacklistReason.POSITIONING_BLOCKED);
+                noteSuppressionMoveAborted();
                 stuckTicks = 0;
                 noProgressTicks = 0;
                 lastSeekingPosition = null;
@@ -2337,11 +2376,21 @@ private void tickRepositioning() {
                 // navigation before blacklisting a cover the pathfinder reached.
                 moveControl.resetFailureState();
                 if (!moveToCover(targetCover) && pendingRetryCover == null && !isReloadBlockedMove()) {
+                    // The pathfinder delivered the soldier to the cover; a
+                    // rejected final alignment within arrival distance is an
+                    // arrival, not a bad cover.
+                    if (horizontalDist < COVER_REACHED_DISTANCE) {
+                        onCoverReached(targetCover);
+                        noProgressTicks = 0;
+                        lastSeekingPosition = null;
+                        return;
+                    }
                     if (DiagnosticLogManager.isCoverLoggingEnabled()) {
                         StevesArmyMod.LOGGER.info("[CoverGoal] Soldier {} reposition handoff rejected (reason={}) for cover={}, blacklisting",
                             soldier.getId(), handoffFailReason, targetCover.getPosition());
                     }
                     blacklistCover(targetCover.getPosition(), BlacklistReason.POSITIONING_BLOCKED);
+                    noteSuppressionMoveAborted();
                     stuckTicks = 0;
                     noProgressTicks = 0;
                     lastSeekingPosition = null;
