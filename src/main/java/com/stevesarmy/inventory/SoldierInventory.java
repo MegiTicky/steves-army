@@ -34,6 +34,8 @@ public class SoldierInventory implements Container {
     private final NonNullList<ItemStack> items;
     @Nullable
     private Consumer<ItemStack> mainHandChangedCallback;
+    @Nullable
+    private Consumer<ItemStack> sidearmChangedCallback;
 
     public SoldierInventory() {
         this.items = NonNullList.withSize(INVENTORY_SIZE, ItemStack.EMPTY);
@@ -41,6 +43,17 @@ public class SoldierInventory implements Container {
 
     public void setMainHandChangedCallback(@Nullable Consumer<ItemStack> callback) {
         this.mainHandChangedCallback = callback;
+    }
+
+    /** Fired whenever the sidearm slot's stack changes; drives the client-facing stowed-weapon sync. */
+    public void setSidearmChangedCallback(@Nullable Consumer<ItemStack> callback) {
+        this.sidearmChangedCallback = callback;
+    }
+
+    private void notifySidearmChanged() {
+        if (sidearmChangedCallback != null) {
+            sidearmChangedCallback.accept(items.get(SLOT_SIDEARM));
+        }
     }
 
     public void syncArmorToEntity(SoldierEntity soldier) {
@@ -92,6 +105,9 @@ public class SoldierInventory implements Container {
         if (slot == SLOT_MAIN_HAND && mainHandChangedCallback != null) {
             mainHandChangedCallback.accept(items.get(SLOT_MAIN_HAND));
         }
+        if (slot == SLOT_SIDEARM) {
+            notifySidearmChanged();
+        }
         return result;
     }
 
@@ -100,6 +116,9 @@ public class SoldierInventory implements Container {
         ItemStack result = ContainerHelper.takeItem(items, slot);
         if (slot == SLOT_MAIN_HAND && mainHandChangedCallback != null) {
             mainHandChangedCallback.accept(items.get(SLOT_MAIN_HAND));
+        }
+        if (slot == SLOT_SIDEARM) {
+            notifySidearmChanged();
         }
         return result;
     }
@@ -117,6 +136,9 @@ public class SoldierInventory implements Container {
             if (slot == SLOT_MAIN_HAND && mainHandChangedCallback != null) {
                 mainHandChangedCallback.accept(stack);
             }
+            if (slot == SLOT_SIDEARM) {
+                notifySidearmChanged();
+            }
         }
     }
 
@@ -125,6 +147,7 @@ public class SoldierInventory implements Container {
         if (mainHandChangedCallback != null) {
             mainHandChangedCallback.accept(items.get(SLOT_MAIN_HAND));
         }
+        notifySidearmChanged();
     }
 
     @Override
@@ -138,6 +161,7 @@ public class SoldierInventory implements Container {
         if (mainHandChangedCallback != null) {
             mainHandChangedCallback.accept(ItemStack.EMPTY);
         }
+        notifySidearmChanged();
     }
 
     public CompoundTag save() {
@@ -187,6 +211,7 @@ public class SoldierInventory implements Container {
                 }
             }
         }
+        notifySidearmChanged();
     }
 
     public NonNullList<ItemStack> getItems() {

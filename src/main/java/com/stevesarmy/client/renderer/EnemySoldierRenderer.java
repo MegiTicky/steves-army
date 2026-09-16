@@ -25,10 +25,11 @@ public class EnemySoldierRenderer extends HumanoidMobRenderer<EnemySoldierEntity
     public EnemySoldierRenderer(EntityRendererProvider.Context context) {
         super(context, new SoldierModel<>(context.bakeLayer(ModelLayers.PLAYER)), 0.5F);
         this.geoRenderer = YsmCompat.createGeoRenderer(context);
-        this.addLayer(new HumanoidArmorLayer<>(this, 
+        this.addLayer(new HumanoidArmorLayer<>(this,
             new HumanoidModel<>(context.bakeLayer(ModelLayers.PLAYER_INNER_ARMOR)),
             new HumanoidModel<>(context.bakeLayer(ModelLayers.PLAYER_OUTER_ARMOR)),
             context.getModelManager()));
+        this.addLayer(new SoldierBackWeaponLayer<>(this));
         // Vanilla glow outline via MobEffects.GLOWING + team color handles enemy glow
     }
 

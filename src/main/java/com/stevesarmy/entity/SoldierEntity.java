@@ -189,6 +189,10 @@ public class SoldierEntity extends PathfinderMob implements Container {
     private static final EntityDataAccessor<Boolean> MG_DEBUG_FALLBACK =
         SynchedEntityData.defineId(SoldierEntity.class, EntityDataSerializers.BOOLEAN);
 
+    /** Mirror of the sidearm slot for clients; the back-weapon layer draws this while it is not held. */
+    private static final EntityDataAccessor<ItemStack> DATA_STOWED_WEAPON =
+        SynchedEntityData.defineId(SoldierEntity.class, EntityDataSerializers.ITEM_STACK);
+
     private static final int HALF_COVER_RISE_TICKS = 8;
     private static final int NAVIGATION_LANDING_LOCK_TICKS = 4;
     private static final int NAVIGATION_COLLISION_LOCK_TICKS = 2;
@@ -396,6 +400,23 @@ public class SoldierEntity extends PathfinderMob implements Container {
                 }
             }
         });
+        this.inventory.setSidearmChangedCallback(stack -> syncStowedWeaponData());
+    }
+
+    /**
+     * Publishes the sidearm slot to clients as the stowed weapon. After a
+     * weapon swap the not-held gun always ends up in the sidearm slot, so this
+     * is all the back-weapon layer needs; server-side only, vanilla entity
+     * data sync carries it the rest of the way.
+     */
+    private void syncStowedWeaponData() {
+        if (this.level().isClientSide) return;
+        entityData.set(DATA_STOWED_WEAPON, inventory.getItem(SoldierInventory.SLOT_SIDEARM).copy());
+    }
+
+    /** The gun currently stowed on the soldier's back (the sidearm slot mirror). */
+    public ItemStack getStowedWeapon() {
+        return entityData.get(DATA_STOWED_WEAPON);
     }
 
     @Override
@@ -453,6 +474,7 @@ public class SoldierEntity extends PathfinderMob implements Container {
         this.entityData.define(MG_DEBUG_SUPPRESSED, false);
         this.entityData.define(MG_DEBUG_MOVEMENT_POSITION, BlockPos.ZERO);
         this.entityData.define(MG_DEBUG_FALLBACK, false);
+        this.entityData.define(DATA_STOWED_WEAPON, ItemStack.EMPTY);
     }
 
     @Override
