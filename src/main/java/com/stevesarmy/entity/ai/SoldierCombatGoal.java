@@ -184,7 +184,10 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
     private int lastHeavyFlipTick = -1000;
     private String lastHeavyLaneSource = null;
     private int pingNoTargetTicks = 0;
+    private int pingPeekStuckTicks = 0;
     private int lastPingRepositionTick = -1000;
+    private int lastRelocationHoldTick = -1000;
+    private String lastRelocationHoldReason = null;
     private int aimPointsRefreshTick = 0;
     private int aimRediscoveryCooldownTick = 0;
     private Vec3 pingSuppressionTarget = null;
@@ -193,6 +196,7 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
     private static final int PING_SUPPRESS_MIN_DURATION_TICKS = 80;   // 4 seconds
     private static final int PING_SUPPRESS_MAX_DURATION_TICKS = 200; // 10 seconds
     private static final int PING_NO_TARGET_REPOSITION_TICKS = 20;    // 1s without a valid lane
+    private static final int PING_PEEK_STUCK_REPOSITION_TICKS = 100;  // 5s idle-in-cover without ever exposing
     private static final int PING_REPOSITION_COOLDOWN_TICKS = 40;     // at most one relocation per 2s
     private static final int PING_AIM_POINT_REFRESH_TICKS = 40;       // re-discover aim points while moving
     private static final int PING_AIM_REDISCOVERY_COOLDOWN_TICKS = 20;
@@ -2434,6 +2438,14 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
             }
         }
 
+        // Relocation held short by the current-cover lane guard — surface the
+        // reason briefly so a held ping doesn't look like a dead one.
+        String relocHoldNote = "";
+        if (soldier.tickCount - lastRelocationHoldTick < PING_REPOSITION_COOLDOWN_TICKS
+            && lastRelocationHoldReason != null) {
+            relocHoldNote = "hold (" + lastRelocationHoldReason + " — lane ok)";
+        }
+
         NetworkHandler.INSTANCE.send(PacketDistributor.PLAYER.with(() -> serverPlayer),
             new SuppressPingDebugPacket(true, soldier.getUUID(), soldier.position(), pingCentre,
                 pingSuppressHeavy, pingSuppressRemainingTicks, pingSuppressDurationTicks,
@@ -2441,7 +2453,8 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
                 aimPoints, aimPointValid,
                 relocStatus, relocFailures, relocLastFailure,
                 searchOrigin, searchRadius, navPath,
-                pingNoTargetTicks, PING_NO_TARGET_REPOSITION_TICKS));
+                pingNoTargetTicks, PING_NO_TARGET_REPOSITION_TICKS,
+                pingPeekStuckTicks, PING_PEEK_STUCK_REPOSITION_TICKS, relocHoldNote));
     }
 
     /** Active player orders return before the ordinary debug-sync cadence. */
@@ -2462,6 +2475,7 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
         status.append(" burst=").append(burstShotsFired).append('/').append(suppressionBurstTarget);
         if (burstCooldownTicks > 0) status.append(" cd=").append(burstCooldownTicks);
         if (pingNoTargetTicks > 0) status.append(" noLane=").append(pingNoTargetTicks);
+        if (pingPeekStuckTicks > 0) status.append(" peekStuck=").append(pingPeekStuckTicks);
         if (GunIntegration.isReloading(soldier)) status.append(" reload");
         if (GunIntegration.isDrawing(soldier)) status.append(" draw");
         if (GunIntegration.isBolting(soldier)) status.append(" bolt");
@@ -3574,6 +3588,8 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
             pingSuppressionTarget = null;
             pingSuppressionSweepEnd = null;
             pingSuppressionShotTarget = null;
+            pingNoTargetTicks = 0;
+            pingPeekStuckTicks = 0;
             resetBurstState();
 
             boolean isMG = GunIntegration.isMachineGun(soldier);
@@ -3605,22 +3621,41 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
                     StevesArmyMod.LOGGER.info("[SuppressPing] Soldier {} waiting for peek (state={}, remaining={}ticks)",
                         soldier.getId(), peekState, pingSuppressRemainingTicks);
                 }
-                // A soldier whose peek never exposes would otherwise sit mute
-                // forever without ever accumulating relocation ticks — count
-                // the blindness here too, with the same 40t/100t throttles.
-                tickPingSuppressReposition();
+                // Peek transit (sliding out, sliding back) is the cycle working,
+                // not blindness — a full-cover slide alone outlasts the 20t
+                // no-lane threshold and would relocate on every routine peek.
+                // Only sustained idle-in-cover (never exposing) counts, on its
+                // own long budget; PeekController's non-peekable watchdog sits
+                // underneath it as the faster escape for dead covers.
+                if (peekState == PeekController.State.MOVING_TO_PEEK
+                    || peekState == PeekController.State.RETURNING_TO_COVER) {
+                    pingPeekStuckTicks = 0;
+                } else if (++pingPeekStuckTicks >= PING_PEEK_STUCK_REPOSITION_TICKS) {
+                    pingPeekStuckTicks = 0;
+                    requestPingEmergencyRelocation("peek stuck in " + peekState);
+                }
                 order.setPreparing(SuppressionOrderController.BlockReason.POSTURE);
                 return;
             }
         }
+        pingPeekStuckTicks = 0;
         
         if (pingSuppressionTarget == null || !hasLaneForCurrentMode(pingSuppressionTarget)) {
+            // A null discovery result covers two very different states: a fresh
+            // probe that just failed against live geometry, and the coasting
+            // ticks while the cleared aim cache waits out its rediscovery
+            // cooldown (which equals the no-lane threshold). Only the fresh
+            // failure proves the position is blind; coasting must not count,
+            // or every stale-cache refresh after arriving would relocate.
+            boolean rediscoveryReady = soldier.tickCount >= aimRediscoveryCooldownTick;
             pingSuppressionTarget = getClearPingSuppressionTarget();
             pingSuppressionSweepEnd = null;
             pingSuppressionShotTarget = null;
             if (pingSuppressionTarget == null) {
                 order.setPreparing(SuppressionOrderController.BlockReason.GEOMETRY);
-                tickPingSuppressReposition();
+                if (rediscoveryReady) {
+                    tickPingSuppressReposition(PING_AIM_REDISCOVERY_COOLDOWN_TICKS);
+                }
                 return;
             }
         }
@@ -3743,23 +3778,44 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
     }
 
     /**
-     * The soldier wants to suppress but no lane into the zone validates. After
-     * a short grace period, relocate (throttled) — the zone-directed threat
-     * feed aims the cover search at the ping. Uses the CONTINUOUS_SUPPRESSION
-     * emergency channel: the routine reposition gate refuses to move while
-     * suppressed, which is exactly when a pinged soldier needs a better angle.
+     * Accumulates no-lane blindness toward the relocation threshold. Callers
+     * pass an increment sized to their failure semantics: the discovery gate
+     * adds a full rediscovery window per genuine probe failure (its coasting
+     * ticks never call here), so one real failure saturates the threshold.
      */
-    private void tickPingSuppressReposition() {
-        pingNoTargetTicks++;
+    private void tickPingSuppressReposition(int increment) {
+        pingNoTargetTicks += increment;
         if (pingNoTargetTicks < PING_NO_TARGET_REPOSITION_TICKS) return;
         pingNoTargetTicks = 0;
+        requestPingEmergencyRelocation("no valid lane into zone");
+    }
+
+    /**
+     * Shared relocation request for every ping blindness path (throttled).
+     * Before moving, checks whether the current cover already validates a
+     * lane into the zone by the relocation search's own criteria — if it
+     * does, relocating can only swap one valid spot for another, so hold
+     * position instead.
+     */
+    private void requestPingEmergencyRelocation(String reason) {
         if (soldier.tickCount - lastPingRepositionTick < PING_REPOSITION_COOLDOWN_TICKS) return;
+        SuppressionOrderController order = soldier.getSuppressionOrder();
+        if (soldier.getCoverTacticalGoal()
+                .currentCoverHasSuppressionLane(order.getGeneration())) {
+            lastRelocationHoldTick = soldier.tickCount;
+            lastRelocationHoldReason = reason;
+            if (isSuppressionDebugLogging()) {
+                StevesArmyMod.LOGGER.info(
+                    "[SuppressPing] Soldier {} relocation held ({}): current cover already has a firing lane",
+                    soldier.getId(), reason);
+            }
+            return;
+        }
         lastPingRepositionTick = soldier.tickCount;
         if (isSuppressionDebugLogging()) {
-            StevesArmyMod.LOGGER.info("[SuppressPing] Soldier {} no valid lane into zone, requesting emergency reposition",
-                soldier.getId());
+            StevesArmyMod.LOGGER.info("[SuppressPing] Soldier {} no valid lane into zone ({}), requesting emergency reposition",
+                soldier.getId(), reason);
         }
-        SuppressionOrderController order = soldier.getSuppressionOrder();
         order.beginRelocation();
         soldier.getCoverTacticalGoal().requestSuppressionPosition(
             soldier.getPingSuppressPos(), order.getGeneration());

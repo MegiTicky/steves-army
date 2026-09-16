@@ -161,30 +161,43 @@ public final class SuppressPingDebugRenderer {
         }
     }
 
-    /** Second label line: relocation progress, or the countdown to requesting one. */
+    /** Second label line: relocation progress, blind counters, or a hold note. */
     private static String buildRelocLine(SuppressPingDebugPacket snapshot) {
+        StringBuilder line = new StringBuilder();
         String status = snapshot.relocStatus();
         if (!status.isEmpty()) {
-            StringBuilder line = new StringBuilder("RELOC ").append(status);
+            line.append("RELOC ").append(status);
             if (snapshot.relocFailures() > 0) {
                 line.append(" x").append(snapshot.relocFailures());
                 if (!snapshot.relocLastFailure().isEmpty()) {
                     line.append(" (").append(snapshot.relocLastFailure()).append(')');
                 }
             }
-            return line.toString();
         }
         if (snapshot.blindTicks() > 0) {
-            return String.format("blind %d/%d", snapshot.blindTicks(), snapshot.blindThreshold());
+            if (line.length() > 0) line.append("  ");
+            line.append(String.format("blind %d/%d", snapshot.blindTicks(), snapshot.blindThreshold()));
         }
-        return "";
+        if (snapshot.peekStuckTicks() > 0) {
+            if (line.length() > 0) line.append("  ");
+            line.append(String.format("peekStuck %d/%d",
+                snapshot.peekStuckTicks(), snapshot.peekStuckThreshold()));
+        }
+        if (!snapshot.relocHoldNote().isEmpty()) {
+            if (line.length() > 0) line.append("  ");
+            line.append(snapshot.relocHoldNote());
+        }
+        return line.toString();
     }
 
     private static int relocLineColor(SuppressPingDebugPacket snapshot) {
         switch (snapshot.relocStatus()) {
             case "FAILED": return 0xFFFF4040;
             case "BLOCKED": return 0xFFFFA000;
-            case "": return 0xFFFFFF40;
+            case "":
+                // Pure countdown segments read as waiting; a hold note means
+                // the soldier deliberately stayed put.
+                return snapshot.relocHoldNote().isEmpty() ? 0xFFFFFF40 : 0xFF40C040;
             default: return 0xFFFF60FF;
         }
     }

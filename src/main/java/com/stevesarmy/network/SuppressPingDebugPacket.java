@@ -39,6 +39,9 @@ public class SuppressPingDebugPacket {
     private final List<Vec3> navPath;
     private final int blindTicks;
     private final int blindThreshold;
+    private final int peekStuckTicks;
+    private final int peekStuckThreshold;
+    private final String relocHoldNote;
 
     public SuppressPingDebugPacket(boolean renderEnabled, UUID soldierId, Vec3 soldierPos,
                                    Vec3 pingPos, boolean heavy, int remainingTicks, int durationTicks,
@@ -46,7 +49,8 @@ public class SuppressPingDebugPacket {
                                    List<Vec3> aimPoints, List<Boolean> aimPointValid,
                                    String relocStatus, int relocFailures, String relocLastFailure,
                                    Vec3 searchOrigin, float searchRadius, List<Vec3> navPath,
-                                   int blindTicks, int blindThreshold) {
+                                   int blindTicks, int blindThreshold,
+                                   int peekStuckTicks, int peekStuckThreshold, String relocHoldNote) {
         this.renderEnabled = renderEnabled;
         this.soldierId = soldierId;
         this.soldierPos = soldierPos;
@@ -67,6 +71,9 @@ public class SuppressPingDebugPacket {
         this.navPath = navPath;
         this.blindTicks = blindTicks;
         this.blindThreshold = blindThreshold;
+        this.peekStuckTicks = peekStuckTicks;
+        this.peekStuckThreshold = peekStuckThreshold;
+        this.relocHoldNote = relocHoldNote;
     }
 
     public SuppressPingDebugPacket(FriendlyByteBuf buf) {
@@ -99,6 +106,9 @@ public class SuppressPingDebugPacket {
         }
         this.blindTicks = buf.readVarInt();
         this.blindThreshold = buf.readVarInt();
+        this.peekStuckTicks = buf.readVarInt();
+        this.peekStuckThreshold = buf.readVarInt();
+        this.relocHoldNote = buf.readUtf();
     }
 
     private static Vec3 readVec(FriendlyByteBuf buf) {
@@ -142,6 +152,9 @@ public class SuppressPingDebugPacket {
         }
         buf.writeVarInt(msg.blindTicks);
         buf.writeVarInt(msg.blindThreshold);
+        buf.writeVarInt(msg.peekStuckTicks);
+        buf.writeVarInt(msg.peekStuckThreshold);
+        buf.writeUtf(msg.relocHoldNote);
     }
 
     public static void handle(SuppressPingDebugPacket msg, Supplier<NetworkEvent.Context> ctx) {
@@ -176,4 +189,7 @@ public class SuppressPingDebugPacket {
     public List<Vec3> navPath() { return navPath; }
     public int blindTicks() { return blindTicks; }
     public int blindThreshold() { return blindThreshold; }
+    public int peekStuckTicks() { return peekStuckTicks; }
+    public int peekStuckThreshold() { return peekStuckThreshold; }
+    public String relocHoldNote() { return relocHoldNote; }
 }

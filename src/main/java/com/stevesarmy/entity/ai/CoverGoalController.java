@@ -29,6 +29,16 @@ public interface CoverGoalController {
         return SuppressionPositionStatus.IDLE;
     }
 
+    /**
+     * True when the soldier's current cover already validates a firing lane
+     * into the ordered suppression area by the relocation search's own
+     * criteria — i.e. moving could not improve the geometry, so the ping
+     * should hold position instead of relocating.
+     */
+    default boolean currentCoverHasSuppressionLane(int generation) {
+        return false;
+    }
+
     /** Debug channel: consecutive search failures for the active suppression-position order. */
     default int getSuppressionPositionFailures(int generation) {
         return 0;

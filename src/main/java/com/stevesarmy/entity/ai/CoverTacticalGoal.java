@@ -1009,6 +1009,24 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
             ? suppressionPositionStatus : SuppressionPositionStatus.IDLE;
     }
 
+    @Override
+    public boolean currentCoverHasSuppressionLane(int generation) {
+        if (generation != suppressionPositionGeneration || suppressionPositionArea == null) {
+            return false;
+        }
+        CoverPoint currentCover = getCoverManager().getCurrentCover();
+        if (currentCover == null) {
+            return false;
+        }
+        // From the live eye while exposed (that is where shots actually leave),
+        // otherwise from the cover's standing position — a ducked soldier must
+        // still be credited with the lane he exposes into.
+        Vec3 from = soldier.getPeekController().getState() == PeekController.State.EXPOSED
+            ? soldier.getEyePosition()
+            : getCoverStandingPosition(currentCover.getPosition());
+        return hasSuppressionFiringLaneFrom(from);
+    }
+
     /** Debug channel: consecutive search failures for the active order. */
     public int getSuppressionPositionFailures(int generation) {
         return generation == suppressionPositionGeneration ? suppressionPositionFailures : 0;
