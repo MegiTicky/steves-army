@@ -11,6 +11,10 @@ import net.minecraft.world.item.ItemStack;
  * heavy-fire suppression ping is active. Swaps exchange the main hand with
  * the slot holding the wanted gun, so the displaced weapon keeps its slot,
  * NBT, and magazine state. Everyone without an AT gun is untouched.
+ *
+ * The emergency sidearm draw ({@link #swapWithSidearm}) bypasses the policy:
+ * a soldier caught in the open with a dry gun swaps straight with the
+ * sidearm slot because switching is faster than reloading.
  */
 public final class SoldierWeaponSelector {
     private SoldierWeaponSelector() {}
@@ -45,6 +49,45 @@ public final class SoldierWeaponSelector {
     public static boolean hasLauncher(SoldierEntity soldier) {
         SoldierInventory inv = soldier.getSoldierInventory();
         return inv != null && findSlot(inv, true) >= 0;
+    }
+
+    /**
+     * True when the sidearm slot holds a gun worth drawing in a fight: loaded,
+     * count-1, and — unless a launcher is wanted right now — not an AT gun, so
+     * a dry rifle never pulls rockets into an infantry engagement.
+     */
+    public static boolean isUsableSidearm(SoldierEntity soldier, boolean launcherDesired) {
+        if (!GunIntegration.isAnyGunLoaded()) {
+            return false;
+        }
+        SoldierInventory inv = soldier.getSoldierInventory();
+        if (inv == null) {
+            return false;
+        }
+        ItemStack sidearm = inv.getItem(SoldierInventory.SLOT_SIDEARM);
+        if (sidearm.isEmpty() || sidearm.getCount() != 1 || !GunIntegration.isGun(sidearm)) {
+            return false;
+        }
+        if (!launcherDesired && ArmorRoleManager.isAtGunStack(sidearm)) {
+            return false;
+        }
+        return GunIntegration.getCurrentAmmo(sidearm) > 0;
+    }
+
+    /**
+     * Emergency exchange of the main hand with the sidearm slot; same
+     * reload-cancel guard as the policy swap. Returns false when the sidearm
+     * slot is unusable or the swap was blocked.
+     */
+    public static boolean swapWithSidearm(SoldierEntity soldier) {
+        if (!GunIntegration.isAnyGunLoaded()) {
+            return false;
+        }
+        SoldierInventory inv = soldier.getSoldierInventory();
+        if (inv == null) {
+            return false;
+        }
+        return swap(soldier, inv, SoldierInventory.SLOT_SIDEARM);
     }
 
     /**

@@ -2741,10 +2741,17 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
      * Sidearm doctrine: AT carriers hold a normal gun (sidearm slot when
      * loaded) and raise the launcher while the vehicle branch owns the
      * engagement or while a heavy-fire suppression ping is active. Soldiers
-     * without an AT gun are untouched.
+     * without an AT gun are untouched. The emergency sidearm draw
+     * ({@link #tickSidearmFallback}) outranks this policy while active.
      */
     private void tickWeaponSelection(@javax.annotation.Nullable ArmorThreatScanner.ArmorContact vehicleTarget) {
         if (!GunIntegration.isAnyGunLoaded() || !GunIntegration.hasGun(soldier)) {
+            return;
+        }
+        // The emergency sidearm draw owns weapon choice while it is active —
+        // the launcher policy below must not fight it, or a raised dry
+        // launcher and the drawn sidearm would swap-flicker every tick.
+        if (tickSidearmFallback(vehicleTarget)) {
             return;
         }
         // Soldiers without a launcher have no policy to apply; skip the scan.
@@ -2759,6 +2766,62 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
         if (SoldierWeaponSelector.update(soldier, launcherWanted)) {
             resetAim(null);
         }
+    }
+
+    /**
+     * Emergency sidearm doctrine: a soldier caught in the open with a dry gun
+     * draws the sidearm-slot gun instead of reloading standing up, because
+     * switching is faster than reloading. The in-cover peek-hide-reload loop
+     * is untouched — this only rescues exposed soldiers. Returns true while
+     * the fallback owns weapon choice; when it releases, the launcher/default
+     * policy below re-asserts the correct gun that same tick.
+     */
+    private boolean tickSidearmFallback(@javax.annotation.Nullable ArmorThreatScanner.ArmorContact vehicleTarget) {
+        if (!sidearmFallbackActive) {
+            if (!shouldDrawSidearmFallback(vehicleTarget)) {
+                return false;
+            }
+            if (!SoldierWeaponSelector.swapWithSidearm(soldier)) {
+                return false;
+            }
+            sidearmFallbackActive = true;
+            sidearmFallbackTicks = 0;
+            resetAim(null);
+            return true;
+        }
+
+        sidearmFallbackTicks++;
+        if (sidearmFallbackTicks < SIDEARM_FALLBACK_MIN_HOLD_TICKS) {
+            return true;
+        }
+        CoverBehaviorManager coverManager = soldier.getCoverBehaviorManager();
+        boolean backInCover = coverManager.isInCover() && soldier.getPeekController().isIdleInCover();
+        boolean fightOver = (target == null || !target.isAlive()) && !coverManager.isSuppressed();
+        if (backInCover || fightOver) {
+            sidearmFallbackActive = false;
+            resetAim(null);
+            return false;
+        }
+        return true;
+    }
+
+    private boolean shouldDrawSidearmFallback(@javax.annotation.Nullable ArmorThreatScanner.ArmorContact vehicleTarget) {
+        // A reload already requested or in progress runs to completion; the
+        // swap must never race it (cancelReload does not clear reloadPending).
+        if (reloadPending || GunIntegration.isReloading(soldier)) {
+            return false;
+        }
+        if (GunIntegration.getCurrentAmmo(soldier) > 0) {
+            return false;
+        }
+        if (soldier.getCoverBehaviorManager().isInCover()) {
+            return false;
+        }
+        if (target == null || !target.isAlive()) {
+            return false;
+        }
+        boolean launcherDesired = vehicleTarget != null || wantsHeavySuppressPing();
+        return SoldierWeaponSelector.isUsableSidearm(soldier, launcherDesired);
     }
 
     /**
@@ -2788,6 +2851,12 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
 
     private boolean atCarrierCached;
     private int atCarrierCheckTick = -1000;
+
+    // Emergency sidearm draw: transient on purpose. After a save/load the
+    // launcher/default policy self-normalizes whatever gun is in hand.
+    private boolean sidearmFallbackActive;
+    private int sidearmFallbackTicks;
+    private static final int SIDEARM_FALLBACK_MIN_HOLD_TICKS = 30;
 
     private boolean hasReadySquadMachineGunner(SquadThreatIntel.ThreatKnowledge threat) {
         SquadThreatIntel intel = getSquadIntel();
