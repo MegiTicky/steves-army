@@ -3527,6 +3527,10 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
                     StevesArmyMod.LOGGER.info("[SuppressPing] Soldier {} waiting for peek (state={}, remaining={}ticks)",
                         soldier.getId(), peekState, pingSuppressRemainingTicks);
                 }
+                // A soldier whose peek never exposes would otherwise sit mute
+                // forever without ever accumulating relocation ticks — count
+                // the blindness here too, with the same 40t/100t throttles.
+                tickPingSuppressReposition();
                 return;
             }
         }

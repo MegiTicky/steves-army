@@ -2362,6 +2362,14 @@ private void tickRepositioning() {
         // so that a suppressed soldier immediately gets the correct posture
         // and state transition even if a reposition request is pending.
         if (getCoverManager().isSuppressed()) {
+            // The continuous-suppression emergency channel is designed to run
+            // while pinned — a pinged soldier under fire is exactly who needs
+            // a new lane. Convert the request here; the routine (suppression-
+            // unsafe) request types stay behind the recovery gate below.
+            if (getCoverManager().isContinuousSuppressionRepositionRequested()
+                && soldier.tickCount >= nextSuppressionRouteSearchTick) {
+                requestEmergencySearch(QueuedSearchMode.CONTINUOUS_SUPPRESSION);
+            }
             soldier.tracePeek("cover-suppression", "tickInCover transition");
             enforceSuppressedHalfCoverPosture(currentCover);
             if (getPeekController().isExposed() && !soldier.hasEmergencyEngagementPosture()) {
@@ -5171,6 +5179,19 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
     }
 
     private CoverMoveResult findSuppressionMoveToCover() {
+        // A ping relocation has no incoming-fire origin to route around — the
+        // soldier simply cannot see into the zone. ThreatAwareness already
+        // aims the normal search at the ping and its scoring prefers covers
+        // with firing lanes toward the threat, so use it instead of failing
+        // the whole relocation with "no firing origin".
+        if (getCoverManager().getRecentSuppressionFiringOrigin() == null
+            && soldier.hasValidPingSuppressPos()) {
+            soldier.setLowCrouching(false);
+            getCoverManager().resetPeekState();
+            getCoverManager().setPeekPosition(null);
+            getPositionController().clear();
+            return findAndMoveToCover();
+        }
         suppressionRouteFiringOrigin = getCoverManager().getRecentSuppressionFiringOrigin();
         suppressionRouteSearchActive = true;
         activeSuppressionRouteMovement = RouteMovement.NORMAL;

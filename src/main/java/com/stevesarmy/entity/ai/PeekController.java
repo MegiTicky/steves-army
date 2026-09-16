@@ -271,14 +271,23 @@ public class PeekController {
         if (soldier.getCoverBehaviorManager().isNonPeekableCover()) {
             nonPeekableTicks++;
             LivingEntity target = soldier.getTarget();
-            if (nonPeekableTicks >= NON_PEEKABLE_REPOSITION_TICKS && target != null && target.isAlive()) {
+            boolean pingActive = soldier.hasValidPingSuppressPos();
+            if (nonPeekableTicks >= NON_PEEKABLE_REPOSITION_TICKS
+                && ((target != null && target.isAlive()) || pingActive)) {
                 if (CoverTacticalGoal.isDebugLoggingEnabled()) {
-                    StevesArmyMod.LOGGER.info("[PeekController] Soldier {} non-peekable for {} ticks with target, requesting reposition",
-                        soldier.getId(), nonPeekableTicks);
+                    StevesArmyMod.LOGGER.info("[PeekController] Soldier {} non-peekable for {} ticks (target={}, ping={}), requesting reposition",
+                        soldier.getId(), nonPeekableTicks, target != null && target.isAlive(), pingActive);
                 }
                 nonPeekableTicks = 0;
                 soldier.getCoverBehaviorManager().setNonPeekableCover(false);
-                soldier.getCoverBehaviorManager().requestReposition();
+                if (pingActive) {
+                    // A ping order must relocate even without a living target,
+                    // and the routine channel refuses movement while
+                    // suppressed — use the emergency channel instead.
+                    soldier.getCoverBehaviorManager().requestContinuousSuppressionReposition();
+                } else {
+                    soldier.getCoverBehaviorManager().requestReposition();
+                }
                 setIdleState(soldier, cover);
                 return;
             }
