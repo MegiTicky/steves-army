@@ -2777,7 +2777,13 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
      * policy below re-asserts the correct gun that same tick.
      */
     private boolean tickSidearmFallback(@javax.annotation.Nullable ArmorThreatScanner.ArmorContact vehicleTarget) {
+        if (sidearmRestoreCooldownTicks > 0) {
+            sidearmRestoreCooldownTicks--;
+        }
         if (!sidearmFallbackActive) {
+            if (sidearmRestoreCooldownTicks > 0) {
+                return false;
+            }
             if (!shouldDrawSidearmFallback(vehicleTarget)) {
                 return false;
             }
@@ -2793,6 +2799,9 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
             sidearmFallbackActive = true;
             sidearmFallbackTicks = 0;
             resetAim(null);
+            if (isDebugLogging()) {
+                StevesArmyMod.LOGGER.info("[SidearmFallback] {} drew the sidearm", soldier.getId());
+            }
             return true;
         }
 
@@ -2801,17 +2810,27 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
             return true;
         }
         CoverBehaviorManager coverManager = soldier.getCoverBehaviorManager();
-        boolean backInCover = coverManager.isInCover() && soldier.getPeekController().isIdleInCover();
+        // Cover alone is enough to restore: the primary's own reload then
+        // waits for a safe peek-idle window through the normal reload flow.
+        boolean backInCover = coverManager.isInCover();
         boolean fightOver = !isDirectlyEngaging() && !coverManager.isSuppressed();
         if (backInCover || fightOver) {
             // Non-AT soldiers have no weapon policy to restore the primary —
             // undo the fallback swap directly. AT carriers let the policy
             // below re-assert the doctrine gun the same tick.
-            if (!isAtCarrier() && !SoldierWeaponSelector.swapWithSidearm(soldier)) {
+            boolean restored = isAtCarrier() || SoldierWeaponSelector.swapWithSidearm(soldier);
+            if (!restored) {
                 return true;
             }
             sidearmFallbackActive = false;
+            // The restored primary is dry; a one-tick cover-state flicker
+            // before its reload starts must not re-arm the sidearm.
+            sidearmRestoreCooldownTicks = SIDEARM_RESTORE_REARM_TICKS;
             resetAim(null);
+            if (isDebugLogging()) {
+                StevesArmyMod.LOGGER.info("[SidearmFallback] {} restored the primary (cover={}, fightOver={})",
+                    soldier.getId(), backInCover, fightOver);
+            }
             return false;
         }
         return true;
@@ -2871,7 +2890,9 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
     // launcher/default policy self-normalizes whatever gun is in hand.
     private boolean sidearmFallbackActive;
     private int sidearmFallbackTicks;
+    private int sidearmRestoreCooldownTicks;
     private static final int SIDEARM_FALLBACK_MIN_HOLD_TICKS = 30;
+    private static final int SIDEARM_RESTORE_REARM_TICKS = 100;
 
     private boolean hasReadySquadMachineGunner(SquadThreatIntel.ThreatKnowledge threat) {
         SquadThreatIntel intel = getSquadIntel();
