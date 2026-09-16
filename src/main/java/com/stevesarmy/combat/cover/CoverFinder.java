@@ -2,6 +2,8 @@ package com.stevesarmy.combat.cover;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.tags.BlockTags;
+import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.BlockHitResult;
@@ -1390,17 +1392,123 @@ return qualityScore + shootBonus - distancePenalty;
                 BlockHitResult hit = shape.clip(eye, blockCenter, block);
                 if (hit == null || hit.getType() != HitResult.Type.BLOCK) continue;
 
-                Vec3 hitPos = hit.getLocation();
-                Vec3 facePoint = hitPos.add(eye.subtract(hitPos).normalize()
-                    .scale(HEAVY_AIM_PROUD_OFFSET));
-                aimPoints.add(facePoint);
+                aimPoints.add(proudFacePoint(eye, hit.getLocation()));
                 if (aimPoints.size() >= MAX_HEAVY_AIM_POINTS) {
                     return aimPoints;
                 }
             }
         }
 
+        // Registered cover only exists where somebody already searched; a
+        // freshly pinged zone usually has none. Fill the remainder from ray
+        // hits so the launcher still gets hittable wall faces.
+        addRaycastHeavyAimPoints(soldier, pingCenter, radius, eye, aimPoints, sampledBlocks);
+
         return aimPoints;
+    }
+
+    /**
+     * Ray-fan fallback for heavy suppression: cast rays from the shooter
+     * across the zone and aim at the first solid wall each one strikes. The
+     * points are the same proud near-face clips the registry path produces,
+     * so they are hittable by construction. Leaf hits are kept separately and
+     * only used when no bare wall is reachable — a rocket bursts in the
+     * canopy either way, but a wall face is the intended target.
+     */
+    private void addRaycastHeavyAimPoints(SoldierEntity soldier, BlockPos pingCenter, double radius,
+                                          Vec3 eye, java.util.List<Vec3> aimPoints,
+                                          java.util.Set<BlockPos> sampledBlocks) {
+        Vec3 center = Vec3.atCenterOf(pingCenter);
+        double maxOffsetSqr = (radius + 3.0) * (radius + 3.0);
+        java.util.List<Vec3> solidFaces = new java.util.ArrayList<>();
+        java.util.List<Vec3> leafFaces = new java.util.ArrayList<>();
+
+        for (Vec3 rayTarget : heavyRayFan(center, radius)) {
+            BlockHitResult hit = clipBlockRay(eye, rayTarget, soldier);
+            if (hit == null) continue;
+            Vec3 hitPos = hit.getLocation();
+            if (hitPos.distanceToSqr(eye) < HEAVY_AIM_MIN_SELF_DISTANCE_SQR) continue;
+            if (hitPos.distanceToSqr(center) > maxOffsetSqr) continue;
+            if (!sampledBlocks.add(hit.getBlockPos())) continue;
+            (level.getBlockState(hit.getBlockPos()).is(BlockTags.LEAVES) ? leafFaces : solidFaces)
+                .add(proudFacePoint(eye, hitPos));
+        }
+
+        for (Vec3 face : solidFaces) {
+            if (aimPoints.size() >= MAX_HEAVY_AIM_POINTS) return;
+            aimPoints.add(face);
+        }
+        for (Vec3 face : leafFaces) {
+            if (aimPoints.size() >= MAX_HEAVY_AIM_POINTS) return;
+            aimPoints.add(face);
+        }
+    }
+
+    /**
+     * Last-resort heavy lane: every cached face point is blocked from the
+     * current eye (the soldier moved after discovery, or discovery ran from
+     * another position). Clip a fresh wall face inside the zone; its proud
+     * face point has a clear solid path from this eye by construction.
+     * Returns the hit closest to the ping centre, preferring bare walls over
+     * foliage, or null when every ray misses.
+     */
+    public Vec3 findFreshHeavyLaneIntoZone(SoldierEntity soldier, BlockPos pingCenter, double radius) {
+        Vec3 eye = soldier.getEyePosition();
+        Vec3 center = Vec3.atCenterOf(pingCenter);
+        double maxOffsetSqr = (radius + 3.0) * (radius + 3.0);
+        Vec3 bestSolid = null;
+        Vec3 bestLeaf = null;
+        double bestSolidDistSqr = Double.MAX_VALUE;
+        double bestLeafDistSqr = Double.MAX_VALUE;
+
+        for (Vec3 rayTarget : heavyRayFan(center, radius)) {
+            BlockHitResult hit = clipBlockRay(eye, rayTarget, soldier);
+            if (hit == null) continue;
+            Vec3 hitPos = hit.getLocation();
+            if (hitPos.distanceToSqr(eye) < HEAVY_AIM_MIN_SELF_DISTANCE_SQR) continue;
+            if (hitPos.distanceToSqr(center) > maxOffsetSqr) continue;
+
+            double distSqr = hitPos.distanceToSqr(center);
+            if (level.getBlockState(hit.getBlockPos()).is(BlockTags.LEAVES)) {
+                if (distSqr < bestLeafDistSqr) {
+                    bestLeafDistSqr = distSqr;
+                    bestLeaf = proudFacePoint(eye, hitPos);
+                }
+            } else if (distSqr < bestSolidDistSqr) {
+                bestSolidDistSqr = distSqr;
+                bestSolid = proudFacePoint(eye, hitPos);
+            }
+        }
+
+        return bestSolid != null ? bestSolid : bestLeaf;
+    }
+
+    private BlockHitResult clipBlockRay(Vec3 from, Vec3 to, SoldierEntity soldier) {
+        BlockHitResult hit = level.clip(new ClipContext(from, to,
+            ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, soldier));
+        return hit.getType() == HitResult.Type.BLOCK ? hit : null;
+    }
+
+    private static Vec3 proudFacePoint(Vec3 eye, Vec3 hitPos) {
+        return hitPos.add(eye.subtract(hitPos).normalize().scale(HEAVY_AIM_PROUD_OFFSET));
+    }
+
+    /** Rays sample the zone centre and two rings so walls on any side of the
+     *  zone get a chance to catch a face point. */
+    private static java.util.List<Vec3> heavyRayFan(Vec3 center, double radius) {
+        java.util.List<Vec3> targets = new java.util.ArrayList<>(18);
+        targets.add(center.add(0, 0.5, 0));
+        targets.add(center.add(0, 1.5, 0));
+        for (int ring = 0; ring < 2; ring++) {
+            double ringRadius = radius * (ring == 0 ? 0.5 : 1.0);
+            double height = ring == 0 ? 1.2 : 1.8;
+            for (int i = 0; i < 8; i++) {
+                double angle = Math.toRadians(i * 45.0);
+                targets.add(new Vec3(center.x + Math.cos(angle) * ringRadius,
+                    center.y + height, center.z + Math.sin(angle) * ringRadius));
+            }
+        }
+        return targets;
     }
 
     /** Adds one raycast-validated exposure point for each half-cover peek block. */

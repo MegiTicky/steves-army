@@ -181,6 +181,8 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
     private int pingSuppressDurationTicks = 0;
     private int pingSuppressRemainingTicks = 0;
     private boolean pingSuppressHeavy = false;
+    private int lastHeavyFlipTick = -1000;
+    private String lastHeavyLaneSource = null;
     private int pingNoTargetTicks = 0;
     private int lastPingRepositionTick = -1000;
     private int aimPointsRefreshTick = 0;
@@ -195,6 +197,7 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
     private static final int PING_AIM_POINT_REFRESH_TICKS = 40;       // re-discover aim points while moving
     private static final int PING_AIM_REDISCOVERY_COOLDOWN_TICKS = 20;
     private static final int PING_HEAVY_ALTERNATE_ATTEMPTS = 6;
+    private static final int PING_HEAVY_FLIP_HYSTERESIS_TICKS = 20;
     
     private List<LivingEntity> cachedPotentialTargets = null;
     private long cachedPotentialTargetsTick = -1;
@@ -2384,6 +2387,12 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
         if (GunIntegration.isBolting(soldier)) status.append(" bolt");
         if (!soldier.getSuppressionAimPoints().isEmpty() && pingSuppressionTarget == null) {
             status.append(" laneBlocked");
+        } else if (pingSuppressHeavy && soldier.getSuppressionAimPoints().isEmpty()
+            && pingNoTargetTicks > 0) {
+            status.append(" noFacePts");
+        }
+        if (pingSuppressHeavy && pingSuppressionTarget != null && lastHeavyLaneSource != null) {
+            status.append(" lane=").append(lastHeavyLaneSource);
         }
         status.append(" cv=").append(coverState);
         if (coverManager.isContinuousSuppressionRepositionRequested()) status.append(" scootReq");
@@ -3465,6 +3474,7 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
                 soldier.level().random.nextInt(PING_SUPPRESS_MAX_DURATION_TICKS - PING_SUPPRESS_MIN_DURATION_TICKS);
             pingSuppressRemainingTicks = pingSuppressDurationTicks;
             pingSuppressHeavy = wantsHeavySuppressPing();
+            lastHeavyFlipTick = soldier.tickCount;
             pingSuppressionTarget = null;
             pingSuppressionSweepEnd = null;
             pingSuppressionShotTarget = null;
@@ -3486,6 +3496,7 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
             isPingSuppressing = false;
             pingSuppressRemainingTicks = 0;
             pingSuppressHeavy = false;
+            lastHeavyLaneSource = null;
             pingNoTargetTicks = 0;
             pingSuppressionTarget = null;
             pingSuppressionSweepEnd = null;
@@ -3496,10 +3507,15 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
 
         // If launcher availability flips mid-burst (rockets ran dry, hunter
         // died), re-discover aim points under the new mode: block faces for
-        // heavy fire, peek openings for the held normal gun.
+        // heavy fire, peek openings for the held normal gun. The flip is
+        // hysteresis-gated so hovering on the ammo or range boundary cannot
+        // wipe the cache every other tick.
         boolean heavyNow = wantsHeavySuppressPing();
-        if (heavyNow != pingSuppressHeavy) {
+        if (heavyNow != pingSuppressHeavy
+            && soldier.tickCount - lastHeavyFlipTick >= PING_HEAVY_FLIP_HYSTERESIS_TICKS) {
             pingSuppressHeavy = heavyNow;
+            lastHeavyFlipTick = soldier.tickCount;
+            lastHeavyLaneSource = null;
             soldier.setSuppressionAimPoints(java.util.List.of());
         }
 
@@ -3515,8 +3531,7 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
             }
         }
         
-        if (pingSuppressionTarget == null
-            || !TargetAcquisition.hasLineOfSightToPositionIgnoringSmoke(soldier, pingSuppressionTarget)) {
+        if (pingSuppressionTarget == null || !hasLaneForCurrentMode(pingSuppressionTarget)) {
             pingSuppressionTarget = getClearPingSuppressionTarget();
             pingSuppressionSweepEnd = null;
             pingSuppressionShotTarget = null;
@@ -3575,8 +3590,9 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
             return;
         }
 
-        if (!VisibilityRay.traceFreshIgnoringSmoke(
-            soldier.level(), soldier.getEyePosition(), finalTarget, soldier).hasContact()) {
+        VisibilityRay.Result lane = VisibilityRay.traceFreshIgnoringSmoke(
+            soldier.level(), soldier.getEyePosition(), finalTarget, soldier);
+        if (pingSuppressHeavy ? !lane.clear() : !lane.hasContact()) {
             return;
         }
 
@@ -3663,15 +3679,51 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
     }
 
     /**
+     * All cached heavy face points are blocked from the current eye — the
+     * soldier repositioned after discovery, or discovery found nothing at
+     * all. Clip a fresh wall face inside the zone; its proud face point has a
+     * clear solid path from this eye by construction, making this the lane of
+     * last resort before the emergency reposition. The clips are uncached, so
+     * probing is throttled to the rediscovery cadence.
+     */
+    private Vec3 clipFreshHeavyLane() {
+        if (soldier.tickCount < aimRediscoveryCooldownTick) return null;
+        aimRediscoveryCooldownTick = soldier.tickCount + PING_AIM_REDISCOVERY_COOLDOWN_TICKS;
+        Vec3 fresh = new CoverFinder(soldier.level()).findFreshHeavyLaneIntoZone(soldier,
+            soldier.getPingSuppressPos(), SoldierEntity.SUPPRESSION_ZONE_RADIUS);
+        if (fresh == null) {
+            // Every ray missed too: drop the stale points so re-discovery can
+            // run from the current eye before the next probe window.
+            soldier.setSuppressionAimPoints(java.util.List.of());
+            return null;
+        }
+        soldier.setSuppressionAimPoints(java.util.List.of(fresh));
+        lastHeavyLaneSource = "raycast";
+        return fresh;
+    }
+
+    /** Rocket lanes ignore concealment (leaves do not stop a round); bullet
+     *  suppression keeps the strict contact check. */
+    private boolean hasLaneForCurrentMode(Vec3 target) {
+        if (pingSuppressHeavy) {
+            return TargetAcquisition.hasHeavyLaunchLane(soldier, target);
+        }
+        return TargetAcquisition.hasLineOfSightToPositionIgnoringSmoke(soldier, target);
+    }
+
+    /**
      * Selects a suppression target whose actual spread-adjusted shot has clear LOS.
      * The old code validated the unspread point but fired at a different point,
      * allowing horizontal or vertical spread to send bullets into cover.
      */
     private Vec3 getClearPingSuppressionTarget() {
         float aimInaccuracy = GunIntegration.getAimInaccuracy(soldier);
+        // The spread fallback aims inside the zone, behind the very cover the
+        // enemies hide behind — bullets can sweep with it, but no lane into it
+        // can ever validate. Heavy fire clips fresh wall faces instead, so it
+        // never consumes the fallback.
         Vec3 selected = soldier.getNextSuppressionAimPoint();
-
-        if (selected == null) {
+        if (selected == null && !pingSuppressHeavy) {
             selected = soldier.getHorizontalSpreadFallbackTarget(soldier.getPingSuppressPos());
         }
 
@@ -3679,22 +3731,20 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
             // Heavy fire is pinned to the cover-block face points: no spread
             // roll (a scattered rocket overflies the wall instead of striking
             // it) and no opening-height clamp. Rotate through alternate face
-            // points so one blocked wall doesn't silence the launcher; with no
-            // face points at all, the spread fallback selected above stands in.
+            // points so one blocked wall doesn't silence the launcher.
             if (!aimPointsAreEmpty(soldier)) {
                 java.util.List<Vec3> facePoints = soldier.getSuppressionAimPoints();
                 int base = Math.max(0, facePoints.indexOf(selected));
                 int attempts = Math.min(facePoints.size(), PING_HEAVY_ALTERNATE_ATTEMPTS);
                 for (int i = 0; i < attempts; i++) {
                     Vec3 candidate = facePoints.get((base + i) % facePoints.size());
-                    if (TargetAcquisition.hasLineOfSightToPositionIgnoringSmoke(soldier, candidate)) {
+                    if (TargetAcquisition.hasHeavyLaunchLane(soldier, candidate)) {
+                        lastHeavyLaneSource = "cached";
                         return candidate;
                     }
                 }
-                clearPingAimPointsAfterFailure();
-                return null;
             }
-            return TargetAcquisition.hasLineOfSightToPositionIgnoringSmoke(soldier, selected) ? selected : null;
+            return clipFreshHeavyLane();
         }
 
         Vec3 finalTarget = calculateSuppressionSpread(selected, aimInaccuracy);

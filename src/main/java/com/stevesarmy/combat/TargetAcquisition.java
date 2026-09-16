@@ -121,6 +121,15 @@ public class TargetAcquisition {
         return getPositionVisibility(observer, targetPos, true).hasContact();
     }
 
+    /**
+     * Rocket lanes only care about solid obstructions: foliage and other
+     * vision concealment do not stop an explosive round, so they must not
+     * mute a launcher in wooded terrain the way they mute bullet fire.
+     */
+    public static boolean hasHeavyLaunchLane(LivingEntity observer, Vec3 targetPos) {
+        return getPositionVisibility(observer, targetPos, true).clear();
+    }
+
     public static boolean hasNearLineOfSightToPosition(LivingEntity observer, Vec3 targetPos, double distanceThreshold) {
         VisibilityRay.Result visibility = getPositionVisibility(observer, targetPos, false);
         double targetDistance = DetectionViewpoint.getEyePosition(observer).distanceTo(targetPos);
