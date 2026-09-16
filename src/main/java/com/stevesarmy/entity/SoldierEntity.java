@@ -1742,7 +1742,9 @@ public BlockPos getPingMoveTarget() {
     }
     
     public void setSuppressionAimPoints(java.util.List<Vec3> points) {
-        this.suppressionAimPoints = points;
+        // Callers pass immutable lists (List.of(...)); the clear helpers below
+        // mutate this field in place, so store a mutable copy.
+        this.suppressionAimPoints = new java.util.ArrayList<>(points);
         this.lastSuppressionAimPoint = null;
     }
     
