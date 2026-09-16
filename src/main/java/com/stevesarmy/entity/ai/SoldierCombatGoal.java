@@ -2784,6 +2784,12 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
             if (!SoldierWeaponSelector.swapWithSidearm(soldier)) {
                 return false;
             }
+            // The swap must not leave a pending reload request behind — it
+            // would fire into the freshly drawn gun (cancelReload does not
+            // clear reloadPending).
+            if (reloadPending) {
+                clearReloadStatus();
+            }
             sidearmFallbackActive = true;
             sidearmFallbackTicks = 0;
             resetAim(null);
@@ -2796,8 +2802,14 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
         }
         CoverBehaviorManager coverManager = soldier.getCoverBehaviorManager();
         boolean backInCover = coverManager.isInCover() && soldier.getPeekController().isIdleInCover();
-        boolean fightOver = (target == null || !target.isAlive()) && !coverManager.isSuppressed();
+        boolean fightOver = !isDirectlyEngaging() && !coverManager.isSuppressed();
         if (backInCover || fightOver) {
+            // Non-AT soldiers have no weapon policy to restore the primary —
+            // undo the fallback swap directly. AT carriers let the policy
+            // below re-assert the doctrine gun the same tick.
+            if (!isAtCarrier() && !SoldierWeaponSelector.swapWithSidearm(soldier)) {
+                return true;
+            }
             sidearmFallbackActive = false;
             resetAim(null);
             return false;
@@ -2806,18 +2818,21 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
     }
 
     private boolean shouldDrawSidearmFallback(@javax.annotation.Nullable ArmorThreatScanner.ArmorContact vehicleTarget) {
-        // A reload already requested or in progress runs to completion; the
-        // swap must never race it (cancelReload does not clear reloadPending).
-        if (reloadPending || GunIntegration.isReloading(soldier)) {
+        // An actually running reload always finishes; a merely pending one is
+        // dropped by the swap instead of blocking the emergency draw.
+        if (GunIntegration.isReloading(soldier)) {
             return false;
         }
         if (GunIntegration.getCurrentAmmo(soldier) > 0) {
             return false;
         }
+        // In cover — even mid-peek — the duck-and-reload loop owns a dry mag.
+        // The sidearm is for soldiers with no cover to reload behind.
         if (soldier.getCoverBehaviorManager().isInCover()) {
             return false;
         }
-        if (target == null || !target.isAlive()) {
+        // Emergency only: actively fighting (live target, suppression, or ping).
+        if (!isDirectlyEngaging()) {
             return false;
         }
         boolean launcherDesired = vehicleTarget != null || wantsHeavySuppressPing();
