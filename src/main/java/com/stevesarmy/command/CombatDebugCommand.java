@@ -14,6 +14,7 @@ import com.stevesarmy.combat.ArmorDoctrineDebugManager;
 import com.stevesarmy.combat.ArmorRoleManager;
 import com.stevesarmy.combat.ArmorThreatScanner;
 import com.stevesarmy.combat.GunIntegration;
+import com.stevesarmy.combat.SidearmDebugManager;
 import com.stevesarmy.combat.SuppressPingDebugManager;
 import com.stevesarmy.combat.ThreatAwareness;
 import com.stevesarmy.combat.cover.CoverBehaviorManager;
@@ -101,6 +102,14 @@ public class CombatDebugCommand {
                     .executes(ctx -> setSuppressPingDebug(ctx, true)))
                 .then(Commands.literal("off")
                     .executes(ctx -> setSuppressPingDebug(ctx, false))))
+
+            // === SIDEARM FALLBACK ===
+            .then(Commands.literal("sidearm")
+                .executes(ctx -> setSidearmDebug(ctx, true))
+                .then(Commands.literal("on")
+                    .executes(ctx -> setSidearmDebug(ctx, true)))
+                .then(Commands.literal("off")
+                    .executes(ctx -> setSidearmDebug(ctx, false))))
 
             // === PERFORMANCE METRICS ===
             .then(Commands.literal("metrics")
@@ -1092,6 +1101,18 @@ public class CombatDebugCommand {
         }
         SuppressPingDebugManager.setEnabled(player, enabled);
         source.sendSuccess(() -> Component.literal("Suppress ping debug render: "
+            + (enabled ? "ON" : "OFF")), false);
+        return 1;
+    }
+
+    private static int setSidearmDebug(CommandContext<CommandSourceStack> context, boolean enabled) {
+        CommandSourceStack source = context.getSource();
+        if (!(source.getEntity() instanceof ServerPlayer player)) {
+            source.sendFailure(Component.literal("Player only command"));
+            return 0;
+        }
+        SidearmDebugManager.setEnabled(player, enabled);
+        source.sendSuccess(() -> Component.literal("Sidearm fallback debug render: "
             + (enabled ? "ON" : "OFF")), false);
         return 1;
     }

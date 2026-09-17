@@ -91,6 +91,36 @@ public final class SoldierWeaponSelector {
     }
 
     /**
+     * Puts the fallback's original main weapon back into the main hand: finds
+     * the tracked stack by item in any persistent slot and exchanges it with
+     * whatever is held. Falls back to the plain sidearm-slot undo, and to a
+     * no-op success when the gun is gone entirely (e.g. taken via the squad
+     * menu mid-fallback). Same reload-cancel guard as every swap.
+     */
+    public static boolean restoreGun(SoldierEntity soldier, ItemStack originalMain) {
+        if (!GunIntegration.isAnyGunLoaded()) {
+            return false;
+        }
+        SoldierInventory inv = soldier.getSoldierInventory();
+        if (inv == null) {
+            return false;
+        }
+        if (!originalMain.isEmpty()) {
+            for (int slot = SoldierInventory.SLOT_SIDEARM; slot < SoldierInventory.INVENTORY_SIZE; slot++) {
+                if (slot != SoldierInventory.SLOT_MAIN_HAND
+                    && ItemStack.isSameItem(inv.getItem(slot), originalMain)) {
+                    return swap(soldier, inv, slot);
+                }
+            }
+        }
+        ItemStack sidearm = inv.getItem(SoldierInventory.SLOT_SIDEARM);
+        if (!sidearm.isEmpty() && sidearm.getCount() == 1 && GunIntegration.isGun(sidearm)) {
+            return swap(soldier, inv, SoldierInventory.SLOT_SIDEARM);
+        }
+        return true;
+    }
+
+    /**
      * Launcher rounds available to the soldier: the launcher stack's loaded
      * ammo plus general/sidearm stacks that fit it. Used for the reserve
      * floor that keeps rockets for tanks.

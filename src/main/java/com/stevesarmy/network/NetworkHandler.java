@@ -172,6 +172,10 @@ public class NetworkHandler {
             SuppressPingDebugPacket::encode,
             SuppressPingDebugPacket::new,
             SuppressPingDebugPacket::handle);
+        INSTANCE.registerMessage(id++, SidearmDebugPacket.class,
+            SidearmDebugPacket::encode,
+            SidearmDebugPacket::new,
+            SidearmDebugPacket::handle);
     }
 
     @SuppressWarnings({"rawtypes", "unchecked"})

@@ -2746,6 +2746,7 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
      */
     private void tickWeaponSelection(@javax.annotation.Nullable ArmorThreatScanner.ArmorContact vehicleTarget) {
         if (!GunIntegration.isAnyGunLoaded() || !GunIntegration.hasGun(soldier)) {
+            abandonSidearmFallback();
             return;
         }
         // The emergency sidearm draw owns weapon choice while it is active —
@@ -2779,14 +2780,15 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
     private boolean tickSidearmFallback(@javax.annotation.Nullable ArmorThreatScanner.ArmorContact vehicleTarget) {
         if (sidearmRestoreCooldownTicks > 0) {
             sidearmRestoreCooldownTicks--;
+            // Keep the restored primary in hand — and the launcher/default
+            // policy out — until its reload has had time to run.
+            return true;
         }
         if (!sidearmFallbackActive) {
-            if (sidearmRestoreCooldownTicks > 0) {
-                return false;
-            }
             if (!shouldDrawSidearmFallback(vehicleTarget)) {
                 return false;
             }
+            ItemStack originalMain = soldier.getMainHandItem().copy();
             if (!SoldierWeaponSelector.swapWithSidearm(soldier)) {
                 return false;
             }
@@ -2796,6 +2798,7 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
             if (reloadPending) {
                 clearReloadStatus();
             }
+            sidearmFallbackOriginalMain = originalMain;
             sidearmFallbackActive = true;
             sidearmFallbackTicks = 0;
             resetAim(null);
@@ -2813,16 +2816,13 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
         // Cover alone is enough to restore: the primary's own reload then
         // waits for a safe peek-idle window through the normal reload flow.
         boolean backInCover = coverManager.isInCover();
-        boolean fightOver = !isDirectlyEngaging() && !coverManager.isSuppressed();
+        boolean fightOver = !hasActiveEngagement() && !coverManager.isSuppressed();
         if (backInCover || fightOver) {
-            // Non-AT soldiers have no weapon policy to restore the primary —
-            // undo the fallback swap directly. AT carriers let the policy
-            // below re-assert the doctrine gun the same tick.
-            boolean restored = isAtCarrier() || SoldierWeaponSelector.swapWithSidearm(soldier);
-            if (!restored) {
+            if (!SoldierWeaponSelector.restoreGun(soldier, sidearmFallbackOriginalMain)) {
                 return true;
             }
             sidearmFallbackActive = false;
+            sidearmFallbackOriginalMain = ItemStack.EMPTY;
             // The restored primary is dry; a one-tick cover-state flicker
             // before its reload starts must not re-arm the sidearm.
             sidearmRestoreCooldownTicks = SIDEARM_RESTORE_REARM_TICKS;
@@ -2831,9 +2831,15 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
                 StevesArmyMod.LOGGER.info("[SidearmFallback] {} restored the primary (cover={}, fightOver={})",
                     soldier.getId(), backInCover, fightOver);
             }
-            return false;
+            return true;
         }
         return true;
+    }
+
+    private void abandonSidearmFallback() {
+        sidearmFallbackActive = false;
+        sidearmFallbackOriginalMain = ItemStack.EMPTY;
+        sidearmRestoreCooldownTicks = 0;
     }
 
     private boolean shouldDrawSidearmFallback(@javax.annotation.Nullable ArmorThreatScanner.ArmorContact vehicleTarget) {
@@ -2851,7 +2857,7 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
             return false;
         }
         // Emergency only: actively fighting (live target, suppression, or ping).
-        if (!isDirectlyEngaging()) {
+        if (!hasActiveEngagement()) {
             return false;
         }
         boolean launcherDesired = vehicleTarget != null || wantsHeavySuppressPing();
@@ -2891,8 +2897,54 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
     private boolean sidearmFallbackActive;
     private int sidearmFallbackTicks;
     private int sidearmRestoreCooldownTicks;
+    private ItemStack sidearmFallbackOriginalMain = ItemStack.EMPTY;
     private static final int SIDEARM_FALLBACK_MIN_HOLD_TICKS = 30;
     private static final int SIDEARM_RESTORE_REARM_TICKS = 100;
+
+    @Override
+    public boolean hasActiveEngagement() {
+        return isDirectlyEngaging();
+    }
+
+    @Override
+    public boolean isSidearmFallbackActive() {
+        return sidearmFallbackActive;
+    }
+
+    @Override
+    public int getSidearmRestoreCooldownTicks() {
+        return sidearmRestoreCooldownTicks;
+    }
+
+    @Override
+    public String getSidearmFallbackOriginalGunId() {
+        return sidearmFallbackOriginalMain.isEmpty() ? "" : GunIntegration.getGunId(sidearmFallbackOriginalMain);
+    }
+
+    /** Why the sidearm is (or is not) in hand right now, for the debug overlay. */
+    @Override
+    public String getSidearmFallbackDebugStatus() {
+        if (sidearmRestoreCooldownTicks > 0) {
+            return "COOLDOWN " + sidearmRestoreCooldownTicks + "t";
+        }
+        if (!sidearmFallbackActive) {
+            return "idle";
+        }
+        if (sidearmFallbackTicks < SIDEARM_FALLBACK_MIN_HOLD_TICKS) {
+            return "WAIT min-hold " + (SIDEARM_FALLBACK_MIN_HOLD_TICKS - sidearmFallbackTicks) + "t";
+        }
+        CoverBehaviorManager coverManager = soldier.getCoverBehaviorManager();
+        if (coverManager.isInCover()) {
+            return "RESTORING";
+        }
+        if (coverManager.isSuppressed()) {
+            return "HOLD suppressed+exposed";
+        }
+        if (hasActiveEngagement()) {
+            return "HOLD engaged+exposed";
+        }
+        return "RESTORING";
+    }
 
     private boolean hasReadySquadMachineGunner(SquadThreatIntel.ThreatKnowledge threat) {
         SquadThreatIntel intel = getSquadIntel();

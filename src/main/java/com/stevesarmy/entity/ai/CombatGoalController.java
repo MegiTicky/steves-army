@@ -47,4 +47,15 @@ public interface CombatGoalController {
     int getTotalAmmo();
 
     void forceRestartPingSuppression();
+
+    /** Actively fighting: live target, suppression assignment, or ping order. */
+    boolean hasActiveEngagement();
+
+    boolean isSidearmFallbackActive();
+
+    int getSidearmRestoreCooldownTicks();
+
+    String getSidearmFallbackOriginalGunId();
+
+    String getSidearmFallbackDebugStatus();
 }
