@@ -5,13 +5,17 @@ import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.builder.ArgumentBuilder;
 import com.stevesarmy.client.CombatDebugRenderer;
 import com.stevesarmy.combat.cover.CoverDebugManager;
+import com.stevesarmy.entity.AntiTankEntity;
+import com.stevesarmy.entity.EnemyAntiTankEntity;
 import com.stevesarmy.entity.EnemySoldierEntity;
+import com.stevesarmy.entity.EnemyVehicleCrewEntity;
 import com.stevesarmy.entity.GarrisonEntity;
 import com.stevesarmy.entity.MachineGunnerEntity;
 import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.entity.SupportEntity;
 import com.stevesarmy.entity.SoldierSpawner;
 import com.stevesarmy.entity.TeamGarrisonEntity;
+import com.stevesarmy.entity.VehicleCrewEntity;
 import com.stevesarmy.entity.ai.CoverTacticalGoal;
 import com.stevesarmy.entity.ai.GrenadeTacticalController;
 import com.stevesarmy.inventory.SoldierInventory;
@@ -62,8 +66,12 @@ public class StevesArmyCommand {
                     "  /stevesarmy spawn machine_gunner <owner> [squad <callsign>] <position> [yaw] [pitch] [loadout_nbt]\n" +
                     "  /stevesarmy spawn support <owner> [squad <callsign>] <position> [yaw] [pitch] [loadout_nbt]\n" +
                     "  /stevesarmy spawn garrison <owner> [squad <callsign>] <position> [yaw] [pitch] [loadout_nbt]\n" +
+                    "  /stevesarmy spawn anti_tank <owner> [squad <callsign>] <position> [yaw] [pitch] [loadout_nbt]\n" +
+                    "  /stevesarmy spawn vehicle_crew <owner> [squad <callsign>] <position> [yaw] [pitch] [loadout_nbt]\n" +
                     "  /stevesarmy spawn team_garrison <team> [squad <callsign>] <position> [yaw] [pitch] [loadout_nbt]\n" +
                     "  /stevesarmy spawn enemy [squad <callsign>] <position> [yaw] [pitch] [loadout_nbt]\n" +
+                    "  /stevesarmy spawn enemy anti_tank <position> [yaw] [pitch] [loadout_nbt]\n" +
+                    "  /stevesarmy spawn enemy vehicle_crew <position> [yaw] [pitch] [loadout_nbt]\n" +
                     "  /stevesarmy squad create <callsign> [owner|team <team>|enemy]\n" +
                     "  /stevesarmy squad list\n" +
                     "  /stevesarmy squad info <callsign>\n" +
@@ -94,6 +102,8 @@ public class StevesArmyCommand {
                 .then(createOwnedSpawnBranch("machine_gunner", ModEntities.MACHINE_GUNNER.get()))
                 .then(createOwnedSpawnBranch("support", ModEntities.SUPPORT.get()))
                 .then(createOwnedSpawnBranch("garrison", ModEntities.GARRISON.get()))
+                .then(createOwnedSpawnBranch("anti_tank", ModEntities.ANTI_TANK.get()))
+                .then(createOwnedSpawnBranch("vehicle_crew", ModEntities.VEHICLE_CREW.get()))
                 .then(Commands.literal("team_garrison")
                     .then(Commands.argument("team", StringArgumentType.word())
                         .then(Commands.literal("squad")
@@ -104,6 +114,10 @@ public class StevesArmyCommand {
                     .then(Commands.literal("squad")
                         .then(Commands.argument("callsign", StringArgumentType.word())
                             .then(createEnemySquadSpawnArgs())))
+                    .then(Commands.literal("anti_tank")
+                        .then(createSpawnArguments(ModEntities.ENEMY_ANTI_TANK.get(), false)))
+                    .then(Commands.literal("vehicle_crew")
+                        .then(createSpawnArguments(ModEntities.ENEMY_VEHICLE_CREW.get(), false)))
                     .then(createSpawnArguments(ModEntities.ENEMY_SOLDIER.get(), false)))
             )
             .then(Commands.literal("squad")
@@ -486,6 +500,20 @@ public class StevesArmyCommand {
         return 1;
     }
 
+    /** Human-readable role name for spawn feedback; enemy subclasses must be tested before EnemySoldierEntity. */
+    private static String describeSoldier(SoldierEntity soldier) {
+        if (soldier instanceof EnemyAntiTankEntity) return "enemy anti-tank";
+        if (soldier instanceof EnemyVehicleCrewEntity) return "enemy vehicle crew";
+        if (soldier instanceof AntiTankEntity) return "anti-tank";
+        if (soldier instanceof VehicleCrewEntity) return "vehicle crew";
+        if (soldier instanceof MachineGunnerEntity) return "machine gunner";
+        if (soldier instanceof SupportEntity) return "support";
+        if (soldier instanceof EnemySoldierEntity) return "enemy soldier";
+        if (soldier instanceof TeamGarrisonEntity) return "team garrison";
+        if (soldier instanceof GarrisonEntity) return "garrison";
+        return "rifleman";
+    }
+
     private static int spawnEntity(
         CommandContext<CommandSourceStack> context,
         EntityType<? extends SoldierEntity> entityType,
@@ -515,12 +543,7 @@ public class StevesArmyCommand {
 
         SoldierEntity soldier = result.soldier();
         String loadoutDescription = loadout == null ? "empty loadout" : "provided loadout";
-        String entityName = soldier instanceof MachineGunnerEntity
-            ? "machine gunner"
-            : soldier instanceof SupportEntity ? "support"
-            : soldier instanceof EnemySoldierEntity ? "enemy soldier"
-            : soldier instanceof TeamGarrisonEntity ? "team garrison"
-            : soldier instanceof GarrisonEntity ? "garrison" : "rifleman";
+        String entityName = describeSoldier(soldier);
         String ownerDescription = owner == null ? "without an owner" : "for " + owner.getName().getString();
         source.sendSuccess(() -> Component.literal(
             "Spawned " + entityName + " " + soldier.getUUID() + " " + ownerDescription
@@ -562,7 +585,7 @@ public class StevesArmyCommand {
             return 0;
         }
         SoldierEntity soldier = result.soldier();
-        String entityName = soldier instanceof MachineGunnerEntity ? "machine gunner" : soldier instanceof SupportEntity ? "support" : soldier instanceof GarrisonEntity ? "garrison" : "rifleman";
+        String entityName = describeSoldier(soldier);
         String extra = callsign != null ? " into squad '" + callsign.toLowerCase(java.util.Locale.ROOT) + "'" : "";
         String ownerDescription = owner == null ? "without an owner" : "for " + owner.getName().getString();
         source.sendSuccess(() -> Component.literal("Spawned " + entityName + " " + soldier.getUUID() + " " + ownerDescription + extra + "."), false);
