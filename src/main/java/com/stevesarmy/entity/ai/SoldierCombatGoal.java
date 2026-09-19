@@ -183,6 +183,9 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
     private int pingSuppressDurationTicks = 0;
     private int pingSuppressRemainingTicks = 0;
     private boolean pingSuppressHeavy = false;
+    // One rocket per ping: once the heavy phase has fired its single shell the
+    // order continues as ordinary sidearm suppression until the next ping.
+    private boolean pingHeavyRocketSpent = false;
     private int lastHeavyFlipTick = -1000;
     private String lastHeavyLaneSource = null;
     private int pingNoTargetTicks = 0;
@@ -632,10 +635,11 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
             soldier.getThreatAwareness().onEnemyPing(BlockPos.containing(activeVehicleTarget.hullCenter()));
             tickCombat(hasGun, activeVehicleTarget);
             updateDebugSync();
-        } else if (hasGun && wantsHeavySuppressPing()) {
+        } else if (hasGun && heavyPingPhaseActive()) {
             // The heavy suppress ping is an explicit player order: the hunter
-            // keeps the RPG up and shells the cover blocks even while enemies
-            // are visible, instead of dropping to the sidearm.
+            // shells the cover blocks even while enemies are visible instead
+            // of dropping to the sidearm — one rocket, then the order
+            // continues as sidearm suppression below.
             if (inCover) {
                 tickCoverPeekCycle(soldier.getCoverBehaviorManager());
             }
@@ -2501,6 +2505,7 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
                                        CoverBehaviorManager coverManager) {
         StringBuilder status = new StringBuilder();
         status.append(isPingSuppressing ? "firing" : "pending");
+        if (pingHeavyRocketSpent) status.append(" rpgSpent");
         status.append(" peek=").append(soldier.getPeekController().getState());
         status.append(String.format(" ads=%.0f%%", GunIntegration.getAimProgress(soldier) * 100.0f));
         status.append(" burst=").append(burstShotsFired).append('/').append(suppressionBurstTarget);
@@ -2763,7 +2768,7 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
         // are already debounced (engagement latch + visible-sighting gate), so
         // a mismatch only means the fight genuinely changed — fighting infantry
         // with a rocket launcher must not wait a cooldown out, and vice versa.
-        boolean launcherWanted = vehicleTarget != null || wantsHeavySuppressPing();
+        boolean launcherWanted = vehicleTarget != null || heavyPingPhaseActive();
         if (SoldierWeaponSelector.update(soldier, launcherWanted)) {
             resetAim(null);
         }
@@ -2860,7 +2865,7 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
         if (!hasActiveEngagement()) {
             return false;
         }
-        boolean launcherDesired = vehicleTarget != null || wantsHeavySuppressPing();
+        boolean launcherDesired = vehicleTarget != null || heavyPingPhaseActive();
         return SoldierWeaponSelector.isUsableSidearm(soldier, launcherDesired);
     }
 
@@ -2878,6 +2883,16 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
         BlockPos pingPos = soldier.getPingSuppressPos();
         return soldier.position().distanceToSqr(pingPos.getCenter())
             <= SUPPRESSION_MAX_RANGE * SUPPRESSION_MAX_RANGE;
+    }
+
+    /**
+     * The heavy phase of the current ping: an armor hunter with launcher
+     * rounds that has not yet spent its one rocket. After the shell goes out
+     * the launcher lowers to the sidearm slot and the order keeps running as
+     * ordinary bullet suppression, so one ping never burns a burst of rockets.
+     */
+    private boolean heavyPingPhaseActive() {
+        return !pingHeavyRocketSpent && wantsHeavySuppressPing();
     }
 
     /** True when the soldier carries an anti-armor gun anywhere in inventory (cached briefly). */
@@ -3701,7 +3716,18 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
             return false;
         }
         
-        boolean heavy = wantsHeavySuppressPing();
+        boolean heavy = heavyPingPhaseActive();
+        // One-rocket doctrine fail-safe: the heavy phase is over but the
+        // soldier is still holding the launcher (no sidearm or other normal
+        // gun to fall back to). Hold fire rather than burning rockets through
+        // the light-suppression path.
+        if (!heavy && ArmorRoleManager.isAtGunStack(soldier.getMainHandItem())) {
+            if (isSuppressionDebugLogging()) {
+                StevesArmyMod.LOGGER.info("[SuppressPing] Soldier {} shouldSuppressPingTarget: rocket spent, launcher still held, no fallback gun",
+                    soldier.getId());
+            }
+            return false;
+        }
         // Heavy fire burns launcher rounds, so its availability is measured in
         // rockets rather than the soldier's total ammo pool.
         int totalAmmo = heavy ? SoldierWeaponSelector.countLauncherAmmo(soldier) : getTotalAmmo();
@@ -3814,7 +3840,7 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
             isPingSuppressing = true;
             pingSuppressDurationTicks = SuppressionOrderController.FIRING_BUDGET_TICKS;
             pingSuppressRemainingTicks = SuppressionOrderController.FIRING_BUDGET_TICKS;
-            pingSuppressHeavy = wantsHeavySuppressPing();
+            pingSuppressHeavy = heavyPingPhaseActive();
             lastHeavyFlipTick = soldier.tickCount;
             pingSuppressionTarget = null;
             pingSuppressionSweepEnd = null;
@@ -3835,7 +3861,7 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
         // heavy fire, peek openings for the held normal gun. The flip is
         // hysteresis-gated so hovering on the ammo or range boundary cannot
         // wipe the cache every other tick.
-        boolean heavyNow = wantsHeavySuppressPing();
+        boolean heavyNow = heavyPingPhaseActive();
         if (heavyNow != pingSuppressHeavy
             && soldier.tickCount - lastHeavyFlipTick >= PING_HEAVY_FLIP_HYSTERESIS_TICKS) {
             pingSuppressHeavy = heavyNow;
@@ -3971,7 +3997,7 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
                 burstShotsFired++;
                 ticksSinceLastBurstShot = 0;
                 pingSuppressionShotTarget = null;
-                
+
                 if (soldier.getCoverBehaviorManager().isInCover()) {
                     soldier.getCoverBehaviorManager().onPeekShot();
                 }
@@ -3980,8 +4006,25 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
                 aimQuality = Math.max(0.0f, aimQuality - recoilMagnitude
                     * StevesArmyConfig.getAimQualityRecoilScale()
                     * getFiringProneRecoilLossMultiplier());
-                
-                if (burstShotsFired >= burstTarget) {
+
+                if (pingSuppressHeavy) {
+                    // One rocket per ping: spend the heavy phase now and hand
+                    // the order to the sidearm. The flip bypasses the 20t
+                    // hysteresis on purpose — waiting it out would let this
+                    // burst's cadence fire a second rocket. Wiping the aim
+                    // cache and burst state rolls a fresh sidearm burst
+                    // against the light-mode (peek opening) lanes.
+                    pingHeavyRocketSpent = true;
+                    pingSuppressHeavy = false;
+                    lastHeavyFlipTick = soldier.tickCount;
+                    lastHeavyLaneSource = null;
+                    soldier.setSuppressionAimPoints(java.util.List.of());
+                    resetBurstState();
+                    if (isSuppressionDebugLogging()) {
+                        StevesArmyMod.LOGGER.info("[SuppressPing] Soldier {} rocket spent, switching to sidearm suppression",
+                            soldier.getId());
+                    }
+                } else if (burstShotsFired >= burstTarget) {
                     int cooldownTicks = (int) (getBurstIntervalSeconds() * 20);
                     if (dynamicFiringEnabled()) {
                         cooldownTicks = FireControl.rollRecoveryTicks(cooldownTicks,
@@ -4242,6 +4285,8 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
     public void forceRestartPingSuppression() {
         this.isPingSuppressing = false;
         this.pingSuppressRemainingTicks = 0;
+        // A fresh ping re-arms the heavy phase's single rocket.
+        this.pingHeavyRocketSpent = false;
         this.pingSuppressionTarget = null;
         this.pingSuppressionSweepEnd = null;
         this.pingSuppressionShotTarget = null;
