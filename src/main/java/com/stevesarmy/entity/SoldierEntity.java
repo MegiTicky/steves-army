@@ -1296,15 +1296,6 @@ public class SoldierEntity extends PathfinderMob implements Container {
             coverBehaviorManager.tickSuppression(coverBehaviorManager.isInCover());
         }
         suppressionOrder.tick(this);
-        if (suppressionOrder.markTerminalReported()) {
-            LivingEntity owner = getOwner();
-            if (owner instanceof ServerPlayer player) {
-                String result = suppressionOrder.getPhase() == SuppressionOrderController.Phase.COMPLETED
-                    ? "completed" : "failed before firing";
-                player.sendSystemMessage(Component.literal("[Squad] Suppression order " + result
-                    + " for " + getName().getString()));
-            }
-        }
         refreshAttackTargetUnderFire();
         tickCoverStuckWatchdog();
 

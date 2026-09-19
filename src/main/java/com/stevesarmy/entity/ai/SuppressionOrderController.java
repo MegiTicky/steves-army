@@ -25,7 +25,6 @@ public final class SuppressionOrderController {
     private int successfulShots;
     private Phase phase = Phase.CANCELLED;
     private BlockReason blockReason = BlockReason.NONE;
-    private boolean terminalReported;
     private int suspendedTicks;
     private int lastControllerTick = -1;
 
@@ -38,7 +37,6 @@ public final class SuppressionOrderController {
         successfulShots = 0;
         phase = Phase.PREPARING;
         blockReason = BlockReason.NONE;
-        terminalReported = false;
         suspendedTicks = 0;
         lastControllerTick = -1;
     }
@@ -122,11 +120,4 @@ public final class SuppressionOrderController {
     public BlockReason getBlockReason() { return blockReason; }
     public int getSuccessfulShots() { return successfulShots; }
     public int getFiringTicksRemaining() { return firingTicksRemaining; }
-    public boolean markTerminalReported() {
-        if (!isActive() && !terminalReported && (phase == Phase.FAILED || phase == Phase.COMPLETED)) {
-            terminalReported = true;
-            return true;
-        }
-        return false;
-    }
 }
