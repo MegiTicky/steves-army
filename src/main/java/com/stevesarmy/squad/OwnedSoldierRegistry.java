@@ -9,6 +9,7 @@ import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.Tag;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.saveddata.SavedData;
 
@@ -60,6 +61,9 @@ public class OwnedSoldierRegistry extends SavedData {
     }
 
     public void refresh(SoldierEntity soldier, ServerLevel level) {
+        // A dismissed soldier must never re-register, whatever caller or
+        // event ordering reaches here (squad sync, status packet, join hook).
+        if (isDismissed(soldier.getUUID())) return;
         UUID ownerId = soldier.getOwnerUUID().orElse(null);
         if (ownerId == null) return;
         Entry entry = entries.computeIfAbsent(soldier.getUUID(), ignored -> new Entry(soldier.getUUID()));
@@ -134,6 +138,37 @@ public class OwnedSoldierRegistry extends SavedData {
         if (entries.entrySet().removeIf(entry -> entry.getValue().health <= 0.0F)) {
             setDirty();
         }
+    }
+
+    /**
+     * Removes entries whose soldier definitively no longer exists: its home
+     * chunk is currently loaded yet no live entity with the UUID is present.
+     * Entries in unloaded chunks are kept — absence there is the legitimate
+     * far-away case this registry exists to track. This is what clears
+     * legacy ghosts (worlds that predate the death cleanup) and crash
+     * residues where the death never reached the saved file.
+     */
+    public void pruneGoneEntries(MinecraftServer server) {
+        boolean removedAny = false;
+        for (Entry entry : new ArrayList<>(entries.values())) {
+            for (ServerLevel level : server.getAllLevels()) {
+                if (!level.dimension().location().toString().equals(entry.dimension)) {
+                    continue;
+                }
+                BlockPos pos = entry.position;
+                if (!level.getChunkSource().hasChunk(pos.getX() >> 4, pos.getZ() >> 4)) {
+                    break;
+                }
+                Entity entity = level.getEntity(entry.soldierId);
+                if (entity instanceof SoldierEntity soldier && soldier.isAlive() && !soldier.isRemoved()) {
+                    break;
+                }
+                entries.remove(entry.soldierId);
+                removedAny = true;
+                break;
+            }
+        }
+        if (removedAny) setDirty();
     }
 
     public Collection<Entry> getAll() {

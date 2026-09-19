@@ -122,10 +122,12 @@ public class SquadSyncHandler {
         if (tickCounter >= 20) {
             tickCounter = 0;
 
+            OwnedSoldierRegistry registry = OwnedSoldierRegistry.get(event.getServer());
+            registry.pruneGoneEntries(event.getServer());
+
             for (net.minecraft.server.level.ServerLevel level : event.getServer().getAllLevels()) {
                 for (var entity : level.getEntities().getAll()) {
                     if (entity instanceof SoldierEntity soldier && !soldier.level().isClientSide) {
-                        OwnedSoldierRegistry registry = OwnedSoldierRegistry.get(event.getServer());
                         if (soldier.isAlive() && !soldier.isRemoved()) {
                             registry.refresh(soldier, level);
                         } else {

@@ -45,13 +45,16 @@ public class DismissSoldierPacket {
 
             FireTeamAssignment fireTeams = FireTeamAssignment.get(player.getServer().overworld(), player.getUUID());
             fireTeams.removeSoldier(message.soldierId);
+            // Mark dismissed before the discard scan: soldiers in unloaded
+            // chunks cannot be discarded here — the join guard on world load
+            // handles them, and no refresh may re-register them meanwhile.
+            registry.dismiss(message.soldierId);
             for (ServerLevel level : player.getServer().getAllLevels()) {
                 Entity entity = level.getEntity(message.soldierId);
                 if (entity instanceof SoldierEntity soldier && soldier.isOwnedBy(player)) {
                     soldier.discard();
                 }
             }
-            registry.dismiss(message.soldierId);
             SquadActivityManager.removeSoldier(message.soldierId, player.getServer());
             NetworkHandler.sendTo(player, SquadStatusSyncPacket.createForPlayer(player));
         });
