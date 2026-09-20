@@ -26,8 +26,10 @@ public class EnemyFinisherHandler {
         // Only re-allow damage if the attacker is an enemy soldier
         if (!(event.getSource().getEntity() instanceof EnemySoldierEntity)) return;
 
-        // Only re-allow damage if it's a TaCZ bullet
-        if (!event.getSource().is(com.tacz.guns.init.ModDamageTypes.BULLETS_TAG)) {
+        // Only re-allow damage if it's a TaCZ bullet. TaCZ check first: resolving
+        // ModDamageTypes.BULLETS_TAG without TaCZ installed would NCDFE.
+        if (!com.stevesarmy.combat.GunIntegration.isTaczLoaded()
+            || !event.getSource().is(com.tacz.guns.init.ModDamageTypes.BULLETS_TAG)) {
             if (debug) {
                 StevesArmyMod.LOGGER.info("[EnemyFinisher] Damage not a TaCZ bullet (type={}), skipping",
                     event.getSource().getMsgId());

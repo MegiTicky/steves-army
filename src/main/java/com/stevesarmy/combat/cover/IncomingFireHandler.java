@@ -62,7 +62,8 @@ public class IncomingFireHandler {
     @SubscribeEvent
     public static void onEntityJoin(EntityJoinLevelEvent event) {
         Entity entity = event.getEntity();
-        if (entity.getType() == EntityKineticBullet.TYPE) {
+        // TaCZ guard first: resolving EntityKineticBullet.TYPE without TaCZ installed would NCDFE.
+        if (com.stevesarmy.combat.GunIntegration.isTaczLoaded() && entity.getType() == EntityKineticBullet.TYPE) {
             trackedBullets.put(entity, null);
         } else if (isCbcLoaded() && isCbcProjectile(entity)) {
             trackedCbcProjectiles.put(entity, null);

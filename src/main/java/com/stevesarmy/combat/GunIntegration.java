@@ -1,12 +1,15 @@
 package com.stevesarmy.combat;
 
 import com.stevesarmy.StevesArmyMod;
+import com.stevesarmy.combat.cover.GunBlockImpactHandlerTaCZ;
+import com.stevesarmy.combat.cover.IncomingFireHandlerTaCZ;
 import com.stevesarmy.debug.DiagnosticLogManager;
 import com.stevesarmy.entity.SoldierEntity;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.phys.Vec3;
+import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.common.capabilities.ForgeCapabilities;
 
 import java.lang.reflect.Field;
@@ -51,6 +54,38 @@ public class GunIntegration {
             gunHandler = VPB_HANDLER;
         } else if (taczLoaded) {
             gunHandler = TACZ_HANDLER;
+        }
+
+        if (taczLoaded) {
+            registerTaCZEventHandlers();
+        }
+    }
+
+    /**
+     * TaCZ event handlers are registered manually instead of through
+     * {@code @EventBusSubscriber}: automatic registration resolves every
+     * handler method's parameter types during mod construction, so a TaCZ
+     * build missing an event class (e.g. 1.1.8-hotfix dropped
+     * AmmoHitBlockEvent) crashes the whole mod load. Each handler is only
+     * registered when its event class is actually present.
+     */
+    private static void registerTaCZEventHandlers() {
+        tryRegisterHandler("com.tacz.guns.api.event.common.GunShootEvent",
+            GunshotDetectionHandlerTaCZ.class);
+        tryRegisterHandler("com.tacz.guns.api.event.common.EntityHurtByGunEvent",
+            IncomingFireHandlerTaCZ.class);
+        tryRegisterHandler("com.tacz.guns.api.event.server.AmmoHitBlockEvent",
+            GunBlockImpactHandlerTaCZ.class);
+    }
+
+    private static void tryRegisterHandler(String eventClassName, Class<?> handlerClass) {
+        try {
+            Class.forName(eventClassName);
+            MinecraftForge.EVENT_BUS.register(handlerClass);
+            StevesArmyMod.LOGGER.info("[TaCZ] Registered {} for {}", handlerClass.getSimpleName(), eventClassName);
+        } catch (Throwable t) {
+            StevesArmyMod.LOGGER.warn("[TaCZ] Skipping {} - event {} unavailable ({})",
+                handlerClass.getSimpleName(), eventClassName, t.toString());
         }
     }
 

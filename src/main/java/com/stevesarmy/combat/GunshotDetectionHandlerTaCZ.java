@@ -6,10 +6,8 @@ import com.tacz.guns.api.event.common.GunShootEvent;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraftforge.eventbus.api.EventPriority;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
-import net.minecraftforge.fml.common.Mod;
 
-/** Converts completed TaCZ shots into observer-specific detection cues. */
-@Mod.EventBusSubscriber(modid = "steves_army")
+/** Converts completed TaCZ shots into observer-specific detection cues. Registered manually from GunIntegration. */
 public final class GunshotDetectionHandlerTaCZ {
     private GunshotDetectionHandlerTaCZ() {}
 
