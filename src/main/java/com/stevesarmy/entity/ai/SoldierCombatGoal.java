@@ -1232,6 +1232,11 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
         if (armor == null) {
             return null;
         }
+        // Never engage the ship we are ourselves riding or standing on, even
+        // if stale squad intel still lists it as a contact.
+        if (ArmorThreatScanner.isOwnMountContact(soldier, armor)) {
+            return null;
+        }
         double maxRange = StevesArmyConfig.getArmorEngagementMaxRange();
         return soldier.distanceToSqr(armor.aimPoint()) <= maxRange * maxRange ? armor : null;
     }

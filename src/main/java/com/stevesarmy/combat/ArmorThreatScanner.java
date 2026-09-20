@@ -35,7 +35,12 @@ import java.util.UUID;
  * carrying enemy vehicle crew (a VEHICLE_CREW-role soldier or anyone riding a
  * seat on the hull) reads as an enemy vehicle such as an APC. Infantry merely
  * standing on a ship or dock never qualifies: the occupancy gate is crew
- * identity, never position alone. A hostile sighting is published into the
+ * identity, never position alone. Hostility is decided with the soldier's
+ * ordinary {@link SoldierEntity#isFriendlyTo} identity (owner, scoreboard
+ * teams, allies), and a ship is never reported while the observer or any of
+ * the observer's side's people are aboard it — our own transports and
+ * boarded-friendly hulls are not rocket targets. A hostile sighting is
+ * published into the
  * squad's shared threat intel as a "hard target" — small arms cannot destroy
  * it, so soldiers react by role: squads without an anti-armor gun keep their
  * distance, and squads with one designate its carrier as the armor hunter
@@ -99,6 +104,12 @@ public final class ArmorThreatScanner {
             return;
         }
 
+        // Own-ship guard: a soldier never reports the hull he is himself
+        // riding or standing on. Without this, a transported soldier scans his
+        // own transport while its real crew reads as friendly and the ship
+        // ends up in shared intel as an enemy vehicle.
+        Long ownShipId = VS2Compat.getShipIdOf(VS2Compat.resolveShipUnderEntity(soldier));
+
         double range = StevesArmyConfig.getArmorDetectionDistance();
         AABB searchBox = soldier.getBoundingBox().inflate(range);
         List<Entity> cannons = serverLevel.getEntitiesOfClass(Entity.class, searchBox,
@@ -119,9 +130,12 @@ public final class ArmorThreatScanner {
                 if (hullCenter == null || !VS2Compat.isWorldPlausible(hullCenter)) {
                     continue;
                 }
+                Long shipId = VS2Compat.getShipIdOf(ship);
+                if (shipId != null && shipId.equals(ownShipId)) {
+                    continue;
+                }
                 Vec3[] hullCorners = ship != null ? shipHullCorners(ship) : null;
                 UUID contactId = contactIdFor(ship, camera.getUUID());
-                Long shipId = VS2Compat.getShipIdOf(ship);
                 if (shipId != null) {
                     scannedShipIds.add(shipId);
                 }
@@ -148,8 +162,18 @@ public final class ArmorThreatScanner {
         // qualifies, so ship-heavy areas cannot flood the doctrine with fake
         // contacts the way the old position-only scan did.
         if (StevesArmyConfig.isOccupancyVehicleDetectionEnabled()) {
+            // The self gotcha: isFriendlyTo(self) is false by definition, so the
+            // observer must be excluded explicitly or a soldier riding in a
+            // transport seat reads as a hostile crewman on his own vehicle.
             List<LivingEntity> occupants = serverLevel.getEntitiesOfClass(LivingEntity.class, searchBox,
-                occ -> occ.isAlive() && !soldier.isFriendlyTo(occ) && isVehicleOccupant(occ));
+                occ -> occ.isAlive() && occ != soldier
+                    && !soldier.isFriendlyTo(occ) && isVehicleOccupant(occ));
+            // Friendly-aboard veto, through the same isFriendlyTo identity used
+            // for every living-target decision (owner, teams, allies): a ship
+            // carrying any of our side's people is never a rocket target, even
+            // when an enemy crewman or boarder stands on it too.
+            Set<Long> friendlyShipIds = occupants.isEmpty()
+                ? Set.of() : friendlyShipIdsNear(soldier, serverLevel, searchBox);
             for (LivingEntity occupant : occupants) {
                 Object ship = VS2Compat.resolveShipUnderEntity(occupant);
                 Long shipId = VS2Compat.getShipIdOf(ship);
@@ -157,6 +181,22 @@ public final class ArmorThreatScanner {
                     continue;
                 }
                 scannedShipIds.add(shipId);
+                if (shipId.equals(ownShipId)) {
+                    if (DiagnosticLogManager.isCoverLoggingEnabled()) {
+                        StevesArmyMod.LOGGER.info(
+                            "[ArmorDoctrine] Soldier {} occupancy veto: ship {} is the observer's own mount (crewman {})",
+                            soldier.getId(), shipId, occupant.getName().getString());
+                    }
+                    continue;
+                }
+                if (friendlyShipIds.contains(shipId)) {
+                    if (DiagnosticLogManager.isCoverLoggingEnabled()) {
+                        StevesArmyMod.LOGGER.info(
+                            "[ArmorDoctrine] Soldier {} occupancy veto: ship {} carries friendly personnel (enemy crewman {})",
+                            soldier.getId(), shipId, occupant.getName().getString());
+                    }
+                    continue;
+                }
                 Vec3 hullCenter = shipCenterWorld(ship);
                 if (hullCenter == null || !VS2Compat.isWorldPlausible(hullCenter)) {
                     continue;
@@ -205,6 +245,54 @@ public final class ArmorThreatScanner {
         }
         Entity vehicle = occupant.getVehicle();
         return vehicle != null && !(vehicle instanceof LivingEntity);
+    }
+
+    /**
+     * Ship ids under any of the observer's side's people in range: the standard
+     * {@link SoldierEntity#isFriendlyTo} test (owner, scoreboard teams, allies)
+     * applied to nearby entities, each resolved onto its ship. Covers the
+     * driver's seat, transported soldiers, and anyone standing on a deck.
+     */
+    private static Set<Long> friendlyShipIdsNear(SoldierEntity soldier, ServerLevel level, AABB searchBox) {
+        Set<Long> ids = new HashSet<>();
+        List<LivingEntity> friendlies = level.getEntitiesOfClass(LivingEntity.class, searchBox,
+            f -> f.isAlive() && f != soldier && soldier.isFriendlyTo(f));
+        for (LivingEntity friendly : friendlies) {
+            Long shipId = VS2Compat.getShipIdOf(VS2Compat.resolveShipUnderEntity(friendly));
+            if (shipId != null) {
+                ids.add(shipId);
+            }
+        }
+        return ids;
+    }
+
+    private record OwnShipSnapshot(long gameTime, @Nullable Long shipId) {}
+
+    /** Per-soldier cache so the per-tick consumption guard can afford the ship resolution. */
+    private static final Map<UUID, OwnShipSnapshot> ownShipSnapshotBySoldier = new HashMap<>();
+    private static final long OWN_SHIP_CACHE_TICKS = 10;
+
+    /**
+     * True when the contact is the very ship the soldier is currently aboard.
+     * Consumption-side safety net: squad intel may still hold a stale record
+     * (it survives save/load for up to 600 ticks), and a hunter must refuse to
+     * engage its own mount regardless of what the intel says.
+     */
+    public static boolean isOwnMountContact(SoldierEntity soldier, ArmorContact contact) {
+        if (!(soldier.level() instanceof ServerLevel serverLevel)) {
+            return false;
+        }
+        long gameTime = serverLevel.getGameTime();
+        UUID soldierId = soldier.getUUID();
+        OwnShipSnapshot snapshot = ownShipSnapshotBySoldier.get(soldierId);
+        Long ownShipId;
+        if (snapshot != null && gameTime - snapshot.gameTime() < OWN_SHIP_CACHE_TICKS) {
+            ownShipId = snapshot.shipId();
+        } else {
+            ownShipId = VS2Compat.getShipIdOf(VS2Compat.resolveShipUnderEntity(soldier));
+            ownShipSnapshotBySoldier.put(soldierId, new OwnShipSnapshot(gameTime, ownShipId));
+        }
+        return ownShipId != null && shipThreatId(ownShipId).equals(contact.threatId());
     }
 
     private record FiringSolutionDebug(Vec3 point, long gameTime) {}
