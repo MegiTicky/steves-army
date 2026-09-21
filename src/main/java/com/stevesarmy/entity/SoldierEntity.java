@@ -9,6 +9,7 @@ import com.stevesarmy.combat.CombatDebugData;
 import com.stevesarmy.combat.DetectionSystem;
 import com.stevesarmy.combat.GrenadeIntegration;
 import com.stevesarmy.combat.GunIntegration;
+import com.stevesarmy.combat.SbwVehicleGunnery;
 import com.stevesarmy.combat.ThreatAwareness;
 import com.stevesarmy.combat.cover.CoverBehaviorManager;
 import com.stevesarmy.combat.cover.CoverPoint;
@@ -1350,6 +1351,10 @@ public class SoldierEntity extends PathfinderMob implements Container {
 
         long gameTime = level().getGameTime();
         if (VS2Compat.prepareSoldierAi(this)) {
+            // Frozen-AI gunnery: while mounted on a Superb Warfare vehicle the
+            // soldier's only duty is spotting — SBW fires the vehicle weapons at
+            // whatever the riding Mob targets.
+            SbwVehicleGunnery.tickMounted(this);
             if (shouldTickGrenadeController(gameTime)) {
                 grenadeTacticalController.tick(getTarget(), getGrenadeSquadIntel());
             }

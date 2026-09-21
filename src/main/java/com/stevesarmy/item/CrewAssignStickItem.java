@@ -13,6 +13,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.context.UseOnContext;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.EntityHitResult;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 
@@ -72,15 +73,18 @@ public class CrewAssignStickItem extends CommandStickItem {
     /**
      * Sends an assignment request for the selected vehicle crew. The dedicated Crew
      * Assign Stick requires ownership; Creative Command Stick callers pass false.
+     * An ENTITY pick on an operational Superb Warfare vehicle rides along as the
+     * vehicle id — ships go through the block anchor as before.
      */
     public static boolean tryAssign(Player player, boolean requireOwnership) {
         BlockHitResult hit = findAimHit(player);
         Vec3 anchor = hit == null ? null : hit.getLocation();
         List<Integer> selected = selectedVehicleCrewIds(player, requireOwnership);
-        StevesArmyMod.LOGGER.info("[CrewStick] assign click: anchor={} block={} selected={}",
+        int vehicleEntityId = aimedVehicleId(player);
+        StevesArmyMod.LOGGER.info("[CrewStick] assign click: anchor={} block={} vehicle={} selected={}",
             anchor == null ? "none" : formatVec3(anchor),
-            hit == null ? "none" : hit.getBlockPos(), selected.size());
-        if (hit == null) {
+            hit == null ? "none" : hit.getBlockPos(), vehicleEntityId, selected.size());
+        if (hit == null && vehicleEntityId <= 0) {
             return false;
         }
         if (selected.isEmpty()) {
@@ -88,9 +92,28 @@ public class CrewAssignStickItem extends CommandStickItem {
                 net.minecraft.network.chat.Component.literal("No crew selected"), true);
             return true;
         }
+        if (vehicleEntityId > 0) {
+            // Anchor on the vehicle itself; the server mounts on the entity id.
+            anchor = player.level().getEntity(vehicleEntityId).position();
+        }
         NetworkHandler.INSTANCE.sendToServer(
-            new CommandStickAssignCrewPacket(anchor, hit.getBlockPos(), selected));
+            new CommandStickAssignCrewPacket(anchor,
+                hit == null ? net.minecraft.core.BlockPos.containing(anchor) : hit.getBlockPos(),
+                vehicleEntityId, selected));
         return true;
+    }
+
+    /** Operational Superb Warfare vehicle under the crosshair's entity id, or 0. */
+    private static int aimedVehicleId(Player player) {
+        if (!com.stevesarmy.compat.SbwCompat.isEnabled()) {
+            return 0;
+        }
+        HitResult hit = player.pick(SEAT_REACH, 1.0F, false);
+        if (hit.getType() == HitResult.Type.ENTITY && hit instanceof EntityHitResult entityHit
+            && com.stevesarmy.compat.SbwCompat.isOperational(entityHit.getEntity())) {
+            return entityHit.getEntity().getId();
+        }
+        return 0;
     }
 
     /** Selected vehicle crew that the caller is permitted to target on the client. */

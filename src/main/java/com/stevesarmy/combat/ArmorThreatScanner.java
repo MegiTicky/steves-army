@@ -2,6 +2,7 @@ package com.stevesarmy.combat;
 
 import com.stevesarmy.StevesArmyConfig;
 import com.stevesarmy.StevesArmyMod;
+import com.stevesarmy.compat.SbwCompat;
 import com.stevesarmy.compat.TallyhoCompat;
 import com.stevesarmy.compat.VS2Compat;
 import com.stevesarmy.debug.DiagnosticLogManager;
@@ -229,7 +230,69 @@ public final class ArmorThreatScanner {
             }
         }
 
+        // Superb Warfare vehicles: plain world-space entities — not ships, not
+        // living targets, invisible to both ship paths above. Same hostile-
+        // occupant doctrine: a vehicle whose riders are unfriendly reads as an
+        // enemy vehicle; a vehicle carrying any of our side's people is vetoed.
+        // The contact id is the entity's own UUID (the synthetic ship-id
+        // namespace cannot collide with it).
+        if (StevesArmyConfig.isOccupancyVehicleDetectionEnabled() && SbwCompat.isEnabled()) {
+            List<Entity> vehicles = serverLevel.getEntitiesOfClass(Entity.class, searchBox,
+                SbwCompat::isOperational);
+            for (Entity vehicle : vehicles) {
+                if (vehicle == soldier.getVehicle()) {
+                    continue;
+                }
+                if (!SbwCompat.hasHostileOccupant(soldier, vehicle)) {
+                    continue;
+                }
+                if (SbwCompat.hasFriendlyOccupant(soldier, vehicle)) {
+                    if (DiagnosticLogManager.isCoverLoggingEnabled()) {
+                        StevesArmyMod.LOGGER.info(
+                            "[ArmorDoctrine] Soldier {} SBW veto: vehicle {} carries friendly personnel",
+                            soldier.getId(), vehicle.getId());
+                    }
+                    continue;
+                }
+                AABB box = vehicle.getBoundingBox();
+                Vec3 hullCenter = box.getCenter();
+                Vec3[] corners = aabbCorners(box);
+                UUID contactId = vehicle.getUUID();
+                int vehicleClass = SquadThreatIntel.VC_VEHICLE;
+                if ("TANK".equals(SbwCompat.getVehicleTypeName(vehicle))) {
+                    vehicleClass = SquadThreatIntel.VC_TANK;
+                } else {
+                    vehicleClass = upgradeForCannons(cannons, hullCenter, vehicleClass);
+                }
+                Vec3 velocity = estimateVelocity(contactId, hullCenter, gameTime);
+                intel.reportHardTarget(soldier.getUUID(), contactId,
+                    BlockPos.containing(hullCenter), hullCenter, velocity, corners,
+                    0.8f, serverLevel, vehicleClass);
+
+                double distSqr = soldier.distanceToSqr(hullCenter);
+                if (nearest == null || distSqr < soldier.distanceToSqr(nearest.aimPoint())) {
+                    nearest = new ArmorContact(contactId, hullCenter, hullCenter, velocity,
+                        corners, gameTime);
+                }
+            }
+        }
+
         pruneIfNeeded(gameTime);
+    }
+
+    /** The vehicle's own bounding-box corners, for hull-silhouette sight tests. */
+    @Nullable
+    private static Vec3[] aabbCorners(AABB box) {
+        return new Vec3[] {
+            new Vec3(box.minX, box.minY, box.minZ),
+            new Vec3(box.maxX, box.minY, box.minZ),
+            new Vec3(box.minX, box.maxY, box.minZ),
+            new Vec3(box.minX, box.minY, box.maxZ),
+            new Vec3(box.maxX, box.maxY, box.minZ),
+            new Vec3(box.maxX, box.minY, box.maxZ),
+            new Vec3(box.minX, box.maxY, box.maxZ),
+            new Vec3(box.maxX, box.maxY, box.maxZ),
+        };
     }
 
     /**
@@ -279,6 +342,12 @@ public final class ArmorThreatScanner {
      * engage its own mount regardless of what the intel says.
      */
     public static boolean isOwnMountContact(SoldierEntity soldier, ArmorContact contact) {
+        // Plain-entity mount (Superb Warfare): the contact id is the mount's own
+        // UUID, so the check is direct — no ship resolution involved.
+        if (soldier.isPassenger() && soldier.getVehicle() != null
+            && contact.threatId().equals(soldier.getVehicle().getUUID())) {
+            return true;
+        }
         if (!(soldier.level() instanceof ServerLevel serverLevel)) {
             return false;
         }
@@ -467,13 +536,25 @@ public final class ArmorThreatScanner {
             rememberFiringSolution(soldier, armor.aimPoint());
             return armor.aimPoint();
         }
+        // Plain-entity vehicle (Superb Warfare): hull samples are points inside
+        // the entity's own hitbox, so sight is plain block/smoke — the ship clip
+        // below never sees the vehicle and there is no surface to pull back from.
+        if (soldier.level() instanceof ServerLevel serverLevel) {
+            Entity vehicle = serverLevel.getEntity(armor.threatId());
+            if (SbwCompat.isOperational(vehicle)) {
+                for (Vec3 candidate : hullSamples(armor)) {
+                    if (TargetAcquisition.hasLineOfSightToPosition(soldier, candidate)) {
+                        rememberFiringSolution(soldier, candidate);
+                        return candidate;
+                    }
+                }
+                forgetFiringSolution(soldier);
+                return null;
+            }
+        }
         Vec3 eye = soldier.getEyePosition();
         AABB region = hullRegion(armor);
-        List<Vec3> candidates = new ArrayList<>(9);
-        candidates.add(armor.hullCenter());
-        if (armor.hullCorners() != null) {
-            candidates.addAll(java.util.Arrays.asList(armor.hullCorners()));
-        }
+        List<Vec3> candidates = hullSamples(armor);
         for (Vec3 candidate : candidates) {
             Vec3 direction = candidate.subtract(eye);
             double distance = direction.length();
@@ -500,6 +581,16 @@ public final class ArmorThreatScanner {
         }
         forgetFiringSolution(soldier);
         return null;
+    }
+
+    /** Hull center plus bounding-box corners, the shared sampling set for both solution paths. */
+    private static List<Vec3> hullSamples(ArmorContact armor) {
+        List<Vec3> samples = new ArrayList<>(9);
+        samples.add(armor.hullCenter());
+        if (armor.hullCorners() != null) {
+            samples.addAll(java.util.Arrays.asList(armor.hullCorners()));
+        }
+        return samples;
     }
 
     /** World-space test region around the hull for accepting ray-hit surfaces. */

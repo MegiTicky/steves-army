@@ -1,5 +1,6 @@
 package com.stevesarmy.entity;
 
+import com.stevesarmy.compat.SbwCompat;
 import com.stevesarmy.compat.VS2Compat;
 import com.stevesarmy.inventory.SoldierInventory;
 import com.stevesarmy.registry.ModEntities;
@@ -56,9 +57,11 @@ public final class SoldierRoleHandler {
         if (soldier.getRole() == targetRole) {
             return null;
         }
-        // Vehicle crew is meaningless without Valkyrien Skies; refuse quietly like
-        // the other conversion refusals.
-        if (targetRole == SoldierRole.VEHICLE_CREW && !VS2Compat.isEnabled()) {
+        // Vehicle crew is meaningless without a vehicle system: Valkyrien Skies
+        // ships or Superb Warfare vehicles. Refuse quietly like the other
+        // conversion refusals.
+        if (targetRole == SoldierRole.VEHICLE_CREW
+            && !VS2Compat.isEnabled() && !SbwCompat.isEnabled()) {
             return null;
         }
         if (!soldier.isAlive() || soldier.isRemoved()) {

@@ -1,6 +1,7 @@
 package com.stevesarmy.interact;
 
 import com.stevesarmy.StevesArmyMod;
+import com.stevesarmy.compat.SbwCompat;
 import com.stevesarmy.compat.VS2Compat;
 import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.item.CreativeCommandStickItem;
@@ -49,11 +50,23 @@ public final class CrewSeatInteractHandler {
             return;
         }
         Entity target = event.getTarget();
+        Player player = event.getEntity();
+        ItemStack mainHand = player.getMainHandItem();
+        // Right-click a Superb Warfare vehicle with the crew egg: spawn crew seated
+        // on it (the entity analogue of the seat-entity branch below).
+        if (SbwCompat.isVehicle(target) && mainHand.getItem() instanceof VehicleCrewSpawnEggItem) {
+            if (!event.getLevel().isClientSide) {
+                VehicleCrewSpawnEggItem.spawnCrewOnVehicle(
+                    (net.minecraft.server.level.ServerLevel) event.getLevel(),
+                    target, player, mainHand);
+            }
+            event.setCanceled(true);
+            event.setCancellationResult(InteractionResult.SUCCESS);
+            return;
+        }
         if (!VS2Compat.isCreateSeatEntity(target)) {
             return;
         }
-        Player player = event.getEntity();
-        ItemStack mainHand = player.getMainHandItem();
         if (!player.isShiftKeyDown()) {
             // Plain right-click on a pickable seat entity (tallyho's FlexibleSeatEntity):
             // block the occupant swap when a soldier is seated so crew posts stay manned.

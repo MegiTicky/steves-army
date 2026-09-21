@@ -1,6 +1,7 @@
 package com.stevesarmy.entity.ai;
 
 import com.stevesarmy.StevesArmyConfig;
+import com.stevesarmy.compat.SbwCompat;
 import com.stevesarmy.compat.TallyhoCompat;
 import com.stevesarmy.compat.VS2Compat;
 import com.stevesarmy.combat.StationGunnerAI;
@@ -45,7 +46,8 @@ public class VehicleCrewGoal extends Goal {
     }
 
     private static boolean crewEnabled() {
-        return StevesArmyConfig.VEHICLE_CREW_ENABLED.get() && VS2Compat.isEnabled();
+        return StevesArmyConfig.VEHICLE_CREW_ENABLED.get()
+            && (VS2Compat.isEnabled() || SbwCompat.isEnabled());
     }
 
     @Override

@@ -103,6 +103,7 @@ public class StevesArmyConfig {
     public static final ForgeConfigSpec.IntValue SOLDIER_DEATH_DROPS_PER_TICK;
     public static final ForgeConfigSpec.EnumValue<ArmorDoctrineOverride> ARMOR_DOCTRINE_OVERRIDE;
     public static final ForgeConfigSpec.BooleanValue OCCUPANCY_VEHICLE_DETECTION;
+    public static final ForgeConfigSpec.BooleanValue SBW_COMPAT_ENABLED;
 
     public enum ArmorDoctrineOverride { AUTO, NO_AT, FORCE_AT }
 
@@ -685,6 +686,18 @@ BUILDER.pop();
                      "Infantry merely standing on a ship or dock never triggers a contact.",
                      "Works without tallyho. Default: true.")
             .define("occupancyVehicleDetection", true);
+
+        BUILDER.pop();
+
+        BUILDER.push("superbwarfare");
+
+        SBW_COMPAT_ENABLED = BUILDER
+            .comment("Enable Superb Warfare compatibility when the superbwarfare mod is installed.",
+                     "AT soldiers treat enemy-crewed SBW vehicles as hard targets, and vehicle",
+                     "crew can board and man them via wheel/crew stick/egg (gunnery only -",
+                     "SBW vehicles are client-input driven, so AI cannot drive them).",
+                     "Default: true.")
+            .define("enabled", true);
 
         BUILDER.pop();
 

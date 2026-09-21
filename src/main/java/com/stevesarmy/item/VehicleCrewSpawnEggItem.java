@@ -1,6 +1,7 @@
 package com.stevesarmy.item;
 
 import com.stevesarmy.StevesArmyMod;
+import com.stevesarmy.compat.SbwCompat;
 import com.stevesarmy.compat.VS2Compat;
 import com.stevesarmy.entity.SoldierSpawner;
 import com.stevesarmy.entity.VehicleCrewEntity;
@@ -14,12 +15,14 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.InteractionResultHolder;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.context.UseOnContext;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.EntityHitResult;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.common.ForgeSpawnEggItem;
@@ -51,6 +54,17 @@ public class VehicleCrewSpawnEggItem extends ForgeSpawnEggItem {
     @Override
     public InteractionResultHolder<ItemStack> use(Level level, Player player, InteractionHand hand) {
         ItemStack stack = player.getItemInHand(hand);
+        // Superb Warfare vehicle under the crosshair: spawn the crew seated on it.
+        // The vehicle pick is an ENTITY hit, which findAimHit's block filter drops.
+        if (player.isShiftKeyDown()) {
+            Entity vehicle = findAimVehicle(player);
+            if (vehicle != null) {
+                if (!level.isClientSide) {
+                    spawnCrewOnVehicle((ServerLevel) level, vehicle, player, stack);
+                }
+                return InteractionResultHolder.sidedSuccess(stack, level.isClientSide);
+            }
+        }
         BlockHitResult hit = player.isShiftKeyDown() ? findAimHit(player) : null;
         if (hit != null) {
             if (!level.isClientSide) {
@@ -93,6 +107,50 @@ public class VehicleCrewSpawnEggItem extends ForgeSpawnEggItem {
         HitResult hit = player.pick(SEAT_REACH, 1.0F, false);
         return hit.getType() == HitResult.Type.BLOCK && hit instanceof BlockHitResult blockHit
             ? blockHit : null;
+    }
+
+    /** Operational Superb Warfare vehicle under the crosshair, or null. */
+    @Nullable
+    private static Entity findAimVehicle(Player player) {
+        if (!SbwCompat.isEnabled()) {
+            return null;
+        }
+        HitResult hit = player.pick(SEAT_REACH, 1.0F, false);
+        if (hit.getType() == HitResult.Type.ENTITY && hit instanceof EntityHitResult entityHit
+            && SbwCompat.isOperational(entityHit.getEntity())) {
+            return entityHit.getEntity();
+        }
+        return null;
+    }
+
+    /**
+     * Server-side "spawn crew seated on this Superb Warfare vehicle": the entity
+     * analogue of {@link #spawnCrewOnSeat}, used by the egg's sneak-use on a
+     * vehicle and by the right-click hook in CrewSeatInteractHandler.
+     */
+    public static void spawnCrewOnVehicle(ServerLevel level, Entity vehicle,
+                                          Player player, ItemStack eggStack) {
+        CompoundTag entityTag = eggEntityTag(eggStack);
+        VehicleCrewEntity crew = createCrew(level, vehicle.position(), player, entityTag);
+        if (crew == null) {
+            return;
+        }
+        SoldierSpawner.SpawnResult result = SoldierSpawner.finishSpawn(level, crew, player, true);
+        if (!result.success()) {
+            return;
+        }
+        int seated = CrewAssignment.mountCrewOnVehicle(level, vehicle, List.of(crew));
+        if (seated == 0) {
+            // Left standing at the vehicle: the unmounted crew goal walks it to a station.
+            StevesArmyMod.LOGGER.warn("[Crew] spawned crew={} could not mount vehicle={}",
+                crew.getId(), vehicle.getId());
+        }
+        if (!player.isCreative()) {
+            eggStack.shrink(1);
+        }
+        player.displayClientMessage(Component.translatable(seated > 0
+            ? "transport.steves_army.feedback.crew_deployed"
+            : "transport.steves_army.feedback.crew_standing"), true);
     }
 
     /** EntityTag carried by the egg stack, or null. */

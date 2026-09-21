@@ -3,6 +3,7 @@ package com.stevesarmy.compat;
 import com.stevesarmy.StevesArmyConfig;
 import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.combat.StationGunnerAI;
+import com.stevesarmy.compat.SbwCompat;
 import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.entity.SoldierRole;
 import com.stevesarmy.squad.SquadMode;
@@ -789,6 +790,60 @@ public final class VS2Compat {
         syncTransportState(soldier, seat, true);
         StevesArmyMod.LOGGER.info("[VS2] seatSoldierOnSeatEntity: mounted soldier={} seat={} seatClass={} shipId={}",
             soldier.getId(), seat.getId(), seat.getClass().getSimpleName(), state.transportShipId);
+        return true;
+    }
+
+    /**
+     * Mounts the soldier directly on a plain world-space vehicle entity (Superb
+     * Warfare). The fourth seat primitive beside SeatBlock/contraption/seat-entity
+     * mounts: vanilla {@code startRiding} with a pending {@code authorizedMounts}
+     * entry, then the SBW seat placement (gunner seats before the driver seat, so
+     * the wheel stays free for a player). Command-driven and ship-less:
+     * {@code transportShipId} and {@code transportSeatPosition} both stay null —
+     * that pair is the marker {@link #waitForReseat} uses to release instead of
+     * re-seating when the vanilla passenger link is gone. No manual passenger
+     * sync: a world-space entity is vanilla-tracked.
+     */
+    public static boolean seatSoldierOnEntity(SoldierEntity soldier, Entity vehicle,
+                                              boolean preferGunnerSeat) {
+        if (soldier.isPassenger() || vehicle == null || vehicle.isRemoved()) {
+            return false;
+        }
+        Vec3 preMountPos = soldier.position();
+        authorizedMounts.put(soldier.getUUID(), vehicle.getUUID());
+        try {
+            soldier.startRiding(vehicle, true);
+        } finally {
+            authorizedMounts.remove(soldier.getUUID());
+        }
+        if (!soldier.isPassenger() || soldier.getVehicle() != vehicle) {
+            return false;
+        }
+
+        SoldierState state = getOrCreateState(soldier);
+        state.transportAnchorId = vehicle.getUUID();
+        state.transportOwnerId = null;
+        state.transportShipId = null;
+        state.transportSeatPosition = null;
+        state.seatRetryCooldownTicks = 0;
+        state.reseatWaitTicks = 0;
+        state.reboardBlockTicks = 0;
+        state.crewSeated = soldier.getRole() == SoldierRole.VEHICLE_CREW;
+        // Egg-spawned / command-mounted crew never stood on foot near here: remember
+        // the pre-mount spot as the recovery target if the vehicle is ever gone.
+        if (isWorldPlausible(preMountPos)) {
+            state.lastSafeWorldPosition = BlockPos.containing(preMountPos.x, preMountPos.y, preMountPos.z);
+        }
+
+        vehicle.positionRider(soldier);
+        int seat = SbwCompat.seatIndexOf(vehicle, soldier);
+        int wanted = SbwCompat.firstFreeSeat(vehicle, preferGunnerSeat);
+        if (wanted >= 0 && wanted != seat) {
+            SbwCompat.changeSeat(vehicle, soldier, wanted);
+        }
+        StevesArmyMod.LOGGER.info("[VS2] seatSoldierOnEntity: mounted soldier={} vehicle={} vehicleClass={} seat {} -> {}",
+            soldier.getId(), vehicle.getId(), vehicle.getClass().getSimpleName(), seat,
+            SbwCompat.seatIndexOf(vehicle, soldier));
         return true;
     }
 
@@ -2899,6 +2954,16 @@ public final class VS2Compat {
      * extracted and its AI may run again.
      */
     private static boolean waitForReseat(SoldierEntity soldier, SoldierState state) {
+        // Plain-entity anchor (Superb Warfare mount: ship id and seat position are
+        // both null). There is no ship to re-seat on, so a lost vanilla passenger
+        // link — the vehicle was destroyed, or the rider was evicted — ends the
+        // mount immediately instead of pinning the soldier for the wait timeout.
+        if (state.transportShipId == null && state.transportSeatPosition == null) {
+            StevesArmyMod.LOGGER.info("[VS2] Vehicle anchor lost soldier={} vehicle={} - releasing",
+                soldier.getId(), state.transportAnchorId);
+            releaseAndClear(soldier, state);
+            return false;
+        }
         boolean firstDetection = state.reseatWaitTicks == 0;
         state.reseatWaitTicks++;
         Level level = soldier.level();

@@ -1,5 +1,6 @@
 package com.stevesarmy.network;
 
+import com.stevesarmy.compat.SbwCompat;
 import com.stevesarmy.compat.VS2Compat;
 import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.StevesArmyMod;
@@ -11,7 +12,9 @@ import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.EntityHitResult;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.network.NetworkEvent;
@@ -81,8 +84,25 @@ public class TransportOrderMessage {
      * never pulls crew that are actively manning a station.
      */
     private static void handleMountCrew(ServerPlayer sender, ServerLevel level, Vec3 aimPosition) {
-        if (!VS2Compat.isEnabled()) {
+        if (!VS2Compat.isEnabled() && !SbwCompat.isEnabled()) {
             sender.displayClientMessage(Component.translatable("transport.steves_army.feedback.vs2_unavailable"), true);
+            return;
+        }
+        // Plain-entity vehicle under the crosshair (Superb Warfare): the pick
+        // returns an ENTITY hit where ships return a BLOCK hit. Board it directly.
+        Entity aimedVehicle = resolveAimedVehicle(sender);
+        if (aimedVehicle != null) {
+            List<SoldierEntity> crew = CrewAssignment.stationlessCrewNear(level, sender, aimPosition, 64);
+            if (crew.isEmpty()) {
+                sender.displayClientMessage(Component.translatable("transport.steves_army.feedback.no_crew"), true);
+                return;
+            }
+            int seated = CrewAssignment.mountCrewOnVehicle(level, aimedVehicle, crew);
+            StevesArmyMod.LOGGER.info("[Transport] MOUNT_CREW by {}: vehicle={} type={} crew={} seated={}",
+                sender.getName().getString(), aimedVehicle.getId(),
+                SbwCompat.getVehicleTypeName(aimedVehicle), crew.size(), seated);
+            sender.displayClientMessage(
+                Component.translatable("transport.steves_army.feedback.seated", seated, crew.size()), true);
             return;
         }
         Vec3 searchCenter = aimPosition;
@@ -132,6 +152,23 @@ public class TransportOrderMessage {
 
     /** /vs get-ship clips 10 blocks from the crosshair. */
     private static final double GET_SHIP_PICK_DISTANCE = 10.0;
+
+    /**
+     * Plain-entity vehicle under the crosshair (Superb Warfare): an ENTITY pick
+     * hit on an operational SBW vehicle. Null for every other hit type — ships
+     * keep going through {@link #resolveAimedShip}.
+     */
+    private static Entity resolveAimedVehicle(ServerPlayer sender) {
+        if (!SbwCompat.isEnabled()) {
+            return null;
+        }
+        HitResult clip = sender.pick(GET_SHIP_PICK_DISTANCE, 1.0F, false);
+        if (clip.getType() == HitResult.Type.ENTITY && clip instanceof EntityHitResult entityHit
+            && SbwCompat.isOperational(entityHit.getEntity())) {
+            return entityHit.getEntity();
+        }
+        return null;
+    }
 
     /**
      * Ship resolution in /vs get-ship order (the crew assign stick's order): the
