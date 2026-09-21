@@ -43,8 +43,18 @@ public final class AsyncSoldierPath extends Path {
         return requestedPositions.equals(positions);
     }
 
+    /**
+     * Pending paths survive sub-1.5-block drift: a walking soldier crosses block
+     * boundaries while a request is in flight, and a soldier on a moored ship
+     * changes world block every tick from hull motion — exact block identity
+     * cancelled nearly every in-flight path and forced a full snapshot recapture.
+     * The age limit and the live VS2/reachability validation on completion remain
+     * the real guards.
+     */
+    private static final double STALE_DRIFT_SQR = 2.25D;
+
     public boolean isStale(BlockPos currentPosition, long currentTick) {
-        return !sourcePosition.equals(currentPosition)
+        return sourcePosition.distSqr(currentPosition) > STALE_DRIFT_SQR
             || currentTick - sourceTick > StevesArmyConfigAccess.maxPendingTicks();
     }
 

@@ -2,6 +2,7 @@ package com.stevesarmy.entity.ai;
 
 import com.stevesarmy.combat.cover.CoverBehaviorManager;
 import com.stevesarmy.combat.cover.CoverPoint;
+import com.stevesarmy.StevesArmyConfig;
 import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.squad.SquadMode;
@@ -14,9 +15,15 @@ import java.util.EnumSet;
 public class SoldierHoldPositionGoal extends Goal {
     private static final float HOLD_RADIUS_SQ = 100.0f;
     private static final float RETURN_TO_COVER_DISTANCE_SQ = 9.0f;
+    /** Retry interval for a request whose path never closed meaningful distance (failed, unreachable, or stale-cancelled). */
+    private static final int HOLD_REPATH_FAILURE_INTERVAL_TICKS = 100;
+    /** Distance the soldier must close per finished path before the retry is treated as a failure. */
+    private static final double HOLD_PATH_PROGRESS_SQ = 2.25D;
     private final SoldierEntity soldier;
     private BlockPos holdPos;
     private final double speedModifier;
+    private int repathTimer;
+    private double holdDistAtRequestSq;
 
     public SoldierHoldPositionGoal(SoldierEntity soldier) {
         this.soldier = soldier;
@@ -97,7 +104,11 @@ public class SoldierHoldPositionGoal extends Goal {
     @Override
     public void start() {
         soldier.clearFormationOffset();
+        this.repathTimer = 0;
+        this.holdDistAtRequestSq = 0.0D;
         navigateToTarget(holdPos);
+        this.holdDistAtRequestSq = soldier.distanceToSqr(holdPos.getX(), holdPos.getY(), holdPos.getZ());
+        this.repathTimer = StevesArmyConfig.getMoveGoalRepathTicks();
     }
 
     @Override
@@ -143,7 +154,23 @@ public class SoldierHoldPositionGoal extends Goal {
 
         double distToHold = soldier.distanceToSqr(holdPos.getX(), holdPos.getY(), holdPos.getZ());
         if (distToHold > HOLD_RADIUS_SQ) {
-            navigateToTarget(holdPos);
+            // Re-path only when the previous path is finished (or failed) and the
+            // interval has elapsed. isDone() is false while an async request is
+            // pending or its path is still being walked, so this follows the path
+            // instead of re-requesting — and recapturing a pathfinding snapshot —
+            // every tick.
+            if (repathTimer > 0) {
+                repathTimer--;
+            }
+            if (repathTimer <= 0 && soldier.getNavigation().isDone()) {
+                boolean stalled = holdDistAtRequestSq > 0.0D
+                    && holdDistAtRequestSq - distToHold < HOLD_PATH_PROGRESS_SQ;
+                navigateToTarget(holdPos);
+                holdDistAtRequestSq = distToHold;
+                repathTimer = stalled
+                    ? HOLD_REPATH_FAILURE_INTERVAL_TICKS
+                    : StevesArmyConfig.getMoveGoalRepathTicks();
+            }
         } else {
             soldier.getNavigation().stop();
         }

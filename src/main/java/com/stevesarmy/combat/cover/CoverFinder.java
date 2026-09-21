@@ -16,6 +16,7 @@ import net.minecraft.world.phys.Vec3;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
+import com.stevesarmy.StevesArmyConfig;
 import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.combat.ExposureCalculator;
 import com.stevesarmy.combat.ModBlockTags;
@@ -826,6 +827,11 @@ public class CoverFinder {
             if (isBetterFiringLane(candidate, best)) {
                 best = candidate;
             }
+            if (best.score() >= 1.0f) {
+                // A perfect lane cannot be improved; further peek origins would
+                // only repeat the full aim-point + contact ray work.
+                break;
+            }
         }
         return best;
     }
@@ -873,11 +879,17 @@ public class CoverFinder {
         float reachableWeight = 0.0f;
         int eligible = 0;
         int reachable = 0;
+        int contactBudget = StevesArmyConfig.COVER_SCORING_MAX_CONTACTS.get();
 
         for (SquadCoverContext.FiringContact contact : squadCtx.getFiringContacts()) {
             float freshness = contact.freshnessAt(currentTick);
             if (freshness <= 0.0f) {
                 continue;
+            }
+            if (contactBudget > 0 && eligible >= contactBudget) {
+                // Scoring samples the first fresh contacts instead of tracing a
+                // ray per contact per candidate; peek decisions still see all.
+                break;
             }
 
             eligible++;

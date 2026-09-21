@@ -48,10 +48,11 @@ final class SnapshotPathNavigationRegion extends PathNavigationRegion {
 
         int minY = Math.max(level.getMinBuildHeight(), min.getY());
         int maxY = Math.min(level.getMaxBuildHeight() - 1, max.getY());
+        BlockPos.MutableBlockPos position = new BlockPos.MutableBlockPos();
         for (int x = min.getX(); x <= max.getX(); x++) {
             for (int y = minY; y <= maxY; y++) {
                 for (int z = min.getZ(); z <= max.getZ(); z++) {
-                    BlockPos position = new BlockPos(x, y, z);
+                    position.set(x, y, z);
                     BlockState state = source.getBlockState(position);
                     if (!state.isAir()) {
                         states.put(position.asLong(), state);

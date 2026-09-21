@@ -113,7 +113,11 @@ public final class VS2Compat {
     private VS2Compat() {}
 
     public static boolean isEnabled() {
-        initialize();
+        // Visibility rays call this several times per ray; enter the synchronized
+        // initializer only before the first successful resolution.
+        if (!initialized) {
+            initialize();
+        }
         return available && StevesArmyConfig.VS2_COMPAT_ENABLED.get();
     }
 
@@ -1997,6 +2001,20 @@ public final class VS2Compat {
     }
 
     /**
+     * Unclassified variant for callers that combine the result with their own
+     * world block walk (VisibilityRay): skips the vanilla clip that rejects a
+     * ship hit sitting behind a closer world block. The caller's min() against
+     * its own obstruction makes the distinction immaterial, and the saved world
+     * clip is the second-most expensive part of the legacy path.
+     */
+    public static double getShipAwareBlockHitDistance(Level level, Vec3 from, Vec3 to,
+                                                       @Nullable Entity source,
+                                                       boolean classifyAgainstWorld) {
+        Vec3 hit = getShipAwareBlockHitLocation(level, from, to, source, classifyAgainstWorld);
+        return hit == null ? Double.POSITIVE_INFINITY : from.distanceTo(hit);
+    }
+
+    /**
      * World-space location of the nearest ship-aware block hit along the ray, or null.
      * Used by the crew stick/egg to anchor on the ship the player is aiming at — the
      * soldier-flow way (ship + anchor position, never via a seat entity: empty Create
@@ -2005,6 +2023,19 @@ public final class VS2Compat {
     @Nullable
     public static Vec3 getShipAwareBlockHitLocation(Level level, Vec3 from, Vec3 to,
                                                     @Nullable Entity source) {
+        return getShipAwareBlockHitLocation(level, from, to, source, true);
+    }
+
+    /**
+     * World-space location of the nearest ship-aware block hit along the ray, or null.
+     * When {@code classifyAgainstWorld} is set, a hit only counts if no world block
+     * lies in front of it (the legacy whole-ray contract); otherwise the caller
+     * merges the result with its own world obstruction.
+     */
+    @Nullable
+    public static Vec3 getShipAwareBlockHitLocation(Level level, Vec3 from, Vec3 to,
+                                                    @Nullable Entity source,
+                                                    boolean classifyAgainstWorld) {
         if (!isEnabled()) {
             return null;
         }
@@ -2017,35 +2048,254 @@ public final class VS2Compat {
         }
 
         try {
-            ClipContext context = new ClipContext(
-                from,
-                to,
-                ClipContext.Block.COLLIDER,
-                ClipContext.Fluid.NONE,
-                source
-            );
-            BlockHitResult hit;
-            if (clipIncludeShipsOnly != null) {
-                hit = (BlockHitResult) reflect(clipIncludeShipsOnly, level, context, true, null, true);
-            } else {
-                hit = (BlockHitResult) reflect(clipIncludeShips, level, context);
-                BlockHitResult vanillaHit = (BlockHitResult) reflect(vanillaClip, level, context);
-                if (hit.getType() != HitResult.Type.BLOCK
-                    || (vanillaHit.getType() == HitResult.Type.BLOCK
-                        && hit.getLocation().distanceToSqr(from)
-                            >= vanillaHit.getLocation().distanceToSqr(from))) {
-                    return null;
-                }
+            if (!StevesArmyConfig.VS2_SHIP_RAYCAST_GATE.get()) {
+                return wholeRayShipHit(level, from, to, source);
             }
-            if (hit.getType() != HitResult.Type.BLOCK) {
+
+            // Gate: with no ship in the ray's bounding box the clip can only ever
+            // reproduce the world result, which VisibilityRay already walks
+            // block-by-block itself. Cover scoring traces hundreds of rays per
+            // search, and on VS 2.3 every full clip also re-clips the whole world
+            // plus every ship in the query box, so skipping it here is the bulk of
+            // the saving.
+            List<Object> ships = shipsIntersectingRay(level, from, to);
+            if (ships.isEmpty()) {
                 return null;
             }
 
-            return hit.getLocation();
+            Vec3 best = null;
+            double bestDistSqr = Double.MAX_VALUE;
+            for (Object ship : ships) {
+                AABB worldBox = shipWorldAABB(level, ship);
+                if (worldBox == null) {
+                    // No voxel AABB or transform helpers: fall back to the legacy
+                    // whole-ray clip rather than guessing a span.
+                    return wholeRayShipHit(level, from, to, source);
+                }
+                double[] span = segmentSpanInBox(from, to, worldBox);
+                if (span == null) {
+                    // The hull lives inside its AABB, so a segment missing the
+                    // AABB cannot hit it — VS2's own per-ship check would skip it.
+                    continue;
+                }
+                // Pad both ends so the sub-segment keeps margin around the AABB
+                // pass-through and absorbs sub-block ship movement since the box
+                // snapshot.
+                double length = from.distanceTo(to);
+                double padT = length > 1.0E-4D ? Math.min(SHIP_SPAN_PAD_BLOCKS / length, 0.5D) : 0.0D;
+                Vec3 hit = shipHitOnSegment(level, from, to,
+                    Math.max(0.0D, span[0] - padT), Math.min(1.0D, span[1] + padT), source);
+                if (hit != null) {
+                    double distSqr = from.distanceToSqr(hit);
+                    if (distSqr < bestDistSqr) {
+                        bestDistSqr = distSqr;
+                        best = hit;
+                    }
+                }
+            }
+            if (best != null && classifyAgainstWorld && vanillaClip != null) {
+                // VS 2.3 legacy contract: a world block level with or in front of
+                // the ship hit means the obstruction is terrain, not hull. On the
+                // VS 2.4 skipWorld path the clip is ship-only by construction and
+                // the legacy code never classified it.
+                BlockHitResult vanillaHit = (BlockHitResult) reflect(vanillaClip, level,
+                    new ClipContext(from, best,
+                        ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, source));
+                if (vanillaHit.getType() == HitResult.Type.BLOCK
+                    && vanillaHit.getLocation().distanceToSqr(from) <= bestDistSqr) {
+                    return null;
+                }
+            }
+            return best;
         } catch (ReflectiveOperationException | RuntimeException exception) {
             logReflectionFailure(exception);
             return null;
         }
+    }
+
+    /** Padding in blocks applied to each end of a ship-clipped sub-segment. */
+    private static final double SHIP_SPAN_PAD_BLOCKS = 1.0D;
+    /** Per-tick world-envelope cache: ships move slowly, rays are many. */
+    private static final Map<Long, AABB> SHIP_WORLD_BOX_CACHE = new HashMap<>();
+    private static long shipWorldBoxCacheTick = Long.MIN_VALUE;
+
+    /** Ships returned by the level's ship index for the ray's bounding box. */
+    private static List<Object> shipsIntersectingRay(Level level, Vec3 from, Vec3 to)
+            throws ReflectiveOperationException {
+        List<Object> ships = new ArrayList<>();
+        Object result = reflect(getShipsIntersecting, level, new AABB(from, to));
+        if (result instanceof Iterable<?> iterable) {
+            for (Object ship : iterable) {
+                ships.add(ship);
+            }
+        }
+        return ships;
+    }
+
+    /**
+     * World-space axis-aligned envelope of the ship's voxel hull: the shipyard
+     * voxel box's eight corners transformed by shipToWorld. Conservative after
+     * yaw (the envelope can exceed the hull), which is safe — a span test
+     * against it only ever widens the clipped segment.
+     */
+    @Nullable
+    private static AABB shipWorldAABB(Level level, Object ship) {
+        Long shipId = getShipIdOf(ship);
+        if (shipId == null) {
+            return null;
+        }
+        long tick = level.getGameTime();
+        synchronized (SHIP_WORLD_BOX_CACHE) {
+            if (shipWorldBoxCacheTick != tick) {
+                SHIP_WORLD_BOX_CACHE.clear();
+                shipWorldBoxCacheTick = tick;
+            }
+            AABB cached = SHIP_WORLD_BOX_CACHE.get(shipId);
+            if (cached != null) {
+                return cached;
+            }
+        }
+        BlockPos shipyardMin = getShipyardMin(ship);
+        BlockPos shipyardMax = getShipyardMax(ship);
+        if (shipyardMin == null || shipyardMax == null) {
+            return null;
+        }
+        double minX = Double.POSITIVE_INFINITY;
+        double minY = Double.POSITIVE_INFINITY;
+        double minZ = Double.POSITIVE_INFINITY;
+        double maxX = Double.NEGATIVE_INFINITY;
+        double maxY = Double.NEGATIVE_INFINITY;
+        double maxZ = Double.NEGATIVE_INFINITY;
+        for (int cx = 0; cx <= 1; cx++) {
+            for (int cy = 0; cy <= 1; cy++) {
+                for (int cz = 0; cz <= 1; cz++) {
+                    Vec3 corner = shipToWorldPosition(ship, new Vec3(
+                        cx == 0 ? shipyardMin.getX() : shipyardMax.getX() + 1,
+                        cy == 0 ? shipyardMin.getY() : shipyardMax.getY() + 1,
+                        cz == 0 ? shipyardMin.getZ() : shipyardMax.getZ() + 1));
+                    if (corner == null) {
+                        return null;
+                    }
+                    minX = Math.min(minX, corner.x);
+                    maxX = Math.max(maxX, corner.x);
+                    minY = Math.min(minY, corner.y);
+                    maxY = Math.max(maxY, corner.y);
+                    minZ = Math.min(minZ, corner.z);
+                    maxZ = Math.max(maxZ, corner.z);
+                }
+            }
+        }
+        AABB box = new AABB(minX, minY, minZ, maxX, maxY, maxZ);
+        synchronized (SHIP_WORLD_BOX_CACHE) {
+            if (SHIP_WORLD_BOX_CACHE.size() > 256) {
+                SHIP_WORLD_BOX_CACHE.clear();
+            }
+            SHIP_WORLD_BOX_CACHE.put(shipId, box);
+        }
+        return box;
+    }
+
+    /**
+     * Entry/exit parameters of the from..to segment through {@code box}, or null
+     * when the segment misses it. Standard slab clip in segment space [0,1].
+     */
+    @Nullable
+    private static double[] segmentSpanInBox(Vec3 from, Vec3 to, AABB box) {
+        double[] span = {0.0D, 1.0D};
+        if (!clipSpanAxis(from.x, to.x - from.x, box.minX, box.maxX, span)
+            || !clipSpanAxis(from.y, to.y - from.y, box.minY, box.maxY, span)
+            || !clipSpanAxis(from.z, to.z - from.z, box.minZ, box.maxZ, span)) {
+            return null;
+        }
+        return span;
+    }
+
+    private static boolean clipSpanAxis(double origin, double delta, double min, double max,
+                                        double[] span) {
+        if (Math.abs(delta) < 1.0E-9D) {
+            return origin >= min && origin <= max;
+        }
+        double inv = 1.0D / delta;
+        double enter = (min - origin) * inv;
+        double exit = (max - origin) * inv;
+        if (enter > exit) {
+            double swap = enter;
+            enter = exit;
+            exit = swap;
+        }
+        span[0] = Math.max(span[0], enter);
+        span[1] = Math.min(span[1], exit);
+        return span[0] <= span[1];
+    }
+
+    /**
+     * Ship-only obstruction on the sub-segment from..to scaled to [t0,t1]. The
+     * VS 2.4 path asks clipIncludeShips to skip the world entirely; on VS 2.3 the
+     * combined clip also contains world blocks, so a hit only counts when it is
+     * closer than a vanilla clip of the same sub-segment — the legacy whole-ray
+     * classification, just over a much shorter walk. Any world block closer than
+     * a ship hit is harmless anyway: VisibilityRay takes the minimum against its
+     * own block walk.
+     */
+    @Nullable
+    private static Vec3 shipHitOnSegment(Level level, Vec3 from, Vec3 to, double t0, double t1,
+                                         @Nullable Entity source)
+            throws ReflectiveOperationException {
+        Vec3 start = lerp(from, to, t0);
+        Vec3 end = lerp(from, to, t1);
+        ClipContext context = new ClipContext(start, end,
+            ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, source);
+        BlockHitResult hit;
+        if (clipIncludeShipsOnly != null) {
+            hit = (BlockHitResult) reflect(clipIncludeShipsOnly, level, context, true, null, true);
+        } else {
+            hit = (BlockHitResult) reflect(clipIncludeShips, level, context);
+            BlockHitResult vanillaHit = (BlockHitResult) reflect(vanillaClip, level, context);
+            if (hit.getType() == HitResult.Type.BLOCK
+                && vanillaHit.getType() == HitResult.Type.BLOCK
+                && hit.getLocation().distanceToSqr(start)
+                    >= vanillaHit.getLocation().distanceToSqr(start)) {
+                return null;
+            }
+        }
+        return hit.getType() == HitResult.Type.BLOCK ? hit.getLocation() : null;
+    }
+
+    /** Legacy whole-ray path: one combined clip plus a vanilla clip for classification. */
+    @Nullable
+    private static Vec3 wholeRayShipHit(Level level, Vec3 from, Vec3 to, @Nullable Entity source)
+            throws ReflectiveOperationException {
+        ClipContext context = new ClipContext(
+            from,
+            to,
+            ClipContext.Block.COLLIDER,
+            ClipContext.Fluid.NONE,
+            source
+        );
+        BlockHitResult hit;
+        if (clipIncludeShipsOnly != null) {
+            hit = (BlockHitResult) reflect(clipIncludeShipsOnly, level, context, true, null, true);
+        } else {
+            hit = (BlockHitResult) reflect(clipIncludeShips, level, context);
+            BlockHitResult vanillaHit = (BlockHitResult) reflect(vanillaClip, level, context);
+            if (hit.getType() != HitResult.Type.BLOCK
+                || (vanillaHit.getType() == HitResult.Type.BLOCK
+                    && hit.getLocation().distanceToSqr(from)
+                        >= vanillaHit.getLocation().distanceToSqr(from))) {
+                return null;
+            }
+        }
+        if (hit.getType() != HitResult.Type.BLOCK) {
+            return null;
+        }
+
+        return hit.getLocation();
+    }
+
+    private static Vec3 lerp(Vec3 from, Vec3 to, double t) {
+        return new Vec3(from.x + (to.x - from.x) * t,
+                        from.y + (to.y - from.y) * t,
+                        from.z + (to.z - from.z) * t);
     }
 
     private static void syncTransportState(SoldierEntity soldier, Entity anchor, boolean mounted) {

@@ -15,8 +15,11 @@ import java.util.UUID;
  * It deliberately stores no entity references and is not persisted with squad data.
  */
 public final class SquadCoverPeekabilityCache {
-    private static final long ENTRY_TTL_TICKS = 10L;
-    private static final int MAX_ENTRIES = 2_048;
+    // TTL must outlive the 20-tick suppression cover-search retry cadence, or
+    // every re-search re-traces the same ~600 unique (candidate, contact) rays;
+    // 40 ticks lets back-to-back searches share geometry that has not moved.
+    private static final long ENTRY_TTL_TICKS = 40L;
+    private static final int MAX_ENTRIES = 4_096;
 
     private final LinkedHashMap<CacheKey, CachedValue> entries = new LinkedHashMap<>(256, 0.75f, true);
     private long lastPruneTick = Long.MIN_VALUE;

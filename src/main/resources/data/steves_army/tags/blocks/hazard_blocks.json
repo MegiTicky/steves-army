@@ -1,6 +1,10 @@
 {
   "replace": false,
   "values": [
+    "minecraft:fire",
+    "minecraft:soul_fire",
+    "minecraft:lava",
+    "minecraft:magma_block",
     {
       "id": "createaddition:barbed_wire",
       "required": false

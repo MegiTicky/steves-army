@@ -201,7 +201,10 @@ public final class VisibilityRay {
         if (contactOnly && !VS2Compat.isEnabled()) {
             shipObstruction = Double.POSITIVE_INFINITY;
         } else if (observer instanceof SoldierEntity soldier && soldier.isVehicleCrewActive()) {
-            double shipHit = VS2Compat.getShipAwareBlockHitDistance(level, from, to, observer);
+            // Unclassified: the final obstruction below takes the minimum against
+            // this walk's own world blocks, so a world hit standing in for a ship
+            // hit changes nothing and the extra world clip is pure waste.
+            double shipHit = VS2Compat.getShipAwareBlockHitDistance(level, from, to, observer, false);
             // Crew rays see ships again — but the gunner's own hull surface right
             // at the muzzle is an artifact of the camera being mounted inside the
             // ship, so near hits are treated as the interior escape.
@@ -209,7 +212,7 @@ public final class VisibilityRay {
                 ? shipHit
                 : Double.POSITIVE_INFINITY;
         } else {
-            shipObstruction = VS2Compat.getShipAwareBlockHitDistance(level, from, to, observer);
+            shipObstruction = VS2Compat.getShipAwareBlockHitDistance(level, from, to, observer, false);
         }
 
         double concealment = 0.0;

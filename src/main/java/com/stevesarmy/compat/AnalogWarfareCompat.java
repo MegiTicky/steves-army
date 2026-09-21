@@ -7,6 +7,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
@@ -19,9 +20,11 @@ import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -563,28 +566,63 @@ public final class AnalogWarfareCompat {
             return List.of();
         }
         List<BlockEntity> valid = new ArrayList<>();
+        boolean anyUnloaded = false;
         for (BlockPos pos : positions) {
+            if (!level.hasChunk(pos.getX() >> 4, pos.getZ() >> 4)) {
+                // Cannot validate without a blocking chunk load; assume the handle
+                // survives until its chunk is loaded again.
+                anyUnloaded = true;
+                continue;
+            }
             BlockEntity blockEntity = level.getBlockEntity(pos);
             if (isHandle(blockEntity) && getHandleShipId(blockEntity) == shipId) {
                 valid.add(blockEntity);
             }
         }
-        if (valid.isEmpty()) {
+        if (valid.isEmpty() && !anyUnloaded) {
             // Ship re-placed: shipyard positions drifted, drop the cache.
             shipHandles.remove(shipId);
         }
         return valid;
     }
 
+    /**
+     * Chunk columns of the scan box that are already loaded. The handle scans run on
+     * the server thread — often on a release — and {@link Level#getBlockEntity} would
+     * synchronously generate every unloaded (shipyard) chunk the box touches;
+     * observed: one release froze the server tick for 4.7 seconds. Scans therefore
+     * only visit positions inside loaded chunks and find nothing elsewhere.
+     */
+    private static Set<Long> loadedChunkColumns(ServerLevel level, BlockPos center,
+                                                int xRange, int zRange) {
+        Set<Long> loaded = new HashSet<>();
+        int minChunkX = (center.getX() - xRange) >> 4;
+        int maxChunkX = (center.getX() + xRange) >> 4;
+        int minChunkZ = (center.getZ() - zRange) >> 4;
+        int maxChunkZ = (center.getZ() + zRange) >> 4;
+        for (int chunkX = minChunkX; chunkX <= maxChunkX; chunkX++) {
+            for (int chunkZ = minChunkZ; chunkZ <= maxChunkZ; chunkZ++) {
+                if (level.hasChunk(chunkX, chunkZ)) {
+                    loaded.add(ChunkPos.asLong(chunkX, chunkZ));
+                }
+            }
+        }
+        return loaded;
+    }
+
     /** Handles around the anchor in shipyard block space, nearest first. */
     private static List<BlockEntity> scanHandles(ServerLevel level, BlockPos anchor,
                                                  @Nullable Long shipId) {
         List<BlockEntity> found = new ArrayList<>();
+        Set<Long> loadedChunks = loadedChunkColumns(level, anchor, SCAN_RANGE, SCAN_RANGE);
         BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
         for (int x = -SCAN_RANGE; x <= SCAN_RANGE; x += SCAN_STRIDE) {
             for (int y = -SCAN_RANGE; y <= SCAN_RANGE; y += SCAN_STRIDE) {
                 for (int z = -SCAN_RANGE; z <= SCAN_RANGE; z += SCAN_STRIDE) {
                     cursor.setWithOffset(anchor, x, y, z);
+                    if (!loadedChunks.contains(ChunkPos.asLong(cursor))) {
+                        continue;
+                    }
                     BlockEntity blockEntity = level.getBlockEntity(cursor);
                     if (!isHandle(blockEntity)) {
                         continue;
@@ -611,11 +649,15 @@ public final class AnalogWarfareCompat {
     private static List<BlockEntity> scanHandlesNear(ServerLevel level, BlockPos anchor,
                                                      @Nullable Long shipId) {
         List<BlockEntity> found = new ArrayList<>();
+        Set<Long> loadedChunks = loadedChunkColumns(level, anchor, 16, 16);
         BlockPos.MutableBlockPos cursor = new BlockPos.MutableBlockPos();
         for (int x = -16; x <= 16; x++) {
             for (int y = -8; y <= 8; y++) {
                 for (int z = -16; z <= 16; z++) {
                     cursor.setWithOffset(anchor, x, y, z);
+                    if (!loadedChunks.contains(ChunkPos.asLong(cursor))) {
+                        continue;
+                    }
                     BlockEntity blockEntity = level.getBlockEntity(cursor);
                     if (!isHandle(blockEntity)) {
                         continue;
