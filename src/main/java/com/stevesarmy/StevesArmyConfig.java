@@ -72,6 +72,7 @@ public class StevesArmyConfig {
     public static final ForgeConfigSpec.DoubleValue SMOKE_FALL_RATE_MULTIPLIER;
 
     public static final ForgeConfigSpec.BooleanValue VS2_COMPAT_ENABLED;
+    public static final ForgeConfigSpec.BooleanValue VS2_SHIP_RAYCAST_GATE;
     public static final ForgeConfigSpec.BooleanValue SKIN_RANDOMIZE_ON_SPAWN;
     public static final ForgeConfigSpec.BooleanValue VS2_AUTO_TRANSPORT;
     public static final ForgeConfigSpec.IntValue VS2_MAX_TRANSPORTED_SOLDIERS;
@@ -97,6 +98,9 @@ public class StevesArmyConfig {
     public static final ForgeConfigSpec.DoubleValue ARMOR_DETECTION_DISTANCE;
     public static final ForgeConfigSpec.DoubleValue ARMOR_ENGAGEMENT_MAX_RANGE;
     public static final ForgeConfigSpec.ConfigValue<java.util.List<? extends String>> ARMOR_AT_GUN_PATTERNS;
+    public static final ForgeConfigSpec.ConfigValue<java.util.List<? extends String>> SIDEARM_GUN_PATTERNS;
+    public static final ForgeConfigSpec.BooleanValue SOLDIER_DEATH_DROPS;
+    public static final ForgeConfigSpec.IntValue SOLDIER_DEATH_DROPS_PER_TICK;
     public static final ForgeConfigSpec.EnumValue<ArmorDoctrineOverride> ARMOR_DOCTRINE_OVERRIDE;
     public static final ForgeConfigSpec.BooleanValue OCCUPANCY_VEHICLE_DETECTION;
 
@@ -114,6 +118,8 @@ public class StevesArmyConfig {
     public static final ForgeConfigSpec.IntValue ASYNC_PATHFINDING_MAX_PENDING_TICKS;
     public static final ForgeConfigSpec.IntValue EXACT_PATH_VALIDATION_LIMIT;
     public static final ForgeConfigSpec.IntValue COVER_SEARCH_FAILURE_RETRY_TICKS;
+    public static final ForgeConfigSpec.IntValue COVER_SCORING_MAX_CONTACTS;
+    public static final ForgeConfigSpec.IntValue MOVE_GOAL_REPATH_TICKS;
 
     public static final ForgeConfigSpec.BooleanValue FIRETEAM_SUPPRESSION_ENABLED;
     public static final ForgeConfigSpec.DoubleValue FIRETEAM_RISE_RATE;
@@ -502,6 +508,14 @@ BUILDER.pop();
                      "Soldiers avoid VS ship navigation and recover from accidental ship contact.")
             .define("enabled", true);
 
+        VS2_SHIP_RAYCAST_GATE = BUILDER
+            .comment("Gate ship-aware visibility rays: rays whose bounding box meets no ship skip",
+                     "the VS2 clip entirely, and rays that do meet a ship are clipped per ship over",
+                     "just the ship's AABB span instead of the whole ray. Hit results are unchanged;",
+                     "this only removes redundant ray work on VS 2.3, whose clip re-walks the world",
+                     "and every ship in the query box for each ray. Default: true")
+            .define("shipRaycastGate", true);
+
         VS2_AUTO_TRANSPORT = BUILDER
             .comment("Automatically mount nearby FOLLOW soldiers to Create seats on the ship their owner boards.",
                      "Mounted soldiers do not navigate, seek cover, or fight while transported.")
@@ -637,6 +651,26 @@ BUILDER.pop();
                 java.util.List.of("rpg", "rocket", "launcher"),
                 entry -> entry instanceof String);
 
+        SIDEARM_GUN_PATTERNS = BUILDER
+            .comment("Gun-ID substrings that count as sidearm pistols for gun slotting",
+                     "(TaCZ gun id, e.g. tacz:glock_17). Gun slotting puts the main gun in",
+                     "the main hand and a pistol in the sidearm slot. Default: pistol /",
+                     "glock / m1911 / deagle / usp / makarov.")
+            .defineList("sidearmGunIdPatterns",
+                java.util.List.of("pistol", "glock", "m1911", "deagle", "usp", "makarov"),
+                entry -> entry instanceof String);
+
+        SOLDIER_DEATH_DROPS = BUILDER
+            .comment("Soldiers drop their whole inventory where they die instead of",
+                     "vanishing with it. Default: true.")
+            .define("soldierDeathDrops", true);
+
+        SOLDIER_DEATH_DROPS_PER_TICK = BUILDER
+            .comment("Max item stacks spawned per server tick from soldier death loot;",
+                     "the rest is deferred to following ticks to smooth mass deaths.",
+                     "0 = unlimited. Default: 32.")
+            .defineInRange("soldierDeathDropsPerTick", 32, 0, 200);
+
         ARMOR_DOCTRINE_OVERRIDE = BUILDER
             .comment("Force the reaction branch for testing: AUTO uses each squad's real",
                      "loadout; NO_AT makes every squad react as if it has no anti-armor",
@@ -741,6 +775,21 @@ BUILDER.pop();
                      "The cooldown is bypassed when the soldier, threat, objective, relocation, or blacklist context changes.",
                      "Default: 20")
             .defineInRange("coverSearchFailureRetryTicks", 20, 1, 200);
+
+        COVER_SCORING_MAX_CONTACTS = BUILDER
+            .comment("Maximum squad firing contacts traced per cover candidate while scoring cover.",
+                     "Contacts beyond the cap are skipped for scoring only; targeting and peek",
+                     "decisions still use every contact. Each contact is one visibility ray per",
+                     "candidate firing origin, so lower this if cover searches spike the server tick.",
+                     "Default: 6")
+            .defineInRange("coverScoringMaxContacts", 6, 0, 24);
+
+        MOVE_GOAL_REPATH_TICKS = BUILDER
+            .comment("Ticks between hold/defend movement re-paths while the current path is still",
+                     "pending or being walked. Lower values react faster to blocked routes but",
+                     "recompute pathfinding snapshots more often; unreachable targets always back",
+                     "off to 100 ticks regardless. Default: 20")
+            .defineInRange("moveGoalRepathTicks", 20, 4, 100);
 
         BUILDER.pop();
 
@@ -1123,6 +1172,10 @@ BUILDER.pop();
         return COVER_SEARCH_FAILURE_RETRY_TICKS.get();
     }
 
+    public static int getMoveGoalRepathTicks() {
+        return MOVE_GOAL_REPATH_TICKS.get();
+    }
+
     public static boolean isFireteamSuppressionEnabled() {
         return FIRETEAM_SUPPRESSION_ENABLED.get();
     }
@@ -1214,6 +1267,18 @@ BUILDER.pop();
 
     public static java.util.List<? extends String> getArmorAtGunPatterns() {
         return ARMOR_AT_GUN_PATTERNS.get();
+    }
+
+    public static java.util.List<? extends String> getSidearmGunPatterns() {
+        return SIDEARM_GUN_PATTERNS.get();
+    }
+
+    public static boolean isSoldierDeathDropsEnabled() {
+        return SOLDIER_DEATH_DROPS.get();
+    }
+
+    public static int getSoldierDeathDropsPerTick() {
+        return SOLDIER_DEATH_DROPS_PER_TICK.get();
     }
 
     public static ArmorDoctrineOverride getArmorDoctrineOverride() {

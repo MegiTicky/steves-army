@@ -181,6 +181,7 @@ public class PingClientEvents {
         WheelCycleController.tick();
         FormationWheelHandler.tick();
         FireTeamWheelHandler.tick();
+        SwapRoleWheelHandler.tick();
         CommandStickState.get().tick();
         
         if (CombatDebugRenderer.getDebugMode() != CombatDebugRenderer.DEBUG_MODE_OFF) {
@@ -343,7 +344,11 @@ public class PingClientEvents {
             if (FormationWheelHandler.isWheelActive()) {
                 FormationWheelRenderer.render(event.getGuiGraphics());
             }
-            
+
+            if (SwapRoleWheelHandler.isWheelActive()) {
+                SwapRoleWheelRenderer.render(event.getGuiGraphics());
+            }
+
             EnemyContactOverlay.render(event.getGuiGraphics(), lastWorldRenderContext);
             PingOverlayRenderer.render(event.getGuiGraphics(), lastWorldRenderContext);
             SquadActivityOverlayRenderer.render(event.getGuiGraphics(), lastWorldRenderContext);

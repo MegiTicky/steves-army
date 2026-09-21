@@ -8,6 +8,7 @@ import com.stevesarmy.entity.SoldierRoleHandler;
 import com.stevesarmy.entity.TeamGarrisonEntity;
 import com.stevesarmy.network.FireTeamScopeSyncPacket;
 import com.stevesarmy.network.NetworkHandler;
+import com.stevesarmy.respawn.SoldierSwapManager;
 import com.stevesarmy.util.SoldierNameGenerator;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
@@ -124,6 +125,13 @@ public class TeamEventHandler {
             UUID ownerUUID = soldier.getOwnerUUID().orElse(null);
             if (ownerUUID != null) {
                 FireTeamAssignment.get(level, ownerUUID).removeSoldier(soldier.getUUID());
+                // Swap cargo is lost where the body is lost, and a swap-back
+                // pointer aimed at this body goes with it.
+                SwapStashStore.get(level.getServer()).pruneSoldier(soldier.getUUID());
+                ServerPlayer ownerPlayer = level.getServer().getPlayerList().getPlayer(ownerUUID);
+                if (ownerPlayer != null && soldier.getUUID().equals(SoldierSwapManager.getLastSwapped(ownerPlayer))) {
+                    SoldierSwapManager.clearLastSwapped(ownerPlayer);
+                }
             }
         }
     }

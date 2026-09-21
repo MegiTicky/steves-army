@@ -4,13 +4,16 @@ import com.stevesarmy.compat.VS2Compat;
 import com.stevesarmy.inventory.SoldierInventory;
 import com.stevesarmy.registry.ModEntities;
 import com.stevesarmy.respawn.PlayerDeathHandler;
+import com.stevesarmy.respawn.SoldierSwapManager;
 import com.stevesarmy.squad.FireTeam;
 import com.stevesarmy.squad.FireTeamAssignment;
 import com.stevesarmy.squad.OwnedSoldierRegistry;
 import com.stevesarmy.squad.SquadManager;
 import com.stevesarmy.squad.SquadMode;
+import com.stevesarmy.squad.SwapStashStore;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.EntityType;
 
 import javax.annotation.Nullable;
@@ -126,6 +129,17 @@ public final class SoldierRoleHandler {
         UUID oldUuid = soldier.getUUID();
         UUID squadId = soldier.getSquadId();
         replacement.setSquadId(squadId);
+
+        UUID swapOwnerUuid = soldier.getOwnerUUID().orElse(null);
+        // A conversion is the same body under a new UUID — swap bookkeeping
+        // (overflow stash binding, the owner's swap-back pointer) must follow.
+        SwapStashStore.get(level.getServer()).rekey(oldUuid, replacement.getUUID());
+        if (swapOwnerUuid != null) {
+            ServerPlayer ownerPlayer = level.getServer().getPlayerList().getPlayer(swapOwnerUuid);
+            if (ownerPlayer != null && oldUuid.equals(SoldierSwapManager.getLastSwapped(ownerPlayer))) {
+                SoldierSwapManager.setLastSwapped(ownerPlayer, replacement.getUUID());
+            }
+        }
 
         if (targetRole == SoldierRole.GARRISON) {
             replacement.setFireTeam(FireTeam.GARRISON);

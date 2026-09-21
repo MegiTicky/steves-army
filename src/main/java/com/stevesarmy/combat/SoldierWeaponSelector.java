@@ -160,6 +160,96 @@ public final class SoldierWeaponSelector {
         return -1;
     }
 
+    /**
+     * Rearranges guns into the standard resting layout: a non-launcher gun in
+     * the main hand, a pistol — or, for AT carriers, the launcher — in the
+     * sidearm slot, remaining guns and all non-gun stacks keeping their
+     * relative order in the general range. Non-guns are never relocated
+     * otherwise. Guns stacked with count &gt; 1 are left alone.
+     */
+    public static void normalizeGunSlots(SoldierEntity soldier) {
+        if (!GunIntegration.isAnyGunLoaded()) {
+            return;
+        }
+        SoldierInventory inv = soldier.getSoldierInventory();
+        if (inv == null) {
+            return;
+        }
+
+        ItemStack[] snapshot = new ItemStack[SoldierInventory.INVENTORY_SIZE];
+        java.util.List<ItemStack> guns = new java.util.ArrayList<>();
+        for (int slot = SoldierInventory.SLOT_SIDEARM; slot < SoldierInventory.INVENTORY_SIZE; slot++) {
+            ItemStack stack = inv.getItem(slot);
+            snapshot[slot] = stack;
+            if (!stack.isEmpty() && stack.getCount() == 1 && GunIntegration.isGun(stack)) {
+                guns.add(stack);
+            }
+        }
+        if (guns.isEmpty()) {
+            return;
+        }
+
+        // Main gun: held non-launcher wins, else the first non-launcher, else
+        // the first gun (launchers only — the soldier must be able to use it).
+        ItemStack held = snapshot[SoldierInventory.SLOT_MAIN_HAND];
+        ItemStack mainGun = null;
+        if (!held.isEmpty() && held.getCount() == 1 && GunIntegration.isGun(held)
+            && !ArmorRoleManager.isAtGunStack(held)) {
+            mainGun = held;
+        }
+        if (mainGun == null) {
+            for (ItemStack gun : guns) {
+                if (!ArmorRoleManager.isAtGunStack(gun)) {
+                    mainGun = gun;
+                    break;
+                }
+            }
+        }
+        if (mainGun == null) {
+            mainGun = guns.get(0);
+        }
+
+        // Sidearm: first pistol among the rest; AT carriers fall back to the
+        // launcher so it rides stowed on the back until an engagement raises it.
+        ItemStack sidearmGun = null;
+        for (ItemStack gun : guns) {
+            if (gun != mainGun && ArmorRoleManager.isSidearmGunStack(gun)) {
+                sidearmGun = gun;
+                break;
+            }
+        }
+        if (sidearmGun == null && soldier.getRole() == com.stevesarmy.entity.SoldierRole.ANTI_TANK) {
+            for (ItemStack gun : guns) {
+                if (gun != mainGun && ArmorRoleManager.isAtGunStack(gun)) {
+                    sidearmGun = gun;
+                    break;
+                }
+            }
+        }
+
+        java.util.Set<ItemStack> placed = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+        placed.add(mainGun);
+        if (sidearmGun != null) {
+            placed.add(sidearmGun);
+        }
+
+        inv.setItem(SoldierInventory.SLOT_MAIN_HAND, mainGun.copy());
+        inv.setItem(SoldierInventory.SLOT_SIDEARM, sidearmGun != null ? sidearmGun.copy() : ItemStack.EMPTY);
+
+        // Everything unplaced — including whatever the old sidearm/main slots
+        // held — compacts into the general range in original order.
+        int cursor = SoldierInventory.SLOT_GENERAL_START;
+        for (int slot = SoldierInventory.SLOT_SIDEARM; slot < SoldierInventory.INVENTORY_SIZE; slot++) {
+            ItemStack stack = snapshot[slot];
+            if (stack.isEmpty() || placed.contains(stack)) {
+                continue;
+            }
+            if (cursor < SoldierInventory.INVENTORY_SIZE) {
+                inv.setItem(cursor++, stack.copy());
+            }
+        }
+    }
+
     /** Exchanges the main hand with the gun in {@code slot}; both stay count-1. */
     private static boolean swap(SoldierEntity soldier, SoldierInventory inv, int slot) {
         ItemStack replacement = inv.getItem(slot);

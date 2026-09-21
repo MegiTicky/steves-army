@@ -1068,7 +1068,9 @@ public class SoldierEntity extends PathfinderMob implements Container {
     protected void pickUpItem(ItemEntity itemEntity) {
         ItemStack stack = itemEntity.getItem();
         int count = stack.getCount();
-        
+        boolean pickedGun = GunIntegration.isGun(stack);
+        boolean pickedLauncher = pickedGun && com.stevesarmy.combat.ArmorRoleManager.isAtGunStack(stack);
+
         // Try to put in an existing partial stack in bag slots first
         for (int i = SoldierInventory.SLOT_GENERAL_START; i < inventory.getContainerSize(); i++) {
             ItemStack existing = inventory.getItem(i);
@@ -1094,6 +1096,9 @@ public class SoldierEntity extends PathfinderMob implements Container {
                 inventory.setItem(i, toInsert);
                 inventory.setChanged();
                 itemEntity.discard();
+                if (pickedGun) {
+                    onGunPickedUp(pickedLauncher);
+                }
                 return;
             }
         }
@@ -1101,13 +1106,57 @@ public class SoldierEntity extends PathfinderMob implements Container {
         // The main hand is reserved for firearms. Do not let vanilla pickup
         // behavior replace a soldier's gun with a knife or other item.
         ItemStack mainHand = inventory.getItem(SoldierInventory.SLOT_MAIN_HAND);
-        if (mainHand.isEmpty() && GunIntegration.isGun(stack)) {
+        if (mainHand.isEmpty() && pickedGun) {
             ItemStack toInsert = stack.split(count);
             inventory.setItem(SoldierInventory.SLOT_MAIN_HAND, toInsert);
             inventory.setChanged();
             itemEntity.discard();
+            onGunPickedUp(pickedLauncher);
             return;
         }
+    }
+
+    /**
+     * After a gun lands in the inventory, re-slot guns into the standard
+     * layout; picking up a launcher turns an owned non-AT soldier into an
+     * AT soldier with the launcher stowed in the sidearm slot.
+     */
+    private void onGunPickedUp(boolean launcherPicked) {
+        if (level().isClientSide) {
+            return;
+        }
+        if (launcherPicked && getRole() != SoldierRole.ANTI_TANK && getRole() != SoldierRole.GARRISON
+            && !(this instanceof TeamGarrisonEntity) && getOwnerUUID().isPresent()) {
+            SoldierEntity replacement = SoldierRoleHandler.convertSoldier(this, SoldierRole.ANTI_TANK);
+            if (replacement != null) {
+                com.stevesarmy.combat.SoldierWeaponSelector.normalizeGunSlots(replacement);
+                return;
+            }
+        }
+        com.stevesarmy.combat.SoldierWeaponSelector.normalizeGunSlots(this);
+    }
+
+    /**
+     * Soldiers drop their whole persistent inventory where they die instead of
+     * vanishing with it. Replaces vanilla's 8.5%-per-slot chance loop, which
+     * would roll duplicates against the mirrored SoldierInventory. Spawning is
+     * deferred through the budgeted queue so mass deaths don't spike a tick.
+     */
+    @Override
+    protected void dropCustomDeathLoot(net.minecraft.world.damagesource.DamageSource source,
+                                       int lootingLevel, boolean recentlyHit) {
+        if (!StevesArmyConfig.isSoldierDeathDropsEnabled()) {
+            return;
+        }
+        java.util.List<ItemStack> drops = new java.util.ArrayList<>();
+        for (int i = 0; i < inventory.getContainerSize(); i++) {
+            ItemStack stack = inventory.getItem(i);
+            if (!stack.isEmpty()) {
+                drops.add(stack.copy());
+                inventory.setItem(i, ItemStack.EMPTY);
+            }
+        }
+        com.stevesarmy.squad.SoldierDeathDropQueue.enqueue(this, drops);
     }
 
     public SoldierInventory getSoldierInventory() {

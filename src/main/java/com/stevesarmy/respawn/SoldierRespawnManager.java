@@ -39,6 +39,10 @@ public class SoldierRespawnManager {
 
         transferEquipment(player, soldier, soldierInventory);
 
+        // The player now occupies this soldier's role — keep the swap bookkeeping
+        // in sync so a later live swap leaves the correct body behind.
+        SoldierSwapManager.setStoredRole(player, soldier.getRole());
+
         soldier.stopRiding();
         CoverReservationManager.releaseAll(soldier);
         squadManager.removeMemberFromSquad(soldierUUID);
@@ -78,37 +82,48 @@ public class SoldierRespawnManager {
             squad.getMemberCount());
     }
     
-    private static void transferEquipment(ServerPlayer player, SoldierEntity soldier, SoldierInventory soldierInventory) {
+    static void transferEquipment(ServerPlayer player, SoldierEntity soldier, SoldierInventory soldierInventory) {
         player.getInventory().clearContent();
-        
-        boolean foundMainHand = false;
-        
-        for (int i = 0; i < soldierInventory.getContainerSize(); i++) {
+
+        // Main hand goes in first: every later add() must see the selected slot
+        // occupied — the previous ordering add()ed sidearm/general items first
+        // and the final gun set() silently destroyed whatever landed there.
+        ItemStack mainHand = soldierInventory.getItem(SoldierInventory.SLOT_MAIN_HAND).copy();
+        boolean foundMainHand = !mainHand.isEmpty();
+        if (foundMainHand) {
+            player.getInventory().items.set(player.getInventory().selected, mainHand);
+        }
+
+        // The sidearm rides in the offhand so it round-trips back into
+        // SLOT_SIDEARM on the next swap instead of getting buried in general slots.
+        ItemStack sidearm = soldierInventory.getItem(SoldierInventory.SLOT_SIDEARM).copy();
+        if (!sidearm.isEmpty()) {
+            player.getInventory().offhand.set(0, sidearm);
+        }
+
+        for (int i = SoldierInventory.ARMOR_HEAD; i <= SoldierInventory.ARMOR_FEET; i++) {
             ItemStack stack = soldierInventory.getItem(i).copy();
             if (stack.isEmpty()) continue;
-            
-            if (i == SoldierInventory.SLOT_MAIN_HAND) {
-                player.getInventory().items.set(player.getInventory().selected, stack);
-                foundMainHand = true;
-            } else if (i >= SoldierInventory.ARMOR_HEAD && i <= SoldierInventory.ARMOR_FEET) {
-                int armorIndex = i;
-                EquipmentSlot slot = getArmorSlot(armorIndex);
-                player.getInventory().armor.set(slot.getIndex(), stack);
-            } else {
-                if (!player.getInventory().add(stack)) {
-                    player.drop(stack, false);
-                }
+            EquipmentSlot slot = getArmorSlot(i);
+            player.getInventory().armor.set(slot.getIndex(), stack);
+        }
+
+        for (int i = SoldierInventory.SLOT_GENERAL_START; i < soldierInventory.getContainerSize(); i++) {
+            ItemStack stack = soldierInventory.getItem(i).copy();
+            if (stack.isEmpty()) continue;
+            if (!player.getInventory().add(stack)) {
+                player.drop(stack, false);
             }
         }
-        
+
         if (!foundMainHand) {
-            ItemStack mainHand = soldier.getMainHandItem().copy();
-            if (!mainHand.isEmpty()) {
-                StevesArmyMod.LOGGER.info("[Respawn] Main hand not in SoldierInventory, falling back to entity equipment: {}", mainHand.getItem());
-                player.getInventory().items.set(player.getInventory().selected, mainHand);
+            ItemStack fallbackMainHand = soldier.getMainHandItem().copy();
+            if (!fallbackMainHand.isEmpty()) {
+                StevesArmyMod.LOGGER.info("[Respawn] Main hand not in SoldierInventory, falling back to entity equipment: {}", fallbackMainHand.getItem());
+                player.getInventory().items.set(player.getInventory().selected, fallbackMainHand);
             }
         }
-        
+
         ItemStack transferredGun = player.getMainHandItem();
         if (GunIntegration.isAnyGunLoaded() && !transferredGun.isEmpty() && GunIntegration.hasGun(player)) {
             GunIntegration.refillMagazine(player);
@@ -116,7 +131,7 @@ public class SoldierRespawnManager {
             GunIntegration.initialData(player);
             GunIntegration.draw(player);
         }
-        
+
         soldierInventory.clearContent();
         soldier.setItemSlot(EquipmentSlot.MAINHAND, ItemStack.EMPTY);
         soldier.setItemSlot(EquipmentSlot.OFFHAND, ItemStack.EMPTY);

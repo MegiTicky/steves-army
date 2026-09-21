@@ -45,6 +45,11 @@ public class DismissSoldierPacket {
 
             FireTeamAssignment fireTeams = FireTeamAssignment.get(player.getServer().overworld(), player.getUUID());
             fireTeams.removeSoldier(message.soldierId);
+            // A dismissed body takes its swap cargo with it, same as its own gear.
+            com.stevesarmy.squad.SwapStashStore.get(player.getServer()).pruneSoldier(message.soldierId);
+            if (message.soldierId.equals(com.stevesarmy.respawn.SoldierSwapManager.getLastSwapped(player))) {
+                com.stevesarmy.respawn.SoldierSwapManager.clearLastSwapped(player);
+            }
             // Mark dismissed before the discard scan: soldiers in unloaded
             // chunks cannot be discarded here — the join guard on world load
             // handles them, and no refresh may re-register them meanwhile.

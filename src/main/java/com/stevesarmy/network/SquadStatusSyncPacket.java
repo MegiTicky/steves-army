@@ -25,14 +25,22 @@ import java.util.function.Supplier;
 public class SquadStatusSyncPacket {
     private final List<SoldierStatusEntry> entries;
     private final com.stevesarmy.squad.ResupplyConfig resupplyConfig;
+    /** The player's previous swap body, or null — drives the wheel's swap-back sector. */
+    private final UUID lastSwappedSoldierId;
 
     public SquadStatusSyncPacket(List<SoldierStatusEntry> entries) {
-        this(entries, com.stevesarmy.squad.ResupplyConfig.DEFAULT);
+        this(entries, com.stevesarmy.squad.ResupplyConfig.DEFAULT, null);
     }
 
     public SquadStatusSyncPacket(List<SoldierStatusEntry> entries, com.stevesarmy.squad.ResupplyConfig resupplyConfig) {
+        this(entries, resupplyConfig, null);
+    }
+
+    public SquadStatusSyncPacket(List<SoldierStatusEntry> entries, com.stevesarmy.squad.ResupplyConfig resupplyConfig,
+                                 UUID lastSwappedSoldierId) {
         this.entries = entries;
         this.resupplyConfig = resupplyConfig;
+        this.lastSwappedSoldierId = lastSwappedSoldierId;
     }
 
     public List<SoldierStatusEntry> getEntries() {
@@ -43,9 +51,14 @@ public class SquadStatusSyncPacket {
         return resupplyConfig;
     }
 
+    public UUID getLastSwappedSoldierId() {
+        return lastSwappedSoldierId;
+    }
+
     public static SquadStatusSyncPacket decode(FriendlyByteBuf buf) {
         com.stevesarmy.squad.ResupplyConfig config = new com.stevesarmy.squad.ResupplyConfig(
             buf.readVarInt(), buf.readVarInt(), buf.readVarInt(), buf.readVarInt());
+        UUID lastSwapped = buf.readBoolean() ? buf.readUUID() : null;
         int count = buf.readVarInt();
         List<SoldierStatusEntry> entries = new ArrayList<>(count);
         for (int i = 0; i < count; i++) {
@@ -69,7 +82,7 @@ public class SquadStatusSyncPacket {
                 squadModeOrdinal, fireDisciplineOrdinal, fireTeamOrdinal, roleOrdinal, coverState, distance, recallTicks, loaded,
                 dutyType));
         }
-        return new SquadStatusSyncPacket(entries, config);
+        return new SquadStatusSyncPacket(entries, config, lastSwapped);
     }
 
     public void encode(FriendlyByteBuf buf) {
@@ -77,6 +90,10 @@ public class SquadStatusSyncPacket {
         buf.writeVarInt(resupplyConfig.healingThreshold());
         buf.writeVarInt(resupplyConfig.resupplyToAmmo());
         buf.writeVarInt(resupplyConfig.resupplyToHeals());
+        buf.writeBoolean(lastSwappedSoldierId != null);
+        if (lastSwappedSoldierId != null) {
+            buf.writeUUID(lastSwappedSoldierId);
+        }
         buf.writeVarInt(entries.size());
         for (SoldierStatusEntry entry : entries) {
             buf.writeUUID(entry.entityId);
@@ -100,7 +117,7 @@ public class SquadStatusSyncPacket {
 
     public void handle(Supplier<NetworkEvent.Context> ctx) {
         ctx.get().enqueueWork(() -> {
-            ClientSquadData.INSTANCE.update(entries, resupplyConfig);
+            ClientSquadData.INSTANCE.update(entries, resupplyConfig, lastSwappedSoldierId);
         });
         ctx.get().setPacketHandled(true);
     }
@@ -149,7 +166,8 @@ public class SquadStatusSyncPacket {
             }
         }
         return new SquadStatusSyncPacket(entries,
-            registry != null ? registry.getResupplyConfig(player.getUUID()) : com.stevesarmy.squad.ResupplyConfig.DEFAULT);
+            registry != null ? registry.getResupplyConfig(player.getUUID()) : com.stevesarmy.squad.ResupplyConfig.DEFAULT,
+            com.stevesarmy.respawn.SoldierSwapManager.getLastSwapped(player));
     }
 
     public static class SoldierStatusEntry {

@@ -125,6 +125,16 @@ public final class ArmorRoleManager {
 
     /** True when this stack's gun ID matches the configured anti-armor patterns. */
     public static boolean isAtGunStack(net.minecraft.world.item.ItemStack stack) {
+        return matchesAnyPattern(stack, StevesArmyConfig.getArmorAtGunPatterns());
+    }
+
+    /** True when this stack's gun ID matches the configured sidearm-pistol patterns. */
+    public static boolean isSidearmGunStack(net.minecraft.world.item.ItemStack stack) {
+        return matchesAnyPattern(stack, StevesArmyConfig.getSidearmGunPatterns());
+    }
+
+    private static boolean matchesAnyPattern(net.minecraft.world.item.ItemStack stack,
+                                             java.util.List<? extends String> patterns) {
         if (!GunIntegration.isGun(stack)) {
             return false;
         }
@@ -133,7 +143,7 @@ public final class ArmorRoleManager {
             return false;
         }
         String lower = gunId.toLowerCase(Locale.ROOT);
-        for (String pattern : StevesArmyConfig.getArmorAtGunPatterns()) {
+        for (String pattern : patterns) {
             if (!pattern.isEmpty() && lower.contains(pattern.toLowerCase(Locale.ROOT))) {
                 return true;
             }
