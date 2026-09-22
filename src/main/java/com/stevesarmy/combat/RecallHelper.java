@@ -5,6 +5,7 @@ import com.stevesarmy.entity.SoldierEntity;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.tags.BlockTags;
 import net.minecraft.tags.FluidTags;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.Mob;
@@ -117,7 +118,9 @@ public class RecallHelper {
         while (cursor.getY() >= minY) {
             BlockState state = level.getBlockState(cursor);
             BlockState below = level.getBlockState(cursor.below());
-            if (state.isAir() && below.isSolid()) {
+            // Leaves carry full collision, so a canopy top looks like ground to the
+            // air-above-solid test — skip it and keep scanning to the terrain below.
+            if (state.isAir() && below.isSolid() && !below.is(BlockTags.LEAVES)) {
                 return cursor.immutable();
             }
             cursor.move(0, -1, 0);
@@ -128,6 +131,7 @@ public class RecallHelper {
     private static boolean isValidStanding(ServerLevel level, BlockPos pos) {
         BlockState ground = level.getBlockState(pos.below());
         if (!ground.isSolid()) return false;
+        if (ground.is(BlockTags.LEAVES)) return false;
         if (!level.getBlockState(pos).isAir()) return false;
         if (!level.getBlockState(pos.above()).isAir()) return false;
         if (level.getFluidState(pos).is(FluidTags.WATER) || level.getFluidState(pos.above()).is(FluidTags.WATER)) return false;
