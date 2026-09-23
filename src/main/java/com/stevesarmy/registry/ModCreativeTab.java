@@ -36,7 +36,7 @@ public class ModCreativeTab {
                 output.accept(ModItems.ENEMY_VEHICLE_CREW_SPAWN_EGG.get());
                 output.accept(ModItems.ENEMY_ANTI_TANK_SPAWN_EGG.get());
                 output.accept(ModItems.TARGET_SPAWN_EGG.get());
-                output.accept(ModItems.RESUPPLY_POUCH.get());
+                output.accept(ModItems.SUPPLY_POUCH.get());
             })
             .build()
     );

@@ -6,7 +6,6 @@ import com.stevesarmy.entity.EnemyVehicleCrewEntity;
 import com.stevesarmy.entity.GarrisonEntity;
 import com.stevesarmy.entity.MachineGunnerEntity;
 import com.stevesarmy.entity.SoldierEntity;
-import com.stevesarmy.entity.ResupplyPouchEntity;
 import com.stevesarmy.entity.SupportEntity;
 import com.stevesarmy.entity.TargetEntity;
 import com.stevesarmy.entity.TeamGarrisonEntity;
@@ -128,14 +127,13 @@ public class ModEntities {
             .build(StevesArmyMod.MODID + ":enemy_anti_tank")
     );
 
-    public static final RegistryObject<EntityType<ResupplyPouchEntity>> RESUPPLY_POUCH = ENTITIES.register(
-        "resupply_pouch",
-        () -> EntityType.Builder.of(ResupplyPouchEntity::new, MobCategory.MISC)
+    public static final RegistryObject<EntityType<com.stevesarmy.entity.SupplyPouchProjectile>> SUPPLY_POUCH = ENTITIES.register(
+        "supply_pouch",
+        () -> EntityType.Builder.<com.stevesarmy.entity.SupplyPouchProjectile>of(com.stevesarmy.entity.SupplyPouchProjectile::new, MobCategory.MISC)
             .sized(0.25F, 0.25F)
-            .clientTrackingRange(16)
-            .updateInterval(1)
-            .noSave()
-            .build(StevesArmyMod.MODID + ":resupply_pouch")
+            .clientTrackingRange(4)
+            .updateInterval(10)
+            .build(StevesArmyMod.MODID + ":supply_pouch")
     );
 
     @SubscribeEvent

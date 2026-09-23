@@ -8,6 +8,11 @@
     "key.steves_army.swap_soldier": "Swap with Soldier (Tap: look · Hold: wheel)",
     "key.steves_army.mark_target": "Mark Friend/Foe (Look-At Target)",
     "gui.steves_army.swap_wheel.previous": "Previous Body",
+    "item.steves_army.supply_pouch": "Supply Pouch",
+    "gui.steves_army.supply_pouch": "Supply Pouch",
+    "tooltip.steves_army.supply_pouch.contains": "Contains %s item(s)",
+    "tooltip.steves_army.supply_pouch.empty": "Empty",
+    "tooltip.steves_army.supply_pouch.usage": "Sneak-use to open · Use to throw",
     "gui.steves_army.swap_wheel.title": "SWAP",
     "key.categories.steves_army": "Steve's Army",
     "entity.steves_army.soldier": "Rifleman",
@@ -73,6 +78,5 @@
     "transport.steves_army.feedback.enemy_crew_deployed": "Enemy vehicle crew deployed to seat",
     "transport.steves_army.feedback.enemy_crew_standing": "Enemy vehicle crew spawned standing — could not reach a seat",
     "transport.steves_army.feedback.crew_dismounted": "Vehicle crew dismounted",
-    "transport.steves_army.feedback.crew_not_mounted": "That crew is not mounted",
-    "item.steves_army.resupply_pouch": "Resupply Pouch"
+    "transport.steves_army.feedback.crew_not_mounted": "That crew is not mounted"
 }

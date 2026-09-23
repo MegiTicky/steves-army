@@ -105,9 +105,9 @@ public class ModItems {
         () -> new com.stevesarmy.item.EnemyAntiTankSpawnEggItem(new Item.Properties())
     );
 
-    public static final RegistryObject<Item> RESUPPLY_POUCH = ITEMS.register(
-        "resupply_pouch",
-        () -> new Item(new Item.Properties().stacksTo(16))
+    public static final RegistryObject<Item> SUPPLY_POUCH = ITEMS.register(
+        "supply_pouch",
+        () -> new com.stevesarmy.item.SupplyPouchItem(new Item.Properties().stacksTo(1))
     );
 
     public static void register(IEventBus eventBus) {

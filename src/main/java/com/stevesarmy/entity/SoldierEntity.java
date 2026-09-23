@@ -1125,6 +1125,11 @@ public class SoldierEntity extends PathfinderMob implements Container {
 
     @Override
     public boolean canHoldItem(ItemStack stack) {
+        // Soldiers never swallow supply pouches; the pouch must stay intact for
+        // players. AI resupply happens via thrown pouches instead.
+        if (stack.getItem() instanceof com.stevesarmy.item.SupplyPouchItem) {
+            return false;
+        }
         return true;
     }
 
@@ -1201,10 +1206,10 @@ public class SoldierEntity extends PathfinderMob implements Container {
     }
 
     /**
-     * Soldiers drop their whole persistent inventory where they die instead of
-     * vanishing with it. Replaces vanilla's 8.5%-per-slot chance loop, which
-     * would roll duplicates against the mirrored SoldierInventory. Spawning is
-     * deferred through the budgeted queue so mass deaths don't spike a tick.
+     * Soldiers drop their whole persistent inventory inside ONE supply pouch
+     * instead of vanishing with it (or showering item entities). Replaces
+     * vanilla's 8.5%-per-slot chance loop, which would roll duplicates against
+     * the mirrored SoldierInventory.
      */
     @Override
     protected void dropCustomDeathLoot(net.minecraft.world.damagesource.DamageSource source,
@@ -1212,15 +1217,20 @@ public class SoldierEntity extends PathfinderMob implements Container {
         if (!StevesArmyConfig.isSoldierDeathDropsEnabled()) {
             return;
         }
-        java.util.List<ItemStack> drops = new java.util.ArrayList<>();
+        boolean anyItems = false;
         for (int i = 0; i < inventory.getContainerSize(); i++) {
-            ItemStack stack = inventory.getItem(i);
-            if (!stack.isEmpty()) {
-                drops.add(stack.copy());
-                inventory.setItem(i, ItemStack.EMPTY);
+            if (!inventory.getItem(i).isEmpty()) {
+                anyItems = true;
+                break;
             }
         }
-        com.stevesarmy.squad.SoldierDeathDropQueue.enqueue(this, drops);
+        if (!anyItems) {
+            return;
+        }
+        com.stevesarmy.inventory.PouchContainer.dropInventoryAsPouch(this, inventory);
+        for (int i = 0; i < inventory.getContainerSize(); i++) {
+            inventory.setItem(i, ItemStack.EMPTY);
+        }
     }
 
     public SoldierInventory getSoldierInventory() {

@@ -3,9 +3,10 @@ package com.stevesarmy.entity.ai;
 import com.stevesarmy.compat.PlayerReviveCompat;
 import com.stevesarmy.combat.GunIntegration;
 import com.stevesarmy.combat.cover.CoverBehaviorManager;
-import com.stevesarmy.entity.ResupplyPouchEntity;
 import com.stevesarmy.entity.SoldierEntity;
+import com.stevesarmy.entity.SupplyPouchProjectile;
 import com.stevesarmy.entity.SupportEntity;
+import com.stevesarmy.inventory.PouchContainer;
 import com.stevesarmy.inventory.SoldierInventory;
 import com.stevesarmy.network.NetworkHandler;
 import com.stevesarmy.network.SyncSoldierInventoryPacket;
@@ -621,7 +622,8 @@ public final class SupportDutyController {
         if (!(soldier.level() instanceof ServerLevel level)) return;
 
         Vec3 origin = soldier.getEyePosition();
-        ResupplyPouchEntity pouch = ResupplyPouchEntity.forTarget(level, origin, target, payload);
+        ItemStack pouchStack = PouchContainer.packContents(payload);
+        SupplyPouchProjectile pouch = SupplyPouchProjectile.forTarget(level, soldier, target, pouchStack);
 
         Vec3 targetPos = target.getEyePosition();
         Vec3 dir = targetPos.subtract(origin).normalize();
