@@ -239,37 +239,26 @@ public class SquadCommandScreen extends Screen {
     private void rebuildTabButtons() {
         int tabWidth = 60;
         int tabHeight = 14;
-        int x = width - PANEL_LEFT - tabWidth * 4 - 12;
+        int tabGap = 4;
+        Tab[] tabs = Tab.values();
+        int rowWidth = tabs.length * tabWidth + (tabs.length - 1) * tabGap;
+        int x = width - PANEL_LEFT - rowWidth;
         int y = 6;
 
-        Button squadTab = Button.builder(Component.literal("Squad"), button -> switchTab(Tab.SQUAD))
-            .bounds(x, y, tabWidth, tabHeight).build();
-        squadTab.active = activeTab != Tab.SQUAD;
-        addRenderableWidget(squadTab);
-
-        x += tabWidth + 4;
-        Button garrisonTab = Button.builder(Component.literal("Garrison"), button -> switchTab(Tab.GARRISON))
-            .bounds(x, y, tabWidth, tabHeight).build();
-        garrisonTab.active = activeTab != Tab.GARRISON;
-        addRenderableWidget(garrisonTab);
-
-        x += tabWidth + 4;
-        Button crewTab = Button.builder(Component.literal("Crew"), button -> switchTab(Tab.VEHICLE_CREW))
-            .bounds(x, y, tabWidth, tabHeight).build();
-        crewTab.active = activeTab != Tab.VEHICLE_CREW;
-        addRenderableWidget(crewTab);
-
-        x += tabWidth + 4;
-        Button resupplyTab = Button.builder(Component.literal("Resupply"), button -> switchTab(Tab.RESUPPLY))
-            .bounds(x, y, tabWidth, tabHeight).build();
-        resupplyTab.active = activeTab != Tab.RESUPPLY;
-        addRenderableWidget(resupplyTab);
-
-        x += tabWidth + 4;
-        Button fofTab = Button.builder(Component.literal("FoF"), button -> switchTab(Tab.FOF))
-            .bounds(x, y, tabWidth, tabHeight).build();
-        fofTab.active = activeTab != Tab.FOF;
-        addRenderableWidget(fofTab);
+        for (Tab tab : tabs) {
+            String label = switch (tab) {
+                case SQUAD -> "Squad";
+                case GARRISON -> "Garrison";
+                case VEHICLE_CREW -> "Crew";
+                case RESUPPLY -> "Resupply";
+                case FOF -> "FoF";
+            };
+            Button tabButton = Button.builder(Component.literal(label), button -> switchTab(tab))
+                .bounds(x, y, tabWidth, tabHeight).build();
+            tabButton.active = activeTab != tab;
+            addRenderableWidget(tabButton);
+            x += tabWidth + tabGap;
+        }
     }
 
     private void switchTab(Tab tab) {
