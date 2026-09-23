@@ -1,8 +1,10 @@
 package com.stevesarmy.client.screen;
 
+import com.stevesarmy.client.ClientFofState;
 import com.stevesarmy.client.ClientSquadData;
 import com.stevesarmy.client.FireTeamScopeState;
 import com.stevesarmy.client.screen.widget.FireTeamDropdownWidget;
+import com.stevesarmy.client.screen.widget.FofDropdownWidget;
 import com.stevesarmy.client.screen.widget.RoleDropdownWidget;
 import com.stevesarmy.entity.SoldierRole;
 import com.stevesarmy.network.BulkGarrisonPacket;
@@ -11,6 +13,7 @@ import com.stevesarmy.network.DismissSoldierPacket;
 import com.stevesarmy.network.OpenSoldierInventoryMessage;
 import com.stevesarmy.network.RecallPacket;
 import com.stevesarmy.network.SetFireTeamPacket;
+import com.stevesarmy.network.SetFofStancePacket;
 import com.stevesarmy.network.SetSoldierConfigPacket;
 import com.stevesarmy.network.SetSoldierRoleByUUIDPacket;
 import com.stevesarmy.network.SetResupplyConfigPacket;
@@ -18,20 +21,27 @@ import com.stevesarmy.network.SquadStatusSyncPacket;
 import com.stevesarmy.network.VehicleCrewDismountPacket;
 import com.stevesarmy.squad.FireDiscipline;
 import com.stevesarmy.squad.FireTeam;
+import com.stevesarmy.squad.FofCategory;
+import com.stevesarmy.squad.FofStance;
 import com.stevesarmy.squad.ResupplyConfig;
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.multiplayer.PlayerInfo;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+
+import javax.annotation.Nullable;
 
 public class SquadCommandScreen extends Screen {
     private static final int ROW_HEIGHT = 22;
@@ -52,6 +62,7 @@ public class SquadCommandScreen extends Screen {
     private static final int ACTION_BUTTON_GAP = 2;
     private static final int ACTION_BUTTON_SIZE = 20;
     private static final int ACTION_STRIP_WIDTH = ACTION_BUTTON_SIZE * 3 + ACTION_BUTTON_GAP * 2;
+    private static final int FOF_STANCE_COL_WIDTH = 110;
 
     private static final ItemStack INVENTORY_ICON = new ItemStack(Items.CHEST);
     private static final ItemStack RECALL_ICON = new ItemStack(Items.ENDER_PEARL);
@@ -73,12 +84,77 @@ public class SquadCommandScreen extends Screen {
     private FireTeamDropdownWidget activeTeamDropdownWidget;
     private int bulkRoleOrdinal = SoldierRole.RIFLEMAN.ordinal();
     private com.stevesarmy.squad.ResupplyConfig draftConfig = com.stevesarmy.squad.ResupplyConfig.DEFAULT;
+    private final List<FofRow> fofRows = new ArrayList<>();
+    private int activeFofDropdownRow = -1;
+    private int activeFofDropdownX;
+    private int activeFofDropdownY;
+    private FofDropdownWidget activeFofDropdownWidget;
 
     private enum Tab {
         SQUAD,
         GARRISON,
         VEHICLE_CREW,
-        RESUPPLY
+        RESUPPLY,
+        FOF
+    }
+
+    /** One row of the FoF tab: a section header or a markable player/team/category. */
+    private static class FofRow {
+        enum Kind { PLAYER, TEAM, CATEGORY }
+
+        final boolean header;
+        final String displayName;
+        final Kind kind;
+        final UUID playerKey;
+        final String teamKey;
+        final FofCategory category;
+        int stanceX;
+
+        private FofRow(boolean header, String displayName, Kind kind,
+                       UUID playerKey, String teamKey, FofCategory category) {
+            this.header = header;
+            this.displayName = displayName;
+            this.kind = kind;
+            this.playerKey = playerKey;
+            this.teamKey = teamKey;
+            this.category = category;
+        }
+
+        static FofRow header(String displayName) {
+            return new FofRow(true, displayName, null, null, null, null);
+        }
+
+        static FofRow player(String name, UUID playerId) {
+            return new FofRow(false, name, Kind.PLAYER, playerId, null, null);
+        }
+
+        static FofRow team(String teamName) {
+            return new FofRow(false, teamName, Kind.TEAM, null, teamName, null);
+        }
+
+        static FofRow category(FofCategory category) {
+            return new FofRow(false, category.getDisplayName(), Kind.CATEGORY, null, null, category);
+        }
+
+        @Nullable
+        FofStance currentStance() {
+            return switch (kind) {
+                case PLAYER -> ClientFofState.INSTANCE.getPlayerStance(playerKey);
+                case TEAM -> ClientFofState.INSTANCE.getTeamStance(teamKey);
+                case CATEGORY -> ClientFofState.INSTANCE.getCategoryStance(category);
+            };
+        }
+
+        void sendStance(@Nullable FofStance stance) {
+            switch (kind) {
+                case PLAYER ->
+                    NetworkHandler.INSTANCE.sendToServer(SetFofStancePacket.playerStance(playerKey, stance));
+                case TEAM ->
+                    NetworkHandler.INSTANCE.sendToServer(SetFofStancePacket.teamStance(teamKey, stance));
+                case CATEGORY ->
+                    NetworkHandler.INSTANCE.sendToServer(SetFofStancePacket.categoryStance(category, stance));
+            }
+        }
     }
 
     private static class SoldierRow {
@@ -154,7 +230,7 @@ public class SquadCommandScreen extends Screen {
         return switch (activeTab) {
             case GARRISON -> entry.getFireTeam() == FireTeam.GARRISON;
             case VEHICLE_CREW -> entry.getRole() == SoldierRole.VEHICLE_CREW;
-            case RESUPPLY -> false;
+            case RESUPPLY, FOF -> false;
             default -> entry.getFireTeam() != FireTeam.GARRISON
                 && entry.getRole() != SoldierRole.VEHICLE_CREW;
         };
@@ -188,6 +264,12 @@ public class SquadCommandScreen extends Screen {
             .bounds(x, y, tabWidth, tabHeight).build();
         resupplyTab.active = activeTab != Tab.RESUPPLY;
         addRenderableWidget(resupplyTab);
+
+        x += tabWidth + 4;
+        Button fofTab = Button.builder(Component.literal("FoF"), button -> switchTab(Tab.FOF))
+            .bounds(x, y, tabWidth, tabHeight).build();
+        fofTab.active = activeTab != Tab.FOF;
+        addRenderableWidget(fofTab);
     }
 
     private void switchTab(Tab tab) {
@@ -195,12 +277,29 @@ public class SquadCommandScreen extends Screen {
         activeTab = tab;
         closeRoleDropdown();
         closeTeamDropdown();
+        closeFofDropdown();
         if (tab == Tab.RESUPPLY) {
             draftConfig = ClientSquadData.INSTANCE.getResupplyConfig();
         }
         rebuildRows();
         rebuildFooterButtons();
     }
+
+    private void rebuildRows() {
+        if (activeTab == Tab.FOF) {
+            rebuildFofRows();
+            return;
+        }
+        rows.clear();
+        for (SquadStatusSyncPacket.SoldierStatusEntry entry : ClientSquadData.INSTANCE.getAllEntries()) {
+            if (matchesTab(entry)) {
+                rows.add(new SoldierRow(entry));
+            }
+        }
+        sortRows();
+        clampScrollOffset();
+    }
+
     private void rebuildFooterButtons() {
         clearWidgets();
 
@@ -210,8 +309,8 @@ public class SquadCommandScreen extends Screen {
             return;
         }
 
-        if (activeTab == Tab.VEHICLE_CREW) {
-            // Crew are managed per-soldier; no squad-wide discipline/role/team controls.
+        if (activeTab == Tab.VEHICLE_CREW || activeTab == Tab.FOF) {
+            // Crew are managed per-soldier; FoF is managed per-row. Tab buttons only.
             rebuildTabButtons();
             return;
         }
@@ -337,17 +436,6 @@ public class SquadCommandScreen extends Screen {
         }
     }
 
-    private void rebuildRows() {
-        rows.clear();
-        for (SquadStatusSyncPacket.SoldierStatusEntry entry : ClientSquadData.INSTANCE.getAllEntries()) {
-            if (matchesTab(entry)) {
-                rows.add(new SoldierRow(entry));
-            }
-        }
-        sortRows();
-        clampScrollOffset();
-    }
-
     private void updateRows() {
         List<SquadStatusSyncPacket.SoldierStatusEntry> entries = ClientSquadData.INSTANCE.getAllEntries();
         Map<UUID, SoldierRow> existingRows = new HashMap<>();
@@ -382,7 +470,7 @@ public class SquadCommandScreen extends Screen {
     public void tick() {
         super.tick();
         teamCount = FireTeamScopeState.INSTANCE.getTeamCount();
-        if (activeTab != Tab.RESUPPLY) {
+        if (activeTab != Tab.RESUPPLY && activeTab != Tab.FOF) {
             updateRows();
         }
     }
@@ -397,6 +485,13 @@ public class SquadCommandScreen extends Screen {
         if (activeTab == Tab.RESUPPLY) {
             renderResupplyPanel(graphics);
             super.render(graphics, mouseX, mouseY, partialTick);
+            return;
+        }
+
+        if (activeTab == Tab.FOF) {
+            renderFofList(graphics, mouseX, mouseY);
+            super.render(graphics, mouseX, mouseY, partialTick);
+            renderDropdowns(graphics, mouseX, mouseY);
             return;
         }
 
@@ -534,6 +629,17 @@ public class SquadCommandScreen extends Screen {
             activeTeamDropdownWidget.setTeam(activeRow.fireTeam);
             activeTeamDropdownWidget.render(graphics, font, activeTeamDropdownX, activeTeamDropdownY,
                 COL_FT_WIDTH, ROW_HEIGHT, mouseX - activeTeamDropdownX, mouseY - activeTeamDropdownY);
+            graphics.disableScissor();
+        }
+
+        if (activeFofDropdownWidget != null && activeFofDropdownRow >= 0 && activeFofDropdownRow < fofRows.size()) {
+            int dropItemHeight = 12;
+            int dropBottom = activeFofDropdownY + dropItemHeight * (1 + FofDropdownWidget.standardOptions().size());
+            graphics.enableScissor(activeFofDropdownX, activeFofDropdownY,
+                activeFofDropdownX + FOF_STANCE_COL_WIDTH, Math.min(height, dropBottom));
+            activeFofDropdownWidget.setStance(fofRows.get(activeFofDropdownRow).currentStance());
+            activeFofDropdownWidget.render(graphics, font, activeFofDropdownX, activeFofDropdownY,
+                FOF_STANCE_COL_WIDTH, ROW_HEIGHT, mouseX - activeFofDropdownX, mouseY - activeFofDropdownY);
             graphics.disableScissor();
         }
 
@@ -725,6 +831,91 @@ public class SquadCommandScreen extends Screen {
         graphics.drawString(font, Component.literal("Applies to all squad members and you."), contentX, hintY, 0xFF888888, false);
     }
 
+    private void rebuildFofRows() {
+        fofRows.clear();
+        Minecraft mc = Minecraft.getInstance();
+        fofRows.add(FofRow.header("Players"));
+        if (mc.getConnection() != null) {
+            UUID selfId = mc.player != null ? mc.player.getUUID() : null;
+            List<PlayerInfo> infos = new ArrayList<>(mc.getConnection().getOnlinePlayers());
+            infos.sort(Comparator.comparing(info -> info.getProfile().getName(), String.CASE_INSENSITIVE_ORDER));
+            for (PlayerInfo info : infos) {
+                if (info.getProfile().getId().equals(selfId)) continue;
+                fofRows.add(FofRow.player(info.getProfile().getName(), info.getProfile().getId()));
+            }
+        }
+        fofRows.add(FofRow.header("Teams"));
+        if (mc.level != null) {
+            List<String> teamNames = new ArrayList<>(mc.level.getScoreboard().getTeamNames());
+            // Internal auto-managed teams are not diplomacy targets.
+            teamNames.removeIf(name -> name.equals("steves_army_enemy") || name.startsWith("steves_army_friendly_"));
+            Collections.sort(teamNames);
+            for (String teamName : teamNames) {
+                fofRows.add(FofRow.team(teamName));
+            }
+        }
+        fofRows.add(FofRow.header("Categories"));
+        fofRows.add(FofRow.category(FofCategory.MONSTERS));
+        fofRows.add(FofRow.category(FofCategory.TARGET_DUMMIES));
+        clampScrollOffset();
+    }
+
+    private void renderFofList(GuiGraphics graphics, int mouseX, int mouseY) {
+        int contentX = PANEL_LEFT + 4;
+        int contentWidth = width - 2 * PANEL_LEFT - 8;
+        int listBottom = getListBottom();
+        int visibleRows = getVisibleRowCount();
+
+        graphics.enableScissor(contentX, ROW_START_Y, contentX + contentWidth, listBottom);
+        int lastVisibleRow = Math.min(fofRows.size(), scrollOffset + visibleRows);
+        for (int i = scrollOffset; i < lastVisibleRow; i++) {
+            FofRow row = fofRows.get(i);
+            int y = ROW_START_Y + (i - scrollOffset) * ROW_HEIGHT;
+
+            if (row.header) {
+                graphics.fill(contentX, y, contentX + contentWidth, y + ROW_HEIGHT, 0x33000000);
+                graphics.drawString(font, Component.literal("-- " + row.displayName + " --"),
+                    contentX + 2, y + 6, 0xFFAAAAAA, false);
+                continue;
+            }
+
+            int rowBg = (i % 2 == 0) ? 0x44000000 : 0x22000000;
+            graphics.fill(contentX, y, contentX + contentWidth, y + ROW_HEIGHT, rowBg);
+            graphics.drawString(font, Component.literal(row.displayName), contentX + 6, y + 6, 0xFFCCCCCC, false);
+
+            int stanceX = contentX + contentWidth - FOF_STANCE_COL_WIDTH;
+            row.stanceX = stanceX;
+            FofDropdownWidget widget = new FofDropdownWidget(row.currentStance(),
+                FofDropdownWidget.standardOptions(), ignored -> { });
+            widget.render(graphics, font, stanceX, y + 4, FOF_STANCE_COL_WIDTH, ROW_HEIGHT,
+                mouseX - stanceX, mouseY - y - 4);
+        }
+        graphics.disableScissor();
+
+        drawScrollbar(graphics, contentX + contentWidth - 3, ROW_START_Y, listBottom, visibleRows);
+
+        int footerY = getFooterY();
+        graphics.drawString(font, Component.literal("-- Friend / Foe --  Overrides apply to every soldier you own."),
+            contentX, footerY, 0xFFAAAAAA, false);
+        graphics.drawString(font, Component.literal("Default keeps the built-in rules. Neutral: hold fire unless attacked. Hostile: engage even if team-allied."),
+            contentX, footerY + 14, 0xFF888888, false);
+    }
+
+    private void openFofDropdown(int rowIndex, int x, int y) {
+        FofRow row = fofRows.get(rowIndex);
+        activeFofDropdownRow = rowIndex;
+        activeFofDropdownX = x;
+        activeFofDropdownY = y;
+        activeFofDropdownWidget = new FofDropdownWidget(row.currentStance(),
+            FofDropdownWidget.standardOptions(), option -> row.sendStance(option.stance()));
+        activeFofDropdownWidget.openDropdown();
+    }
+
+    private void closeFofDropdown() {
+        activeFofDropdownRow = -1;
+        activeFofDropdownWidget = null;
+    }
+
     private void drawIconButton(GuiGraphics graphics, int x, int y, ItemStack icon, boolean enabled,
                                 boolean destructive, Component tooltip, int mouseX, int mouseY) {
         Button button = Button.builder(Component.empty(), ignored -> { })
@@ -750,8 +941,13 @@ public class SquadCommandScreen extends Screen {
         return Math.max(1, (getListBottom() - ROW_START_Y) / ROW_HEIGHT);
     }
 
+    /** Row count of whichever list is showing (soldier rows or FoF rows). */
+    private int activeRowCount() {
+        return activeTab == Tab.FOF ? fofRows.size() : rows.size();
+    }
+
     private int getMaxScrollOffset() {
-        return Math.max(0, rows.size() - getVisibleRowCount());
+        return Math.max(0, activeRowCount() - getVisibleRowCount());
     }
 
     private void clampScrollOffset() {
@@ -759,10 +955,11 @@ public class SquadCommandScreen extends Screen {
     }
 
     private void drawScrollbar(GuiGraphics graphics, int x, int top, int bottom, int visibleRows) {
-        if (rows.size() <= visibleRows) return;
+        int rowCount = activeRowCount();
+        if (rowCount <= visibleRows) return;
 
         int trackHeight = bottom - top;
-        int thumbHeight = Math.max(8, trackHeight * visibleRows / rows.size());
+        int thumbHeight = Math.max(8, trackHeight * visibleRows / rowCount);
         int thumbY = top + (trackHeight - thumbHeight) * scrollOffset / getMaxScrollOffset();
         graphics.fill(x, top, x + 2, bottom, 0x66000000);
         graphics.fill(x, thumbY, x + 2, thumbY + thumbHeight, 0xFF777777);
@@ -776,6 +973,19 @@ public class SquadCommandScreen extends Screen {
 
     @Override
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
+        if (activeFofDropdownWidget != null && activeFofDropdownRow >= 0 && activeFofDropdownRow < fofRows.size()) {
+            boolean clicked = activeFofDropdownWidget.mouseClicked(
+                mouseX - activeFofDropdownX, mouseY - activeFofDropdownY, button);
+            if (clicked) {
+                if (!activeFofDropdownWidget.isDropdownOpen()) {
+                    closeFofDropdown();
+                }
+                return true;
+            } else {
+                closeFofDropdown();
+            }
+        }
+
         if (activeTeamDropdownWidget != null && activeTeamDropdownRow >= 0 && activeTeamDropdownRow < rows.size()) {
             boolean clicked = activeTeamDropdownWidget.mouseClicked(
                 mouseX - activeTeamDropdownX, mouseY - activeTeamDropdownY, button);
@@ -806,6 +1016,24 @@ public class SquadCommandScreen extends Screen {
         }
 
         if (super.mouseClicked(mouseX, mouseY, button)) return true;
+
+        if (activeTab == Tab.FOF) {
+            if (mouseY >= ROW_START_Y && mouseY < getListBottom() && button == 0) {
+                int rowIndex = scrollOffset + (int) ((mouseY - ROW_START_Y) / ROW_HEIGHT);
+                if (rowIndex < fofRows.size()) {
+                    FofRow row = fofRows.get(rowIndex);
+                    int rowY = ROW_START_Y + (rowIndex - scrollOffset) * ROW_HEIGHT;
+                    int localMouseY = (int) (mouseY - rowY);
+                    if (!row.header && mouseX >= row.stanceX && mouseX < row.stanceX + FOF_STANCE_COL_WIDTH
+                        && localMouseY >= 4 && localMouseY < 16) {
+                        openFofDropdown(rowIndex, row.stanceX, rowY + 4);
+                        return true;
+                    }
+                    return true;
+                }
+            }
+            return false;
+        }
 
         if (mouseY >= ROW_START_Y && mouseY < getListBottom() && button == 0) {
             int rowIndex = scrollOffset + (int) ((mouseY - ROW_START_Y) / ROW_HEIGHT);
@@ -885,6 +1113,9 @@ public class SquadCommandScreen extends Screen {
         }
         if (activeTeamDropdownRow >= 0) {
             closeTeamDropdown();
+        }
+        if (activeFofDropdownRow >= 0) {
+            closeFofDropdown();
         }
         if (mouseY >= ROW_START_Y && mouseY < getListBottom() && getMaxScrollOffset() > 0) {
             scrollOffset -= (int) Math.signum(delta);

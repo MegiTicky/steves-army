@@ -1,8 +1,10 @@
 package com.stevesarmy.command;
 
+import com.mojang.authlib.GameProfile;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.builder.ArgumentBuilder;
+import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import com.stevesarmy.client.CombatDebugRenderer;
 import com.stevesarmy.combat.cover.CoverDebugManager;
 import com.stevesarmy.entity.AntiTankEntity;
@@ -19,16 +21,24 @@ import com.stevesarmy.entity.VehicleCrewEntity;
 import com.stevesarmy.entity.ai.CoverTacticalGoal;
 import com.stevesarmy.entity.ai.GrenadeTacticalController;
 import com.stevesarmy.inventory.SoldierInventory;
+import com.stevesarmy.network.FofSyncPacket;
+import com.stevesarmy.network.NetworkHandler;
 import com.stevesarmy.ping.PingType;
 import com.stevesarmy.registry.ModEntities;
+import com.stevesarmy.squad.FofCategory;
+import com.stevesarmy.squad.FofSettings;
+import com.stevesarmy.squad.FofStance;
+import com.stevesarmy.squad.FofTargetType;
 import com.stevesarmy.squad.SquadData;
 import com.stevesarmy.squad.SquadManager;
 import com.mojang.brigadier.arguments.FloatArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
+import net.minecraft.commands.SharedSuggestionProvider;
 import net.minecraft.commands.arguments.CompoundTagArgument;
 import net.minecraft.commands.arguments.EntityArgument;
+import net.minecraft.commands.arguments.GameProfileArgument;
 import net.minecraft.commands.arguments.coordinates.Vec3Argument;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.ClickEvent;
@@ -36,13 +46,20 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.network.chat.Style;
 import net.minecraft.ChatFormatting;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.phys.Vec3;
 
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.Map;
 import java.util.UUID;
 import java.util.function.Function;
 
@@ -76,7 +93,10 @@ public class StevesArmyCommand {
                     "  /stevesarmy squad list\n" +
                     "  /stevesarmy squad info <callsign>\n" +
                     "  /stevesarmy squad disband <callsign>\n" +
-                    "  /stevesarmy squad order <callsign> <goto|send|attack|threat|suppress|hold|follow> [pos|player]"
+                    "  /stevesarmy squad order <callsign> <goto|send|attack|threat|suppress|hold|follow> [pos|player]\n" +
+                    "  /stevesarmy fof set player|team|category <key> <friendly|neutral|hostile|default> [for <players>]\n" +
+                    "  /stevesarmy fof clear [for <players>] - wipe FoF overrides\n" +
+                    "  /stevesarmy fof list [for <players>]"
                 ), false);
                 return 1;
             })
@@ -173,8 +193,164 @@ public class StevesArmyCommand {
                         .then(Commands.literal("follow")
                             .executes(ctx -> squadOrderFollow(ctx, StringArgumentType.getString(ctx, "callsign"), null))
                             .then(Commands.argument("player", EntityArgument.player())
-                                .executes(ctx -> squadOrderFollow(ctx, StringArgumentType.getString(ctx, "callsign"), EntityArgument.getPlayer(ctx, "player")))))))
+                                .executes(ctx -> squadOrderFollow(ctx, StringArgumentType.getString(ctx, "callsign"), EntityArgument.getPlayer(ctx, "player"))))))))
+            .then(Commands.literal("fof")
+                .executes(ctx -> {
+                    ctx.getSource().sendSuccess(() -> Component.literal(
+                        "FoF commands (op):\n" +
+                        "  /stevesarmy fof set player <name> <friendly|neutral|hostile|default> [for <players>]\n" +
+                        "  /stevesarmy fof set team <team> <friendly|neutral|hostile|default> [for <players>]\n" +
+                        "  /stevesarmy fof set category <monsters|target_dummies> <friendly|neutral|hostile|default> [for <players>]\n" +
+                        "  /stevesarmy fof clear [for <players>] - wipe every override\n" +
+                        "  /stevesarmy fof list [for <players>]\n" +
+                        "Example: /stevesarmy fof set team red hostile for @a[team=blue]"
+                    ), false);
+                    return 1;
+                })
+                .then(Commands.literal("set")
+                    .then(Commands.literal("player")
+                        .then(Commands.argument("name", GameProfileArgument.gameProfile())
+                            .then(fofStanceNode("friendly", FofStance.FRIENDLY, FofTargetType.PLAYER))
+                            .then(fofStanceNode("neutral", FofStance.NEUTRAL, FofTargetType.PLAYER))
+                            .then(fofStanceNode("hostile", FofStance.HOSTILE, FofTargetType.PLAYER))
+                            .then(fofStanceNode("default", null, FofTargetType.PLAYER))))
+                    .then(Commands.literal("team")
+                        .then(Commands.argument("team", StringArgumentType.word())
+                            .then(fofStanceNode("friendly", FofStance.FRIENDLY, FofTargetType.TEAM))
+                            .then(fofStanceNode("neutral", FofStance.NEUTRAL, FofTargetType.TEAM))
+                            .then(fofStanceNode("hostile", FofStance.HOSTILE, FofTargetType.TEAM))
+                            .then(fofStanceNode("default", null, FofTargetType.TEAM))))
+                    .then(Commands.literal("category")
+                        .then(Commands.argument("category", StringArgumentType.word())
+                            .suggests((context, builder) -> SharedSuggestionProvider.suggest(
+                                () -> Arrays.stream(FofCategory.values()).map(FofCategory::getSerializedName).iterator(), builder))
+                            .then(fofStanceNode("friendly", FofStance.FRIENDLY, FofTargetType.CATEGORY))
+                            .then(fofStanceNode("neutral", FofStance.NEUTRAL, FofTargetType.CATEGORY))
+                            .then(fofStanceNode("hostile", FofStance.HOSTILE, FofTargetType.CATEGORY))
+                            .then(fofStanceNode("default", null, FofTargetType.CATEGORY)))))
+                .then(Commands.literal("clear")
+                    .executes(ctx -> fofClear(ctx, Collections.singleton(ctx.getSource().getPlayerOrException())))
+                    .then(Commands.literal("for")
+                        .then(Commands.argument("players", EntityArgument.players())
+                            .executes(ctx -> fofClear(ctx, EntityArgument.getPlayers(ctx, "players"))))))
+                .then(Commands.literal("list")
+                    .executes(ctx -> fofList(ctx, Collections.singleton(ctx.getSource().getPlayerOrException())))
+                    .then(Commands.literal("for")
+                        .then(Commands.argument("players", EntityArgument.players())
+                            .executes(ctx -> fofList(ctx, EntityArgument.getPlayers(ctx, "players"))))))
             );
+    }
+
+    private static LiteralArgumentBuilder<CommandSourceStack> fofStanceNode(String name, FofStance stance, FofTargetType type) {
+        return Commands.literal(name)
+            .executes(ctx -> fofSet(ctx, type, stance, Collections.singleton(ctx.getSource().getPlayerOrException())))
+            .then(Commands.literal("for")
+                .then(Commands.argument("players", EntityArgument.players())
+                    .executes(ctx -> fofSet(ctx, type, stance, EntityArgument.getPlayers(ctx, "players")))));
+    }
+
+    private static int fofSet(CommandContext<CommandSourceStack> ctx, FofTargetType type,
+                              FofStance stance, Collection<ServerPlayer> targets) throws com.mojang.brigadier.exceptions.CommandSyntaxException {
+        MinecraftServer server = ctx.getSource().getServer();
+
+        java.util.List<UUID> playerKeys = new ArrayList<>();
+        String keyLabel;
+        String stringKey = null;
+        if (type == FofTargetType.PLAYER) {
+            Collection<GameProfile> profiles = GameProfileArgument.getGameProfiles(ctx, "name");
+            for (GameProfile profile : profiles) {
+                playerKeys.add(profile.getId());
+            }
+            if (playerKeys.isEmpty()) {
+                ctx.getSource().sendFailure(Component.literal("No player matched"));
+                return 0;
+            }
+            keyLabel = profiles.stream().map(GameProfile::getName).collect(java.util.stream.Collectors.joining(", "));
+        } else if (type == FofTargetType.TEAM) {
+            stringKey = StringArgumentType.getString(ctx, "team");
+            keyLabel = "team " + stringKey;
+        } else {
+            stringKey = StringArgumentType.getString(ctx, "category");
+            if (FofCategory.fromName(stringKey) == null) {
+                ctx.getSource().sendFailure(Component.literal("Unknown category: " + stringKey
+                    + " (expected monsters or target_dummies)"));
+                return 0;
+            }
+            keyLabel = "category " + stringKey;
+        }
+
+        String stanceLabel = stance != null ? stance.getDisplayName() : "default";
+        int changed = 0;
+        for (ServerPlayer target : targets) {
+            boolean touched = false;
+            if (type == FofTargetType.PLAYER) {
+                for (UUID key : playerKeys) {
+                    if (FofSettings.applyStance(server, target.getUUID(), type, key, null, stance)) touched = true;
+                }
+            } else if (FofSettings.applyStance(server, target.getUUID(), type, null, stringKey, stance)) {
+                touched = true;
+            }
+            if (touched) {
+                NetworkHandler.sendTo(target, FofSyncPacket.createFor(server, target.getUUID()));
+                changed++;
+            }
+        }
+
+        int playerKeyCount = playerKeys.size();
+        if (changed == 0) {
+            ctx.getSource().sendFailure(Component.literal("Nothing changed (unknown team/category, or self-mark attempt)"));
+            return 0;
+        }
+        String targetsLabel = type == FofTargetType.PLAYER && playerKeyCount > 1
+            ? changed + " owner(s) x " + playerKeyCount + " player(s)"
+            : changed + " owner squad(s)";
+        String finalKeyLabel = keyLabel;
+        ctx.getSource().sendSuccess(() -> Component.literal(
+            "FoF: " + finalKeyLabel + " -> " + stanceLabel + " for " + targetsLabel), false);
+        return changed;
+    }
+
+    private static int fofClear(CommandContext<CommandSourceStack> ctx, Collection<ServerPlayer> targets) {
+        MinecraftServer server = ctx.getSource().getServer();
+        FofSettings settings = FofSettings.get(server);
+        int cleared = 0;
+        for (ServerPlayer target : targets) {
+            if (settings.clearOwner(target.getUUID())) {
+                cleared++;
+            }
+            NetworkHandler.sendTo(target, FofSyncPacket.createFor(server, target.getUUID()));
+        }
+        final int clearedCount = cleared;
+        ctx.getSource().sendSuccess(() -> Component.literal(
+            "FoF overrides cleared for " + clearedCount + " owner squad(s)"), false);
+        return cleared;
+    }
+
+    private static int fofList(CommandContext<CommandSourceStack> ctx, Collection<ServerPlayer> targets) {
+        MinecraftServer server = ctx.getSource().getServer();
+        StringBuilder sb = new StringBuilder();
+        for (ServerPlayer target : targets) {
+            sb.append(target.getName().getString()).append(":\n");
+            FofSettings.OwnerFof fof = FofSettings.get(server).peek(target.getUUID());
+            if (fof == null || fof.isEmpty()) {
+                sb.append("  (no overrides — default rules apply)\n");
+                continue;
+            }
+            for (Map.Entry<UUID, FofStance> entry : fof.playerView().entrySet()) {
+                String name = server.getProfileCache().get(entry.getKey())
+                    .map(GameProfile::getName).orElse(entry.getKey().toString());
+                sb.append("  player ").append(name).append(": ").append(entry.getValue().getDisplayName()).append("\n");
+            }
+            for (Map.Entry<String, FofStance> entry : fof.teamView().entrySet()) {
+                sb.append("  team ").append(entry.getKey()).append(": ").append(entry.getValue().getDisplayName()).append("\n");
+            }
+            for (Map.Entry<FofCategory, FofStance> entry : fof.categoryView().entrySet()) {
+                sb.append("  category ").append(entry.getKey().getSerializedName()).append(": ")
+                    .append(entry.getValue().getDisplayName()).append("\n");
+            }
+        }
+        ctx.getSource().sendSuccess(() -> Component.literal(sb.toString()), false);
+        return 1;
     }
 
     private static int squadCreate(CommandContext<CommandSourceStack> ctx, String rawCallsign, UUID leaderId, String teamName) {

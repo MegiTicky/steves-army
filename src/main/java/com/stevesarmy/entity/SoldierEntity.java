@@ -38,6 +38,9 @@ import com.stevesarmy.network.OpenSoldierInventoryMessage;
 import com.stevesarmy.squad.FireDiscipline;
 import com.stevesarmy.squad.FireTeam;
 import com.stevesarmy.squad.FireTeamAssignment;
+import com.stevesarmy.squad.FofCategory;
+import com.stevesarmy.squad.FofSettings;
+import com.stevesarmy.squad.FofStance;
 import com.stevesarmy.squad.SquadManager;
 import com.stevesarmy.squad.SquadThreatIntel;
 import com.stevesarmy.squad.SquadMode;
@@ -53,6 +56,7 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.network.syncher.EntityDataAccessor;
 import net.minecraft.network.syncher.EntityDataSerializers;
 import net.minecraft.network.syncher.SynchedEntityData;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.util.Mth;
 import net.minecraft.server.level.ServerPlayer;
@@ -198,6 +202,9 @@ public class SoldierEntity extends PathfinderMob implements Container {
     private static final int NAVIGATION_LANDING_LOCK_TICKS = 4;
     private static final int NAVIGATION_COLLISION_LOCK_TICKS = 2;
 
+    /** How long a NEUTRAL-marked attacker stays a valid retaliation target. */
+    private static final int NEUTRAL_RETALIATION_TICKS = 200;
+
     @Nullable
     private UUID squadId;
     @Nullable
@@ -228,6 +235,11 @@ public class SoldierEntity extends PathfinderMob implements Container {
     private int navigationTraversalLockUntilTick = -1;
     private int navigationTraversalHeightDelta;
     private String navigationTraversalLockReason = "none";
+
+    /** FoF: last NEUTRAL-marked entity that damaged us, for the retaliation window. */
+    @Nullable
+    private LivingEntity neutralAttacker;
+    private int neutralAttackerTick = Integer.MIN_VALUE;
     /** True when combat, rather than cover movement, owns the low-prone posture. */
     private boolean firingProne = false;
     /** Armed only by a low-crouch exit; prevents unrelated peek transitions from rising. */
@@ -980,6 +992,10 @@ public class SoldierEntity extends PathfinderMob implements Container {
 
     @Override
     public boolean canAttack(LivingEntity target) {
+        // An explicit HOSTILE mark beats team/owner alliance (traitor-teammate case).
+        if (target != this && getFofOverride(target) == FofStance.HOSTILE) {
+            return super.canAttack(target);
+        }
         if (target instanceof SoldierEntity soldier && soldier.getOwnerUUID().equals(this.getOwnerUUID())) {
             return false;
         }
@@ -1013,9 +1029,56 @@ public class SoldierEntity extends PathfinderMob implements Container {
         return ownerTeam != null && ownerTeam.isAlliedTo(otherTeam);
     }
     
+    /**
+     * Explicit FoF stance this soldier's owner marked on other, or null when
+     * the built-in default rules apply. Server side only; client-side calls
+     * (rendering, prediction) fall back to the defaults.
+     */
+    @Nullable
+    public FofStance getFofOverride(LivingEntity other) {
+        if (this.level().isClientSide) return null;
+        MinecraftServer server = this.level().getServer();
+        if (server == null) return null;
+        Optional<UUID> ownerUUID = getOwnerUUID();
+        if (ownerUUID.isEmpty()) return null;
+        return FofSettings.resolveStance(server, ownerUUID.get(), other);
+    }
+
+    /**
+     * Whether this soldier may proactively hunt the candidate. NEUTRAL-marked
+     * entities are left alone until they attack us; every other entity
+     * follows the default rules.
+     */
+    public boolean isProactiveTarget(LivingEntity candidate) {
+        if (getFofOverride(candidate) != FofStance.NEUTRAL) return true;
+        return candidate == neutralAttacker
+            && this.tickCount - neutralAttackerTick <= NEUTRAL_RETALIATION_TICKS;
+    }
+
+    /** Category targeting gate: an explicit FoF stance replaces the config default. */
+    public boolean fofCategoryAllows(FofCategory category, boolean configDefault) {
+        if (this.level().isClientSide) return configDefault;
+        MinecraftServer server = this.level().getServer();
+        if (server == null) return configDefault;
+        Optional<UUID> ownerUUID = getOwnerUUID();
+        if (ownerUUID.isEmpty()) return configDefault;
+        FofSettings.OwnerFof fof = FofSettings.get(server).peek(ownerUUID.get());
+        FofStance override = fof != null ? fof.resolveCategory(category) : null;
+        if (override == null) return configDefault;
+        return override != FofStance.FRIENDLY;
+    }
+
     public boolean isFriendlyTo(LivingEntity other) {
         if (other == this) return false;
-        
+
+        // Explicit per-owner FoF overrides sit above the default rules below.
+        // FRIENDLY protects even team enemies; HOSTILE engages even team allies;
+        // NEUTRAL falls through as non-friendly (retaliation still works) and
+        // is kept out of proactive targeting by isProactiveTarget.
+        FofStance override = getFofOverride(other);
+        if (override == FofStance.FRIENDLY) return true;
+        if (override == FofStance.HOSTILE) return false;
+
         if (isAlliedByTeam(other)) return true;
         
         LivingEntity owner = getOwner();
@@ -1501,6 +1564,13 @@ public class SoldierEntity extends PathfinderMob implements Container {
             }
             if (isRecalling()) {
                 cancelRecall();
+            }
+            // A NEUTRAL-marked attacker forfeits neutrality: remember them so
+            // isProactiveTarget lets the squad fight back for a while.
+            if (source.getEntity() instanceof LivingEntity neutralCandidate && neutralCandidate != this
+                && getFofOverride(neutralCandidate) == FofStance.NEUTRAL) {
+                this.neutralAttacker = neutralCandidate;
+                this.neutralAttackerTick = this.tickCount;
             }
             if (coverBehaviorManager != null) {
                 CoverBehaviorManager.CoverState preState = coverBehaviorManager.getState();

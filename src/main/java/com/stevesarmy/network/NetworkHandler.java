@@ -14,7 +14,7 @@ import java.util.function.Function;
 import java.util.function.Supplier;
 
 public class NetworkHandler {
-    private static final String PROTOCOL_VERSION = "12";
+    private static final String PROTOCOL_VERSION = "13";
     
     public static final SimpleChannel INSTANCE = NetworkRegistry.newSimpleChannel(
         new ResourceLocation(StevesArmyMod.MODID, "main"),
@@ -180,6 +180,14 @@ public class NetworkHandler {
             SwapSoldierPacket::encode,
             SwapSoldierPacket::decode,
             SwapSoldierPacket::handle);
+        INSTANCE.registerMessage(id++, SetFofStancePacket.class,
+            SetFofStancePacket::encode,
+            SetFofStancePacket::decode,
+            SetFofStancePacket::handle);
+        INSTANCE.registerMessage(id++, FofSyncPacket.class,
+            FofSyncPacket::encode,
+            FofSyncPacket::decode,
+            FofSyncPacket::handle);
     }
 
     @SuppressWarnings({"rawtypes", "unchecked"})

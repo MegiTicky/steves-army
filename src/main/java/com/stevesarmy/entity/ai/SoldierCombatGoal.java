@@ -38,6 +38,7 @@ import com.stevesarmy.network.PotentialTargetsDebugMessage;
 import com.stevesarmy.network.SuppressPingDebugPacket;
 import com.stevesarmy.squad.FireDiscipline;
 import com.stevesarmy.squad.FireTeamSuppressionTracker;
+import com.stevesarmy.squad.FofCategory;
 import com.stevesarmy.squad.SquadData;
 import com.stevesarmy.squad.SquadManager;
 import com.stevesarmy.squad.SquadThreatIntel;
@@ -1960,7 +1961,8 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
             if (entity == soldier) continue;
             if (entity.getBoundingBox().intersects(soldier.getBoundingBox().inflate(maxRange))
                 && TargetAcquisition.isValidTarget(soldier, entity)
-                && !soldier.isFriendlyTo(entity)) {
+                && !soldier.isFriendlyTo(entity)
+                && soldier.isProactiveTarget(entity)) {
                 if (entity instanceof SoldierEntity otherSoldier && otherSoldier != soldier) {
                     soldiers.add(entity);
                 } else if (entity instanceof TargetEntity) {
@@ -1973,11 +1975,12 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
             }
         }
 
-        // Preserve original category ordering
-        if (StevesArmyConfig.shouldTargetMonsters()) {
+        // Preserve original category ordering. An explicit FoF category stance
+        // replaces the config toggle; no stance keeps the config default.
+        if (soldier.fofCategoryAllows(FofCategory.MONSTERS, StevesArmyConfig.shouldTargetMonsters())) {
             potentialTargets.addAll(monsters);
         }
-        if (StevesArmyConfig.shouldTargetTargetEntities()) {
+        if (soldier.fofCategoryAllows(FofCategory.TARGET_DUMMIES, StevesArmyConfig.shouldTargetTargetEntities())) {
             potentialTargets.addAll(targetEntities);
         }
         potentialTargets.addAll(players);

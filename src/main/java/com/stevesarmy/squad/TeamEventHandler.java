@@ -7,10 +7,12 @@ import com.stevesarmy.entity.SoldierRole;
 import com.stevesarmy.entity.SoldierRoleHandler;
 import com.stevesarmy.entity.TeamGarrisonEntity;
 import com.stevesarmy.network.FireTeamScopeSyncPacket;
+import com.stevesarmy.network.FofSyncPacket;
 import com.stevesarmy.network.NetworkHandler;
 import com.stevesarmy.respawn.SoldierSwapManager;
 import com.stevesarmy.util.SoldierNameGenerator;
 import net.minecraft.network.chat.Component;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.effect.MobEffectInstance;
@@ -18,6 +20,7 @@ import net.minecraft.world.effect.MobEffects;
 import net.minecraft.world.level.Level;
 import net.minecraftforge.event.entity.EntityJoinLevelEvent;
 import net.minecraftforge.event.entity.living.LivingDeathEvent;
+import net.minecraftforge.event.entity.player.PlayerEvent;
 import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
@@ -29,6 +32,14 @@ import java.util.UUID;
 @Mod.EventBusSubscriber(modid = StevesArmyMod.MODID)
 public class TeamEventHandler {
     private static final Map<UUID, String> LAST_PLAYER_TEAMS = new HashMap<>();
+
+    @SubscribeEvent
+    public static void onPlayerLoggedIn(PlayerEvent.PlayerLoggedInEvent event) {
+        if (!(event.getEntity() instanceof ServerPlayer player)) return;
+        MinecraftServer server = player.getServer();
+        if (server == null) return;
+        NetworkHandler.sendTo(player, FofSyncPacket.createFor(server, player.getUUID()));
+    }
 
     @SubscribeEvent
     public static void onEntityJoin(EntityJoinLevelEvent event) {

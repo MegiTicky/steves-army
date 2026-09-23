@@ -67,6 +67,15 @@ public static final KeyMapping PING_WHEEL = new KeyMapping(
         "key.categories.steves_army"
     );
 
+    /** Unbound by default: opens the friend/foe stance picker for the looked-at target. */
+    public static final KeyMapping MARK_TARGET = new KeyMapping(
+        "key.steves_army.mark_target",
+        KeyConflictContext.IN_GAME,
+        InputConstants.Type.KEYSYM,
+        GLFW.GLFW_KEY_UNKNOWN,
+        "key.categories.steves_army"
+    );
+
     @SubscribeEvent
     public static void registerKeyMappings(RegisterKeyMappingsEvent event) {
         event.register(FORMATION_WHEEL);
@@ -76,6 +85,7 @@ public static final KeyMapping PING_WHEEL = new KeyMapping(
         event.register(FIRE_TEAM_WHEEL);
         event.register(CYCLE_FIRE_TEAM);
         event.register(SWAP_SOLDIER);
+        event.register(MARK_TARGET);
     }
     
     public static boolean isPingWheelKeyDown() {
