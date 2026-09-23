@@ -40,6 +40,7 @@ public class StevesArmyConfig {
     
     public static final ForgeConfigSpec.BooleanValue TARGET_MONSTERS;
     public static final ForgeConfigSpec.BooleanValue TARGET_TARGET_ENTITIES;
+    public static final ForgeConfigSpec.BooleanValue MONSTERS_ATTACK_SOLDIERS;
     public static final ForgeConfigSpec.DoubleValue BASIC_DETECTION_DISTANCE;
     public static final ForgeConfigSpec.DoubleValue MACHINE_GUNNER_DETECTION_DISTANCE;
 
@@ -336,6 +337,13 @@ public class StevesArmyConfig {
                      "Disable for better performance if not using target entities.",
                      "Default: true")
             .define("targetTargetEntities", true);
+
+        MONSTERS_ATTACK_SOLDIERS = BUILDER
+            .comment("Whether vanilla monsters proactively hunt soldiers (Recruits-style).",
+                     "Without it monsters only retaliate after being attacked; with it zombies,",
+                     "skeletons and other monsters actively hunt nearby soldiers.",
+                     "Default: true")
+            .define("monstersAttackSoldiers", true);
 
         BASIC_DETECTION_DISTANCE = BUILDER
             .comment("Focused detection distance for riflemen and enemy soldiers (blocks).",
@@ -1026,6 +1034,10 @@ BUILDER.pop();
     
     public static boolean shouldTargetTargetEntities() {
         return TARGET_TARGET_ENTITIES.get();
+    }
+
+    public static boolean shouldMonstersAttackSoldiers() {
+        return MONSTERS_ATTACK_SOLDIERS.get();
     }
 
     public static double getBasicDetectionDistance() {
