@@ -146,11 +146,18 @@ public class CommandStickItem extends Item {
 
     @Nullable
     public static SoldierEntity findTargetableSoldier(Player player, BiPredicate<SoldierEntity, Player> filter) {
+        return findTargetableSoldier(player, filter, TARGET_RANGE, CONE_COS);
+    }
+
+    /** Torso-anchored cone sweep: most centered soldier wins, distance as tiebreak. */
+    @Nullable
+    public static SoldierEntity findTargetableSoldier(Player player, BiPredicate<SoldierEntity, Player> filter,
+                                                      double range, double coneCos) {
         Level level = player.level();
         Vec3 eyePos = player.getEyePosition();
         Vec3 lookVec = player.getLookAngle();
 
-        AABB searchBox = player.getBoundingBox().inflate(TARGET_RANGE);
+        AABB searchBox = player.getBoundingBox().inflate(range);
         List<Entity> entities = level.getEntitiesOfClass(Entity.class, searchBox);
 
         SoldierEntity best = null;
@@ -162,10 +169,10 @@ public class CommandStickItem extends Item {
 
             Vec3 toEntity = soldier.position().add(0, soldier.getBbHeight() * 0.5, 0).subtract(eyePos);
             double dist = toEntity.length();
-            if (dist > TARGET_RANGE || dist < 0.01) continue;
+            if (dist > range || dist < 0.01) continue;
 
             double dot = lookVec.normalize().dot(toEntity.normalize());
-            if (dot < CONE_COS) continue;
+            if (dot < coneCos) continue;
 
             double score = -dot + dist * 0.0001;
             if (score < bestScore) {

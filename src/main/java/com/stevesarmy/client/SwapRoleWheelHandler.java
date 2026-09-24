@@ -8,10 +8,6 @@ import com.stevesarmy.network.SquadStatusSyncPacket;
 import com.stevesarmy.network.SwapSoldierPacket;
 import net.minecraft.client.Minecraft;
 import net.minecraft.network.chat.Component;
-import net.minecraft.world.level.ClipContext;
-import net.minecraft.world.phys.BlockHitResult;
-import net.minecraft.world.phys.HitResult;
-import net.minecraft.world.phys.Vec3;
 import org.lwjgl.glfw.GLFW;
 
 import java.util.ArrayList;
@@ -101,7 +97,7 @@ public class SwapRoleWheelHandler {
                     sendToServer(selected);
                 }
             } else if (!pressConsumed) {
-                handleTap(mc);
+                handleTap();
             }
             pressTarget = null;
         }
@@ -109,20 +105,10 @@ public class SwapRoleWheelHandler {
         wasKeyDown = isKeyDown;
     }
 
-    private static void handleTap(Minecraft mc) {
+    /** Empty-air tap deliberately does nothing — the wheel's Previous Body sector is the only swap-back. */
+    private static void handleTap() {
         if (pressTarget != null && pressTarget.isAlive()) {
             NetworkHandler.INSTANCE.sendToServer(SwapSoldierPacket.byEntity(pressTarget.getUUID()));
-            return;
-        }
-
-        UUID lastSwapped = ClientSquadData.INSTANCE.getLastSwappedSoldierId();
-        SquadStatusSyncPacket.SoldierStatusEntry entry =
-            lastSwapped != null ? ClientSquadData.INSTANCE.getEntry(lastSwapped) : null;
-        if (entry != null && entry.loaded) {
-            NetworkHandler.INSTANCE.sendToServer(SwapSoldierPacket.byLast());
-        } else {
-            mc.player.displayClientMessage(
-                Component.literal("Look at a squadmate to swap, or hold V for the role wheel."), true);
         }
     }
 
@@ -173,54 +159,24 @@ public class SwapRoleWheelHandler {
     }
 
     /**
-     * True crosshair pick: the view ray must pass through the soldier's
-     * (slightly inflated) hitbox, blocked by walls in between — the earlier
-     * ±10° cone sweep let a soldier far off-center trigger the swap when the
-     * player was looking into the air. Nearest soldier along the ray wins.
+     * Command-stick look select (CommandStickItem.findTargetableSoldier):
+     * torso-anchored cone sweep, most centered soldier wins. Cone tightened to
+     * ±5° at 32 blocks so only a soldier close to the crosshair center counts —
+     * the strict ray-pick before needed near pixel-perfect aim at range and was
+     * blocked by leaves and fences.
      */
     private static final double LOOK_RANGE = 32.0;
-    private static final double LOOK_HITBOX_INFLATION = 0.3;
+    private static final double LOOK_CONE_COS = Math.cos(Math.toRadians(5));
 
     private static SoldierEntity findLookedAtSoldier(Minecraft mc) {
         if (mc.player == null || mc.level == null) {
             return null;
         }
-        Vec3 eyePos = mc.player.getEyePosition();
-        Vec3 endPos = eyePos.add(mc.player.getLookAngle().scale(LOOK_RANGE));
-
-        BlockHitResult blockHit = mc.level.clip(new ClipContext(
-            eyePos, endPos, ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, mc.player));
-        double maxDist = blockHit.getType() == HitResult.Type.BLOCK
-            ? Math.min(LOOK_RANGE, blockHit.getLocation().distanceTo(eyePos))
-            : LOOK_RANGE;
-
-        double bestDist = Double.MAX_VALUE;
-        SoldierEntity best = null;
-        for (SoldierEntity soldier : mc.level.getEntitiesOfClass(SoldierEntity.class,
-                mc.player.getBoundingBox().inflate(LOOK_RANGE))) {
-            if (!soldier.isAlive() || !soldier.isOwnedBy(mc.player)) {
-                continue;
-            }
-            if (ClientSquadData.INSTANCE.getEntry(soldier.getUUID()) == null) {
-                continue;
-            }
-            double dist = rayHitDistance(eyePos, endPos, soldier);
-            if (dist < 0 || dist > maxDist) {
-                continue;
-            }
-            if (dist < bestDist) {
-                bestDist = dist;
-                best = soldier;
-            }
-        }
-        return best;
-    }
-
-    /** Distance along the view ray where it enters the soldier's hitbox, or -1. */
-    private static double rayHitDistance(Vec3 from, Vec3 to, SoldierEntity soldier) {
-        return soldier.getBoundingBox().inflate(LOOK_HITBOX_INFLATION).clip(from, to)
-            .map(from::distanceTo)
-            .orElse(-1.0);
+        return com.stevesarmy.item.CommandStickItem.findTargetableSoldier(mc.player,
+            (soldier, player) -> soldier.isAlive()
+                && soldier.isOwnedBy(player)
+                && ClientSquadData.INSTANCE.getEntry(soldier.getUUID()) != null,
+            LOOK_RANGE, LOOK_CONE_COS);
     }
 
     private static void grabMouseForWheel(Minecraft mc) {
