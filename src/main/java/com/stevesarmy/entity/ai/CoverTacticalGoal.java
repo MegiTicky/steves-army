@@ -150,6 +150,17 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
     // The support/MG search anchor is latched so repeated searches within this
     // window score identically instead of tracking every teammate step.
     private static final int MG_ANCHOR_LATCH_TICKS = 200;
+    // The anchor latch breaks early when the reference point (owner in FOLLOW,
+    // attack target in ATTACK) has moved this far since the latch was taken.
+    private static final double MG_ANCHOR_STALE_MOVE_SQR = 8.0D * 8.0D;
+    // Beyond twice the follow cover distance, no cover state — not even an
+    // active suppression hunker — may hold a FOLLOW soldier in place. The
+    // release re-arms the FOLLOW relocation so the soldier walks back.
+    private static final float FOLLOW_HARD_LEASH_MULTIPLIER = 2.0F;
+    // Repeated failed seek episodes in FOLLOW/HOLD hand control back to the
+    // follow/hold behavior for this long instead of cycling searches forever.
+    private static final int MAX_FAILED_SEEK_EPISODES = 2;
+    private static final int SEEK_GIVE_UP_TICKS = 100;
     
     private static final double POSITIONING_TOLERANCE = 0.05;
     private static final double POSITIONING_SPEED = 1.0;
@@ -229,6 +240,7 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
     private BlockPos suppressionEpisodeCover = null;
     private BlockPos latchedMachineGunnerSearchCenter = null;
     private int latchedMachineGunnerSearchCenterTick = 0;
+    private BlockPos latchedMachineGunnerSearchCenterReference = null;
     private int suppressionEpisodeCount = 0;
     private boolean suppressionEpisodeActive = false;
     private long continuousSuppressionStartTime = 0L;
@@ -285,6 +297,8 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
     private long failedSearchFingerprint = Long.MIN_VALUE;
     private QueuedSearchMode failedSearchMode;
     private int nextFailedSearchTick;
+    private int failedSeekEpisodes = 0;
+    private int seekGiveUpUntilTick;
     private long blacklistRevision;
 
     private BlockPos movementAttemptTarget = null;
@@ -524,6 +538,30 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
         failedSearchFingerprint = Long.MIN_VALUE;
         failedSearchMode = null;
         nextFailedSearchTick = 0;
+    }
+
+    /** A seek episode ended without acquiring cover (search timeout). */
+    private void noteSeekEpisodeFailure(String reason) {
+        if (reason == null || soldier.hasValidAttackTarget()
+            || (soldier.getSquadMode() != SquadMode.FOLLOW && soldier.getSquadMode() != SquadMode.HOLD)) {
+            return;
+        }
+        failedSeekEpisodes++;
+        if (failedSeekEpisodes >= MAX_FAILED_SEEK_EPISODES) {
+            openSeekGiveUpWindow(reason);
+        }
+    }
+
+    private void openSeekGiveUpWindow(String reason) {
+        seekGiveUpUntilTick = soldier.tickCount + SEEK_GIVE_UP_TICKS;
+        failedSeekEpisodes = 0;
+        // Ungated and rate-limited by design: one line per give-up window is the
+        // production diagnosability for seek loops — cover debug logging stays off.
+        StevesArmyMod.LOGGER.info(
+            "[CoverGoal] Soldier {} ({}) pausing cover searches for {}t after {} failed episodes ({}), mode={}, suppressed={}, pos={}",
+            soldier.getId(), soldier.getName().getString(), SEEK_GIVE_UP_TICKS,
+            MAX_FAILED_SEEK_EPISODES, reason, soldier.getSquadMode(),
+            getCoverManager().isSuppressed(), soldier.blockPosition());
     }
 
     int getSoldierTickCount() {
@@ -1080,13 +1118,21 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
 
     private boolean beginFollowRelocationIfNeeded() {
         if (relocationType != RelocationType.NONE || soldier.getSquadMode() != SquadMode.FOLLOW
-            || getCoverManager().isSuppressed() || soldier.tickCount < nextFollowRelocationSearchTick) {
+            || soldier.tickCount < nextFollowRelocationSearchTick) {
             return relocationType == RelocationType.FOLLOW;
         }
 
         LivingEntity owner = soldier.getOwner();
         if (owner == null || !owner.isAlive() || owner.isSpectator()
             || soldier.distanceToSqr(owner) < followCoverDistance() * followCoverDistance()) {
+            return false;
+        }
+
+        // Inside the normal follow band, suppression keeps the soldier hunkered
+        // locally. Beyond the hard leash the march to the owner wins even while
+        // suppressed — a stranded suppressor helps no one.
+        float hardLeash = followHardLeashDistance();
+        if (getCoverManager().isSuppressed() && soldier.distanceToSqr(owner) <= hardLeash * hardLeash) {
             return false;
         }
 
@@ -1099,6 +1145,11 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
     /** Rear roles tolerate a farther owner before interrupting for a follow cover move. */
     private float followCoverDistance() {
         return soldier.isPeekDisabled() ? SUPPORT_FOLLOW_COVER_DISTANCE : FOLLOW_COVER_DISTANCE;
+    }
+
+    /** Distance past which no cover state may keep a FOLLOW soldier from marching to the owner. */
+    private float followHardLeashDistance() {
+        return followCoverDistance() * FOLLOW_HARD_LEASH_MULTIPLIER;
     }
 
     private double followTargetStaleDistance() {
@@ -1191,9 +1242,20 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
         // every teammate step, which re-ranks all cover on each search. Latch it
         // briefly so repeated searches — duty recovery, reposition requests —
         // land on the same spot instead of walking the soldier in circles.
+        BlockPos latchReference = soldier.hasValidAttackTarget()
+            ? soldier.getAttackTargetPos()
+            : soldier.getOwner() != null ? soldier.getOwner().blockPosition() : null;
         if (latchedMachineGunnerSearchCenter != null
             && soldier.tickCount - latchedMachineGunnerSearchCenterTick < MG_ANCHOR_LATCH_TICKS) {
-            return latchedMachineGunnerSearchCenter;
+            // A marching owner must not keep scoring covers around a stale
+            // anchor: break the latch once the reference has moved on.
+            boolean referenceMoved = latchReference == null
+                || latchedMachineGunnerSearchCenterReference == null
+                || latchedMachineGunnerSearchCenterReference.distSqr(latchReference) > MG_ANCHOR_STALE_MOVE_SQR;
+            if (!referenceMoved) {
+                return latchedMachineGunnerSearchCenter;
+            }
+            latchedMachineGunnerSearchCenter = null;
         }
         BlockPos target = soldier.hasValidAttackTarget()
             ? soldier.getAttackTargetPos()
@@ -1202,6 +1264,7 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
         if (anchor != null) {
             latchedMachineGunnerSearchCenter = anchor;
             latchedMachineGunnerSearchCenterTick = soldier.tickCount;
+            latchedMachineGunnerSearchCenterReference = latchReference;
         }
         return anchor;
     }
@@ -1625,7 +1688,37 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
         }
         
         CoverBehaviorManager.CoverState state = getCoverManager().getState();
-        
+
+        // FOLLOW hard leash: past twice the follow cover distance, every cover
+        // state — SEEKING_COVER, REPOSITIONING, SUPPRESSED_IN_COVER, even an
+        // active suppression hunker — releases so the soldier can march back to
+        // the owner. An armed relocation is exempt: it IS the march back (its
+        // validity is re-checked above), and releasing it every tick would
+        // cancel the walk before it makes progress. beginFollowRelocationIfNeeded
+        // re-arms the follow move on the next canUse after a release.
+        if (soldier.getSquadMode() == SquadMode.FOLLOW && relocationType == RelocationType.NONE) {
+            LivingEntity owner = soldier.getOwner();
+            float hardLeash = followHardLeashDistance();
+            if (owner != null && soldier.distanceToSqr(owner) > hardLeash * hardLeash) {
+                navigation.stop();
+                getPositionController().clear();
+                clearRelocationTarget();
+                getCoverManager().clearTargetCover();
+                getCoverManager().clearCover();
+                getCoverManager().resetPeekState();
+                soldier.setFiringProne(false);
+                getCoverManager().setState(CoverBehaviorManager.CoverState.NO_COVER);
+                stuckTicks = 0;
+                seekingTicks = 0;
+                repositioningTicks = 0;
+                if (DiagnosticLogManager.isCoverLoggingEnabled()) {
+                    StevesArmyMod.LOGGER.info("[CoverGoal] canContinueToUse=false: FOLLOW hard leash ({} blocks), state={}",
+                        String.format("%.1f", Math.sqrt(soldier.distanceToSqr(owner))), state);
+                }
+                return false;
+            }
+        }
+
         if (state == CoverBehaviorManager.CoverState.IN_COVER && !getCoverManager().isSuppressed()) {
             if (soldier.getSquadMode() == SquadMode.FOLLOW) {
                 LivingEntity owner = soldier.getOwner();
@@ -2186,6 +2279,7 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
                 ? SEARCH_EXHAUSTION_COOLDOWN_SUPPRESSED_TICKS
                 : SEARCH_EXHAUSTION_COOLDOWN_TICKS;
             enterOpenGroundFallbackPosture();
+            noteSeekEpisodeFailure(relocationType != RelocationType.NONE ? null : "seek-timeout");
         }
     }
     
@@ -3143,6 +3237,13 @@ private void tickRepositioning() {
             return true;
         }
 
+        // Give-up window: repeated failed seek episodes hand control back to the
+        // follow/hold behavior for a while instead of cycling searches forever.
+        if (seekGiveUpUntilTick > soldier.tickCount
+            && (soldier.getSquadMode() == SquadMode.FOLLOW || soldier.getSquadMode() == SquadMode.HOLD)) {
+            return false;
+        }
+
         if (soldier.isCQB() || soldier.hasCloseRangeTarget()) {
             if (DiagnosticLogManager.isCoverLoggingEnabled()) {
                 StevesArmyMod.LOGGER.info("[CoverGoal] shouldSeekCover=false (CQB mode={}, closeRangeTarget={})",
@@ -3619,7 +3720,12 @@ private boolean shouldExitCoverForFollow() {
         } else if (soldier.getSquadMode() == SquadMode.FOLLOW) {
             LivingEntity owner = soldier.getOwner();
             if (owner instanceof Player) {
-                if (getCoverManager().isSuppressed()) {
+                // Suppressed soldiers hunker around their own position — but only
+                // within the hard leash. Past it, searching around the owner is the
+                // only way a released soldier's next cover is on the march back.
+                float hardLeash = followHardLeashDistance();
+                if (getCoverManager().isSuppressed()
+                    && soldier.distanceToSqr(owner) <= hardLeash * hardLeash) {
                     searchRadius = SEARCH_RADIUS;
                     searchCenter = soldier.blockPosition();
                 } else {
@@ -5567,6 +5673,7 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
         // Reset search exhaustion state on successful cover acquisition
         consecutiveFailedSearches = 0;
         searchExhaustionCooldown = 0;
+        failedSeekEpisodes = 0;
         repositioningTicks = 0;
         // Promote target to current — releases old reservation, sets metadata
         getCoverManager().promoteTargetToCurrentCover();
@@ -5596,6 +5703,7 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
         getPeekController().setLastPeekEndTime(System.currentTimeMillis());
         resetSuppressionEpisodes();
         latchedMachineGunnerSearchCenter = null;
+        latchedMachineGunnerSearchCenterReference = null;
         
         // Compute peek position with LOS validation for full cover
         if (cover.getType() == CoverType.FULL) {

@@ -100,6 +100,7 @@ public class MachineGunnerEntity extends SoldierEntity {
                 double y = 0.0;
                 double z = 0.0;
                 double totalWeight = 0.0;
+                long freshestSeen = Long.MIN_VALUE;
                 for (SquadThreatIntel.ThreatKnowledge threat : squad.getThreatIntel().getAllThreats()) {
                     if (!threat.isAlive || threat.lastKnownPosition == null
                         || squad.getThreatIntel().isThreatStale(threat.threatEntityId, now)) {
@@ -112,6 +113,14 @@ public class MachineGunnerEntity extends SoldierEntity {
                     y += (threat.lastKnownPosition.getY() + 0.5) * weight;
                     z += (threat.lastKnownPosition.getZ() + 0.5) * weight;
                     totalWeight += weight;
+                    freshestSeen = Math.max(freshestSeen, threat.lastSeenTime);
+                }
+                // The 0.25 freshness floor keeps old positions weighted, so the
+                // centroid survives long after contact broke. Only aim cover at it
+                // while some squad member has actually seen a threat recently —
+                // otherwise fall through to local threat knowledge or null.
+                if (freshestSeen == Long.MIN_VALUE || now - freshestSeen > 60L) {
+                    return null;
                 }
                 return totalWeight > 0.0
                     ? BlockPos.containing(x / totalWeight, y / totalWeight, z / totalWeight)
