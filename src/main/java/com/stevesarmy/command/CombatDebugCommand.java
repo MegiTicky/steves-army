@@ -13,6 +13,7 @@ import com.stevesarmy.client.model.PoseConfig;
 import com.stevesarmy.combat.ArmorDoctrineDebugManager;
 import com.stevesarmy.combat.ArmorRoleManager;
 import com.stevesarmy.combat.ArmorThreatScanner;
+import com.stevesarmy.combat.CoverStateDebugManager;
 import com.stevesarmy.combat.GunIntegration;
 import com.stevesarmy.combat.SidearmDebugManager;
 import com.stevesarmy.combat.SuppressPingDebugManager;
@@ -102,6 +103,14 @@ public class CombatDebugCommand {
                     .executes(ctx -> setSuppressPingDebug(ctx, true)))
                 .then(Commands.literal("off")
                     .executes(ctx -> setSuppressPingDebug(ctx, false))))
+
+            // === COVER STATE MACHINE ===
+            .then(Commands.literal("coverstate")
+                .executes(ctx -> setCoverStateDebug(ctx, true))
+                .then(Commands.literal("on")
+                    .executes(ctx -> setCoverStateDebug(ctx, true)))
+                .then(Commands.literal("off")
+                    .executes(ctx -> setCoverStateDebug(ctx, false))))
 
             // === SIDEARM FALLBACK ===
             .then(Commands.literal("sidearm")
@@ -411,6 +420,9 @@ public class CombatDebugCommand {
         CoverDebugManager.setShowPeekCandidates(true);
         CoverDebugManager.setVisualizationEnabled(true);
         DiagnosticLogManager.enableAll();
+        if (context.getSource().getEntity() instanceof ServerPlayer player) {
+            CoverStateDebugManager.setEnabled(player, true);
+        }
 
         context.getSource().sendSuccess(() -> Component.literal(
             "=== Steve's Army Debug: ALL ON ===\n" +
@@ -441,6 +453,9 @@ public class CombatDebugCommand {
         DiagnosticLogManager.disableAll();
         CoverDebugManager.setShowRays(false);
         CoverDebugManager.setShowSolidBlocks(false);
+        if (context.getSource().getEntity() instanceof ServerPlayer player) {
+            CoverStateDebugManager.setEnabled(player, false);
+        }
 
         context.getSource().sendSuccess(() -> Component.literal(
             "=== Steve's Army Debug: ALL OFF ===\n" +
@@ -1101,6 +1116,18 @@ public class CombatDebugCommand {
         }
         SuppressPingDebugManager.setEnabled(player, enabled);
         source.sendSuccess(() -> Component.literal("Suppress ping debug render: "
+            + (enabled ? "ON" : "OFF")), false);
+        return 1;
+    }
+
+    private static int setCoverStateDebug(CommandContext<CommandSourceStack> context, boolean enabled) {
+        CommandSourceStack source = context.getSource();
+        if (!(source.getEntity() instanceof ServerPlayer player)) {
+            source.sendFailure(Component.literal("Player only command"));
+            return 0;
+        }
+        CoverStateDebugManager.setEnabled(player, enabled);
+        source.sendSuccess(() -> Component.literal("Cover state-machine debug render: "
             + (enabled ? "ON" : "OFF")), false);
         return 1;
     }

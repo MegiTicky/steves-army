@@ -88,6 +88,31 @@ public class MachineGunnerEntity extends SoldierEntity {
         return direction.lengthSqr() > 0.001 ? direction.normalize() : null;
     }
 
+    /**
+     * Ticks since the freshest squad threat feeding the suppression centroid
+     * was last seen; -1 when no squad threat knowledge feeds it at all. Debug
+     * visibility for how stale the MG's cover aim is.
+     */
+    public int getSuppressionCenterFreshTicks() {
+        if (!(level() instanceof ServerLevel serverLevel) || getSquadId() == null) {
+            return -1;
+        }
+        long now = level().getGameTime();
+        return SquadManager.get(serverLevel).getSquadById(getSquadId())
+            .map(squad -> {
+                long freshestSeen = Long.MIN_VALUE;
+                for (SquadThreatIntel.ThreatKnowledge threat : squad.getThreatIntel().getAllThreats()) {
+                    if (!threat.isAlive || threat.lastKnownPosition == null
+                        || squad.getThreatIntel().isThreatStale(threat.threatEntityId, now)) {
+                        continue;
+                    }
+                    freshestSeen = Math.max(freshestSeen, threat.lastSeenTime);
+                }
+                return freshestSeen == Long.MIN_VALUE ? -1 : (int) (now - freshestSeen);
+            })
+            .orElse(-1);
+    }
+
     @Nullable
     private BlockPos getBestSquadThreatPosition() {
         if (!(level() instanceof ServerLevel serverLevel) || getSquadId() == null) {

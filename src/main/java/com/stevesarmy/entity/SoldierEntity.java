@@ -6,6 +6,7 @@ import com.stevesarmy.compat.VS2Compat;
 import com.stevesarmy.skin.SoldierSkinManager;
 import com.stevesarmy.squad.OwnedSoldierRegistry;
 import com.stevesarmy.combat.CombatDebugData;
+import com.stevesarmy.combat.CoverStateDebugManager;
 import com.stevesarmy.combat.DetectionSystem;
 import com.stevesarmy.combat.GrenadeIntegration;
 import com.stevesarmy.combat.GunIntegration;
@@ -34,6 +35,7 @@ import com.stevesarmy.entity.ai.GrenadeTacticalController;
 import com.stevesarmy.inventory.SoldierInventory;
 import com.stevesarmy.inventory.SoldierInventoryHandler;
 import com.stevesarmy.network.NetworkHandler;
+import com.stevesarmy.network.CoverStateDebugPacket;
 import com.stevesarmy.network.OpenSoldierInventoryMessage;
 import com.stevesarmy.squad.FireDiscipline;
 import com.stevesarmy.squad.FireTeam;
@@ -84,6 +86,7 @@ import net.minecraftforge.common.capabilities.Capability;
 import net.minecraftforge.common.capabilities.ForgeCapabilities;
 import net.minecraftforge.common.util.LazyOptional;
 import net.minecraftforge.items.IItemHandler;
+import net.minecraftforge.network.PacketDistributor;
 
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
@@ -1433,6 +1436,9 @@ public class SoldierEntity extends PathfinderMob implements Container {
         suppressionOrder.tick(this);
         refreshAttackTargetUnderFire();
         tickCoverStuckWatchdog();
+        if (tickCount % 10 == 0) {
+            sendCoverStateDebugPacket();
+        }
 
         long gameTime = level().getGameTime();
         if (VS2Compat.prepareSoldierAi(this)) {
@@ -1451,6 +1457,20 @@ public class SoldierEntity extends PathfinderMob implements Container {
             return;
         }
         super.customServerAiStep();
+    }
+
+    /**
+     * Cover state-machine debug feed ({@code /stevesarmy_debug coverstate}).
+     * Runs from the entity tick rather than the cover goal so the card stays
+     * live during goal cooldowns and restarts — exactly the blind spots where
+     * strands hide. Read-only diagnostics.
+     */
+    private void sendCoverStateDebugPacket() {
+        if (!(getOwner() instanceof ServerPlayer serverPlayer)) return;
+        if (!CoverStateDebugManager.isEnabled(serverPlayer.getUUID())) return;
+        if (!(coverTacticalGoal instanceof CoverTacticalGoal tacticalGoal)) return;
+        CoverStateDebugPacket packet = tacticalGoal.buildCoverStateDebugPacket();
+        NetworkHandler.INSTANCE.send(PacketDistributor.PLAYER.with(() -> serverPlayer), packet);
     }
 
     // --- Cover anti-stuck watchdog -----------------------------------------

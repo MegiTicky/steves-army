@@ -18,6 +18,7 @@ import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.entity.SoldierRole;
 import com.stevesarmy.entity.MachineGunnerEntity;
 import com.stevesarmy.entity.SupportEntity;
+import com.stevesarmy.network.CoverStateDebugPacket;
 import com.stevesarmy.squad.SquadCoverContext;
 import com.stevesarmy.squad.SquadManager;
 import com.stevesarmy.squad.SquadMode;
@@ -296,6 +297,8 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
 
     private CoverFinder.ScoredCover[] cachedTopCovers = new CoverFinder.ScoredCover[0];
     private BlockPos debugSearchCenter = null;
+    /** Why shouldSeekCover last returned true; empty when it returned false. Debug only. */
+    private String lastWantCoverReason = "";
 
     // Per-soldier rate limiters (ticks between repeated log lines)
     private static final int SNAPSHOT_INTERVAL = 20; // 1 second at 20 TPS
@@ -1204,6 +1207,118 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
             latchedMachineGunnerSearchCenterTick = soldier.tickCount;
         }
         return anchor;
+    }
+
+    // --- Cover state-machine debug render ------------------------------------
+
+    BlockPos debugLatchedMachineGunnerAnchor() {
+        return latchedMachineGunnerSearchCenter;
+    }
+
+    /** Ticks since the MG/Support rear-anchor latch was taken; -1 when unset. */
+    int debugLatchedMachineGunnerAnchorAge() {
+        return latchedMachineGunnerSearchCenter != null
+            ? soldier.tickCount - latchedMachineGunnerSearchCenterTick : -1;
+    }
+
+    /**
+     * Builds the per-soldier snapshot for the cover state-machine debug render
+     * (network/CoverStateDebugPacket). Read-only: mirrors the canUse /
+     * canContinueToUse / SoldierFollowOwnerGoal decision inputs so a strand is
+     * visible as it forms instead of only as a stuck pose.
+     */
+    public CoverStateDebugPacket buildCoverStateDebugPacket() {
+        CoverBehaviorManager mgr = getCoverManager();
+        CoverBehaviorManager.CoverState state = mgr.getState();
+
+        LivingEntity owner = soldier.getOwner();
+        float ownerDist = owner != null ? soldier.distanceTo(owner) : -1.0f;
+        String followBlockedBy = describeFollowBlocker(state);
+
+        Vec3 relocCenterVec = relocationCenter != null
+            ? Vec3.atBottomCenterOf(relocationCenter) : null;
+
+        BlockPos latchedAnchor = latchedMachineGunnerSearchCenter;
+        Vec3 mgAnchorVec = latchedAnchor != null
+            ? Vec3.atBottomCenterOf(latchedAnchor) : null;
+        int mgAnchorAge = debugLatchedMachineGunnerAnchorAge();
+
+        Vec3 suppressionCenterVec = null;
+        int supCenterFresh = -1;
+        Vec3 laneVec = null;
+        if (soldier instanceof MachineGunnerEntity mg) {
+            BlockPos supPos = mg.getSuppressionCenter();
+            if (supPos != null) {
+                suppressionCenterVec = Vec3.atBottomCenterOf(supPos);
+                supCenterFresh = mg.getSuppressionCenterFreshTicks();
+            }
+            BlockPos lanePos = soldier.hasValidAttackTarget()
+                ? soldier.getAttackTargetPos() : supPos;
+            if (lanePos != null) {
+                laneVec = Vec3.atBottomCenterOf(lanePos);
+            }
+        }
+
+        int blacklistClearInSec = 0;
+        if (lastBlacklistClearTime > 0) {
+            long elapsedMs = System.currentTimeMillis() - lastBlacklistClearTime;
+            blacklistClearInSec = (int) Math.max(0L, (BLACKLIST_CLEAR_INTERVAL_MS - elapsedMs) / 1000L);
+        }
+
+        return new CoverStateDebugPacket(
+            true,
+            soldier.getUUID(),
+            soldier.getRole().name(),
+            soldier.position(),
+            state.name(),
+            soldier.getPeekController().getState().name(),
+            soldier.getSquadMode().name(),
+            mgr.getSuppressionTracker().getSuppressionLevel(),
+            mgr.isPinned(),
+            !lastWantCoverReason.isEmpty(),
+            lastWantCoverReason,
+            cooldown,
+            seekingTicks,
+            relocationType != RelocationType.NONE ? MAX_SEEKING_TICKS * 3 : MAX_SEEKING_TICKS,
+            stuckTicks,
+            MAX_STUCK_TICKS,
+            noProgressTicks,
+            searchExhaustionCooldown,
+            consecutiveFailedSearches,
+            failedCoverPositions.size(),
+            blacklistClearInSec,
+            coverSearchPending,
+            queuedSearchMode != null ? queuedSearchMode.name() : "",
+            CoverSearchScheduler.pendingCount(),
+            relocationType.name(),
+            relocCenterVec,
+            Math.max(0, nextFollowRelocationSearchTick - soldier.tickCount),
+            followBlockedBy,
+            ownerDist,
+            machineGunnerPipeline,
+            mgAnchorVec,
+            mgAnchorAge,
+            suppressionCenterVec,
+            supCenterFresh,
+            laneVec);
+    }
+
+    /**
+     * Names the gate currently refusing SoldierFollowOwnerGoal.canUse, in that
+     * goal's check order; empty when nothing blocks the follow march.
+     */
+    private String describeFollowBlocker(CoverBehaviorManager.CoverState state) {
+        if (soldier.hasValidPingSuppressPos()) return "ping-suppress";
+        if (soldier.getRole() == SoldierRole.VEHICLE_CREW) return "crew";
+        if (soldier.getSquadMode() != SquadMode.FOLLOW) return "";
+        if (state == CoverBehaviorManager.CoverState.SEEKING_COVER
+            || state == CoverBehaviorManager.CoverState.REPOSITIONING) {
+            return state.name();
+        }
+        if (getCoverManager().isSuppressed()) return "suppressed";
+        LivingEntity owner = soldier.getOwner();
+        if (owner == null || owner.isSpectator()) return "no-owner";
+        return "";
     }
 
     /**
@@ -3133,6 +3248,7 @@ private void tickRepositioning() {
         ThreatAwareness threats = getThreats();
 
         if (relocationType != RelocationType.NONE) {
+            lastWantCoverReason = "reloc";
             return true;
         }
 
@@ -3140,6 +3256,7 @@ private void tickRepositioning() {
             if (DiagnosticLogManager.isCoverLoggingEnabled()) {
                 StevesArmyMod.LOGGER.info("[CoverGoal] shouldSeekCover=true (ATTACK mode)");
             }
+            lastWantCoverReason = "attack";
             return true;
         }
 
@@ -3148,37 +3265,41 @@ private void tickRepositioning() {
                 StevesArmyMod.LOGGER.info("[CoverGoal] shouldSeekCover=false (CQB mode={}, closeRangeTarget={})",
                     soldier.isCQB(), soldier.hasCloseRangeTarget());
             }
+            lastWantCoverReason = "";
             return false;
         }
-        
+
         if (soldier.getSquadMode() == SquadMode.HOLD) {
             boolean hasValid = getCoverManager().getCurrentCover() != null && isCoverStillValid();
             boolean result = !hasValid;
             if (DiagnosticLogManager.isCoverLoggingEnabled()) {
                 StevesArmyMod.LOGGER.info("[CoverGoal] shouldSeekCover={} (HOLD mode, hasValidCover={})", result, hasValid);
             }
+            lastWantCoverReason = result ? "hold-invalid" : "";
             return result;
         }
-        
+
         if (soldier.getSquadMode() == SquadMode.FOLLOW) {
             boolean suppressed = getCoverManager().isSuppressed();
             float healthRatio = soldier.getHealth() / soldier.getMaxHealth();
             boolean lowHealth = healthRatio < LOW_HEALTH_THRESHOLD;
-            
+
             LivingEntity owner = soldier.getOwner();
-            boolean closeToOwner = owner != null && 
+            boolean closeToOwner = owner != null &&
                 soldier.distanceToSqr(owner) < FOLLOW_COVER_DISTANCE * FOLLOW_COVER_DISTANCE;
-            
+
             boolean result;
             if (closeToOwner) {
                 boolean hasThreat = threats.hasActiveThreat();
                 result = (suppressed || lowHealth) || hasThreat;
+                lastWantCoverReason = result ? joinSeekReasons(suppressed, lowHealth, hasThreat) : "";
                 if (DiagnosticLogManager.isCoverLoggingEnabled()) {
                     StevesArmyMod.LOGGER.info("[CoverGoal] shouldSeekCover={} (FOLLOW close, suppressed={}, lowHealth={} health={}, hasThreat={})",
                         result, suppressed, lowHealth, String.format("%.2f", healthRatio), hasThreat);
                 }
             } else {
                 result = suppressed || lowHealth;
+                lastWantCoverReason = result ? joinSeekReasons(suppressed, lowHealth, false) : "";
                 if (DiagnosticLogManager.isCoverLoggingEnabled()) {
                     StevesArmyMod.LOGGER.info("[CoverGoal] shouldSeekCover={} (FOLLOW far, suppressed={}, lowHealth={} health={})",
                         result, suppressed, lowHealth, String.format("%.2f", healthRatio));
@@ -3186,18 +3307,28 @@ private void tickRepositioning() {
             }
             return result;
         }
-        
+
         boolean suppressed = getCoverManager().isSuppressed();
         float healthRatio = soldier.getHealth() / soldier.getMaxHealth();
         boolean lowHealth = healthRatio < LOW_HEALTH_THRESHOLD;
         boolean hasThreat = threats.hasActiveThreat();
-        
+
         boolean result = (suppressed || lowHealth) || hasThreat;
+        lastWantCoverReason = result ? joinSeekReasons(suppressed, lowHealth, hasThreat) : "";
         if (DiagnosticLogManager.isCoverLoggingEnabled()) {
             StevesArmyMod.LOGGER.info("[CoverGoal] shouldSeekCover={} (suppressed={}, lowHealth={} health={}, hasThreat={})",
                 result, suppressed, lowHealth, String.format("%.2f", healthRatio), hasThreat);
         }
         return result;
+    }
+
+    /** Compact reason tags for the debug card, e.g. "supp,threat". */
+    private static String joinSeekReasons(boolean suppressed, boolean lowHealth, boolean hasThreat) {
+        StringBuilder reasons = new StringBuilder();
+        if (suppressed) reasons.append("supp,");
+        if (lowHealth) reasons.append("lowHP,");
+        if (hasThreat) reasons.append("threat,");
+        return reasons.length() == 0 ? "" : reasons.substring(0, reasons.length() - 1);
     }
     
     private boolean isCoverStillValid() {
