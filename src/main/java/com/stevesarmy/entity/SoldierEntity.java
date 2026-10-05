@@ -406,7 +406,10 @@ public class SoldierEntity extends PathfinderMob implements Container {
                     StevesArmyMod.LOGGER.info("[Soldier] Blocked gun swap during reload (callback)");
                     return;
                 }
-                setItemSlot(EquipmentSlot.MAINHAND, stack.copy());
+                // Share the inventory's stack instance with the hand slot so
+                // TaCZ's per-shot/reload NBT writes land on the stack the
+                // inventory shows; copying would strand them on an orphan.
+                setItemSlot(EquipmentSlot.MAINHAND, stack);
                 if (GunIntegration.isAnyGunLoaded() && !stack.isEmpty() && !reloading) {
                     GunIntegration.initialData(this);
                     GunIntegration.draw(this);
@@ -635,6 +638,10 @@ public class SoldierEntity extends PathfinderMob implements Container {
     @Override
     public ItemStack getPickedResult(HitResult target) {
         inventory.syncFromEntity(this);
+
+        for (int i = 0; i < inventory.getContainerSize(); i++) {
+            InfiniteReserveAmmo.stripInfiniteReserveNbt(inventory.getItem(i));
+        }
 
         ItemStack stack = new ItemStack(getPickBlockEggItem());
         CompoundTag tag = new CompoundTag();
@@ -1227,6 +1234,9 @@ public class SoldierEntity extends PathfinderMob implements Container {
         if (!anyItems) {
             return;
         }
+        for (int i = 0; i < inventory.getContainerSize(); i++) {
+            InfiniteReserveAmmo.stripInfiniteReserveNbt(inventory.getItem(i));
+        }
         com.stevesarmy.inventory.PouchContainer.dropInventoryAsPouch(this, inventory);
         for (int i = 0; i < inventory.getContainerSize(); i++) {
             inventory.setItem(i, ItemStack.EMPTY);
@@ -1307,7 +1317,7 @@ public class SoldierEntity extends PathfinderMob implements Container {
         }
         inventory.setItem(slot, stack);
         if (slot == SoldierInventory.SLOT_MAIN_HAND) {
-            setItemSlot(EquipmentSlot.MAINHAND, stack.copy());
+            setItemSlot(EquipmentSlot.MAINHAND, stack);
             if (GunIntegration.isAnyGunLoaded() && !stack.isEmpty() && !reloading) {
                 GunIntegration.initialData(this);
                 GunIntegration.draw(this);
@@ -1332,7 +1342,9 @@ public class SoldierEntity extends PathfinderMob implements Container {
         inventorySyncingFromEntity = true;
         try {
             if (slot == EquipmentSlot.MAINHAND) {
-                inventory.setItem(SoldierInventory.SLOT_MAIN_HAND, stack.copy());
+                // Share the instance (not a copy) so the persistent slot and
+                // the hand are always the same stack; see the main-hand callback.
+                inventory.setItem(SoldierInventory.SLOT_MAIN_HAND, stack);
             } else if (slot.getType() == EquipmentSlot.Type.ARMOR) {
                 int invSlot;
                 switch (slot) {

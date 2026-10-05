@@ -1103,6 +1103,12 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
             GunIntegration.draw(soldier);
             clearReloadStatus();
             wasReloading = false;
+            // A reload that consumed reserve ammo but left the magazine at zero
+            // means the write never landed on the held stack; back off instead
+            // of re-requesting every tick and draining the ammo supply.
+            if (GunIntegration.getCurrentAmmo(soldier) == 0 && !usesInventoryAmmoWithoutReserve()) {
+                reloadRetryTicks = 100;
+            }
             return true;
         }
 

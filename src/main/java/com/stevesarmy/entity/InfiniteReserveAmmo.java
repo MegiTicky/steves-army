@@ -2,6 +2,7 @@ package com.stevesarmy.entity;
 
 import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.combat.GunIntegration;
+import net.minecraft.nbt.CompoundTag;
 import net.minecraft.world.item.ItemStack;
 
 import java.lang.reflect.Method;
@@ -57,6 +58,24 @@ public final class InfiniteReserveAmmo {
             StevesArmyMod.LOGGER.warn("[InfiniteAmmo] Failed to configure infinite reserve for soldier {} gun {}: {}",
                 soldier.getId(), soldier.getMainHandItem(), e.toString());
             return false;
+        }
+    }
+
+    /**
+     * Removes the virtual-reserve NBT from a gun stack before it leaves the
+     * soldier (death pouch, pick-block egg). The hand stack now persists to
+     * loot, and a looted enemy gun must not carry the million-round dummy
+     * reserve; {@code prepareEnemyReserveAmmo} re-ensures it before every
+     * reload. Keys are TaCZ's GunItemDataAccessor GUN_DUMMY_AMMO /
+     * GUN_MAX_DUMMY_AMMO ("DummyAmmo" / "MaxDummyAmmo"); the presence of the
+     * first tag is itself the dummy-ammo flag, so removing both fully clears it.
+     */
+    public static void stripInfiniteReserveNbt(ItemStack stack) {
+        if (stack.isEmpty() || !GunIntegration.isGun(stack)) return;
+        CompoundTag tag = stack.getTag();
+        if (tag != null) {
+            tag.remove("DummyAmmo");
+            tag.remove("MaxDummyAmmo");
         }
     }
 }
