@@ -101,6 +101,7 @@ public class StevesArmyConfig {
     public static final ForgeConfigSpec.ConfigValue<java.util.List<? extends String>> ARMOR_AT_GUN_PATTERNS;
     public static final ForgeConfigSpec.ConfigValue<java.util.List<? extends String>> SIDEARM_GUN_PATTERNS;
     public static final ForgeConfigSpec.BooleanValue SOLDIER_DEATH_DROPS;
+    public static final ForgeConfigSpec.BooleanValue SWAP_SYNCS_HEALTH;
     public static final ForgeConfigSpec.EnumValue<ArmorDoctrineOverride> ARMOR_DOCTRINE_OVERRIDE;
     public static final ForgeConfigSpec.BooleanValue OCCUPANCY_VEHICLE_DETECTION;
     public static final ForgeConfigSpec.BooleanValue SBW_COMPAT_ENABLED;
@@ -672,6 +673,13 @@ BUILDER.pop();
             .comment("Soldiers drop their whole inventory inside one supply pouch",
                      "where they die instead of vanishing with it. Default: true.")
             .define("soldierDeathDrops", true);
+
+        SWAP_SYNCS_HEALTH = BUILDER
+            .comment("Player-soldier body swap carries health with the body: swapping into",
+                     "a wounded soldier leaves you at his hearts, and the body you leave",
+                     "behind keeps yours (so swapping back never heals you for free).",
+                     "Default: true.")
+            .define("swapSyncsHealth", true);
 
         ARMOR_DOCTRINE_OVERRIDE = BUILDER
             .comment("Force the reaction branch for testing: AUTO uses each squad's real",
@@ -1293,6 +1301,10 @@ BUILDER.pop();
 
     public static boolean isSoldierDeathDropsEnabled() {
         return SOLDIER_DEATH_DROPS.get();
+    }
+
+    public static boolean isSwapHealthSyncEnabled() {
+        return SWAP_SYNCS_HEALTH.get();
     }
 
     public static ArmorDoctrineOverride getArmorDoctrineOverride() {

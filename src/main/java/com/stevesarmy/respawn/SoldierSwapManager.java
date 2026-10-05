@@ -1,5 +1,6 @@
 package com.stevesarmy.respawn;
 
+import com.stevesarmy.StevesArmyConfig;
 import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.combat.GunIntegration;
 import com.stevesarmy.combat.SoldierWeaponSelector;
@@ -104,6 +105,7 @@ public final class SoldierSwapManager {
         float targetYRot = target.getYRot();
         float targetXRot = target.getXRot();
         SoldierRole targetRole = target.getRole();
+        float targetHealth = target.getHealth();
 
         SoldierRole leftBehindRole = getStoredRole(player);
         if (leftBehindRole == SoldierRole.VEHICLE_CREW && !VS2Compat.isEnabled()) {
@@ -133,6 +135,12 @@ public final class SoldierSwapManager {
         target.discard();
 
         teleportPlayerToSoldier(player, seatCapture, targetPos, targetYRot, targetXRot);
+
+        // The body's wounds come with it — the left-behind already captured the
+        // player's old health, so damage round-trips and swap-back never heals.
+        if (StevesArmyConfig.isSwapHealthSyncEnabled()) {
+            player.setHealth(targetHealth);
+        }
 
         // The player now "is" the swapped-in role.
         setStoredRole(player, targetRole);
@@ -185,6 +193,11 @@ public final class SoldierSwapManager {
             StevesArmyMod.LOGGER.warn("[Swap] Left-behind spawn failed: {}", result.message());
             leftBehind.discard();
             return null;
+        }
+        // The body keeps the wounds it carried — otherwise swapping back would
+        // be a free full heal. Runs before the player's health is overwritten.
+        if (StevesArmyConfig.isSwapHealthSyncEnabled()) {
+            leftBehind.setHealth(player.getHealth());
         }
         if (!overflow.isEmpty()) {
             SwapStashStore.get(player.getServer()).stash(player.getUUID(), leftBehind.getUUID(), overflow);
