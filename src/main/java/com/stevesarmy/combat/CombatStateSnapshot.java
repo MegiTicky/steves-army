@@ -59,6 +59,9 @@ public final class CombatStateSnapshot {
     /** Claimed / pursued cover positions; null when none. Extra beyond the debug packet. */
     public final BlockPos currentCover;
     public final BlockPos targetCover;
+    /** CoverType name (HALF/FULL/...) of the claimed / pursued cover; null when none. */
+    public final String currentCoverType;
+    public final String targetCoverType;
 
     public CombatStateSnapshot(UUID soldierId, String role, Vec3 position,
                                String coverState, String peekState, String squadMode,
@@ -72,7 +75,8 @@ public final class CombatStateSnapshot {
                                String followBlockedBy, float ownerDist,
                                boolean mgPipeline, Vec3 mgAnchor, int mgAnchorAgeTicks,
                                Vec3 suppressionCenter, int supCenterFreshTicks, Vec3 laneTarget,
-                               BlockPos currentCover, BlockPos targetCover) {
+                               BlockPos currentCover, BlockPos targetCover,
+                               String currentCoverType, String targetCoverType) {
         this.soldierId = soldierId;
         this.role = role;
         this.position = position;
@@ -109,5 +113,7 @@ public final class CombatStateSnapshot {
         this.laneTarget = laneTarget;
         this.currentCover = currentCover;
         this.targetCover = targetCover;
+        this.currentCoverType = currentCoverType;
+        this.targetCoverType = targetCoverType;
     }
 }

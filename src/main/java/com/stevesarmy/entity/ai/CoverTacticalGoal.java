@@ -1314,7 +1314,9 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
             supCenterFresh,
             laneVec,
             currentCover != null ? currentCover.getPosition() : null,
-            targetCover != null ? targetCover.getPosition() : null);
+            targetCover != null ? targetCover.getPosition() : null,
+            currentCover != null ? currentCover.getType().name() : null,
+            targetCover != null ? targetCover.getType().name() : null);
     }
 
     /**

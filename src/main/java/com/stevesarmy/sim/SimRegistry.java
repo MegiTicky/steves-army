@@ -4,7 +4,6 @@ import com.stevesarmy.entity.EnemySoldierEntity;
 import com.stevesarmy.registry.ModEntities;
 import com.stevesarmy.sim.scenario.SimContext;
 import com.stevesarmy.sim.scenario.SimScenario;
-import com.stevesarmy.sim.terrain.SimTerrain;
 import com.stevesarmy.squad.SquadMode;
 import net.minecraft.world.phys.Vec3;
 
@@ -53,6 +52,9 @@ public final class SimRegistry {
                 t.coverRow(20, 18, 22, 18, 1); // north waist-high segment
                 t.coverRow(20, 30, 22, 30, 1); // south waist-high segment
                 t.coverBlock(19, 24, 2);       // head-high hard cover mid-line
+                t.coverRow(44, 20, 46, 20, 1); // enemy-side cover (east of the shooter)
+                t.coverRow(44, 28, 46, 28, 1);
+                t.coverBlock(43, 24, 2);
             })
             .setup(ctx -> {
                 ctx.spawnAnchor(4, 0, 24);
@@ -82,6 +84,9 @@ public final class SimRegistry {
             .terrain(t -> {
                 t.platform();
                 t.pocket(10, 24, 3, 3, "W");
+                t.coverRow(44, 20, 46, 20, 1); // enemy-side cover
+                t.coverRow(44, 28, 46, 28, 1);
+                t.coverBlock(43, 24, 2);
             })
             .setup(ctx -> {
                 ctx.spawnAnchor(3, 0, 24);
@@ -107,6 +112,9 @@ public final class SimRegistry {
                 t.coverRow(22, 20, 24, 20, 1); // relocation option north of the line
                 t.coverRow(22, 28, 24, 28, 1); // relocation option south of the line
                 t.coverBlock(18, 24, 2);       // close hard cover near the spawn
+                t.coverRow(40, 20, 42, 20, 1); // enemy-side cover
+                t.coverRow(40, 28, 42, 28, 1);
+                t.coverBlock(39, 24, 2);
             })
             .setup(ctx -> {
                 ctx.spawnAnchor(4, 0, 24);
@@ -132,6 +140,12 @@ public final class SimRegistry {
                 t.coverRow(16, 21, 18, 21, 1); // waist-high cover north of the gunner
                 t.coverRow(16, 27, 18, 27, 1); // waist-high cover south of the gunner
                 t.coverBlock(22, 24, 2);       // head-high hard cover mid-line
+                t.coverRow(40, 20, 42, 20, 1); // enemy-side cover near position A
+                t.coverRow(40, 28, 42, 28, 1);
+                t.coverBlock(39, 24, 2);
+                t.coverRow(40, 40, 42, 40, 1); // enemy-side cover near the moved position B
+                t.coverRow(40, 46, 42, 46, 1);
+                t.coverBlock(39, 44, 2);
             })
             .setup(ctx -> {
                 ctx.spawnAnchor(4, 0, 24);
@@ -167,6 +181,9 @@ public final class SimRegistry {
                 t.coverRow(18, 19, 20, 19, 1);
                 t.coverRow(18, 29, 20, 29, 1); // right soldier's options
                 t.coverRow(18, 36, 20, 36, 1);
+                t.coverRow(40, 20, 42, 20, 1); // enemy-side cover
+                t.coverRow(40, 28, 42, 28, 1);
+                t.coverBlock(39, 24, 2);
             })
             .setup(ctx -> {
                 ctx.spawnAnchor(4, 0, 24);
@@ -192,7 +209,12 @@ public final class SimRegistry {
             .description("No suppression, one visible enemy directly in the soldier's facing: a healthy "
                 + "run. Any detector violation here is a false positive to calibrate, not a bug.")
             .duration(500)
-            .terrain(SimTerrain::platform)
+            .terrain(t -> {
+                t.platform();
+                t.coverRow(7, 44, 13, 44, 1); // enemy-side cover south of the shooter
+                t.coverBlock(7, 40, 1);
+                t.coverBlock(13, 40, 1);
+            })
             .setup(ctx -> {
                 ctx.spawnAnchor(4, 0, 8);
                 ctx.spawnFriendly(ModEntities.SOLDIER.get(), "scout", 10, 0, 8, SquadMode.FOLLOW);

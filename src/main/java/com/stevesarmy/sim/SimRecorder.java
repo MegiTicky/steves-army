@@ -73,6 +73,12 @@ public final class SimRecorder {
             .append(",\"los\":").append(quote(los == null ? "?" : los ? "y" : "n"));
         appendPos(current, "c", s.currentCover);
         appendPos(current, "t", s.targetCover);
+        if (s.currentCoverType != null) {
+            current.append(",\"ck\":").append(quote(s.currentCoverType));
+        }
+        if (s.targetCoverType != null) {
+            current.append(",\"tk\":").append(quote(s.targetCoverType));
+        }
         if (s.relocCenter != null) {
             current.append(",\"rx\":").append(num(s.relocCenter.x))
                 .append(",\"rz\":").append(num(s.relocCenter.z));

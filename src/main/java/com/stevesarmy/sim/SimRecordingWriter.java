@@ -52,7 +52,8 @@ public final class SimRecordingWriter {
              .sq{display:inline-block;width:11px;height:11px;background:#ff3030;vertical-align:middle}
              #detail{white-space:pre;margin-top:12px;color:#b8d8b8;font-size:12px;background:#1c1c1c;
                      border:1px solid #333;padding:8px;min-height:170px}
-             #evline{color:#ffcc66;font-size:12px;min-height:16px;margin-top:4px}
+             #evlog{color:#ffcc66;font-size:12px;margin-top:4px;height:54px;overflow-y:auto;
+                    background:#1a1a1a;border:1px solid #333;padding:4px 6px}
              #vline{color:#ff7b7b;font-size:12px;margin-top:4px}
              .outcome-FAIL{color:#ff7b7b} .outcome-PASS{color:#7bd97b}
             </style></head><body>
@@ -66,7 +67,7 @@ public final class SimRecordingWriter {
                tick <span id="tickLabel">0</span> <span style="color:#666">(1x = real time)</span>
               </div>
               <input type="range" id="scrub" min="0" max="0" value="0">
-              <div id="evline"></div>
+              <div id="evlog" title="scripted events (append-only)"></div>
               <div id="vline"></div>
              </div>
              <div class="side">
@@ -82,6 +83,8 @@ public final class SimRecordingWriter {
                    <td><span class="dot" style="background:transparent;border:2px solid rgba(255,60,60,.9)"></span></td><td>suppression arc</td></tr>
                <tr><td><span style="color:#0ff">&mdash;</span></td><td>cover target</td>
                    <td><span style="color:#fff">&mdash;</span></td><td>line of sight</td></tr>
+               <tr><td><span class="sq" style="background:#9c8a4d"></span></td><td>half cover</td>
+                   <td><span class="sq" style="background:#cfd8e6"></span></td><td>full cover</td></tr>
               </table>
               <div id="detail">click a soldier to inspect</div>
              </div>
@@ -103,10 +106,16 @@ public final class SimRecordingWriter {
             terr.width = cv.width; terr.height = cv.height;
             {
               const tc = terr.getContext('2d');
-              const shades = ['#242424', '#808080', '#a2a2a2', '#c6c6c6'];
+              const rimShades = ['#242424', '#808080', '#a2a2a2', '#c6c6c6'];
+              const HALF = '#9c8a4d', FULL = '#cfd8e6';
               for (let ix = 0; ix < W; ix++) for (let iz = 0; iz < H; iz++) {
                 const h = D.terrain.cells[ix * H + iz] || 0;
-                tc.fillStyle = shades[Math.min(h, 3)];
+                const rim = ix === 0 || ix === W - 1 || iz === 0 || iz === H - 1;
+                let fill;
+                if (h === 0) fill = '#242424';
+                else if (rim) fill = rimShades[Math.min(h, 3)];
+                else fill = h === 1 ? HALF : FULL;
+                tc.fillStyle = fill;
                 tc.fillRect(ix * CS, iz * CS, CS, CS);
                 if (h > 0) { tc.strokeStyle = 'rgba(0,0,0,.55)'; tc.strokeRect(ix*CS+.5, iz*CS+.5, CS-1, CS-1); }
               }
@@ -128,22 +137,44 @@ public final class SimRecordingWriter {
               ctx.restore();
             }
 
+            // --- event log: append-only, rebuilt only when scrubbing backwards ------
+            const evlog = document.getElementById('evlog');
+            let evShown = 0;          // events[0..evShown) are in the log
+            let lastRenderedTick = Infinity;
+            function syncEvents(t, rebuild) {
+              if (rebuild) { evlog.textContent = ''; evShown = 0; }
+              let added = false;
+              while (evShown < D.events.length && D.events[evShown][0] <= t) {
+                const e = D.events[evShown++];
+                const row = document.createElement('div');
+                row.textContent = 't' + e[0] + ': ' + e[1];
+                evlog.appendChild(row);
+                added = true;
+              }
+              while (evlog.childNodes.length > 200) evlog.removeChild(evlog.firstChild);
+              if (added) evlog.scrollTop = evlog.scrollHeight;
+            }
+
             function render() {
               const f = D.frames[idx];
               ctx.drawImage(terr, 0, 0);
               document.getElementById('tickLabel').textContent = f.t;
               scrub.value = idx;
-
-              const recent = D.events.filter(e => e[0] <= f.t && f.t - e[0] <= 75);
-              document.getElementById('evline').textContent =
-                recent.map(e => 't' + e[0] + ': ' + e[1]).join('  |  ');
+              syncEvents(f.t, f.t < lastRenderedTick);
+              lastRenderedTick = f.t;
 
               // enemies
               ctx.fillStyle = '#ff3030';
               for (const e of f.e) ctx.fillRect(px(e[0]) - 5, px(e[1]) - 5, 10, 10);
 
               for (const s of f.s) {
-                if (s.tx !== undefined) line(s.x, s.z, s.tx, s.tz, 'rgba(0,255,255,.45)');
+                if (s.tx !== undefined) {
+                  line(s.x, s.z, s.tx, s.tz, 'rgba(0,255,255,.45)');
+                  ctx.fillStyle = s.tk === 'FULL' ? '#cfd8e6' : s.tk === 'HALF' ? '#9c8a4d' : '#0ff';
+                  ctx.strokeStyle = 'rgba(0,255,255,.9)'; ctx.lineWidth = 1;
+                  ctx.fillRect(px(s.tx) - 4, px(s.tz) - 4, 8, 8);
+                  ctx.strokeRect(px(s.tx) - 4.5, px(s.tz) - 4.5, 9, 9);
+                }
                 if (s.rx !== undefined) line(s.x, s.z, s.rx, s.rz, 'rgba(255,170,60,.55)', true);
                 if (s.los === 'y' && s.nx !== undefined) line(s.x, s.z, s.nx, s.nz, 'rgba(255,255,255,.4)', true);
               }
@@ -182,8 +213,8 @@ public final class SimRecordingWriter {
                    '\\nwantCover        : ' + (s.wc || '-') +
                    '\\nqueued / reloc   : ' + (s.qm || '-') + ' / ' + s.rt +
                    '\\nseeking / failed / stuck : ' + s.sk + ' / ' + s.fs + ' / ' + s.st +
-                   '\\ncurrentCover     : ' + (s.cx !== undefined ? p(s.cx) + ', ' + p(s.cz) : '-') +
-                   '\\ntargetCover      : ' + (s.tx !== undefined ? p(s.tx) + ', ' + p(s.tz) : '-') +
+                   '\\ncurrentCover     : ' + (s.cx !== undefined ? p(s.cx) + ', ' + p(s.cz) + (s.ck ? '  [' + s.ck + ']' : '') : '-') +
+                   '\\ntargetCover      : ' + (s.tx !== undefined ? p(s.tx) + ', ' + p(s.tz) + (s.tk ? '  [' + s.tk + ']' : '') : '-') +
                    '\\nrelocCenter      : ' + (s.rx !== undefined ? p(s.rx) + ', ' + p(s.rz) : '-') +
                    '\\nLoS to enemy     : ' + s.los;
             }
