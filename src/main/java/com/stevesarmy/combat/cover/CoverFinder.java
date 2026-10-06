@@ -122,6 +122,11 @@ public class CoverFinder {
     public List<CoverPoint> discoverCoverPoints(BlockPos center, int radius) {
         return findCoverPoints(center, radius, null);
     }
+
+    /** Discovers physical candidates classified against an explicit threat. */
+    public List<CoverPoint> discoverCoverPoints(BlockPos center, int radius, LivingEntity threat) {
+        return findCoverPoints(center, radius, threat);
+    }
     
     public List<CoverPoint> findCoverPoints(BlockPos center, int radius, LivingEntity threat) {
         SearchKey searchKey = new SearchKey(center.immutable(), radius,
@@ -170,41 +175,6 @@ public class CoverFinder {
         candidatesDiscovered += coverPoints.size();
         PerformanceMetrics.recordCoverSearch(elapsed, coverPoints.size());
         return coverPoints;
-    }
-    
-    public Optional<CoverPoint> findBestCover(BlockPos center, int radius, LivingEntity threat) {
-        List<CoverPoint> coverPoints = findCoverPoints(center, radius, threat);
-        
-        if (coverPoints.isEmpty()) {
-            return Optional.empty();
-        }
-        
-        return coverPoints.stream()
-            .max(Comparator.comparingDouble(cp -> calculateScore(cp, center, threat)));
-    }
-    
-    public Optional<CoverPoint> findBestCover(BlockPos center, int radius, LivingEntity threat, Vec3 threatDirection) {
-        List<CoverPoint> coverPoints = findCoverPoints(center, radius, threat);
-        
-        if (coverPoints.isEmpty()) {
-            return Optional.empty();
-        }
-
-        if (threatDirection != null && threatDirection.lengthSqr() > 0.001) {
-            List<CoverPoint> protectedCovers = coverPoints.stream()
-                .filter(cp -> cp.getType() != CoverType.NONE)
-                .filter(cp -> isDirectionProtected(cp, threatDirection))
-                .collect(java.util.stream.Collectors.toList());
-            if (!protectedCovers.isEmpty()) {
-                return protectedCovers.stream()
-                    .max(Comparator.comparingDouble(cp -> calculateThreatAwareScore(cp, center, threat, threatDirection)));
-            }
-            return Optional.empty();
-        }
-        
-        return coverPoints.stream()
-            .filter(cp -> cp.getType() != CoverType.NONE)
-            .max(Comparator.comparingDouble(cp -> calculateThreatAwareScore(cp, center, threat, threatDirection)));
     }
     
     public Optional<CoverPoint> findBestCover(LivingEntity soldier, Vec3 threatDirection, List<LivingEntity> allThreats) {
@@ -730,7 +700,9 @@ public class CoverFinder {
     }
     
     private float calculateDistanceScore(CoverPoint coverPoint, LivingEntity soldier) {
-        double distance = coverPoint.distanceTo(soldier);
+        // distanceTo() returns a SQUARED distance; normalize the true block
+        // distance against the same 2x-radius span the BlockPos variant uses.
+        double distance = Math.sqrt(coverPoint.distanceTo(soldier));
         double maxDistance = DEFAULT_SEARCH_RADIUS * 2.0;
         return (float) (1.0 - Math.min(distance / maxDistance, 1.0));
     }
@@ -969,14 +941,6 @@ public class CoverFinder {
             return vec.z > 0 ? Direction.SOUTH : Direction.NORTH;
         }
     }
-    
-    private double calculateScore(CoverPoint coverPoint, BlockPos soldierPos, LivingEntity threat) {
-        double distancePenalty = Math.sqrt(coverPoint.distanceTo(soldierPos)) * 0.05;
-        double qualityScore = coverPoint.getQuality() * 10;
-        double shootBonus = coverPoint.canShootFrom() ? 2.0 : 0.0;
-        
-return qualityScore + shootBonus - distancePenalty;
-    }
 
     public static boolean hasLineOfSightStatic(Vec3 from, Vec3 to, net.minecraft.world.level.Level level) {
         return VisibilityRay.trace(level, from, to, null).hasContact();
@@ -1057,18 +1021,6 @@ return qualityScore + shootBonus - distancePenalty;
         return raycastDistanceStatic(start, direction, maxDistance, level);
     }
 
-    private double calculateThreatAwareScore(CoverPoint coverPoint, BlockPos soldierPos, LivingEntity threat, Vec3 threatDirection) {
-        if (threatDirection == null || threatDirection.lengthSqr() < 0.001) {
-            return calculateScore(coverPoint, soldierPos, threat);
-        }
-        
-        double baseScore = calculateScore(coverPoint, soldierPos, threat);
-        
-        double protectionScore = calculatePrimaryProtection(coverPoint, threatDirection);
-        
-        return baseScore + protectionScore * 10.0;
-    }
-    
     public CoverPoint evaluatePosition(BlockPos pos, LivingEntity threat) {
         if (!isValidCoverPosition(pos)) {
             return null;

@@ -41,6 +41,16 @@ public final class PureCoverEvaluator {
             ranked.add(new CoverSearchResult.RankedCandidate(candidate,
                 score(input, terrain, candidate)));
         }
+        if (com.stevesarmy.debug.DiagnosticLogManager.isCoverScoreLoggingEnabled()) {
+            StringBuilder trace = new StringBuilder("[PureScore] soldier=")
+                .append(input.soldierPosition()).append(" candidates=").append(ranked.size());
+            for (int i = 0; i < Math.min(6, ranked.size()); i++) {
+                CoverSearchResult.RankedCandidate rc = ranked.get(i);
+                trace.append(String.format(" | #%d %s %s %.3f",
+                    i + 1, rc.candidate().position(), rc.candidate().type(), rc.score()));
+            }
+            com.stevesarmy.StevesArmyMod.LOGGER.info(trace.toString());
+        }
         return new CoverSearchResult(ranked);
     }
 
@@ -178,8 +188,9 @@ public final class PureCoverEvaluator {
     }
 
     private static float distanceScore(BlockPos position, BlockPos soldier) {
-        // CoverFinder's NORMAL scorer intentionally uses its block-distance value directly.
-        return (float) (1.0 - Math.min(position.distSqr(soldier) / 24.0, 1.0));
+        // Mirror of CoverFinder's NORMAL scorer: true block distance against a
+        // 2x-radius span (12-block radius -> 24).
+        return (float) (1.0 - Math.min(Math.sqrt(position.distSqr(soldier)) / 24.0, 1.0));
     }
 
     private static float dispersionScore(BlockPos position, List<BlockPos> occupied) {

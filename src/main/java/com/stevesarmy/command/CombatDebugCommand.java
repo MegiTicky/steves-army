@@ -1463,7 +1463,12 @@ public class CombatDebugCommand {
         LivingEntity threat = CoverDebugManager.getThreatEntity();
         BlockPos center = player.blockPosition();
         CoverFinder finder = new CoverFinder(player.level());
-        var bestCover = finder.findBestCover(center, radius, threat);
+        // Modern tactical scorer (same weights as live soldiers) so the debug
+        // probe reflects production picks; the player stands in for the soldier.
+        Vec3 threatDirection = threat == null ? null
+            : threat.position().subtract(center.getX() + 0.5, center.getY(), center.getZ() + 0.5);
+        List<LivingEntity> threats = threat == null ? List.of() : List.of(threat);
+        var bestCover = finder.findBestCover(player, threatDirection, threats, radius, null);
 
         if (bestCover.isEmpty()) {
             source.sendSuccess(() -> Component.literal("No cover found within radius " + radius), false);

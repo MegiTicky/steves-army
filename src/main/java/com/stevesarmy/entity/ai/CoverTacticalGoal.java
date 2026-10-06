@@ -3968,7 +3968,12 @@ private boolean shouldExitCoverForFollow() {
         } else {
             if (!asyncPilotFallback && StevesArmyConfig.isAsyncCoverPilotEnabled()
                 && isAsyncCoverPilotEligible()) {
-                List<CoverPoint> discovered = finder.discoverCoverPoints(searchCenter, searchRadius);
+                // Classify against the live threat: the direction-blind
+                // discovery fallback types every cell next to a tall wall as
+                // FULL, which let rim cells 10 blocks off-axis outrank the
+                // nearby half cover in the pilot's coarse ranking.
+                List<CoverPoint> discovered = finder.discoverCoverPoints(searchCenter, searchRadius,
+                    threats.isEmpty() ? null : threats.get(0));
                 if (discovered.isEmpty()) {
                     PerformanceMetrics.recordPhase6FallbackDiscoveryEmpty();
                     PerformanceMetrics.recordPhase6Fallback();
@@ -4013,12 +4018,21 @@ private boolean shouldExitCoverForFollow() {
 
             if (bestCover.isEmpty()) {
                 PerformanceMetrics.recordCoverFullSearchAttempt();
-                bestCover = finder.findBestCover(
-                    searchCenter,
-                    searchRadius,
-                    threats.isEmpty() ? null : threats.get(0),
-                    threatDirection
-                );
+                // Last-resort center search scored with the same tactical
+                // weights as the primary pass (the legacy quality×10 scorer
+                // here let any FULL classification outrank every HALF
+                // regardless of distance).
+                CoverPoint claimedCover = getCoverManager().getCurrentCover();
+                List<CoverFinder.ScoredCover> centerScored = finder.evaluateAndScoreAllFromCenter(
+                    searchCenter, soldier, threatDirection, threats, searchRadius, squadCtx);
+                for (CoverFinder.ScoredCover sc : centerScored) {
+                    CoverPoint cover = sc.cover;
+                    if (claimedCover != null && cover.getPosition().equals(claimedCover.getPosition())) continue;
+                    if (failedCoverPositions.contains(cover.getPosition())) continue;
+                    if (!finder.isPrimaryThreatProtected(cover, soldier, threatDirection)) continue;
+                    bestCover = Optional.of(cover);
+                    break;
+                }
             }
 
             if (bestCover.isEmpty() && squadCtx.inSquad()) {
