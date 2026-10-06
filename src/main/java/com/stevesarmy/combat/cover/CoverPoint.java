@@ -20,6 +20,10 @@ public class CoverPoint {
     private final Map<Direction, Float> coverHeights;
     private LivingEntity reservedBy;
     private String debugInfo;
+    /** Squad danger-map score (0..100) at this position; -1 = unknown (no map data). */
+    private float dangerScore = -1.0f;
+    /** Leg-height exposure bit behind {@link #dangerScore} (prone-body exposure). */
+    private boolean dangerLegExposed;
 
     public CoverPoint(BlockPos position) {
         this.position = position;
@@ -133,5 +137,21 @@ public class CoverPoint {
 
     public void setDebugInfo(String debugInfo) {
         this.debugInfo = debugInfo;
+    }
+
+    public float getDangerScore() {
+        return dangerScore;
+    }
+
+    public void setDangerScore(float dangerScore) {
+        this.dangerScore = dangerScore;
+    }
+
+    public boolean isDangerLegExposed() {
+        return dangerLegExposed;
+    }
+
+    public void setDangerLegExposed(boolean dangerLegExposed) {
+        this.dangerLegExposed = dangerLegExposed;
     }
 }

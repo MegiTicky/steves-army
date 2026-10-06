@@ -24,6 +24,8 @@ public final class PureCoverEvaluator {
     private static final float HALF_COVER_FIGHTABILITY_BONUS = 0.25f;
     private static final float FULL_COVER_FIGHTABILITY_BONUS = 0.15f;
     private static final float FIRING_LANE_EPSILON = 0.01f;
+    /** Mirrors StevesArmyConfig#dangerCoverWeight (the pure scorer reads no config). */
+    private static final float DANGER_COVER_WEIGHT = 0.35f;
     private static final double LAST_SEEN_CONTACT_TOLERANCE = 2.0;
     private static final int MAX_FULL_SCORE_CANDIDATES = 16;
 
@@ -84,13 +86,17 @@ public final class PureCoverEvaluator {
             firingLane = 0.0f;
         }
 
+        // squad danger map term — unknown (-1) contributes nothing
+        float dangerPenalty = candidate.dangerScore() > 0
+            ? candidate.dangerScore() / 100.0f * DANGER_COVER_WEIGHT : 0.0f;
+
         return (float) (primaryProtection * PRIMARY_PROTECTION_WEIGHT
             + flankingProtection * FLANKING_PROTECTION_WEIGHT
             + distance * DISTANCE_WEIGHT
             + firingQuality * FIRING_QUALITY_WEIGHT
             + firingLane * PEEK_ANGLE_WEIGHT
             + dispersion * SQUAD_DISPERSION_WEIGHT)
-            + fightability - blindPenalty;
+            + fightability - blindPenalty - dangerPenalty;
     }
 
     private static float primaryProtection(CoverSearchInput input, CoverTerrainSnapshot terrain,

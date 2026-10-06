@@ -87,6 +87,9 @@ public class CoverFinder {
     }
 
     private final Level level;
+    /** The searching soldier's squad danger map, resolved once per search; null when unavailable. */
+    @javax.annotation.Nullable
+    private com.stevesarmy.squad.SquadDangerMap dangerMap;
     private long candidateDiscoveryNanos;
     private long tacticalScoringNanos;
     private int candidatesDiscovered;
@@ -258,6 +261,7 @@ public class CoverFinder {
 
     public List<ScoredCover> evaluateAndScoreAll(LivingEntity soldier, Vec3 threatDirection,
                                                     List<LivingEntity> allThreats, int radius, boolean includeReserved) {
+        this.dangerMap = resolveDangerMap(soldier);
         List<CoverPoint> coverPoints = findCoverPoints(soldier.blockPosition(), radius);
         if (coverPoints.isEmpty()) {
             return Collections.emptyList();
@@ -278,6 +282,7 @@ public class CoverFinder {
                 evaluator.evaluateWithCone(coverPoint, evaluationDirection);
             }
             candidatesEvaluated++;
+            applyDanger(coverPoint);
             float score = calculateThreatAwareScore(coverPoint, soldier, threatDirection, allThreats, primaryThreat, protection);
             coverPoint.setQuality(score);
             coverPoint.setCombatScore(score);
@@ -296,12 +301,13 @@ public class CoverFinder {
         candidatesScored += scored.size();
         PerformanceMetrics.recordStageTime(PerformanceMetrics.Stage.COVER_SCORING, scoringNanos);
         PerformanceMetrics.recordCoverCandidatesScored(scored.size());
-        return scored;
+        return applyDangerClaimGate(scored);
     }
 
     public List<ScoredCover> evaluateAndScoreAll(LivingEntity soldier, Vec3 threatDirection,
                                                     List<LivingEntity> allThreats, int radius, boolean includeReserved,
                                                     SquadCoverContext squadCtx) {
+        this.dangerMap = resolveDangerMap(soldier);
         List<CoverPoint> coverPoints = findCoverPoints(soldier.blockPosition(), radius);
         if (coverPoints.isEmpty()) {
             return Collections.emptyList();
@@ -322,6 +328,7 @@ public class CoverFinder {
                 evaluator.evaluateWithCone(coverPoint, evaluationDirection);
             }
             candidatesEvaluated++;
+            applyDanger(coverPoint);
             float score = calculateThreatAwareScore(coverPoint, soldier, threatDirection, allThreats, primaryThreat,
                 squadCtx, null, 0, protection);
             coverPoint.setQuality(score);
@@ -345,7 +352,7 @@ public class CoverFinder {
         candidatesScored += scored.size();
         PerformanceMetrics.recordStageTime(PerformanceMetrics.Stage.COVER_SCORING, scoringNanos);
         PerformanceMetrics.recordCoverCandidatesScored(scored.size());
-        return scored;
+        return applyDangerClaimGate(scored);
     }
 
     /**
@@ -355,6 +362,7 @@ public class CoverFinder {
     public List<ScoredCover> evaluateAndScoreAllFromCenter(BlockPos searchCenter, LivingEntity soldier,
                                                              Vec3 threatDirection, List<LivingEntity> allThreats,
                                                              int radius, SquadCoverContext squadCtx) {
+        this.dangerMap = resolveDangerMap(soldier);
         List<CoverPoint> coverPoints = findCoverPoints(searchCenter, radius);
         if (coverPoints.isEmpty()) {
             return Collections.emptyList();
@@ -375,6 +383,7 @@ public class CoverFinder {
                 evaluator.evaluateWithCone(coverPoint, evaluationDirection);
             }
             candidatesEvaluated++;
+            applyDanger(coverPoint);
             float score = calculateThreatAwareScore(coverPoint, soldier, threatDirection, allThreats, primaryThreat, squadCtx,
                 searchCenter, radius, protection);
             coverPoint.setQuality(score);
@@ -394,7 +403,90 @@ public class CoverFinder {
         candidatesScored += scored.size();
         PerformanceMetrics.recordStageTime(PerformanceMetrics.Stage.COVER_SCORING, scoringNanos);
         PerformanceMetrics.recordCoverCandidatesScored(scored.size());
-        return scored;
+        return applyDangerClaimGate(scored);
+    }
+
+    // --- danger-map integration (Phase 2a) -------------------------------------
+
+    /** Resolves the soldier's squad danger map once per search; null outside squads or on clients. */
+    @javax.annotation.Nullable
+    private com.stevesarmy.squad.SquadDangerMap resolveDangerMap(LivingEntity soldier) {
+        if (!(soldier instanceof com.stevesarmy.entity.SoldierEntity soldierEntity)
+            || soldierEntity.getSquadId() == null
+            || !(level instanceof net.minecraft.server.level.ServerLevel serverLevel)) {
+            return null;
+        }
+        return com.stevesarmy.squad.SquadManager.get(serverLevel)
+            .getSquadById(soldierEntity.getSquadId())
+            .map(com.stevesarmy.squad.SquadData::getDangerMap)
+            .orElse(null);
+    }
+
+    /** O(1) map lookup per candidate; unknown cells stay -1 (neutral to scoring and the gate). */
+    private void applyDanger(CoverPoint coverPoint) {
+        if (dangerMap == null) {
+            coverPoint.setDangerScore(-1.0f);
+            coverPoint.setDangerLegExposed(false);
+            return;
+        }
+        com.stevesarmy.squad.SquadDangerMap.Cell cell = dangerMap.cellAt(
+            coverPoint.getPosition().getX() + 0.5, coverPoint.getPosition().getZ() + 0.5,
+            level.getGameTime());
+        if (cell != null) {
+            coverPoint.setDangerScore(cell.score);
+            coverPoint.setDangerLegExposed(cell.legExposed);
+        } else {
+            coverPoint.setDangerScore(-1.0f);
+            coverPoint.setDangerLegExposed(false);
+        }
+    }
+
+    /**
+     * Danger score term: fully-exposed candidates lose up to
+     * {@code dangerCoverWeight} of score — comparable to the heaviest existing
+     * terms (dispersion 0.20), so exposure re-ranks picks without dominating.
+     * Unknown danger contributes nothing.
+     */
+    private float dangerPenalty(CoverPoint coverPoint) {
+        float danger = coverPoint.getDangerScore();
+        if (danger <= 0.0f) return 0.0f;
+        return danger / 100.0f * (float) com.stevesarmy.StevesArmyConfig.getDangerCoverWeight();
+    }
+
+    /**
+     * Claim gate with least-dangerous fallback: while any known candidate
+     * sits at or below {@code dangerClaimMaxScore}, candidates known to be
+     * hotter are dropped from selection entirely. Unknown-danger (-1)
+     * candidates survive — a cold map must not starve cover searches. If
+     * EVERY candidate is hot, the list is untouched and the scorer's danger
+     * term picks the least-bad slot (no open-field paralysis).
+     *
+     * <p>Deliberately NOT gating on the leg-exposure bit: the map evaluates
+     * cell centers while the soldier's actual slot sits 0.5-1.0 blocks away,
+     * so cell-level body-protection claims over-reject slots whose real
+     * slots are fine (measured: crowding + PositionDeadlock). Slot-exact
+     * protection remains CoverQualityEvaluator's cone check; the map ranks
+     * and gates on standing danger.</p>
+     */
+    private List<ScoredCover> applyDangerClaimGate(List<ScoredCover> scored) {
+        double threshold = com.stevesarmy.StevesArmyConfig.getDangerClaimMaxScore();
+        boolean anyAcceptable = false;
+        for (ScoredCover s : scored) {
+            float danger = s.cover.getDangerScore();
+            if (danger >= 0 && danger <= threshold) {
+                anyAcceptable = true;
+                break;
+            }
+        }
+        if (!anyAcceptable) return scored;
+        List<ScoredCover> gated = new ArrayList<>(scored.size());
+        for (ScoredCover s : scored) {
+            float danger = s.cover.getDangerScore();
+            if (danger < 0 || danger <= threshold) {
+                gated.add(s);
+            }
+        }
+        return gated;
     }
 
     public static class ScoredCover {
@@ -562,12 +654,14 @@ public class CoverFinder {
                            firingAccessScore * PEEK_ANGLE_WEIGHT +
                            dispersionScore * SQUAD_DISPERSION_WEIGHT) + fightability - blindPenalty;
         }
+        weightedScore -= dangerPenalty(coverPoint);
 
         if (com.stevesarmy.debug.DiagnosticLogManager.isCoverScoreLoggingEnabled()) {
-            StevesArmyMod.LOGGER.info("[CoverScore] {} type={} lane={} laneSource={} contacts={}/{} total={}",
+            StevesArmyMod.LOGGER.info("[CoverScore] {} type={} lane={} laneSource={} contacts={}/{} danger={} total={}",
                 coverPoint.getPosition(), coverPoint.getType(),
                 String.format("%.2f", firingAccessScore * PEEK_ANGLE_WEIGHT),
                 firingLane.source(), firingLane.reachableContacts(), firingLane.eligibleContacts(),
+                String.format("%.0f", coverPoint.getDangerScore()),
                 String.format("%.2f", weightedScore));
         }
 

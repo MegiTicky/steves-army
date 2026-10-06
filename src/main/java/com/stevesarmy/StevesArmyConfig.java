@@ -44,6 +44,15 @@ public class StevesArmyConfig {
     public static final ForgeConfigSpec.DoubleValue BASIC_DETECTION_DISTANCE;
     public static final ForgeConfigSpec.DoubleValue MACHINE_GUNNER_DETECTION_DISTANCE;
 
+    public static final ForgeConfigSpec.BooleanValue DANGER_MAP_ENABLED;
+    public static final ForgeConfigSpec.DoubleValue DANGER_AMBIENT_RADIUS;
+    public static final ForgeConfigSpec.IntValue DANGER_RAY_BUDGET_PER_TICK;
+    public static final ForgeConfigSpec.IntValue DANGER_CELL_TTL_TICKS;
+    public static final ForgeConfigSpec.IntValue DANGER_MAX_THREATS;
+    public static final ForgeConfigSpec.DoubleValue DANGER_THREAT_RANGE;
+    public static final ForgeConfigSpec.DoubleValue DANGER_COVER_WEIGHT;
+    public static final ForgeConfigSpec.IntValue DANGER_CLAIM_MAX_SCORE;
+
     public static final ForgeConfigSpec.DoubleValue SPACING_DISTANCE;
 
     public static final ForgeConfigSpec.DoubleValue EXPLOSION_SUPPRESSION_STRENGTH;
@@ -356,7 +365,60 @@ public class StevesArmyConfig {
                      "Machine gunners retain a longer detection range for area suppression.",
                      "Default: 96.0 blocks")
             .defineInRange("machineGunnerDetectionDistance", 96.0, 1.0, 256.0);
-        
+
+        BUILDER.push("danger_map");
+
+        DANGER_MAP_ENABLED = BUILDER
+            .comment("Per-squad spatial danger map: which nearby positions are exposed to",
+                     "line-of-sight from the squad's known threats, probed at leg and eye heights.",
+                     "Pure intelligence - it changes no behavior by itself; AI consumers read it",
+                     "through later features.",
+                     "Default: true")
+            .define("dangerMapEnabled", true);
+
+        DANGER_AMBIENT_RADIUS = BUILDER
+            .comment("Radius (blocks) around the squad anchor the ambient baker keeps warm.",
+                     "Default: 24.0 blocks")
+            .defineInRange("dangerAmbientRadius", 24.0, 8.0, 64.0);
+
+        DANGER_RAY_BUDGET_PER_TICK = BUILDER
+            .comment("Global per-tick line-of-sight ray budget shared by every squad's danger map.",
+                     "Baking defers when the budget runs out; queries never spend rays.",
+                     "Sized for the 6-ray body-span fan: ~85 cells/tick for one threat,",
+                     "still leaving head-room for two concurrent squads.",
+                     "Default: 512 rays/tick")
+            .defineInRange("dangerRayBudgetPerTick", 512, 16, 8192);
+
+        DANGER_CELL_TTL_TICKS = BUILDER
+            .comment("How long a baked danger cell stays fresh before re-baking.",
+                     "Default: 60 ticks (3 s)")
+            .defineInRange("dangerCellTtlTicks", 60, 20, 400);
+
+        DANGER_MAX_THREATS = BUILDER
+            .comment("Maximum number of tracked threats the map bakes shadows for (strongest first).",
+                     "Default: 6")
+            .defineInRange("dangerMaxThreats", 6, 1, 12);
+
+        DANGER_THREAT_RANGE = BUILDER
+            .comment("Threats farther than this from the squad anchor are ignored by the map.",
+                     "Default: 96.0 blocks")
+            .defineInRange("dangerThreatRange", 96.0, 16.0, 256.0);
+
+        DANGER_COVER_WEIGHT = BUILDER
+            .comment("How strongly the squad danger map re-ranks cover candidates: a fully-exposed",
+                     "slot loses this much score (existing terms sum to ~1.05).",
+                     "Default: 0.35")
+            .defineInRange("dangerCoverWeight", 0.35, 0.0, 1.0);
+
+        DANGER_CLAIM_MAX_SCORE = BUILDER
+            .comment("Claim gate: while any known candidate sits at or below this danger score,",
+                     "hotter candidates are refused for claiming entirely. If every candidate is",
+                     "hotter, the least-dangerous one is taken (no open-field paralysis).",
+                     "Default: 80")
+            .defineInRange("dangerClaimMaxScore", 80, 0, 100);
+
+        BUILDER.pop();
+
 BUILDER.pop();
 
         BUILDER.push("spacing");
@@ -1043,6 +1105,38 @@ BUILDER.pop();
 
     public static double getBasicDetectionDistance() {
         return BASIC_DETECTION_DISTANCE.get();
+    }
+
+    public static boolean isDangerMapEnabled() {
+        return DANGER_MAP_ENABLED.get();
+    }
+
+    public static double getDangerAmbientRadius() {
+        return DANGER_AMBIENT_RADIUS.get();
+    }
+
+    public static int getDangerRayBudgetPerTick() {
+        return DANGER_RAY_BUDGET_PER_TICK.get();
+    }
+
+    public static long getDangerCellTtlTicks() {
+        return DANGER_CELL_TTL_TICKS.get();
+    }
+
+    public static int getDangerMaxThreats() {
+        return DANGER_MAX_THREATS.get();
+    }
+
+    public static double getDangerThreatRange() {
+        return DANGER_THREAT_RANGE.get();
+    }
+
+    public static double getDangerCoverWeight() {
+        return DANGER_COVER_WEIGHT.get();
+    }
+
+    public static int getDangerClaimMaxScore() {
+        return DANGER_CLAIM_MAX_SCORE.get();
     }
 
     public static double getMachineGunnerDetectionDistance() {
