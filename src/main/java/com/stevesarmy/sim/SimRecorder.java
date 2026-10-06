@@ -21,6 +21,7 @@ public final class SimRecorder {
     private final List<String> frames = new ArrayList<>();
     private final List<String> events = new ArrayList<>();
     private final List<String> shots = new ArrayList<>();
+    private final List<String> dangerOverlay = new ArrayList<>();
     private StringBuilder current;
     private boolean firstSoldier;
 
@@ -46,6 +47,16 @@ public final class SimRecorder {
         events.add("[" + tick + "," + quote(describe) + "]");
     }
 
+    /** Static ground-truth danger overlay (oracle cells) rendered as a tint layer. */
+    public void setDangerOverlay(DangerOracle.Oracle oracle) {
+        dangerOverlay.clear();
+        for (DangerOracle.OracleCell cell : oracle.cells().values()) {
+            if (cell.score() < 0.5) continue;
+            dangerOverlay.add("[" + num(cell.centerX()) + "," + num(cell.centerZ()) + ","
+                + (int) Math.round(cell.score()) + "]");
+        }
+    }
+
     /** One fired round, drawn as a tracer for the frame being built. */
     public void shot(double fromX, double fromZ, double toX, double toZ) {
         shots.add("[" + num(fromX) + "," + num(fromZ) + "," + num(toX) + "," + num(toZ) + "]");
@@ -64,7 +75,8 @@ public final class SimRecorder {
                         int shotsFired, boolean hasGun, int ammo, int magazineSize, float health,
                         double slotOffset, int anchorPulls, int exposedRays, int exposedHeadRays,
                         int probedRays, boolean reloading,
-                        String posture, boolean rising, float syncedCoverHeight) {
+                        String posture, boolean rising, float syncedCoverHeight,
+                        double dangerAtSoldier) {
         if (current == null) return;
         if (!firstSoldier) current.append(',');
         firstSoldier = false;
@@ -135,6 +147,9 @@ public final class SimRecorder {
         if (syncedCoverHeight >= 0) {
             current.append(",\"ch\":").append(String.format("%.2f", syncedCoverHeight));
         }
+        if (dangerAtSoldier >= 0) {
+            current.append(",\"dm\":").append((int) Math.round(dangerAtSoldier));
+        }
         current.append('}');
     }
 
@@ -182,6 +197,11 @@ public final class SimRecorder {
             first = false;
             sb.append('[').append(v.tick).append(',').append(quote(v.detector))
                 .append(',').append(quote(v.soldierLabel)).append(',').append(quote(v.severity.name())).append(']');
+        }
+        sb.append("],\"danger\":[");
+        for (int i = 0; i < dangerOverlay.size(); i++) {
+            if (i > 0) sb.append(',');
+            sb.append(dangerOverlay.get(i));
         }
         sb.append("],\"frames\":[");
         for (int i = 0; i < frames.size(); i++) {

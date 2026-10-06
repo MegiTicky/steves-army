@@ -9,7 +9,6 @@ import com.stevesarmy.squad.SquadMode;
 import net.minecraft.world.phys.Vec3;
 
 import java.util.List;
-
 /**
  * The v1 scenario set: the cover/suppression strand the live mod struggles
  * with, plus one clean baseline for detector calibration. Every generic
@@ -39,7 +38,16 @@ public final class SimRegistry {
             loneBlockExposure(),
             loneBlockFlankStand(),
             supportSquadFight(),
-            supportRearCoverPick());
+            supportRearCoverPick(),
+            dangerOracleOpenField(),
+            dangerOracleRidge(),
+            dangerOracleLoneBlock(),
+            dangerOracleCrossfire(),
+            dangerOracleNoIntel(),
+            dangerSelfTestAllZero(),
+            dangerSelfTestAllMax(),
+            dangerSelfTestMirrored(),
+            dangerDecayProperty());
     }
 
     public static SimScenario byName(String name) {
@@ -1028,6 +1036,279 @@ public final class SimRegistry {
             if (s.reloading) return true;
         }
         return false;
+    }
+
+    // --- danger-map oracle rig (Phase 0) ---------------------------------------
+    //
+    // These scenarios verify the VERIFICATION RIG before any danger-map code
+    // exists: the oracle scenarios hand-check the independent ground-truth
+    // engine against known geometry, the self-tests prove the sweep FAILs
+    // deliberately-wrong samplers (expected FAILs, like the KNOWN FINDING
+    // scenarios), and the decay scenario pins the temporal property contract.
+
+    /** ORACLE: open platform, one threat — the whole field must read exposed. */
+    private static SimScenario dangerOracleOpenField() {
+        return SimScenario.builder("danger_oracle_open_field")
+            .description("ORACLE RIG: flat platform, one synthetic threat; the independent oracle "
+                + "must read the whole verification field as exposed — a hand-check of the ground-truth engine itself.")
+            .duration(300)
+            .setup(ctx -> {
+                ctx.spawnAnchor(8, 0, 24);
+                ctx.spawnFriendly(ModEntities.SOLDIER.get(), "probe", 14, 0, 24, SquadMode.HOLD);
+                ctx.injectThreat(40, 24);
+            })
+            .assertThat("oracle exists and covers the default region",
+                view -> view.dangerOracle() != null && view.dangerOracle().size() >= 300)
+            .assertThat(">=90% of verified cells score > 80 (open field = fully exposed)",
+                view -> cellFraction(view.dangerOracle(), c -> c.score() > 80) >= 0.90)
+            .assertThat("no sampler registered -> sampled danger stays absent",
+                view -> view.timeline().series("probe").stream().allMatch(s -> s.dangerAtSoldier < 0))
+            .build();
+    }
+
+    /** ORACLE: full-height ridge — directional shadow vs exposed sides. */
+    private static SimScenario dangerOracleRidge() {
+        return SimScenario.builder("danger_oracle_ridge")
+            .description("ORACLE RIG: a 3-high ridge spans the field; everything behind it must read "
+                + "near-zero while the threat side reads exposed — directional geometry ground truth.")
+            .duration(300)
+            .terrain(t -> {
+                t.platform();
+                t.coverRow(24, 8, 24, 40, 3);
+            })
+            .setup(ctx -> {
+                ctx.spawnAnchor(6, 0, 24);
+                ctx.spawnFriendly(ModEntities.SOLDIER.get(), "probe", 10, 0, 24, SquadMode.HOLD);
+                ctx.injectThreat(40, 24);
+                ctx.setDangerVerificationRegion(4, 12, 44, 36);
+            })
+            .assertThat("cells west of the ridge read near-zero (shadow side)",
+                view -> cellFractionWhere(view.dangerOracle(),
+                    c -> c.centerX() <= 22, c -> c.score() < 10) >= 0.95)
+            .assertThat("cells east of the ridge read exposed (threat side)",
+                view -> cellFractionWhere(view.dangerOracle(),
+                    c -> c.centerX() >= 26, c -> c.score() > 60) >= 0.90)
+            .build();
+    }
+
+    /** ORACLE: one waist-high block — center-line eye/leg bits as ground truth. */
+    private static SimScenario dangerOracleLoneBlock() {
+        return SimScenario.builder("danger_oracle_lone_block")
+            .description("ORACLE RIG: one waist-high block. The cell behind it must read eye-exposed / "
+                + "leg-protected on the center line (head shows over the wall; prone bodies are safe "
+                + "on this line). The 15-ray fan-width kill mechanism of lone narrow blocks is the "
+                + "fidelity probe + DangerProbeDisagreement detector's domain, not the oracle's.")
+            .duration(300)
+            .terrain(t -> {
+                t.platform();
+                t.coverBlock(20, 24, 1);
+            })
+            .setup(ctx -> {
+                ctx.spawnAnchor(6, 0, 24);
+                ctx.spawnFriendly(ModEntities.SOLDIER.get(), "probe", 10, 0, 24, SquadMode.HOLD);
+                ctx.injectThreat(40, 24);
+                ctx.setDangerVerificationRegion(4, 10, 18, 38);
+            })
+            .assertThat("cell directly behind the lone block: eye exposed, legs protected (center line)",
+                view -> {
+                    DangerOracle.OracleCell c = cellAt(view, 17, 25);
+                    return c != null && c.eyeExposed() && !c.legExposed();
+                })
+            .assertThat("deeper cells behind the lone block stay eye-exposed (ray passes over 1.0)",
+                view -> {
+                    DangerOracle.OracleCell c = cellAt(view, 13, 25);
+                    return c != null && c.eyeExposed() && !c.legExposed();
+                })
+            .assertThat("flanking cell off the block axis is fully exposed on both heights",
+                view -> {
+                    DangerOracle.OracleCell c = cellAt(view, 17, 11);
+                    return c != null && c.score() > 80 && c.legExposed();
+                })
+            .build();
+    }
+
+    /** ORACLE: two threats around one wall — union semantics (one shadow is not safety). */
+    private static SimScenario dangerOracleCrossfire() {
+        return SimScenario.builder("danger_oracle_crossfire")
+            .description("ORACLE RIG: two threats at different angles around one 3-high wall — a pocket "
+                + "shadowed from both reads 0 while a cell open to either threat reads exposed "
+                + "(danger unions across threats).")
+            .duration(300)
+            .terrain(t -> {
+                t.platform();
+                t.coverRow(20, 20, 20, 28, 3);
+            })
+            .setup(ctx -> {
+                ctx.spawnAnchor(6, 0, 24);
+                ctx.spawnFriendly(ModEntities.SOLDIER.get(), "probe", 10, 0, 24, SquadMode.HOLD);
+                ctx.injectThreat(40, 22);
+                ctx.injectThreat(40, 26);
+                ctx.setDangerVerificationRegion(4, 14, 18, 34);
+            })
+            .assertThat("pocket shadowed from both threats reads ~0",
+                view -> {
+                    DangerOracle.OracleCell c = cellAt(view, 17, 25);
+                    return c != null && c.score() < 10;
+                })
+            .assertThat("cell open to one threat reads exposed despite the wall (union)",
+                view -> {
+                    DangerOracle.OracleCell c = cellAt(view, 17, 15);
+                    return c != null && c.score() > 80;
+                })
+            .build();
+    }
+
+    /** ORACLE: no threats — no oracle, no sampled danger (the map's empty state). */
+    private static SimScenario dangerOracleNoIntel() {
+        return SimScenario.builder("danger_oracle_no_intel")
+            .description("ORACLE RIG: no threats injected — no oracle is produced and the sampled "
+                + "danger stays absent (the map's empty state must be silence, not garbage).")
+            .duration(200)
+            .setup(ctx -> {
+                ctx.spawnAnchor(8, 0, 24);
+                ctx.spawnFriendly(ModEntities.SOLDIER.get(), "probe", 14, 0, 24, SquadMode.HOLD);
+            })
+            .assertThat("no oracle without injected threats", view -> view.dangerOracle() == null)
+            .assertThat("sampled danger stays absent without a sampler",
+                view -> view.timeline().series("probe").stream().allMatch(s -> s.dangerAtSoldier < 0))
+            .build();
+    }
+
+    /** SELF-TEST (expected FAIL): constant-zero sampler vs an open field. */
+    private static SimScenario dangerSelfTestAllZero() {
+        return SimScenario.builder("danger_selftest_all_zero")
+            .description("RIG SELF-TEST (expected FAIL): a constant-0 danger sampler must trip "
+                + "DangerOracleMismatch on an open field — proves the sweep fails a map that "
+                + "sees nothing.")
+            .duration(200)
+            .setup(ctx -> {
+                ctx.spawnAnchor(8, 0, 24);
+                ctx.spawnFriendly(ModEntities.SOLDIER.get(), "probe", 14, 0, 24, SquadMode.HOLD);
+                ctx.injectThreat(40, 24);
+                ctx.setDangerSampler((x, z) -> 0.0);
+            })
+            .assertThat("DangerOracleMismatch fired against the all-zero stub",
+                view -> hasFailingViolation(view, "DangerOracleMismatch"))
+            .build();
+    }
+
+    /** SELF-TEST (expected FAIL): constant-100 sampler vs a ridge (shadow side must not read hot). */
+    private static SimScenario dangerSelfTestAllMax() {
+        return SimScenario.builder("danger_selftest_all_max")
+            .description("RIG SELF-TEST (expected FAIL): a constant-100 danger sampler must trip "
+                + "DangerOracleMismatch on a ridge field — a map that calls everything dangerous "
+                + "is as wrong as one that calls everything safe.")
+            .duration(200)
+            .terrain(t -> {
+                t.platform();
+                t.coverRow(24, 8, 24, 40, 3);
+            })
+            .setup(ctx -> {
+                ctx.spawnAnchor(6, 0, 24);
+                ctx.spawnFriendly(ModEntities.SOLDIER.get(), "probe", 10, 0, 24, SquadMode.HOLD);
+                ctx.injectThreat(40, 24);
+                ctx.setDangerVerificationRegion(4, 12, 44, 36);
+                ctx.setDangerSampler((x, z) -> 100.0);
+            })
+            .assertThat("DangerOracleMismatch fired against the all-max stub",
+                view -> hasFailingViolation(view, "DangerOracleMismatch"))
+            .build();
+    }
+
+    /** SELF-TEST (expected FAIL): spatially mirrored sampler — catches maps that aggregate right but are wrong in space. */
+    private static SimScenario dangerSelfTestMirrored() {
+        return SimScenario.builder("danger_selftest_mirrored")
+            .description("RIG SELF-TEST (expected FAIL): a sampler that inverts the field at the ridge "
+                + "(hot where safe, safe where hot) must trip DangerOracleMismatch — catches maps "
+                + "that look right in aggregate but are spatially wrong.")
+            .duration(200)
+            .terrain(t -> {
+                t.platform();
+                t.coverRow(24, 8, 24, 40, 3);
+            })
+            .setup(ctx -> {
+                ctx.spawnAnchor(6, 0, 24);
+                ctx.spawnFriendly(ModEntities.SOLDIER.get(), "probe", 10, 0, 24, SquadMode.HOLD);
+                ctx.injectThreat(40, 24);
+                ctx.setDangerVerificationRegion(4, 12, 44, 36);
+                ctx.setDangerSampler((x, z) -> x < 24 ? 100.0 : 0.0);
+            })
+            .assertThat("DangerOracleMismatch fired against the mirrored stub",
+                view -> hasFailingViolation(view, "DangerOracleMismatch"))
+            .build();
+    }
+
+    /** RIG: temporal decay property — sampled danger must drop after the threats die. */
+    private static SimScenario dangerDecayProperty() {
+        java.util.concurrent.atomic.AtomicBoolean alive = new java.util.concurrent.atomic.AtomicBoolean(true);
+        return SimScenario.builder("danger_decay_property")
+            .description("RIG: temporal property — after the injected threats are marked dead the sampled "
+                + "danger must decay to zero within the window. Uses a decay-mimicking stub sampler; "
+                + "Phase 1 re-runs this contract against the real map (a tick-0 action re-arms the stub).")
+            .duration(400)
+            .action(0, "re-arm decay stub", ctx -> alive.set(true))
+            .setup(ctx -> {
+                ctx.spawnAnchor(8, 0, 24);
+                ctx.spawnFriendly(ModEntities.SOLDIER.get(), "probe", 14, 0, 24, SquadMode.HOLD);
+                ctx.injectThreat(40, 24);
+                ctx.setDangerSampler((x, z) -> alive.get() ? 100.0 : 0.0);
+                // the sweep compares at scenario end, after the staged kill — skip it here
+                ctx.setDangerSweepEnabled(false);
+            })
+            .action(250, "injected threats marked dead", ctx -> {
+                ctx.markInjectedThreatsDead();
+                alive.set(false);
+            })
+            .assertThat("danger reads hot while the threat is alive (>=10 samples at 100 before the kill tick)",
+                view -> {
+                    // actions fire before sampling, so the kill-tick sample already reads cold
+                    long hot = view.timeline().series("probe").stream()
+                        .filter(s -> s.tick < 250 && s.dangerAtSoldier >= 100).count();
+                    long total = view.timeline().series("probe").stream()
+                        .filter(s -> s.tick < 250).count();
+                    return total >= 10 && hot == total;
+                })
+            .assertThat("danger decays to zero after the threat dies (>=10 samples at 0 after t280)",
+                view -> {
+                    long cold = view.timeline().series("probe").stream()
+                        .filter(s -> s.tick >= 280 && s.dangerAtSoldier == 0).count();
+                    long total = view.timeline().series("probe").stream()
+                        .filter(s -> s.tick >= 280).count();
+                    return total >= 10 && cold == total;
+                })
+            .build();
+    }
+
+    // --- danger oracle assertion helpers ---------------------------------------
+
+    private static DangerOracle.OracleCell cellAt(SimScenario.SimRunResultView view, double x, double z) {
+        return view.dangerOracle() == null ? null : view.dangerOracle().at(x, z);
+    }
+
+    /** Fraction of ALL oracle cells matching the predicate (0 on a null oracle). */
+    private static double cellFraction(DangerOracle.Oracle oracle,
+                                       java.util.function.Predicate<DangerOracle.OracleCell> predicate) {
+        return cellFractionWhere(oracle, c -> true, predicate);
+    }
+
+    /** Fraction of region-selected oracle cells matching the predicate. */
+    private static double cellFractionWhere(DangerOracle.Oracle oracle,
+                                            java.util.function.Predicate<DangerOracle.OracleCell> region,
+                                            java.util.function.Predicate<DangerOracle.OracleCell> predicate) {
+        if (oracle == null) return 0.0;
+        long total = 0;
+        long matching = 0;
+        for (DangerOracle.OracleCell cell : oracle.cells().values()) {
+            if (!region.test(cell)) continue;
+            total++;
+            if (predicate.test(cell)) matching++;
+        }
+        return total == 0 ? 0.0 : (double) matching / total;
+    }
+
+    private static boolean hasFailingViolation(SimScenario.SimRunResultView view, String detectorName) {
+        return view.violations().stream()
+            .anyMatch(v -> detectorName.equals(v.detector) && v.severity == SimViolation.Severity.FAIL);
     }
 
     // --- earlier assertion helpers ---------------------------------------------

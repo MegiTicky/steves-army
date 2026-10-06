@@ -4,6 +4,7 @@ import com.stevesarmy.entity.EnemySoldierEntity;
 import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.entity.TargetEntity;
 import com.stevesarmy.registry.ModEntities;
+import com.stevesarmy.sim.DangerSampler;
 import com.stevesarmy.sim.terrain.SimTerrain;
 import com.stevesarmy.squad.FireTeam;
 import com.stevesarmy.squad.SquadData;
@@ -13,6 +14,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.phys.Vec3;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -32,6 +34,15 @@ public final class SimContext {
     public final List<EnemySoldierEntity> enemies = new ArrayList<>();
     public final Map<String, SoldierEntity> byLabel = new LinkedHashMap<>();
     public TargetEntity anchor;
+
+    /** Synthetic threat sighting written straight into the squad's shared intel (deterministic, no entity). */
+    public record InjectedThreat(UUID threatId, Vec3 eye, float accuracy) {}
+
+    private final List<InjectedThreat> injectedThreats = new ArrayList<>();
+    private DangerSampler dangerSampler;
+    /** Fixture-local verification region {x1,z1,x2,z2} for the danger oracle; null = whole field inset by 3. */
+    private int[] dangerVerificationRegion;
+    private boolean dangerSweepEnabled = true;
 
     public SimContext(ServerLevel level, SimTerrain terrain) {
         this.level = level;
@@ -100,6 +111,75 @@ public final class SimContext {
         old.discard();
         enemies.remove(old);
         return spawnEnemy(x, y, z);
+    }
+
+    // --- danger-map verification seams ---------------------------------------
+
+    /**
+     * Writes a synthetic threat sighting directly into the friendly squad's
+     * shared intel at the platform surface — no entity, fully deterministic.
+     * The oracle uses the recorded position, not the intel entry.
+     */
+    public InjectedThreat injectThreat(double x, double z) {
+        return injectThreat(x, z, 1.0f);
+    }
+
+    public InjectedThreat injectThreat(double x, double z, float accuracy) {
+        if (anchor == null) {
+            throw new IllegalStateException("spawn an anchor before injectThreat — the squad owns the intel");
+        }
+        UUID threatId = UUID.randomUUID();
+        BlockPos surface = terrain.at((int) x, 0, (int) z);
+        SquadData squad = SquadManager.get(level).getSquadByLeader(anchor.getUUID()).orElse(null);
+        if (squad == null) {
+            throw new IllegalStateException("no squad for anchor — spawn the anchor first");
+        }
+        squad.getThreatIntel().reportThreatPosition(anchor.getUUID(), threatId, surface, accuracy, level);
+        InjectedThreat threat = new InjectedThreat(threatId,
+            new Vec3(surface.getX() + 0.5, surface.getY() + 1.6, surface.getZ() + 0.5), accuracy);
+        injectedThreats.add(threat);
+        return threat;
+    }
+
+    /** Kills every injected sighting (the intel entry, not an entity) — the decay property probe. */
+    public void markInjectedThreatsDead() {
+        SquadData squad = anchor == null ? null
+            : SquadManager.get(level).getSquadByLeader(anchor.getUUID()).orElse(null);
+        if (squad == null) return;
+        for (InjectedThreat threat : injectedThreats) {
+            squad.getThreatIntel().markThreatDead(threat.threatId());
+        }
+    }
+
+    public List<InjectedThreat> injectedThreats() {
+        return injectedThreats;
+    }
+
+    /** Overrides the danger read SimManager samples per soldier (stub samplers for rig self-tests). */
+    public void setDangerSampler(DangerSampler sampler) {
+        this.dangerSampler = sampler;
+    }
+
+    public DangerSampler dangerSampler() {
+        return dangerSampler;
+    }
+
+    /** Narrows the oracle verification sweep to a fixture-local region {x1,z1,x2,z2}. */
+    public void setDangerVerificationRegion(int x1, int z1, int x2, int z2) {
+        this.dangerVerificationRegion = new int[] {x1, z1, x2, z2};
+    }
+
+    public int[] dangerVerificationRegion() {
+        return dangerVerificationRegion;
+    }
+
+    /** Opts a scenario out of the end-of-run sampler-vs-oracle sweep (temporal-property scenarios). */
+    public void setDangerSweepEnabled(boolean enabled) {
+        this.dangerSweepEnabled = enabled;
+    }
+
+    public boolean dangerSweepEnabled() {
+        return dangerSweepEnabled;
     }
 
     public void damageSoldier(String label, float amount) {

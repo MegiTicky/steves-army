@@ -2,6 +2,7 @@ package com.stevesarmy.sim.scenario;
 
 import com.stevesarmy.sim.terrain.SimTerrain;
 
+import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.BiConsumer;
@@ -23,6 +24,11 @@ public final class SimScenario {
         int durationTicks();
         float enemyHealthStart();
         float enemyHealthEnd();
+        /** Ground-truth exposure map computed at scenario end; null when no threats were injected. */
+        @Nullable
+        com.stevesarmy.sim.DangerOracle.Oracle dangerOracle();
+        /** Violations the generic detectors produced this run (danger self-tests assert on these). */
+        java.util.List<com.stevesarmy.sim.SimViolation> violations();
     }
 
     public final String name;

@@ -46,6 +46,8 @@ public final class SimSample {
     public final boolean rising;
     /** Synced cover height the pose gate reads (CoverPoint cover height); -1 when unavailable. */
     public final float syncedCoverHeight;
+    /** Danger-map score (0..100) at the soldier's position; -1 when no danger source is wired. */
+    public final double dangerAtSoldier;
 
     public SimSample(int tick, String label, CombatStateSnapshot state,
                      float health, float maxHealth, boolean hasAttackTarget,
@@ -53,7 +55,8 @@ public final class SimSample {
                      boolean hasGun, int shotsFired, int ammo, int magazineSize,
                      double coverSlotOffset, int anchorPulls,
                      int exposedBodyRays, int exposedHeadRays, int probedBodyRays, boolean reloading,
-                     String posture, boolean rising, float syncedCoverHeight) {
+                     String posture, boolean rising, float syncedCoverHeight,
+                     double dangerAtSoldier) {
         this.tick = tick;
         this.label = label;
         this.state = state;
@@ -76,5 +79,6 @@ public final class SimSample {
         this.posture = posture;
         this.rising = rising;
         this.syncedCoverHeight = syncedCoverHeight;
+        this.dangerAtSoldier = dangerAtSoldier;
     }
 }

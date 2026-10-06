@@ -56,4 +56,19 @@ public final class SimTuning {
     /** Follow-blocker strings that mean "cover machine owns the legs right now". */
     public static final String BLOCKED_SEEKING = "SEEKING_COVER";
     public static final String BLOCKED_REPOSITIONING = "REPOSITIONING";
+
+    // --- danger-map oracle rig (Phase 0) ------------------------------------
+
+    /** Per-cell sampler-vs-oracle disagreement that counts as a mismatch. */
+    public static final double DANGER_CELL_TOLERANCE = 12.0;
+    /** Fraction of compared cells allowed to disagree before the oracle detector FAILs. */
+    public static final double DANGER_ORACLE_MISMATCH_FRACTION = 0.02;
+    /** Sustained map-vs-probe contradiction before the cross-check fires (WARN). */
+    public static final int DANGER_PROBE_DISAGREE_TICKS = 60;
+    /** Map score below this counts as "reads safe" in the probe cross-check. */
+    public static final double DANGER_PROBE_SAFE_MAX = 20.0;
+    /** Map score above this counts as "reads hot" in the probe cross-check. */
+    public static final double DANGER_PROBE_HOT_MIN = 60.0;
+    /** Body rays visible that count as "heavily exposed" in the probe cross-check. */
+    public static final int DANGER_PROBE_RAYS_MANY = 8;
 }

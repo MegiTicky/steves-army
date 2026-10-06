@@ -24,7 +24,7 @@ public final class StandardDetectors {
     private StandardDetectors() {}
 
     public static List<SimDetector> all() {
-        return List.of(
+        List<SimDetector> detectors = new ArrayList<>(List.of(
             new StuckSeek(),
             new SeekFailLoop(),
             new CoverOscillation(),
@@ -36,13 +36,15 @@ public final class StandardDetectors {
             new FireStarvation(),
             new ReservationDrift(),
             new CoverDockDrift(),
-            new ExposedWhileHiding());
+            new ExposedWhileHiding()));
+        detectors.addAll(DangerMapDetectors.all());
+        return detectors;
     }
 
     /** Longest run helper: indexes of a maximal run where the predicate holds. */
-    private record Run(int fromIdx, int toIdx) {}
+    record Run(int fromIdx, int toIdx) {}
 
-    private static List<Run> runs(List<SimSample> series, java.util.function.Predicate<SimSample> predicate) {
+    static List<Run> runs(List<SimSample> series, java.util.function.Predicate<SimSample> predicate) {
         List<Run> found = new ArrayList<>();
         int start = -1;
         for (int i = 0; i < series.size(); i++) {
@@ -57,7 +59,7 @@ public final class StandardDetectors {
         return found;
     }
 
-    private static int spanTicks(List<SimSample> series, Run run) {
+    static int spanTicks(List<SimSample> series, Run run) {
         return series.get(run.toIdx).tick - series.get(run.fromIdx).tick;
     }
 

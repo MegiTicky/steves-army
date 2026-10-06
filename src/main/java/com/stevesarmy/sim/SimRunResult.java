@@ -16,6 +16,10 @@ public final class SimRunResult {
     public final List<SimViolation> violations = new ArrayList<>();
     /** Empty = all explicit scenario assertions passed. */
     public final List<String> assertionFailures = new ArrayList<>();
+    /** Ground-truth exposure map computed at scenario end; null when the scenario injected no threats. */
+    public volatile DangerOracle.Oracle dangerOracle;
+    /** Sampler-vs-oracle sweep result; null when no sampler was registered or the sweep was disabled. */
+    public volatile DangerOracle.SweepReport oracleSweep;
 
     public SimRunResult(SimScenario scenario, int durationTicks, boolean gunsLoaded,
                         float enemyHealthStart, float enemyHealthEnd, SimTimeline timeline) {

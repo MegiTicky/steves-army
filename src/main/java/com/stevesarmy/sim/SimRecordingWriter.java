@@ -86,7 +86,7 @@ public final class SimRecordingWriter {
                <tr><td><span class="sq" style="background:#9c8a4d"></span></td><td>half cover</td>
                    <td><span class="sq" style="background:#cfd8e6"></span></td><td>full cover</td></tr>
                <tr><td><span style="color:#ffe066">&mdash;</span></td><td>shot (dot = impact)</td>
-                   <td></td><td></td></tr>
+                   <td><span style="display:inline-block;width:14px;height:14px;background:rgba(255,60,40,.35)"></span></td><td>danger (LoS oracle)</td></tr>
                <tr><td><span style="display:inline-block;width:14px;height:14px;background:#4dff88;border-radius:50%"></span></td><td>standing</td>
                    <td><span style="display:inline-block;width:9px;height:9px;background:#4dff88;border-radius:50%"></span></td><td>crouched</td></tr>
                <tr><td><span style="display:inline-block;width:16px;height:7px;background:#4dff88;border-radius:50%"></span></td><td>prone</td>
@@ -127,6 +127,18 @@ public final class SimRecordingWriter {
               }
             }
 
+            // --- danger overlay layer (static, from the LoS oracle) ---------------
+            const dangerCv = document.createElement('canvas');
+            dangerCv.width = cv.width; dangerCv.height = cv.height;
+            if (D.danger && D.danger.length) {
+              const dc = dangerCv.getContext('2d');
+              for (const c of D.danger) {
+                if (c[2] <= 0) continue;
+                dc.fillStyle = 'rgba(255,60,40,' + (0.06 + 0.30 * c[2] / 100).toFixed(3) + ')';
+                dc.fillRect(px(c[0]) - CS, px(c[1]) - CS, 2 * CS, 2 * CS);
+              }
+            }
+
             const stateColors = { NO_COVER:'#ff4d4d', SEEKING_COVER:'#ffaa33', IN_COVER:'#4dff88',
                                   SUPPRESSED_IN_COVER:'#4db8ff', REPOSITIONING:'#ffff4d' };
             const scrub = document.getElementById('scrub');
@@ -164,6 +176,7 @@ public final class SimRecordingWriter {
             function render() {
               const f = D.frames[idx];
               ctx.drawImage(terr, 0, 0);
+              ctx.drawImage(dangerCv, 0, 0);
               document.getElementById('tickLabel').textContent = f.t;
               scrub.value = idx;
               syncEvents(f.t, f.t < lastRenderedTick);
@@ -251,6 +264,7 @@ public final class SimRecordingWriter {
                    '\\nslot offset      : ' + (s.cd !== undefined ? s.cd.toFixed(2) + (s.cd > 0.35 ? '  [DRIFT]' : '') : '-') +
                    '\\nanchor pulls     : ' + (s.ap !== undefined ? s.ap : '-') +
                    '\\nbody rays exposed: ' + (s.xr !== undefined ? s.xr + ' / ' + s.pr + (s.xh ? '  (head: ' + s.xh + ')' : '') : '-') +
+                   (s.dm !== undefined ? '\\ndanger@cell     : ' + s.dm : '') +
                    (s.rl ? '\\nRELOADING' : '') +
                    '\\nLoS to enemy     : ' + s.los;
             }

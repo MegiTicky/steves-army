@@ -240,6 +240,14 @@ public final class SimManager {
                 probedRays = rays.probed();
             }
 
+            // danger read: scenario-registered stub sampler (rig self-tests);
+            // the live per-squad map adapter replaces this in Phase 1
+            double dangerAtSoldier = -1;
+            DangerSampler sampler = context.dangerSampler();
+            if (sampler != null) {
+                dangerAtSoldier = sampler.dangerScoreAt(soldier.getX(), soldier.getZ());
+            }
+
             timeline.add(new SimSample(simTick, label, snap,
                 soldier.getHealth(), soldier.getMaxHealth(),
                 combatTarget != null && combatTarget.isAlive(), los,
@@ -251,7 +259,8 @@ public final class SimManager {
                 slotOffset, anchorPulls, exposedRays, exposedHeadRays, probedRays,
                 soldier.isPreparingOrReloading(),
                 soldier.getPose().name(), soldier.isHalfCoverRising(),
-                snap.currentCover != null ? soldier.getSyncedCoverCurrentHeight() : -1f));
+                snap.currentCover != null ? soldier.getSyncedCoverCurrentHeight() : -1f,
+                dangerAtSoldier));
             recorder.soldier(label, snap, los, nearestX, nearestZ,
                 shotCounts.getOrDefault(soldier.getUUID(), 0),
                 hasGun,
@@ -261,7 +270,8 @@ public final class SimManager {
                 slotOffset, anchorPulls, exposedRays, exposedHeadRays, probedRays,
                 soldier.isPreparingOrReloading(),
                 soldier.getPose().name(), soldier.isHalfCoverRising(),
-                snap.currentCover != null ? soldier.getSyncedCoverCurrentHeight() : -1f);
+                snap.currentCover != null ? soldier.getSyncedCoverCurrentHeight() : -1f,
+                dangerAtSoldier);
         }
         recorder.endFrame(context.enemies);
     }
@@ -307,6 +317,27 @@ public final class SimManager {
             GunIntegration.isAnyGunLoaded() && scenario.armed,
             enemyHealthStart, enemyHealthEnd, timeline);
 
+        // danger-map oracle: independent ground truth over the injected threats,
+        // then the sampler-vs-oracle sweep the DangerOracleMismatch detector judges
+        if (!context.injectedThreats().isEmpty()) {
+            int[] region = context.dangerVerificationRegion();
+            int x1 = region != null ? region[0] : 3;
+            int z1 = region != null ? region[1] : 3;
+            int x2 = region != null ? region[2] : scenario.width - 3;
+            int z2 = region != null ? region[3] : scenario.depth - 3;
+            List<DangerOracle.ThreatOrigin> origins = new ArrayList<>();
+            for (SimContext.InjectedThreat threat : context.injectedThreats()) {
+                origins.add(new DangerOracle.ThreatOrigin(threat.eye(), 1.0));
+            }
+            result.dangerOracle = DangerOracle.compute(level, origins, x1, z1, x2, z2,
+                terrain.origin.getY());
+            if (context.dangerSweepEnabled() && context.dangerSampler() != null) {
+                result.oracleSweep = DangerOracle.sweep(result.dangerOracle,
+                    context.dangerSampler(), SimTuning.DANGER_CELL_TOLERANCE);
+            }
+            recorder.setDangerOverlay(result.dangerOracle);
+        }
+
         for (SimDetector detector : DETECTORS) {
             try {
                 result.violations.addAll(detector.evaluate(result));
@@ -320,6 +351,8 @@ public final class SimManager {
             @Override public int durationTicks() { return scenario.durationTicks; }
             @Override public float enemyHealthStart() { return enemyHealthStart; }
             @Override public float enemyHealthEnd() { return enemyHealthEnd; }
+            @Override public DangerOracle.Oracle dangerOracle() { return result.dangerOracle; }
+            @Override public List<SimViolation> violations() { return result.violations; }
         };
         for (SimScenario.Assertion assertion : scenario.assertions) {
             try {
