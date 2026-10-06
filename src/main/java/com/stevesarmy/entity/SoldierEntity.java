@@ -2606,6 +2606,13 @@ public BlockPos getPingMoveTarget() {
             return;
         }
 
+        // The claim→dock alignment onto an already-claimed cover also finishes
+        // through the reload — see CoverPositionController's dock exception.
+        if (moveControl instanceof com.stevesarmy.entity.ai.CoverPositionController ctrl
+            && ctrl.isFinishingCoverDockDuringReload()) {
+            return;
+        }
+
         this.getNavigation().stop();
         if (moveControl instanceof com.stevesarmy.entity.ai.CoverPositionController ctrl) {
             // A tactical goal may deliberately preserve a full-cover duck-back.

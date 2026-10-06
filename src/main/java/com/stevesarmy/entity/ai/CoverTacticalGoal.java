@@ -2857,6 +2857,12 @@ private void tickRepositioning() {
             soldier.setLowCrouching(soldier.isFiringProne());
         }
 
+        // A reload that starts during the claim→dock transit must not strand
+        // the soldier crouched outside its cover cell for the whole reload:
+        // the anchor finishes the alignment under the same exception as the
+        // approach (maintainCoverAnchor arms it via isFinishingCoverDockDuringReload).
+        getPositionController().maintainCoverAnchor(getCoverStandingPosition(currentCover.getPosition()));
+
         soldier.holdMovementForReload();
     }
 

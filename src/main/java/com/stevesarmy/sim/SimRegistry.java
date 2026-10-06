@@ -31,6 +31,7 @@ public final class SimRegistry {
             dockArrivalRoles(),
             dockArrivalSuppressed(),
             dockReloadHold(),
+            dockReloadMidApproach(),
             dockKnockbackRecovery(),
             dockSuppressedDriftRecovery(),
             dockCqbHoldFidelity(),
@@ -394,6 +395,72 @@ public final class SimRegistry {
             .assertThat("rifleman anchor velocity engaged", view -> anchorPullsBy(view, "rifle") > 0)
             .assertThat("MG anchor velocity engaged", view -> anchorPullsBy(view, "gunner") > 0)
             .build();
+    }
+
+    private static SimScenario dockReloadMidApproach() {
+        return SimScenario.builder("dock_reload_midapproach")
+            .description("Reload starting mid-approach (user-reported): the reload must not leave the soldier "
+                + "crouched at the claim-time offset for the whole magazine swap — the claim→dock alignment "
+                + "finishes through the reload, same exception as the approach itself.")
+            .duration(500)
+            .armed()
+            .terrain(t -> {
+                t.platform();
+                dockLane(t, 10);
+            })
+            .setup(ctx -> {
+                ctx.spawnAnchor(4, 0, 20);
+                ctx.spawnFriendly(ModEntities.SOLDIER.get(), "reloader", 10, 0, 22, SquadMode.FOLLOW);
+                ctx.spawnEnemy(14, 0, 46); // due south: lane geometry shields it, keeping bug-1 exposure out of this verdict
+            })
+            .suppress(null, 20, 260, 15)
+            .action(35, "burn one round, start reload mid-approach", ctx -> {
+                SoldierEntity s = ctx.soldier("reloader");
+                if (s != null && s.isAlive()) {
+                    com.stevesarmy.combat.GunIntegration.shootAtPosition(s, s.position().add(0.0, -1.0, 0.0));
+                    com.stevesarmy.combat.GunIntegration.reload(s);
+                }
+            })
+            .assertThat("reload was engaged", view -> everReloading(view, "reloader"))
+            .assertThat("reload overlapped the cover claim (exercises the bug window)",
+                view -> reloadOverlappedClaim(view, "reloader"))
+            .assertThat("dock completes during the reload (offset <= 0.2 between claim and reload end)",
+                view -> docksDuringReload(view, "reloader"))
+            .assertThat("ends docked in the exact slot", view -> dockedAtEnd(view, "reloader"))
+            .build();
+    }
+
+    /** True when the reload window overlaps the cover claim (the bug's precondition). */
+    private static boolean reloadOverlappedClaim(SimScenario.SimRunResultView view, String label) {
+        Integer claimTick = null;
+        Integer reloadEndTick = null;
+        boolean reloadingSeen = false;
+        for (SimSample s : view.timeline().series(label)) {
+            if (claimTick == null && s.state.currentCover != null) claimTick = s.tick;
+            if (s.reloading) {
+                reloadingSeen = true;
+                reloadEndTick = s.tick;
+            }
+        }
+        return reloadingSeen && claimTick != null && reloadEndTick != null && reloadEndTick >= claimTick;
+    }
+
+    /** The claim→dock transit finishes during the reload: an idle sample between
+     * the cover claim and the reload end sits within 0.2 of the slot. */
+    private static boolean docksDuringReload(SimScenario.SimRunResultView view, String label) {
+        Integer claimTick = null;
+        Integer reloadEndTick = null;
+        for (SimSample s : view.timeline().series(label)) {
+            if (claimTick == null && s.state.currentCover != null) claimTick = s.tick;
+            if (s.reloading) reloadEndTick = s.tick;
+        }
+        if (claimTick == null || reloadEndTick == null || reloadEndTick < claimTick) return false;
+        for (SimSample s : view.timeline().series(label)) {
+            if (s.tick < claimTick || s.tick > reloadEndTick) continue;
+            if (s.state.currentCover != null && idlePeek(s)
+                && s.coverSlotOffset >= 0 && s.coverSlotOffset <= 0.2) return true;
+        }
+        return false;
     }
 
     private static SimScenario dockReloadHold() {

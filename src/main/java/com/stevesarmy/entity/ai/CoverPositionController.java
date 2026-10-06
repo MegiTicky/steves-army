@@ -80,7 +80,10 @@ public class CoverPositionController extends MoveControl {
             return;
         }
         if (isPreparingOrReloading()) {
-            if (!controlledReturnToCover && !isCoverApproachDuringReload()) {
+            if (controlledReturnToCover || isCoverApproachDuringReload()
+                || isFinishingCoverDockDuringReload()) {
+                beginMove(pos, tolerance, speed, source, reason, controlledReturnToCover);
+            } else {
                 stopForReload();
                 this.lastResult = MovementResult.FAILED;
                 this.lastFailureReason = FailureReason.RELOAD_INTERRUPTED;
@@ -269,9 +272,11 @@ public class CoverPositionController extends MoveControl {
      * Requests short-range position correction while the soldier is hiding in
      * its current cover. The request is consumed by tick() so the correction
      * happens after MoveControl has processed the normal movement command.
+     * A reload suspends the anchor EXCEPT for a pending claim→dock alignment,
+     * which finishes through the reload.
      */
     public void maintainCoverAnchor(Vec3 target) {
-        if (!isPreparingOrReloading()) {
+        if (!isPreparingOrReloading() || isFinishingCoverDockDuringReload()) {
             this.coverAnchorTarget = target;
         }
     }
@@ -320,7 +325,7 @@ public class CoverPositionController extends MoveControl {
         this.coverAnchorTarget = null;
 
         if (isPreparingOrReloading() && !controlledReturnToCover
-            && !isCoverApproachDuringReload()) {
+            && !isCoverApproachDuringReload() && !isFinishingCoverDockDuringReload()) {
             clear();
             this.debugMoveSource = "reload";
             this.debugMoveReason = "movement held while reloading";
@@ -434,6 +439,26 @@ public class CoverPositionController extends MoveControl {
     private boolean isCoverApproachDuringReload() {
         return this.mob instanceof SoldierEntity soldier
             && soldier.isMovingToUnoccupiedCoverDuringReload();
+    }
+
+    /**
+     * True when a reload is holding a soldier off its already-claimed cover
+     * slot: the cover is claimed but the claim→dock alignment (recenter +
+     * anchor) has not finished. This transit finishes through the reload under
+     * the same exception as the approach itself — otherwise a reload that
+     * starts mid-alignment leaves the soldier crouched partially outside its
+     * cover cell until the magazine is full.
+     */
+    public boolean isFinishingCoverDockDuringReload() {
+        if (!(this.mob instanceof SoldierEntity soldier) || !soldier.isPreparingOrReloading()) {
+            return false;
+        }
+        var current = soldier.getCoverBehaviorManager().getCurrentCover();
+        if (current == null) {
+            return false;
+        }
+        return !isWithinCoverAnchorDeadzone(
+            CoverTacticalGoal.getCoverStandingPositionStatic(current.getPosition()));
     }
 
     private void traceMoveControlRotation(String source, float previousYaw, float previousBodyYaw,
