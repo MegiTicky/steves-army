@@ -35,7 +35,8 @@ public final class SimRegistry {
             dockKnockbackRecovery(),
             dockSuppressedDriftRecovery(),
             dockCqbHoldFidelity(),
-            dockPeekReturn());
+            dockPeekReturn(),
+            loneBlockExposure());
     }
 
     public static SimScenario byName(String name) {
@@ -643,6 +644,76 @@ public final class SimRegistry {
             if ("MOVING_TO_PEEK".equals(s.state.peekState) || "RETURNING_TO_COVER".equals(s.state.peekState)) {
                 return true;
             }
+        }
+        return false;
+    }
+
+    // 12. lone 1-block cover in an open field — the stand-while-hiding strand --
+
+    /**
+     * User report (2026-10-06): a soldier hiding at a single 1-block cover in an
+     * open field "not actually ducking (just stands there)" dies to enemy fire.
+     * A lone 1-high block classifies HALF with synced cover height 1.0, so the
+     * pose gate (SoldierEntity.tick) must hold the crouch whenever he is docked
+     * there; sustained STANDING posture with exposed head rays at that slot is
+     * the reported failure signature.
+     */
+    private static SimScenario loneBlockExposure() {
+        return SimScenario.builder("lone_block_exposure")
+            .description("User report: at a single 1-block cover in an open field the soldier "
+                + "stands upright while labeled hiding and is shot dead. The lone block "
+                + "classifies HALF (synced height 1.0 < 1.3), so the pose gate must keep him "
+                + "crouched at the slot; sustained standing head exposure there is the bug.")
+            .duration(700)
+            .armed()
+            .terrain(t -> {
+                t.platform();
+                t.coverBlock(12, 30, 1); // THE lone block — nothing else in the field
+            })
+            .setup(ctx -> {
+                ctx.spawnAnchor(4, 0, 24);
+                ctx.spawnFriendly(ModEntities.SOLDIER.get(), "lone", 10, 0, 22, SquadMode.FOLLOW);
+                // four shooters so the pressure outlives the soldier's return fire —
+                // two die too fast and the stand-exposure window never forms
+                ctx.spawnEnemy(16, 0, 44);
+                ctx.spawnEnemy(22, 0, 48);
+                ctx.spawnEnemy(12, 0, 50);
+                ctx.spawnEnemy(26, 0, 42);
+            })
+            .assertThat("soldier claims the lone block (HALF) as cover by t300",
+                view -> claimedCoverTypedBy(view, "lone", 300, "HALF"))
+            .assertThat("FINDING: docked soldier never sustains STANDING posture at the low "
+                + "half cover with head rays exposed (pose gate holds the crouch)",
+                view -> !sustainedStandingAtLowHalfCover(view, "lone", 40, 8))
+            .build();
+    }
+
+    /** Claims a cover of the given type by {@code byTick}. */
+    private static boolean claimedCoverTypedBy(SimScenario.SimRunResultView view, String label,
+                                               int byTick, String type) {
+        for (SimSample s : view.timeline().series(label)) {
+            if (s.tick > byTick) break;
+            if (s.state.currentCover != null && type.equals(s.state.currentCoverType)) return true;
+        }
+        return false;
+    }
+
+    /** Sustained STANDING posture while docked at a HALF cover whose synced height is
+     * below the 1.3 standing threshold — the pose gate should be holding the crouch. */
+    private static boolean sustainedStandingAtLowHalfCover(SimScenario.SimRunResultView view,
+                                                           String label, int fromTick,
+                                                           int streakSamples) {
+        int streak = 0;
+        for (SimSample s : view.timeline().series(label)) {
+            if (s.tick < fromTick) continue;
+            boolean hit = s.state.currentCover != null
+                && "HALF".equals(s.state.currentCoverType)
+                && s.syncedCoverHeight >= 0 && s.syncedCoverHeight < 1.3f
+                && s.coverSlotOffset >= 0 && s.coverSlotOffset <= 0.5
+                && "STANDING".equals(s.posture)
+                && s.exposedHeadRays > 0;
+            streak = hit ? streak + 1 : 0;
+            if (streak >= streakSamples) return true;
         }
         return false;
     }

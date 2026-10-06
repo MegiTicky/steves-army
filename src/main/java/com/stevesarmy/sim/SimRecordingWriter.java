@@ -87,6 +87,10 @@ public final class SimRecordingWriter {
                    <td><span class="sq" style="background:#cfd8e6"></span></td><td>full cover</td></tr>
                <tr><td><span style="color:#ffe066">&mdash;</span></td><td>shot (dot = impact)</td>
                    <td></td><td></td></tr>
+               <tr><td><span style="display:inline-block;width:14px;height:14px;background:#4dff88;border-radius:50%"></span></td><td>standing</td>
+                   <td><span style="display:inline-block;width:9px;height:9px;background:#4dff88;border-radius:50%"></span></td><td>crouched</td></tr>
+               <tr><td><span style="display:inline-block;width:16px;height:7px;background:#4dff88;border-radius:50%"></span></td><td>prone</td>
+                   <td><span style="display:inline-block;width:12px;height:12px;border:1px dashed #fff;border-radius:50%"></span></td><td>rising</td></tr>
               </table>
               <div id="detail">click a soldier to inspect</div>
              </div>
@@ -190,9 +194,20 @@ public final class SimRecordingWriter {
 
               for (const s of f.s) {
                 const X = px(s.x), Z = px(s.z);
-                ctx.beginPath(); ctx.arc(X, Z, 7, 0, 2 * Math.PI);
-                ctx.fillStyle = stateColors[s.cs] || '#ffffff'; ctx.fill();
-                ctx.strokeStyle = 'rgba(0,0,0,.7)'; ctx.lineWidth = 1; ctx.stroke();
+                // posture: standing = full circle, crouching = small circle,
+                // prone (SWIMMING pose) = flattened ellipse
+                ctx.fillStyle = stateColors[s.cs] || '#ffffff';
+                ctx.strokeStyle = 'rgba(0,0,0,.7)'; ctx.lineWidth = 1;
+                if (s.po === 'SWIMMING') {
+                  ctx.beginPath(); ctx.ellipse(X, Z, 9, 3.5, 0, 0, 2 * Math.PI);
+                  ctx.fill(); ctx.stroke();
+                } else {
+                  const r = s.po === 'CROUCHING' ? 4.5 : 7;
+                  ctx.beginPath(); ctx.arc(X, Z, r, 0, 2 * Math.PI); ctx.fill(); ctx.stroke();
+                }
+                if (s.ri) { ctx.beginPath(); ctx.arc(X, Z, 9.5, 0, 2 * Math.PI);
+                             ctx.strokeStyle = 'rgba(255,255,255,.8)'; ctx.setLineDash([2, 2]);
+                             ctx.lineWidth = 1; ctx.stroke(); ctx.setLineDash([]); }
                 if (s.pin) { ctx.beginPath(); ctx.arc(X, Z, 9, 0, 2 * Math.PI);
                              ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.stroke(); }
                 if (s.sup > 0.02) { ctx.beginPath();
@@ -217,6 +232,10 @@ public final class SimRecordingWriter {
               return 'label            : ' + s.l +
                    '\\ncoverState       : ' + s.cs +
                    '\\npeekState        : ' + s.ps +
+                   (s.po !== undefined || s.ch !== undefined
+                     ? '\\nposture          : ' + (s.po || 'STANDING') + (s.ri ? '  [RISING]' : '')
+                       + (s.ch !== undefined ? '   cover height: ' + s.ch : '')
+                     : '') +
                    (s.hp !== undefined ? '\\nhealth           : ' + s.hp.toFixed(1) : '') +
                    '\\nsuppression      : ' + s.sup.toFixed(2) + (s.pin ? '   [PINNED]' : '') +
                    '\\nfollowBlockedBy  : ' + (s.fb || '-') +

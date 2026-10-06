@@ -40,13 +40,20 @@ public final class SimSample {
     public final int probedBodyRays;
     /** Soldier is mid reload (facade) or has a pending reload flag. */
     public final boolean reloading;
+    /** Rendered pose name: STANDING, CROUCHING, SWIMMING (prone/low crouch), ... */
+    public final String posture;
+    /** Half-cover rise animation in progress (crouch-to-stand blend). */
+    public final boolean rising;
+    /** Synced cover height the pose gate reads (CoverPoint cover height); -1 when unavailable. */
+    public final float syncedCoverHeight;
 
     public SimSample(int tick, String label, CombatStateSnapshot state,
                      float health, float maxHealth, boolean hasAttackTarget,
                      Boolean losToEnemy, float enemyDistance, int reservationCountForClaim,
                      boolean hasGun, int shotsFired, int ammo, int magazineSize,
                      double coverSlotOffset, int anchorPulls,
-                     int exposedBodyRays, int exposedHeadRays, int probedBodyRays, boolean reloading) {
+                     int exposedBodyRays, int exposedHeadRays, int probedBodyRays, boolean reloading,
+                     String posture, boolean rising, float syncedCoverHeight) {
         this.tick = tick;
         this.label = label;
         this.state = state;
@@ -66,5 +73,8 @@ public final class SimSample {
         this.exposedHeadRays = exposedHeadRays;
         this.probedBodyRays = probedBodyRays;
         this.reloading = reloading;
+        this.posture = posture;
+        this.rising = rising;
+        this.syncedCoverHeight = syncedCoverHeight;
     }
 }

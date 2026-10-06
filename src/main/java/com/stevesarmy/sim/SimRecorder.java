@@ -63,7 +63,8 @@ public final class SimRecorder {
                         Double nearestEnemyX, Double nearestEnemyZ,
                         int shotsFired, boolean hasGun, int ammo, int magazineSize, float health,
                         double slotOffset, int anchorPulls, int exposedRays, int exposedHeadRays,
-                        int probedRays, boolean reloading) {
+                        int probedRays, boolean reloading,
+                        String posture, boolean rising, float syncedCoverHeight) {
         if (current == null) return;
         if (!firstSoldier) current.append(',');
         firstSoldier = false;
@@ -124,6 +125,15 @@ public final class SimRecorder {
         }
         if (reloading) {
             current.append(",\"rl\":1");
+        }
+        if (posture != null && !"STANDING".equals(posture)) {
+            current.append(",\"po\":").append(quote(posture));
+        }
+        if (rising) {
+            current.append(",\"ri\":1");
+        }
+        if (syncedCoverHeight >= 0) {
+            current.append(",\"ch\":").append(String.format("%.2f", syncedCoverHeight));
         }
         current.append('}');
     }

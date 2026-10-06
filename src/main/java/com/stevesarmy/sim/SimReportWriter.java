@@ -120,7 +120,8 @@ public final class SimReportWriter {
         List<SimSample> series = result.timeline.series(label);
         if (series.isEmpty()) return;
         int segStart = series.get(0).tick;
-        String segState = series.get(0).state.coverState + "/" + series.get(0).state.peekState;
+        String segState = series.get(0).state.coverState + "/" + series.get(0).state.peekState
+            + "/" + series.get(0).posture;
         float segSup = series.get(0).state.suppressionLevel;
         String segBlocked = series.get(0).state.followBlockedBy;
         List<Integer> violationTicks = result.violations.stream()
@@ -128,7 +129,7 @@ public final class SimReportWriter {
             .map(v -> v.tick).toList();
 
         for (SimSample s : series) {
-            String state = s.state.coverState + "/" + s.state.peekState;
+            String state = s.state.coverState + "/" + s.state.peekState + "/" + s.posture;
             if (!state.equals(segState) || !s.state.followBlockedBy.equals(segBlocked)) {
                 sb.append("  t").append(segStart).append('-').append(s.tick).append(' ').append(segState);
                 if (!segBlocked.isEmpty()) sb.append(" [blocked:").append(segBlocked).append(']');

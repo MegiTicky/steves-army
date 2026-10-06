@@ -249,7 +249,9 @@ public final class SimManager {
                 hasGun ? GunIntegration.getCurrentAmmo(soldier) : -1,
                 hasGun ? GunIntegration.getMagazineSize(soldier) : -1,
                 slotOffset, anchorPulls, exposedRays, exposedHeadRays, probedRays,
-                soldier.isPreparingOrReloading()));
+                soldier.isPreparingOrReloading(),
+                soldier.getPose().name(), soldier.isHalfCoverRising(),
+                snap.currentCover != null ? soldier.getSyncedCoverCurrentHeight() : -1f));
             recorder.soldier(label, snap, los, nearestX, nearestZ,
                 shotCounts.getOrDefault(soldier.getUUID(), 0),
                 hasGun,
@@ -257,7 +259,9 @@ public final class SimManager {
                 hasGun ? GunIntegration.getMagazineSize(soldier) : -1,
                 soldier.getHealth(),
                 slotOffset, anchorPulls, exposedRays, exposedHeadRays, probedRays,
-                soldier.isPreparingOrReloading());
+                soldier.isPreparingOrReloading(),
+                soldier.getPose().name(), soldier.isHalfCoverRising(),
+                snap.currentCover != null ? soldier.getSyncedCoverCurrentHeight() : -1f);
         }
         recorder.endFrame(context.enemies);
     }
