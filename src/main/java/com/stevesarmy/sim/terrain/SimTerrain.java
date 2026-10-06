@@ -68,6 +68,11 @@ public final class SimTerrain {
         wall(x1, z1, x2, z2, h, Blocks.STONE_BRICKS.defaultBlockState());
     }
 
+    /** Single hard-cover stack (h tall) at one cell. */
+    public void coverBlock(int x, int z, int h) {
+        wall(x, z, x, z, h, Blocks.STONE_BRICKS.defaultBlockState());
+    }
+
     public void block(int x, int y, int z, BlockState state) {
         BlockPos pos = origin.offset(x, y, z);
         level.setBlockAndUpdate(pos, state);

@@ -90,7 +90,7 @@ public final class SimRecordingWriter {
             const D = __DATA__;
             const CS = 10;
             const cv = document.getElementById('cv');
-            const W = D.terrain.w + 2, H = D.terrain.d + 2;
+            const W = D.terrain.w + 3, H = D.terrain.d + 3;
             cv.width = W * CS; cv.height = H * CS;
             const ctx = cv.getContext('2d');
             document.getElementById('title').textContent = 'stevesarmy sim: ' + D.scenario;

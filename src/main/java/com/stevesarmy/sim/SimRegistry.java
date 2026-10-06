@@ -48,7 +48,12 @@ public final class SimRegistry {
                 + "the follow gate must reopen once pressure subsides (t400+). Reproduces the "
                 + "suppression-gates-all-follow-escapes strand.")
             .duration(600)
-            .terrain(SimTerrain::platform)
+            .terrain(t -> {
+                t.platform();
+                t.coverRow(20, 18, 22, 18, 1); // north waist-high segment
+                t.coverRow(20, 30, 22, 30, 1); // south waist-high segment
+                t.coverBlock(19, 24, 2);       // head-high hard cover mid-line
+            })
             .setup(ctx -> {
                 ctx.spawnAnchor(4, 0, 24);
                 ctx.spawnFriendly(ModEntities.SOLDIER.get(), "alice", 10, 0, 24, SquadMode.FOLLOW);
@@ -97,7 +102,12 @@ public final class SimRegistry {
             .description("Rifleman pinned continuously for the whole scenario from one fixed origin: "
                 + "the relocation chain must move the soldier between covers instead of dead-ending.")
             .duration(700)
-            .terrain(SimTerrain::platform)
+            .terrain(t -> {
+                t.platform();
+                t.coverRow(22, 20, 24, 20, 1); // relocation option north of the line
+                t.coverRow(22, 28, 24, 28, 1); // relocation option south of the line
+                t.coverBlock(18, 24, 2);       // close hard cover near the spawn
+            })
             .setup(ctx -> {
                 ctx.spawnAnchor(4, 0, 24);
                 ctx.spawnFriendly(ModEntities.SOLDIER.get(), "runner", 12, 0, 24, SquadMode.FOLLOW);
@@ -117,7 +127,12 @@ public final class SimRegistry {
                 + "position B. The MG suppression centroid must refresh from fresh squad intel "
                 + "instead of latching to the stale anchor.")
             .duration(700)
-            .terrain(SimTerrain::platform)
+            .terrain(t -> {
+                t.platform();
+                t.coverRow(16, 21, 18, 21, 1); // waist-high cover north of the gunner
+                t.coverRow(16, 27, 18, 27, 1); // waist-high cover south of the gunner
+                t.coverBlock(22, 24, 2);       // head-high hard cover mid-line
+            })
             .setup(ctx -> {
                 ctx.spawnAnchor(4, 0, 24);
                 ctx.spawnFriendly(ModEntities.MACHINE_GUNNER.get(), "gunner", 12, 0, 24, SquadMode.FOLLOW);
@@ -146,7 +161,13 @@ public final class SimRegistry {
                 + "(when armed) the pair should disperse rather than stack on one anchor.")
             .duration(700)
             .armed()
-            .terrain(SimTerrain::platform)
+            .terrain(t -> {
+                t.platform();
+                t.coverRow(18, 12, 20, 12, 1); // left soldier's options
+                t.coverRow(18, 19, 20, 19, 1);
+                t.coverRow(18, 29, 20, 29, 1); // right soldier's options
+                t.coverRow(18, 36, 20, 36, 1);
+            })
             .setup(ctx -> {
                 ctx.spawnAnchor(4, 0, 24);
                 ctx.spawnFriendly(ModEntities.SOLDIER.get(), "left", 12, 0, 16, SquadMode.FOLLOW);

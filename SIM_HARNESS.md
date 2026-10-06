@@ -85,6 +85,11 @@ instance exercise the real firing chain.
 | `pair_suppression_lanes` | Two suppressors; dispersion vs stacking |
 | `open_field_baseline` | No suppression; detector false-positive calibration |
 
+Every scenario except `open_field_baseline` (intentionally bare) places real
+cover: waist-high stone-brick rows (half cover, peekable) and 2-high stacks
+(full cover) between the actors and the shooter, spaced so each soldier has
+reachable options and the pair/relocation scenarios have distinct candidates.
+
 ## Detectors (all run in every scenario)
 
 StuckSeek, SeekFailLoop, CoverOscillation, PeekThrash (incl. aborted
@@ -92,25 +97,35 @@ peek cycles), SuppressionStarve, FollowEscapeBlocked, PathFailStorm,
 PositionDeadlock, FireStarvation (armed runs only), ReservationDrift
 (+ post-run ReservationLeak check).
 
-## Known first-run findings (2026-10-06)
+## Known findings (2026-10-06, post cover-fixture pass)
 
-The harness's first pass reproduced live strands programmatically:
+Findings after the scenarios gained real cover blocks (the first pass ran four
+scenarios on a bare slab, which conflated "no cover found" with "cover machine
+dead"):
 
-1. **Dead suppression-escape chain** — soldiers pinned 370–640t never queue
-   `SUPPRESSION_REPOSITION` / `CONTINUOUS_SUPPRESSION` / `SUPPRESSION_POSITION`
-   (`relocType=NONE`, `queuedModesSeen` empty for the whole pin). The
-   continuous-suppression reposition trigger and the relocation chain do not
-   engage from `SUPPRESSED_IN_COVER` in these conditions.
-2. **MG async-search dead-wait** (`mg_anchor_freshness`) — MG held
-   SEEKING_COVER 695t: `searchPending=true`, `targetCover=null`,
-   `failedSearches=0`, `blacklistSize=0`. Because the search never *fails*,
-   every escalation counter stays at zero and no watchdog re-decides.
-3. **Open-field pinned paralysis** (`pair_suppression_lanes`) — no cover within
-   search radius → NO_COVER + PINNED for the whole run with only periodic
-   failed seeks; soldiers stand exposed under fire without relocating away.
-4. **Peek-while-pinned churn** — repeated `MOVING_TO_PEEK → RETURNING_TO_COVER`
-   cycles that never reach EXPOSED while suppression is ~1.0.
-5. **Reservation drift/leak (WARN)** — occupied cover unreserved 65t+; one
+1. **Escape chain dead while pinned** — in `suppressed_follow_escape` both
+   soldiers hold cover through a 370t pin with `queuedModesSeen` empty and
+   `relocType=NONE`; reorganization (REPOSITIONING/SEEKING, bob) only starts
+   ~70t after the injection stops at t400. The escape chain does engage from
+   the open (`persistent_ping_relocation` PASSes: cover at t35, reposition at
+   t40-55 under fire) — it is reaching-cover-then-staying that never escalates.
+2. **Suppression gates cover acquisition** (`pair_suppression_lanes`) — both
+   soldiers spend 640t pinned in the open 7 blocks from valid cover. The
+   suppression gate blocks starting a search; the brief decay dips (5-25t)
+   where `SEEKING_COVER` blips through are too short for the async search to
+   return before the next burst re-pins and cancels it.
+3. **MG seek dead-wait** (`mg_anchor_freshness`) — MG held SEEKING_COVER 695t
+   with `searchPending=false`, `targetCover=null`, `failedSearches=0` — the
+   seek state is held with no pending search, no result, and no failure
+   counted; nothing re-issues or escalates. (Pre-fixture pass the search
+   stayed `pending=true` forever; now it resolves to nothing and the state
+   still doesn't move.)
+4. **Cover churn under fire** — bob claimed 4 distinct covers within 200t
+   (`CoverOscillation`) once suppression dipped; alice/bob also show
+   MOVING_TO_PEEK → RETURNING cycles that never reach EXPOSED at sup ~1.0.
+5. **Reservation drift/leak (WARN)** — occupied cover unreserved 60t+; one
    orphaned reservation at cleanup.
-6. **Detection candidate** — baseline scout did not acquire an enemy 24 blocks
-   away within 20s (facing-dependent?); needs a look before recalibrating.
+6. **Detection candidate** — baseline scout does not acquire an enemy 30
+   blocks due south (its facing) within 20s; zero detector violations (the
+   calibration goal holds), but the targeting assertion fails. Needs a
+   TargetAcquisition/FoF look before recalibrating.

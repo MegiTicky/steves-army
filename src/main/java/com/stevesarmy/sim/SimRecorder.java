@@ -17,7 +17,7 @@ import java.util.List;
 public final class SimRecorder {
     private final int width;
     private final int depth;
-    private final int[] heights; // (w+2)*(d+2), origin at (-1,-1); 0 = floor, 1..3 = wall height
+    private final int[] heights; // (w+3)*(d+3), origin at (-1,-1); 0 = floor, 1..3 = wall height
     private final List<String> frames = new ArrayList<>();
     private final List<String> events = new ArrayList<>();
     private StringBuilder current;
@@ -26,7 +26,7 @@ public final class SimRecorder {
     public SimRecorder(int width, int depth) {
         this.width = width;
         this.depth = depth;
-        this.heights = new int[(width + 2) * (depth + 2)];
+        this.heights = new int[(width + 3) * (depth + 3)];
     }
 
     /** Top-down height map from everything the fixture placed. */
@@ -34,9 +34,9 @@ public final class SimRecorder {
         for (BlockPos pos : terrain.placedBlocks()) {
             int x = pos.getX() - terrain.origin.getX();
             int z = pos.getZ() - terrain.origin.getZ();
-            if (x < -1 || z < -1 || x > width || z > depth) continue;
+            if (x < -1 || z < -1 || x > width + 1 || z > depth + 1) continue;
             int h = pos.getY() - terrain.origin.getY() + 1; // floor slab -> 0, wall layer 0 -> 1, ...
-            int idx = (x + 1) * (depth + 2) + (z + 1);
+            int idx = (x + 1) * (depth + 3) + (z + 1);
             if (h > heights[idx]) heights[idx] = Math.min(h, 3);
         }
     }
