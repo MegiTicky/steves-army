@@ -56,6 +56,7 @@ public final class SimManager {
     private static SimTerrain terrain;
     private static SimContext context;
     private static SimTimeline timeline;
+    private static SimRecorder recorder;
     private static int simTick = 0;
     private static int actionIndex = 0;
     private static float enemyHealthStart;
@@ -106,6 +107,7 @@ public final class SimManager {
             } catch (Exception e) {
                 StevesArmyMod.LOGGER.error("[Sim] action '{}' failed at {}t: {}", action.describe(), simTick, e.toString(), e);
             }
+            recorder.event(simTick, action.describe());
         }
 
         if (simTick % SimTuning.SAMPLE_INTERVAL_TICKS == 0 || simTick >= scenario.durationTicks) {
@@ -128,6 +130,8 @@ public final class SimManager {
         StevesArmyMod.LOGGER.info("[Sim] === scenario {}/{}: {} ===", queueIndex + 1, queue.size(), scenario.name);
         terrain = new SimTerrain(level, new BlockPos(0, yLevel, 0), scenario.width, scenario.depth);
         scenario.terrainBuilder.accept(terrain);
+        recorder = new SimRecorder(scenario.width, scenario.depth);
+        recorder.captureTerrain(terrain);
         forceChunks();
         context = new SimContext(level, terrain);
         timeline = new SimTimeline();
@@ -149,17 +153,19 @@ public final class SimManager {
     }
 
     private static void sample() {
-        List<EnemySoldierEntity> enemies = context.enemies;
+        recorder.beginFrame(simTick);
         for (SoldierEntity soldier : context.friendlies) {
             if (soldier.isRemoved()) continue;
             CombatStateSnapshot snap = captureFor(soldier);
             if (snap == null) continue;
 
             Boolean los = null;
-            float enemyDist = -1f;
-            EnemySoldierEntity nearest = nearestEnemy(soldier, enemies);
+            Double nearestX = null;
+            Double nearestZ = null;
+            EnemySoldierEntity nearest = nearestEnemy(soldier, context.enemies);
             if (nearest != null) {
-                enemyDist = soldier.distanceTo(nearest);
+                nearestX = nearest.getX();
+                nearestZ = nearest.getZ();
                 VisibilityRay.Result ray = VisibilityRay.traceFresh(
                     level, soldier.getEyePosition(), nearest.getEyePosition(), soldier);
                 los = ray != null && ray.clear();
@@ -168,11 +174,15 @@ public final class SimManager {
             int reservation = snap.currentCover != null
                 ? CoverReservationManager.getReservationCount(snap.currentCover) : -1;
 
-            timeline.add(new SimSample(simTick, labelOf(soldier), snap,
+            String label = labelOf(soldier);
+            timeline.add(new SimSample(simTick, label, snap,
                 soldier.getHealth(), soldier.getMaxHealth(),
-                soldier.hasValidAttackTarget(), los, enemyDist, reservation,
+                soldier.hasValidAttackTarget(), los,
+                nearest == null ? -1f : soldier.distanceTo(nearest), reservation,
                 GunIntegration.hasGun(soldier)));
+            recorder.soldier(label, snap, los, nearestX, nearestZ);
         }
+        recorder.endFrame(context.enemies);
     }
 
     /** MG goal is a wrapper shell; unwrap to the real CoverTacticalGoal for sampling. */
@@ -255,6 +265,7 @@ public final class SimManager {
         }
 
         SimReportWriter.write(result, simTick);
+        SimRecordingWriter.write(result, recorder);
 
         // cleanup
         for (SoldierEntity soldier : new ArrayList<>(context.friendlies)) {

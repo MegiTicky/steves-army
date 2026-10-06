@@ -33,6 +33,19 @@ counter-chain evidence, and a per-soldier segmented state timeline. The final
 autorun log line `SIM COMPLETE` is the CI-style grep anchor; per-scenario
 `PASS`/`FAIL` is in the report and the `[Sim]` log lines.
 
+### Watching the simulation
+
+Every scenario also produces `<scenario>_<timestamp>_sim.html` — a
+self-contained top-down animation of the run (double-click to open in any
+browser; no server or codec needed). Soldiers are colored by cover state with a
+white ring when pinned and a red arc showing suppression level; dashed white
+lines are live line-of-sight, cyan lines point at the pursued cover, red
+squares are enemies. Play at 0.5–10x, scrub, and click a soldier for its full
+state snapshot at that tick. The same data ships machine-readable as
+`<scenario>_<timestamp>_recording.json`. You can also watch a run live:
+`/stevesarmy_sim run <name>` from the dev client and fly up to the fixture
+(platform at Y=160+, west edge of the world origin).
+
 Dev runs are gun-less by design (TaCZ is compile-only in dev — its SRG-refmapped
 mixins cannot load against userdev classes), so suppression pressure comes from
 deterministic `SuppressionTracker` injection and firing-chain assertions skip
@@ -44,6 +57,9 @@ instance exercise the real firing chain.
 - `sim/SimManager` — tick-loop runner: build fixture → spawn actors → scripted
   action timeline → sample every 5 ticks → detectors + assertions → report →
   cleanup/next. Auto-runs from `ServerStartedEvent` when `-Dsim.autorun=true`.
+- `sim/SimRecorder` + `sim/SimRecordingWriter` — per-sample animation frames
+  (states, LoS, cover targets, enemies, event markers) serialized into the
+  self-contained HTML player per scenario run.
 - `sim/sim/scenario/SimScenario` — declarative DSL: terrain builder, actor
   setup, timed actions (`suppress(...)`, `moveEnemy`, `damageSoldier`),
   explicit assertions.

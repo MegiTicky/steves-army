@@ -86,6 +86,11 @@ public final class SimTerrain {
         return origin.offset(x, y, z);
     }
 
+    /** Blocks placed so far (used by the recording height map). */
+    public List<BlockPos> placedBlocks() {
+        return placed;
+    }
+
     /** Removes exactly the blocks this fixture placed. */
     public void clear() {
         for (BlockPos pos : placed) {
