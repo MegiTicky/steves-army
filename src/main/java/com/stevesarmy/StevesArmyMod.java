@@ -2,6 +2,7 @@ package com.stevesarmy;
 
 import com.mojang.logging.LogUtils;
 import com.stevesarmy.command.CombatDebugCommand;
+import com.stevesarmy.command.SimCommand;
 import com.stevesarmy.command.StevesArmyCommand;
 import com.stevesarmy.command.TransportCommand;
 import com.stevesarmy.client.StevesArmyClientConfig;
@@ -48,6 +49,7 @@ public class StevesArmyMod {
 
         MinecraftForge.EVENT_BUS.register(this);
         MinecraftForge.EVENT_BUS.register(TeamEventHandler.class);
+        MinecraftForge.EVENT_BUS.register(com.stevesarmy.sim.SimManager.class);
         MinecraftForge.EVENT_BUS.addListener(this::registerCommands);
     }
 
@@ -70,7 +72,8 @@ public class StevesArmyMod {
         CombatDebugCommand.register(event.getDispatcher());
         StevesArmyCommand.register(event.getDispatcher());
         TransportCommand.register(event.getDispatcher());
-        LOGGER.info("Registered commands: /stevesarmy, /steves_army, /stevesarmy_debug, /stevesarmy transport");
+        SimCommand.register(event.getDispatcher());
+        LOGGER.info("Registered commands: /stevesarmy, /steves_army, /stevesarmy_debug, /stevesarmy transport, /stevesarmy_sim");
     }
 
     /** IMC drain for the VehicleCrewApi contract (see api/VehicleCrewApi javadoc). */

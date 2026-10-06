@@ -32,6 +32,12 @@ public final class FireTeamFireSuperiorityTracker {
 
     private FireTeamFireSuperiorityTracker() {}
 
+    /** Simulation-harness isolation: clear superiority memory between scenarios. */
+    public static void resetForSim() {
+        DATA.clear();
+        tickCounter = 0;
+    }
+
     public static void tick() {
         tickCounter++;
         if (tickCounter < WINDOW_TICKS) return;

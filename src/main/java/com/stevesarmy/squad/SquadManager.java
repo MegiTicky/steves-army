@@ -190,6 +190,15 @@ public class SquadManager extends SavedData {
         return squadsById.values();
     }
 
+    /** Simulation-harness isolation: drop all squads between scenarios. */
+    public void resetForSim() {
+        squadsById.clear();
+        squadsByLeader.clear();
+        squadsByCallsign.clear();
+        squadsByMember.clear();
+        setDirty();
+    }
+
     /** Commits a successful autonomous grenade throw and persists its cooldown. */
     public SquadData.GrenadeThrowResult completeGrenadeThrow(SquadData squad,
                                                                UUID soldierId,

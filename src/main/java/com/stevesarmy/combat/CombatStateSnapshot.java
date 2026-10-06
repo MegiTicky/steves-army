@@ -1,0 +1,113 @@
+package com.stevesarmy.combat;
+
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.phys.Vec3;
+
+import java.util.UUID;
+
+/**
+ * Per-soldier snapshot of the cover/peek/suppression state machine, shared by
+ * the {@code /stevesarmy_debug coverstate} render ({@code CoverStateDebugPacket})
+ * and the simulation harness ({@code sim/}). Built by
+ * {@code CoverTacticalGoal.captureStateSnapshot} so both surfaces see exactly
+ * the same decision inputs, including the loop counters where strands hide.
+ * Plain data: no behavior, no world access.
+ */
+public final class CombatStateSnapshot {
+    public final UUID soldierId;
+    public final String role;
+    public final Vec3 position;
+
+    public final String coverState;
+    public final String peekState;
+    public final String squadMode;
+    public final float suppressionLevel;
+    public final boolean pinned;
+
+    public final boolean wantCover;
+    public final String wantCoverReason;
+    public final int goalCooldown;
+
+    public final int seekingTicks;
+    public final int seekingTimeout;
+    public final int stuckTicks;
+    public final int maxStuckTicks;
+    public final int noProgressTicks;
+    public final int searchExhaustionTicks;
+    public final int failedSearches;
+    public final int blacklistSize;
+    public final int blacklistClearInSec;
+
+    public final boolean searchPending;
+    public final String queuedMode;
+    public final int schedulerPending;
+
+    public final String relocType;
+    public final Vec3 relocCenter;
+    public final int relocBackoffTicks;
+
+    public final String followBlockedBy;
+    public final float ownerDist;
+
+    public final boolean mgPipeline;
+    public final Vec3 mgAnchor;
+    public final int mgAnchorAgeTicks;
+    public final Vec3 suppressionCenter;
+    public final int supCenterFreshTicks;
+    public final Vec3 laneTarget;
+
+    /** Claimed / pursued cover positions; null when none. Extra beyond the debug packet. */
+    public final BlockPos currentCover;
+    public final BlockPos targetCover;
+
+    public CombatStateSnapshot(UUID soldierId, String role, Vec3 position,
+                               String coverState, String peekState, String squadMode,
+                               float suppressionLevel, boolean pinned,
+                               boolean wantCover, String wantCoverReason, int goalCooldown,
+                               int seekingTicks, int seekingTimeout, int stuckTicks, int maxStuckTicks,
+                               int noProgressTicks, int searchExhaustionTicks, int failedSearches,
+                               int blacklistSize, int blacklistClearInSec,
+                               boolean searchPending, String queuedMode, int schedulerPending,
+                               String relocType, Vec3 relocCenter, int relocBackoffTicks,
+                               String followBlockedBy, float ownerDist,
+                               boolean mgPipeline, Vec3 mgAnchor, int mgAnchorAgeTicks,
+                               Vec3 suppressionCenter, int supCenterFreshTicks, Vec3 laneTarget,
+                               BlockPos currentCover, BlockPos targetCover) {
+        this.soldierId = soldierId;
+        this.role = role;
+        this.position = position;
+        this.coverState = coverState;
+        this.peekState = peekState;
+        this.squadMode = squadMode;
+        this.suppressionLevel = suppressionLevel;
+        this.pinned = pinned;
+        this.wantCover = wantCover;
+        this.wantCoverReason = wantCoverReason;
+        this.goalCooldown = goalCooldown;
+        this.seekingTicks = seekingTicks;
+        this.seekingTimeout = seekingTimeout;
+        this.stuckTicks = stuckTicks;
+        this.maxStuckTicks = maxStuckTicks;
+        this.noProgressTicks = noProgressTicks;
+        this.searchExhaustionTicks = searchExhaustionTicks;
+        this.failedSearches = failedSearches;
+        this.blacklistSize = blacklistSize;
+        this.blacklistClearInSec = blacklistClearInSec;
+        this.searchPending = searchPending;
+        this.queuedMode = queuedMode;
+        this.schedulerPending = schedulerPending;
+        this.relocType = relocType;
+        this.relocCenter = relocCenter;
+        this.relocBackoffTicks = relocBackoffTicks;
+        this.followBlockedBy = followBlockedBy;
+        this.ownerDist = ownerDist;
+        this.mgPipeline = mgPipeline;
+        this.mgAnchor = mgAnchor;
+        this.mgAnchorAgeTicks = mgAnchorAgeTicks;
+        this.suppressionCenter = suppressionCenter;
+        this.supCenterFreshTicks = supCenterFreshTicks;
+        this.laneTarget = laneTarget;
+        this.currentCover = currentCover;
+        this.targetCover = targetCover;
+    }
+}

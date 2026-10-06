@@ -39,6 +39,13 @@ public final class FireTeamSuppressionTracker {
 
     private FireTeamSuppressionTracker() {}
 
+    /** Simulation-harness isolation: clear fire-team suppression memory between scenarios. */
+    public static void resetForSim() {
+        DATA.clear();
+        serverTick = 0;
+        FireTeamFireSuperiorityTracker.resetForSim();
+    }
+
     public static void tick(MinecraftServer server) {
         if (!StevesArmyConfig.isFireteamSuppressionEnabled()) return;
         serverTick++;

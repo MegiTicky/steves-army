@@ -90,6 +90,9 @@ minecraft {
         server {
             property 'forge.enabledGameTestNamespaces', mod_id
             args '--nogui'
+            // -Psim.autorun=true makes the dedicated server run every scenario
+            // headless at startup, write reports to run/sim_reports/, then halt.
+            property 'sim.autorun', (project.findProperty('sim.autorun') ?: 'false').toString()
         }
 
         // This run config launches GameTestServer and runs all registered gametests, then exits.
@@ -124,7 +127,13 @@ repositories {
 
 dependencies {
     minecraft "net.minecraftforge:forge:${minecraft_version}-${forge_version}"
-    implementation fileTree(dir: 'libs', include: '*.jar')
+    // All libs jars are compile-time only. ForgeGradle's userdev classpath locator
+    // would otherwise load them as mods in dev runs, where they hard-fail:
+    // pointblank needs geckolib (absent) and TaCZ's SRG-refmapped mixins cannot
+    // resolve against mojmap userdev classes. Integration is reflection-guarded at
+    // runtime (GunIntegration/YsmCompat); real gun behavior is tested on the
+    // deployed instances, which install these mods properly.
+    compileOnly fileTree(dir: 'libs', include: ['pointblank*.jar', 'tacz*.jar', 'ysm*.jar'])
     annotationProcessor 'org.spongepowered:mixin:0.8.5:processor'
 }
 

@@ -2,6 +2,7 @@ package com.stevesarmy.entity.ai;
 
 import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.StevesArmyConfig;
+import com.stevesarmy.combat.CombatStateSnapshot;
 import com.stevesarmy.combat.TargetAcquisition;
 import com.stevesarmy.combat.ThreatAwareness;
 import com.stevesarmy.combat.VisibilityRay;
@@ -1228,6 +1229,15 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
      * visible as it forms instead of only as a stuck pose.
      */
     public CoverStateDebugPacket buildCoverStateDebugPacket() {
+        return CoverStateDebugPacket.fromSnapshot(captureStateSnapshot());
+    }
+
+    /**
+     * Assembles the shared {@link CombatStateSnapshot} behind the coverstate
+     * debug render. The simulation harness samples the same snapshot so its
+     * detectors see exactly what the in-game card shows.
+     */
+    public CombatStateSnapshot captureStateSnapshot() {
         CoverBehaviorManager mgr = getCoverManager();
         CoverBehaviorManager.CoverState state = mgr.getState();
 
@@ -1265,8 +1275,10 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
             blacklistClearInSec = (int) Math.max(0L, (BLACKLIST_CLEAR_INTERVAL_MS - elapsedMs) / 1000L);
         }
 
-        return new CoverStateDebugPacket(
-            true,
+        CoverPoint currentCover = mgr.getCurrentCover();
+        CoverPoint targetCover = mgr.getTargetCover();
+
+        return new CombatStateSnapshot(
             soldier.getUUID(),
             soldier.getRole().name(),
             soldier.position(),
@@ -1300,7 +1312,9 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
             mgAnchorAge,
             suppressionCenterVec,
             supCenterFresh,
-            laneVec);
+            laneVec,
+            currentCover != null ? currentCover.getPosition() : null,
+            targetCover != null ? targetCover.getPosition() : null);
     }
 
     /**

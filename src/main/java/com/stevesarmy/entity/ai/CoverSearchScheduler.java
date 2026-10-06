@@ -204,6 +204,11 @@ public final class CoverSearchScheduler {
         }
     }
 
+    /** Simulation-harness isolation: drop all queued requests between scenarios. */
+    public static void resetForSim() {
+        PENDING.clear();
+    }
+
     private static final class Request {
         private final CoverTacticalGoal goal;
         private int priority;

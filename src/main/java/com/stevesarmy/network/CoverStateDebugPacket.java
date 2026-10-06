@@ -112,8 +112,47 @@ public class CoverStateDebugPacket {
         this.laneTarget = laneTarget;
     }
 
-    public CoverStateDebugPacket(FriendlyByteBuf buf) {
-        this.renderEnabled = buf.readBoolean();
+    /** Wire view of a shared {@code CombatStateSnapshot}; fields map 1:1. */
+    public static CoverStateDebugPacket fromSnapshot(com.stevesarmy.combat.CombatStateSnapshot s) {
+        return new CoverStateDebugPacket(
+            true,
+            s.soldierId,
+            s.role,
+            s.position,
+            s.coverState,
+            s.peekState,
+            s.squadMode,
+            s.suppressionLevel,
+            s.pinned,
+            s.wantCover,
+            s.wantCoverReason,
+            s.goalCooldown,
+            s.seekingTicks,
+            s.seekingTimeout,
+            s.stuckTicks,
+            s.maxStuckTicks,
+            s.noProgressTicks,
+            s.searchExhaustionTicks,
+            s.failedSearches,
+            s.blacklistSize,
+            s.blacklistClearInSec,
+            s.searchPending,
+            s.queuedMode,
+            s.schedulerPending,
+            s.relocType,
+            s.relocCenter,
+            s.relocBackoffTicks,
+            s.followBlockedBy,
+            s.ownerDist,
+            s.mgPipeline,
+            s.mgAnchor,
+            s.mgAnchorAgeTicks,
+            s.suppressionCenter,
+            s.supCenterFreshTicks,
+            s.laneTarget);
+    }
+
+    public CoverStateDebugPacket(FriendlyByteBuf buf) {        this.renderEnabled = buf.readBoolean();
         this.soldierId = buf.readUUID();
         this.role = buf.readUtf();
         this.soldierPos = readVec(buf);
