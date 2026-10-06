@@ -36,7 +36,8 @@ public final class SimRegistry {
             dockSuppressedDriftRecovery(),
             dockCqbHoldFidelity(),
             dockPeekReturn(),
-            loneBlockExposure());
+            loneBlockExposure(),
+            loneBlockFlankStand());
     }
 
     public static SimScenario byName(String name) {
@@ -694,6 +695,63 @@ public final class SimRegistry {
         for (SimSample s : view.timeline().series(label)) {
             if (s.tick > byTick) break;
             if (s.state.currentCover != null && type.equals(s.state.currentCoverType)) return true;
+        }
+        return false;
+    }
+
+    /**
+     * Close-quarters variant of the user report: the enemy inside the 6-block
+     * emergency-flank distance and off the prone arc. Documented result (three
+     * runs): the suppression prone still wins server-side — the soldier dies
+     * standing-exposed anyway because a lone block at that range leaves 10-12
+     * of 15 body rays visible while prone. The emergency stand-fire cycle
+     * (prepareToFire out-of-arc stand, 20t EMR window vetoing the prone) never
+     * got a window to fire before death; it remains an in-game-only candidate
+     * for the "keeps standing while suppressed" visual, readable on the
+     * coverstate card's EMR flag.
+     */
+    private static SimScenario loneBlockFlankStand() {
+        return SimScenario.builder("lone_block_flank_stand")
+            .description("KNOWN FINDING (close range): at a lone 1-block cover with the enemy inside "
+                + "the 6-block flank distance, the soldier dies within ~150t with 10-12/15 body rays "
+                + "visible while PRONE and pinned (sup 1.0) — the lone block protects nothing at "
+                + "close range. Server posture behaves as designed; the standing visual is a render-"
+                + "side or emergency-stand question, readable via the coverstate card.")
+            .duration(600)
+            .armed()
+            .terrain(t -> {
+                t.platform();
+                t.coverBlock(12, 30, 1); // THE lone block
+            })
+            .setup(ctx -> {
+                ctx.spawnAnchor(4, 0, 24);
+                ctx.spawnFriendly(ModEntities.SOLDIER.get(), "flank", 10, 0, 22, SquadMode.FOLLOW);
+                ctx.spawnEnemy(15, 0, 32); // ~4.2 blocks from the claimed slot: inside EMERGENCY_FLANK_DISTANCE, ~45deg off the prone arc
+                ctx.spawnEnemy(24, 0, 40); // keeps pressure when the close one goes down
+            })
+            .assertThat("soldier claims the lone block (HALF) as cover by t300",
+                view -> claimedCoverTypedBy(view, "flank", 300, "HALF"))
+            .assertThat("FINDING: soldier never stands while suppressed at the low half cover "
+                + "(emergency stand-fire cycle dominates the suppression prone)",
+                view -> !standingWhileSuppressedEver(view, "flank", 40, 8))
+            .build();
+    }
+
+    /** Sustained STANDING posture while pinned (suppression >= 0.5) docked at a low HALF cover. */
+    private static boolean standingWhileSuppressedEver(SimScenario.SimRunResultView view,
+                                                       String label, int fromTick,
+                                                       int streakSamples) {
+        int streak = 0;
+        for (SimSample s : view.timeline().series(label)) {
+            if (s.tick < fromTick) continue;
+            boolean hit = s.state.currentCover != null
+                && "HALF".equals(s.state.currentCoverType)
+                && s.syncedCoverHeight >= 0 && s.syncedCoverHeight < 1.3f
+                && s.coverSlotOffset >= 0 && s.coverSlotOffset <= 0.5
+                && "STANDING".equals(s.posture)
+                && (s.state.pinned || s.state.suppressionLevel >= 0.5f);
+            streak = hit ? streak + 1 : 0;
+            if (streak >= streakSamples) return true;
         }
         return false;
     }

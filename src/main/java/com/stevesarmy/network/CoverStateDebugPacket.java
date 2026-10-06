@@ -63,6 +63,12 @@ public class CoverStateDebugPacket {
     private final int supCenterFreshTicks;
     private final Vec3 laneTarget;
 
+    private final String posture;
+    private final boolean lowCrouching;
+    private final boolean emergencyPosture;
+    private final float currentCoverHeight;
+    private final String currentCoverType;
+
     public CoverStateDebugPacket(boolean renderEnabled, UUID soldierId, String role, Vec3 soldierPos,
                                  String coverState, String peekState, String squadMode,
                                  float suppressionLevel, boolean pinned,
@@ -74,7 +80,9 @@ public class CoverStateDebugPacket {
                                  String relocType, Vec3 relocCenter, int relocBackoffTicks,
                                  String followBlockedBy, float ownerDist,
                                  boolean mgPipeline, Vec3 mgAnchor, int mgAnchorAgeTicks,
-                                 Vec3 suppressionCenter, int supCenterFreshTicks, Vec3 laneTarget) {
+                                 Vec3 suppressionCenter, int supCenterFreshTicks, Vec3 laneTarget,
+                                 String posture, boolean lowCrouching, boolean emergencyPosture,
+                                 float currentCoverHeight, String currentCoverType) {
         this.renderEnabled = renderEnabled;
         this.soldierId = soldierId;
         this.role = role;
@@ -110,6 +118,11 @@ public class CoverStateDebugPacket {
         this.suppressionCenter = suppressionCenter;
         this.supCenterFreshTicks = supCenterFreshTicks;
         this.laneTarget = laneTarget;
+        this.posture = posture;
+        this.lowCrouching = lowCrouching;
+        this.emergencyPosture = emergencyPosture;
+        this.currentCoverHeight = currentCoverHeight;
+        this.currentCoverType = currentCoverType;
     }
 
     /** Wire view of a shared {@code CombatStateSnapshot}; fields map 1:1. */
@@ -149,7 +162,12 @@ public class CoverStateDebugPacket {
             s.mgAnchorAgeTicks,
             s.suppressionCenter,
             s.supCenterFreshTicks,
-            s.laneTarget);
+            s.laneTarget,
+            s.posture,
+            s.lowCrouching,
+            s.emergencyPosture,
+            s.currentCoverHeight,
+            s.currentCoverType);
     }
 
     public CoverStateDebugPacket(FriendlyByteBuf buf) {        this.renderEnabled = buf.readBoolean();
@@ -187,6 +205,11 @@ public class CoverStateDebugPacket {
         this.suppressionCenter = buf.readBoolean() ? readVec(buf) : null;
         this.supCenterFreshTicks = buf.readVarInt();
         this.laneTarget = buf.readBoolean() ? readVec(buf) : null;
+        this.posture = buf.readUtf();
+        this.lowCrouching = buf.readBoolean();
+        this.emergencyPosture = buf.readBoolean();
+        this.currentCoverHeight = buf.readFloat();
+        this.currentCoverType = buf.readUtf();
     }
 
     private static Vec3 readVec(FriendlyByteBuf buf) {
@@ -239,6 +262,11 @@ public class CoverStateDebugPacket {
         buf.writeVarInt(msg.supCenterFreshTicks);
         buf.writeBoolean(msg.laneTarget != null);
         if (msg.laneTarget != null) writeVec(buf, msg.laneTarget);
+        buf.writeUtf(msg.posture);
+        buf.writeBoolean(msg.lowCrouching);
+        buf.writeBoolean(msg.emergencyPosture);
+        buf.writeFloat(msg.currentCoverHeight);
+        buf.writeUtf(msg.currentCoverType == null ? "" : msg.currentCoverType);
     }
 
     public static void handle(CoverStateDebugPacket msg, Supplier<NetworkEvent.Context> ctx) {
@@ -288,4 +316,9 @@ public class CoverStateDebugPacket {
     public Vec3 suppressionCenter() { return suppressionCenter; }
     public int supCenterFreshTicks() { return supCenterFreshTicks; }
     public Vec3 laneTarget() { return laneTarget; }
+    public String posture() { return posture; }
+    public boolean lowCrouching() { return lowCrouching; }
+    public boolean emergencyPosture() { return emergencyPosture; }
+    public float currentCoverHeight() { return currentCoverHeight; }
+    public String currentCoverType() { return currentCoverType; }
 }

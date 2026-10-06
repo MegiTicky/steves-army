@@ -128,14 +128,39 @@ public final class CoverStateDebugRenderer {
         return shortRole(snapshot.role()) + ' ' + snapshot.coverState()
             + '/' + snapshot.peekState()
             + ' ' + snapshot.squadMode()
+            + postureSegment(snapshot)
+            + (snapshot.emergencyPosture() ? " EMR" : "")
             + (snapshot.pinned() ? " PINNED" : "");
+    }
+
+    /**
+     * Posture diagnostics: server pose, the LOW_CROUCH flag the pose gate obeys,
+     * and the claimed cover's type + synced height. A standing-looking soldier
+     * whose segment says crouch/prone is a RENDER mismatch, not a state problem;
+     * STANDING with cover type HALF and height >= 1.3 is the pose gate's choice.
+     */
+    private static String postureSegment(CoverStateDebugPacket snapshot) {
+        StringBuilder seg = new StringBuilder(" ");
+        if (snapshot.currentCoverType() != null && !snapshot.currentCoverType().isEmpty()) {
+            seg.append(snapshot.currentCoverType());
+            if (snapshot.currentCoverHeight() >= 0) {
+                seg.append(String.format(" h=%.1f", snapshot.currentCoverHeight()));
+            }
+            seg.append(' ');
+        }
+        seg.append(snapshot.posture());
+        if (snapshot.lowCrouching()) {
+            seg.append("(low)");
+        }
+        return seg.toString();
     }
 
     private static String countersLine(CoverStateDebugPacket snapshot) {
         StringBuilder line = new StringBuilder();
+        line.append(String.format("sup=%.2f", snapshot.suppressionLevel()));
         line.append(snapshot.wantCover()
-            ? "want=Y(" + snapshot.wantCoverReason() + ')'
-            : "want=N");
+            ? " want=Y(" + snapshot.wantCoverReason() + ')'
+            : " want=N");
         if (snapshot.goalCooldown() > 0) {
             line.append(" cd=").append(snapshot.goalCooldown());
         }

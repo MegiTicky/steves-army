@@ -201,29 +201,9 @@ docked-reload damp regression `dock_reload_hold` still passes).
 
 **FIXED — cover scoring: closeness never mattered, FULL outranked HALF regardless of distance (2026-10-06 evening).** Follow-up to the bug-1 diagnosis ("cover picks that don't block the threat line"): traced the live per-candidate scores with the new `-Psim.coverlog` flag and found four scorers deciding cover picks with different math. (1) `CoverPoint.distanceTo()` returns a SQUARED distance and `CoverFinder.calculateDistanceScore` normalized it linearly against a 24-block span, so every candidate ≥4.9 blocks scored dist=0.00 — closeness contributed nothing; `PureCoverEvaluator.distanceScore` (the async cover pilot's scorer) replicated the bug verbatim. (2) The pilot's discovery ran `discoverCoverPoints(center, radius)` with threat=null, so `evaluatePosition` classified every cell next to a ≥2-high wall as FULL from height alone — the platform rim (~40 cells, 10 blocks off-axis) all typed FULL and crowded the pilot's coarse top-16, evicting the nearby HALF row from full scoring entirely. (3) The legacy `calculateScore` fallback (quality×10 + protection×10 vs distance×0.05/block) let any FULL classification beat any HALF no matter the distance. Fix: sqrt the distance in both modern scorers; pass the primary threat into the pilot's discovery so classification is threat-aware; retire the legacy scorer (the CoverTacticalGoal full-search fallback now uses `evaluateAndScoreAllFromCenter` + the protection filter, and the debug `/stevesarmy_debug` best-cover probe scores through the modern path too). Added a `[PureScore]` trace (same coverlog flag) so the pilot's ranking is visible. Verified: `dock_reload_hold` now claims the closer HALF row at t25 (was: walked past it to a FULL block 11 blocks out) with the pilot ranking the row #1 at the predicted 0.946, 0/15 exposure rays while hiding; suite went 10/15 PASS with the remaining FAILs all in the known bug-1/bug-2/follow-strand families (one dock_reload_hold suite FAIL was the soldier dying to organic fire mid-assertion — correct cover claimed).
 
-**REPRODUCED — lone 1-block cover: "hiding" soldier looks standing and dies under fire (user report, 2026-10-06 late).** New scenario
-`lone_block_exposure` (armed, one 1-block cover in an open field, four
-shooters) reproduces it as an expected FAIL: at t575 and t665 the soldier is
-peek-state HIDING at the lone block, pinned (sup 0.83), with **6/15 body rays
-(2 head) still visible to the threat for 55-65t straight** — a lone
-waist-high block physically cannot protect a ducked body in an open field,
-and suppression pins him for the whole run (sup 0.66-1.00 from t5 to t700,
-hp 20→16→12). Two stacked causes: (1) **geometry/doctrine** — the lone HALF
-cover leaves the ducked soldier partially exposed no matter the posture;
-fix candidates are relocation-when-head-exposed doctrine. (2) **render bug
-(separate, explains the "just stands there" visual)** — the pose gate
-correctly applies `Pose.CROUCHING` at low half cover (synced height 1.0 <
-1.3), but `HumanoidModel.setupAnim` keys its crouch pose off
-`entity.isCrouching()`, which reads the shared *sneaking flag* that soldiers
-never set, and it overwrites `SoldierRenderer`'s `model.crouching` assignment
-(SoldierRenderer.java:48) on every frame — so a server-side-crouched soldier
-renders standing. The prone/low-crouch pose renders fine (different code
-path, `isLowCrouching` in SoldierModel). Telemetry now records **posture**
-(STANDING/CROUCHING/SWIMMING + rise flag) and **synced cover height** per
-frame (JSON keys `po`/`ri`/`ch`; player glyphs: big circle standing, small
-circle crouched, flat ellipse prone, dashed ring rising), so pose failures
-are directly observable in the animation and assertions
-(`sustainedStandingAtLowHalfCover` in the scenario).
+**REPRODUCED (partially) — lone 1-block cover: "hiding" soldier looks standing and dies under fire (user report, 2026-10-06 late).** Two scenarios: `lone_block_exposure` (ranged, four shooters) and `lone_block_flank_stand` (enemy inside the 6-block flank gate). What the sim DID reproduce: the death mechanism — peek-state HIDING at the lone block while **6/15 rays (ranged) and 10-12/15 rays (close) stay visible to the threat**, pinned at sup 0.83-1.00 for the whole fight, periodic hits until death (close range kills in ~150t even while correctly prone). A lone waist-high block physically cannot protect a ducked body; no posture fixes that. What the sim did NOT reproduce: the user's "keeps standing, even when suppressed, not proning" — in all three runs the server proned correctly under suppression, so that state is either **(a)** the render bug below (crouch looks standing — the dominant visual), **(b)** the emergency stand-fire cycle (`prepareToFire` stands a prone soldier whose direct target is within 6 blocks and outside the ±30° prone arc; the 20t EMR window vetoes the suppression-prone enforcer — needs a very close, out-of-arc, alive target, which the sim couldn't sustain because death precedes it), or **(c)** cover not typed HALF in that world (the enforcer early-returns for non-HALF covers). The upgraded `coverstate` card (protocol 15) now discriminates all three live: state line shows `[HALF h=1.0 CROUCH(low)] EMR PINNED` (cover type + synced height + server pose + low-crouch flag + emergency flag), and the counters line gained `sup=` (suppression level, previously never rendered).
+
+**Render bug (the "just stands there" visual, code-traced — invisible to the headless sim by construction).** The pose gate correctly applies `Pose.CROUCHING` at low half cover (synced height 1.0 < 1.3), but `HumanoidModel.setupAnim` keys its crouch pose off `entity.isCrouching()`, which reads the shared *sneaking flag* that soldiers never set, and it overwrites `SoldierRenderer`'s `model.crouching` assignment (SoldierRenderer.java:48) on every frame — so a server-side-crouched soldier renders standing. `EnemySoldierRenderer.java:49` same. The prone/low-crouch pose renders fine (different code path, `isLowCrouching` in SoldierModel). Telemetry now records **posture** (STANDING/CROUCHING/SWIMMING + rise flag) and **synced cover height** per frame (JSON keys `po`/`ri`/`ch`; player glyphs: big circle standing, small circle crouched, flat ellipse prone, dashed ring rising), so pose failures are directly observable in the animation and assertions.
 
 **Earlier strands (pre-existing, unchanged):**
 

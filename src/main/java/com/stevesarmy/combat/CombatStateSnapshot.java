@@ -66,6 +66,16 @@ public final class CombatStateSnapshot {
     /** Outcome of the most recent cover search; null before the first search. */
     public final LastSearch lastSearch;
 
+    /** Server-side rendered pose name (STANDING/CROUCHING/SWIMMING); the card's
+     * posture segment exists to expose pose-vs-visual disagreements in-game. */
+    public final String posture;
+    /** LOW_CROUCHING entity flag (the prone/low-crouch state the pose gate obeys). */
+    public final boolean lowCrouching;
+    /** Emergency engagement posture window active (vetoed the suppression prone). */
+    public final boolean emergencyPosture;
+    /** Synced cover height the pose gate reads; -1 when no cover claimed. */
+    public final float currentCoverHeight;
+
     /** Telemetry for one executed cover search — where it looked and what came back. */
     public static final class LastSearch {
         public final String mode;
@@ -103,7 +113,9 @@ public final class CombatStateSnapshot {
                                Vec3 suppressionCenter, int supCenterFreshTicks, Vec3 laneTarget,
                                BlockPos currentCover, BlockPos targetCover,
                                String currentCoverType, String targetCoverType,
-                               LastSearch lastSearch) {
+                               LastSearch lastSearch,
+                               String posture, boolean lowCrouching, boolean emergencyPosture,
+                               float currentCoverHeight) {
         this.soldierId = soldierId;
         this.role = role;
         this.position = position;
@@ -143,5 +155,9 @@ public final class CombatStateSnapshot {
         this.currentCoverType = currentCoverType;
         this.targetCoverType = targetCoverType;
         this.lastSearch = lastSearch;
+        this.posture = posture;
+        this.lowCrouching = lowCrouching;
+        this.emergencyPosture = emergencyPosture;
+        this.currentCoverHeight = currentCoverHeight;
     }
 }

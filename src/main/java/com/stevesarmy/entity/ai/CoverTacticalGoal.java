@@ -1346,7 +1346,11 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
             debugLastSearchTick >= 0 ? new CombatStateSnapshot.LastSearch(
                 debugLastSearchMode, debugLastSearchResult, debugLastSearchPhase,
                 debugSearchCenter != null ? Vec3.atBottomCenterOf(debugSearchCenter) : null,
-                debugSearchRadius, debugLastSearchTick, noCoverSearchStreak) : null);
+                debugSearchRadius, debugLastSearchTick, noCoverSearchStreak) : null,
+            soldier.getPose().name(),
+            soldier.isLowCrouching(),
+            soldier.hasEmergencyEngagementPosture(),
+            currentCover != null ? soldier.getSyncedCoverCurrentHeight() : -1f);
     }
 
     /**
