@@ -37,7 +37,9 @@ public final class SimRegistry {
             dockCqbHoldFidelity(),
             dockPeekReturn(),
             loneBlockExposure(),
-            loneBlockFlankStand());
+            loneBlockFlankStand(),
+            supportSquadFight(),
+            supportRearCoverPick());
     }
 
     public static SimScenario byName(String name) {
@@ -774,6 +776,154 @@ public final class SimRegistry {
             if (streak >= streakSamples) return true;
         }
         return false;
+    }
+
+    // 13. support-role cover behavior ------------------------------------------
+    //
+    // The support wraps CoverTacticalGoal (rear positioning, never peeks) and
+    // periodically leaves cover for resupply duty, so its cover engagement
+    // flaps: claim → duty (cover cleared) → claim again. These scenarios check
+    // both halves of that loop plus the pick quality itself.
+
+    /**
+     * Live-fire mixed squad: one support + two riflemen vs two enemies behind
+     * their own cover. The support must claim cover under real fire, actually
+     * dock into it while hiding, and still be claiming cover late in the fight
+     * (the duty→cover return path must not strand it in the open).
+     */
+    private static SimScenario supportSquadFight() {
+        return SimScenario.builder("support_squad_fight")
+            .description("Live-fire support probe: one support + two riflemen vs two enemies behind "
+                + "their own cover. The support must claim cover under real fire, dock into it while "
+                + "hiding (0 exposed rays), and come back to cover after resupply-duty departures. "
+                + "KNOWN FINDINGS (expected FAIL until fixed, 2026-10-06): pre-intel cover searches "
+                + "downgrade solid waist-high walls to CONCEALMENT (null-threat NORTH default reads "
+                + "the height in the wrong direction; type frozen at claim), and the pose gate only "
+                + "crouches HALF covers — so the misclassified soldier stands upright behind a 1-high "
+                + "wall labeled HIDING with head rays exposed the whole fight.")
+            .duration(700)
+            .armed()
+            .terrain(t -> {
+                t.platform();
+                t.coverRow(16, 21, 18, 21, 1); // waist-high rows the squad should claim
+                t.coverRow(16, 27, 18, 27, 1);
+                t.coverBlock(22, 24, 2);       // head-high hard cover mid-line
+                t.coverRow(40, 20, 42, 20, 1); // enemy-side cover
+                t.coverRow(40, 28, 42, 28, 1);
+                t.coverBlock(39, 24, 2);
+            })
+            .setup(ctx -> {
+                ctx.spawnAnchor(4, 0, 24);
+                ctx.spawnFriendly(ModEntities.SUPPORT.get(), "sup", 12, 0, 24, SquadMode.FOLLOW);
+                ctx.spawnFriendly(ModEntities.SOLDIER.get(), "left", 12, 0, 14, SquadMode.FOLLOW);
+                ctx.spawnFriendly(ModEntities.SOLDIER.get(), "right", 12, 0, 34, SquadMode.FOLLOW);
+                ctx.spawnEnemy(38, 0, 22);
+                ctx.spawnEnemy(38, 0, 26);
+            })
+            .assertThat("support claims cover by t300", view -> claimedCoverBy(view, "sup", 300))
+            .assertThat("support docks and hides unexposed after t250 (0 exposed rays)",
+                view -> existsHidingUnexposed(view, "sup", 250))
+            .assertThat("left rifleman claims cover by t200 and still holds it at t400",
+                view -> claimedCoverByAndHeld(view, "left", 200, 400))
+            .assertThat("right rifleman claims cover by t200 and still holds it at t400",
+                view -> claimedCoverByAndHeld(view, "right", 200, 400))
+            .assertThat("support is in cover again after t400 (duty return path doesn't strand)",
+                view -> view.timeline().series("sup").stream()
+                    .anyMatch(s -> s.tick >= 400 && s.state.currentCover != null))
+            .assertThat("squad fights back — the enemy takes damage from friendly fire",
+                view -> view.enemyHealthEnd() < view.enemyHealthStart())
+            .assertThat("FINDING: no soldier claims a solid wall as CONCEALMENT "
+                + "(pre-intel searches read cover height in the null-threat NORTH default and "
+                + "downgrade 1-high solid cover; the claimed type then never reclassifies)",
+                view -> !everClaimedSolidCoverAsConcealment(view))
+            .assertThat("FINDING: a docked hiding soldier at a sub-1.3 cover never sustains "
+                + "STANDING posture with head rays exposed (the pose gate only crouches HALF, "
+                + "so CONCEALMENT-typed solid cover stands upright in the open)",
+                view -> !sustainedStandingWhileHiding(view, 40, 8))
+            .build();
+    }
+
+    /** Any claimed cover typed CONCEALMENT whose synced height is >= 0.8 — solid cover misclassified. */
+    private static boolean everClaimedSolidCoverAsConcealment(SimScenario.SimRunResultView view) {
+        return view.timeline().soldierLabels().stream().anyMatch(label ->
+            view.timeline().series(label).stream().anyMatch(s ->
+                s.state.currentCover != null
+                    && "CONCEALMENT".equals(s.state.currentCoverType)
+                    && s.syncedCoverHeight >= 0.8f));
+    }
+
+    /** Sustained STANDING posture while docked + hiding at a low cover with head rays exposed, any soldier. */
+    private static boolean sustainedStandingWhileHiding(SimScenario.SimRunResultView view,
+                                                        int fromTick, int streakSamples) {
+        return view.timeline().soldierLabels().stream().anyMatch(label -> {
+            int streak = 0;
+            for (SimSample s : view.timeline().series(label)) {
+                if (s.tick < fromTick) continue;
+                boolean hit = s.state.currentCover != null
+                    && s.syncedCoverHeight >= 0 && s.syncedCoverHeight < 1.3f
+                    && s.coverSlotOffset >= 0 && s.coverSlotOffset <= 0.5
+                    && "HIDING".equals(s.state.peekState)
+                    && "STANDING".equals(s.posture)
+                    && s.exposedHeadRays > 0;
+                streak = hit ? streak + 1 : 0;
+                if (streak >= streakSamples) return true;
+            }
+            return false;
+        });
+    }
+
+    /**
+     * Deterministic cover-pick probe (support alone, injected suppression): a
+     * protected waist-high row ~6 blocks from the soldier vs a head-high block
+     * ~11 blocks out, both between the soldier and the enemy. Under the
+     * corrected distance term the near row should win; the pre-fix scorer
+     * squared the distance against the 24 cap, scored both candidates 0.00 and
+     * picked on quality alone. Run with sim.coverlog=true to read the
+     * per-candidate [CoverScore] breakdown behind the pick.
+     */
+    private static SimScenario supportRearCoverPick() {
+        return SimScenario.builder("support_rear_cover_pick")
+            .description("Cover-pick probe: a pinned support chooses between a protected waist-high "
+                + "row 6 blocks away and a head-high block 11 blocks away. Correct scoring claims "
+                + "the near row instead of walking past usable cover while under fire.")
+            .duration(600)
+            .terrain(t -> {
+                t.platform();
+                t.coverRow(14, 24, 15, 24, 1); // NEAR protected waist-high row
+                t.coverBlock(19, 24, 2);       // FAR head-high block
+                t.coverRow(40, 20, 42, 20, 1); // enemy-side cover
+                t.coverRow(40, 28, 42, 28, 1);
+                t.coverBlock(39, 24, 2);
+            })
+            .setup(ctx -> {
+                ctx.spawnAnchor(2, 0, 24);
+                ctx.spawnFriendly(ModEntities.SUPPORT.get(), "sup", 8, 0, 24, SquadMode.FOLLOW);
+                ctx.spawnEnemy(40, 0, 24);
+            })
+            .suppress("sup", 40, 540, 15)
+            .assertThat("support claims cover by t300", view -> claimedCoverBy(view, "sup", 300))
+            .assertThat("FINDING: first claimed cover is the near row (within 9 blocks of spawn; "
+                + "the far block is 11+)",
+                view -> firstClaimedCoverNearSpawn(view, "sup", 9.0))
+            .build();
+    }
+
+    /** Distance from the soldier's first recorded position to its first claimed cover; -1 if none. */
+    private static double firstClaimedCoverSpawnDistance(SimScenario.SimRunResultView view, String label) {
+        Vec3 spawn = null;
+        for (SimSample s : view.timeline().series(label)) {
+            if (spawn == null) spawn = s.state.position;
+            if (s.state.currentCover != null) {
+                return s.state.currentCover.getCenter().distanceTo(spawn);
+            }
+        }
+        return -1;
+    }
+
+    private static boolean firstClaimedCoverNearSpawn(SimScenario.SimRunResultView view, String label,
+                                                      double maxDist) {
+        double d = firstClaimedCoverSpawnDistance(view, label);
+        return d >= 0 && d <= maxDist;
     }
 
     // --- dock assertion helpers --------------------------------------------------
