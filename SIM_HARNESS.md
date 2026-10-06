@@ -177,6 +177,24 @@ Status after the MG seek-strand fix, the fixture build-limit repair, and the
 armed-sim work (SimGunHandler + telemetry fixes). Suite state: 6/7 PASS; the
 one FAIL is a pre-existing intermittent.
 
+**REPORTED — reload mid-approach defers the final dock (user in-game report,
+2026-10-06, leave-for-now, not yet a sim scenario).** Symptom: "soldier
+reaches the cover but not exactly [in it] until it waits a few seconds
+(reloading?)". Mechanism, from code: the approach may claim the cover
+(`currentCover` set, state IN_COVER) while still 0.3-1.0 blocks from the slot
+center — that claim→dock transit is normally closed by the recenter + anchor.
+A reload active at that moment suspends both: `maintainCoverAnchor` refuses
+to arm while `isPreparingOrReloading()`, and once `currentCover != null` the
+`isMovingToUnoccupiedCoverDuringReload` exception dies, so further recenter
+`moveTo`s come back RELOAD_INTERRUPTED. The soldier crouches at the
+claim-time offset for the whole reload (seconds with TaCZ), then docks when
+the reload ends and `tickInCover` recenter (0.05) + anchor resume. My
+`dock_reload_hold` scenario missed this window because it scripted the
+reload *after* the soldier was already docked. Candidate follow-up: a
+`dock_reload_midapproach` scenario (reload scripted during the seek), and a
+design call on whether the claim→dock transit should be exempt from the
+reload hold like the approach itself is.
+
 **Earlier strands (pre-existing, unchanged):**
 
 1. **Post-suppression relocation churn** (`suppressed_follow_escape`,
