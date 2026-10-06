@@ -39,18 +39,33 @@ Every scenario also produces `<scenario>_<timestamp>_sim.html` — a
 self-contained top-down animation of the run (double-click to open in any
 browser; no server or codec needed). Soldiers are colored by cover state with a
 white ring when pinned and a red arc showing suppression level; dashed white
-lines are live line-of-sight, cyan lines point at the pursued cover, red
-squares are enemies. Play at 0.5–10x, scrub, and click a soldier for its full
-state snapshot at that tick. The same data ships machine-readable as
-`<scenario>_<timestamp>_recording.json`. You can also watch a run live:
-`/stevesarmy_sim run <name>` from the dev client and fly up to the fixture
-(platform at Y=160+, west edge of the world origin).
+lines are live line-of-sight, cyan lines point at the pursued cover (marker
+colored by cover type), tan blocks are half cover and pale steel blocks are
+full cover, yellow lines are shots fired with an impact dot at the aim point,
+red squares are enemies. The event feed below the scrubber is append-only.
+Play at 0.5–10x, scrub, and click a soldier for its full state snapshot at
+that tick (including shots fired and magazine). The same data ships
+machine-readable as `<scenario>_<timestamp>_recording.json`. You can also
+watch a run live: `/stevesarmy_sim run <name>` from the dev client and fly up
+to the fixture (platform at Y=160+, west edge of the world origin).
 
-Dev runs are gun-less by design (TaCZ is compile-only in dev — its SRG-refmapped
-mixins cannot load against userdev classes), so suppression pressure comes from
-deterministic `SuppressionTracker` injection and firing-chain assertions skip
-themselves when no gun mod is present. Armed runs via the command on a TaCZ
-instance exercise the real firing chain.
+### Guns & ammo in the sim
+
+**Sim friendlies have no gun and no ammo today.** Two reasons stack: TaCZ is
+compile-only in dev (its SRG-refmapped mixins FML-hard-fail against userdev
+classes), and the mod's no-TaCZ fallback (`GunIntegration.FallbackGunHandler`)
+is a deliberate stub — `hasGun()=false`, every `shoot()` returns `NOT_GUN` —
+so nobody fires even though soldiers exist and target. Suppression pressure is
+therefore deterministic `SuppressionTracker` injection, reports print
+`guns: ABSENT`, and firing-chain detectors/assertions skip themselves.
+
+Every successful round fired through `GunIntegration.shoot*` (any shooter,
+TaCZ or a future real fallback) is tapped by `GunIntegration.shotListener`,
+which the harness installs per scenario: shots appear as yellow tracers in
+the animation frame they were fired, per-soldier `shots fired` counters and
+`ammo / magazine` show in the inspect panel, and `SimSample.shotsFired` is
+available to detectors. Armed runs (TaCZ on the runtime classpath, e.g. the
+deployed game) get all of this automatically.
 
 ## Architecture
 

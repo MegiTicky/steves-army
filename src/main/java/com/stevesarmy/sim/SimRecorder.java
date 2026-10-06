@@ -20,6 +20,7 @@ public final class SimRecorder {
     private final int[] heights; // (w+3)*(d+3), origin at (-1,-1); 0 = floor, 1..3 = wall height
     private final List<String> frames = new ArrayList<>();
     private final List<String> events = new ArrayList<>();
+    private final List<String> shots = new ArrayList<>();
     private StringBuilder current;
     private boolean firstSoldier;
 
@@ -45,14 +46,22 @@ public final class SimRecorder {
         events.add("[" + tick + "," + quote(describe) + "]");
     }
 
+    /** One fired round, drawn as a tracer for the frame being built. */
+    public void shot(double fromX, double fromZ, double toX, double toZ) {
+        if (current == null) return;
+        shots.add("[" + num(fromX) + "," + num(fromZ) + "," + num(toX) + "," + num(toZ) + "]");
+    }
+
     public void beginFrame(int tick) {
         current = new StringBuilder();
         current.append("{\"t\":").append(tick).append(",\"s\":[");
         firstSoldier = true;
+        shots.clear();
     }
 
     public void soldier(String label, CombatStateSnapshot s, Boolean los,
-                        Double nearestEnemyX, Double nearestEnemyZ) {
+                        Double nearestEnemyX, Double nearestEnemyZ,
+                        int shotsFired, boolean hasGun, int ammo, int magazineSize) {
         if (current == null) return;
         if (!firstSoldier) current.append(',');
         firstSoldier = false;
@@ -87,6 +96,10 @@ public final class SimRecorder {
             current.append(",\"nx\":").append(num(nearestEnemyX))
                 .append(",\"nz\":").append(num(nearestEnemyZ));
         }
+        current.append(",\"sf\":").append(shotsFired);
+        if (hasGun) {
+            current.append(",\"am\":").append(ammo).append(",\"mg\":").append(magazineSize);
+        }
         current.append('}');
     }
 
@@ -99,6 +112,11 @@ public final class SimRecorder {
             if (!first) current.append(',');
             first = false;
             current.append('[').append(num(enemy.getX())).append(',').append(num(enemy.getZ())).append(']');
+        }
+        current.append("],\"shots\":[");
+        for (int i = 0; i < shots.size(); i++) {
+            if (i > 0) current.append(',');
+            current.append(shots.get(i));
         }
         current.append("]}");
         frames.add(current.toString());

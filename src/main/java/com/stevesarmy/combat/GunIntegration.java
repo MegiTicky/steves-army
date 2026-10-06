@@ -112,9 +112,38 @@ public class GunIntegration {
         }
     }
     public static boolean hasGun(LivingEntity entity) { return gunHandler.hasGun(entity); }
-    public static ShootResult shoot(LivingEntity shooter, LivingEntity target) { return gunHandler.shoot(shooter, target); }
-    public static ShootResult shootWithDeviation(LivingEntity shooter, ExposureCalculator.AimPointResult aimPoint, float pitchDeviation, float yawDeviation) { return gunHandler.shootWithDeviation(shooter, aimPoint, pitchDeviation, yawDeviation); }
-    public static ShootResult shootAtPosition(LivingEntity shooter, Vec3 targetPosition) { return gunHandler.shootAtPosition(shooter, targetPosition); }
+
+    /**
+     * Observes every round actually fired through the facade, whoever the
+     * shooter is. The sim harness sets this to draw tracers in its animation;
+     * null (the default) costs one null check per shot.
+     */
+    public interface ShotListener {
+        void onShot(LivingEntity shooter, Vec3 aimPoint);
+    }
+
+    public static volatile ShotListener shotListener;
+
+    private static void notifyShot(LivingEntity shooter, Vec3 aimPoint) {
+        ShotListener listener = shotListener;
+        if (listener != null && aimPoint != null) listener.onShot(shooter, aimPoint);
+    }
+
+    public static ShootResult shoot(LivingEntity shooter, LivingEntity target) {
+        ShootResult result = gunHandler.shoot(shooter, target);
+        if (result == ShootResult.SUCCESS) notifyShot(shooter, target != null ? target.getEyePosition() : null);
+        return result;
+    }
+    public static ShootResult shootWithDeviation(LivingEntity shooter, ExposureCalculator.AimPointResult aimPoint, float pitchDeviation, float yawDeviation) {
+        ShootResult result = gunHandler.shootWithDeviation(shooter, aimPoint, pitchDeviation, yawDeviation);
+        if (result == ShootResult.SUCCESS) notifyShot(shooter, aimPoint != null ? aimPoint.position : null);
+        return result;
+    }
+    public static ShootResult shootAtPosition(LivingEntity shooter, Vec3 targetPosition) {
+        ShootResult result = gunHandler.shootAtPosition(shooter, targetPosition);
+        if (result == ShootResult.SUCCESS) notifyShot(shooter, targetPosition);
+        return result;
+    }
     public static boolean canReload(LivingEntity entity) { return gunHandler.canReload(entity); }
     public static void reload(LivingEntity entity) { gunHandler.reload(entity); }
     public static void refillMagazine(LivingEntity entity) { gunHandler.refillMagazine(entity); }

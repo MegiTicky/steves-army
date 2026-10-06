@@ -85,6 +85,8 @@ public final class SimRecordingWriter {
                    <td><span style="color:#fff">&mdash;</span></td><td>line of sight</td></tr>
                <tr><td><span class="sq" style="background:#9c8a4d"></span></td><td>half cover</td>
                    <td><span class="sq" style="background:#cfd8e6"></span></td><td>full cover</td></tr>
+               <tr><td><span style="color:#ffe066">&mdash;</span></td><td>shot (dot = impact)</td>
+                   <td></td><td></td></tr>
               </table>
               <div id="detail">click a soldier to inspect</div>
              </div>
@@ -179,6 +181,13 @@ public final class SimRecordingWriter {
                 if (s.los === 'y' && s.nx !== undefined) line(s.x, s.z, s.nx, s.nz, 'rgba(255,255,255,.4)', true);
               }
 
+              // tracers fired during this sample interval
+              for (const sh of (f.shots || [])) {
+                line(sh[0], sh[1], sh[2], sh[3], 'rgba(255,224,102,.85)');
+                ctx.fillStyle = 'rgba(255,224,102,.9)';
+                ctx.beginPath(); ctx.arc(px(sh[2]), px(sh[3]), 2.5, 0, 2 * Math.PI); ctx.fill();
+              }
+
               for (const s of f.s) {
                 const X = px(s.x), Z = px(s.z);
                 ctx.beginPath(); ctx.arc(X, Z, 7, 0, 2 * Math.PI);
@@ -216,6 +225,8 @@ public final class SimRecordingWriter {
                    '\\ncurrentCover     : ' + (s.cx !== undefined ? p(s.cx) + ', ' + p(s.cz) + (s.ck ? '  [' + s.ck + ']' : '') : '-') +
                    '\\ntargetCover      : ' + (s.tx !== undefined ? p(s.tx) + ', ' + p(s.tz) + (s.tk ? '  [' + s.tk + ']' : '') : '-') +
                    '\\nrelocCenter      : ' + (s.rx !== undefined ? p(s.rx) + ', ' + p(s.rz) : '-') +
+                   '\\nshots fired      : ' + (s.sf || 0) +
+                   (s.am !== undefined ? '\\nammo             : ' + s.am + ' / ' + s.mg : '') +
                    '\\nLoS to enemy     : ' + s.los;
             }
 

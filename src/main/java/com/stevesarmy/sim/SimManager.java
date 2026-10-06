@@ -25,7 +25,10 @@ import net.minecraftforge.eventbus.api.SubscribeEvent;
 
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.UUID;
 
 /**
  * Simulation harness runtime: drives one scenario at a time from the server
@@ -60,6 +63,8 @@ public final class SimManager {
     private static int simTick = 0;
     private static int actionIndex = 0;
     private static float enemyHealthStart;
+    /** Rounds fired per shooter UUID this scenario (from the GunIntegration shot tap). */
+    private static final Map<UUID, Integer> shotCounts = new HashMap<>();
     private static final List<SimScenario.ScheduledAction> sortedActions = new ArrayList<>();
     private static final List<ChunkPos> forcedChunks = new ArrayList<>();
 
@@ -136,6 +141,12 @@ public final class SimManager {
         context = new SimContext(level, terrain);
         timeline = new SimTimeline();
         enemyHealthStart = 0f;
+        shotCounts.clear();
+        // tracer tap: every successful shot from anyone lands in the recording
+        GunIntegration.shotListener = (shooter, aim) -> {
+            recorder.shot(shooter.getX(), shooter.getZ(), aim.x, aim.z);
+            shotCounts.merge(shooter.getUUID(), 1, Integer::sum);
+        };
         scenario.setup.accept(context);
         enemyHealthStart = totalEnemyHealth();
         sortedActions.clear();
@@ -175,12 +186,20 @@ public final class SimManager {
                 ? CoverReservationManager.getReservationCount(snap.currentCover) : -1;
 
             String label = labelOf(soldier);
+            boolean hasGun = GunIntegration.hasGun(soldier);
             timeline.add(new SimSample(simTick, label, snap,
                 soldier.getHealth(), soldier.getMaxHealth(),
                 soldier.hasValidAttackTarget(), los,
                 nearest == null ? -1f : soldier.distanceTo(nearest), reservation,
-                GunIntegration.hasGun(soldier)));
-            recorder.soldier(label, snap, los, nearestX, nearestZ);
+                hasGun,
+                shotCounts.getOrDefault(soldier.getUUID(), 0),
+                hasGun ? GunIntegration.getCurrentAmmo(soldier) : -1,
+                hasGun ? GunIntegration.getMagazineSize(soldier) : -1));
+            recorder.soldier(label, snap, los, nearestX, nearestZ,
+                shotCounts.getOrDefault(soldier.getUUID(), 0),
+                hasGun,
+                hasGun ? GunIntegration.getCurrentAmmo(soldier) : -1,
+                hasGun ? GunIntegration.getMagazineSize(soldier) : -1);
         }
         recorder.endFrame(context.enemies);
     }
@@ -276,6 +295,7 @@ public final class SimManager {
         terrain.clear();
         unforceChunks();
         SimIsolation.reset(level);
+        GunIntegration.shotListener = null;
         yLevel += Y_SEPARATION;
         queueIndex++;
 

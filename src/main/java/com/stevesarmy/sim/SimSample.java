@@ -22,11 +22,17 @@ public final class SimSample {
     public final int reservationCountForClaim;
     /** Soldier holds a usable gun — gates firing-chain detectors on armed runs. */
     public final boolean hasGun;
+    /** Rounds this soldier fired since scenario start (from the GunIntegration shot tap). */
+    public final int shotsFired;
+    /** Rounds left in the magazine; -1 when no gun reports one. */
+    public final int ammo;
+    /** Magazine capacity; -1 when no gun reports one. */
+    public final int magazineSize;
 
     public SimSample(int tick, String label, CombatStateSnapshot state,
                      float health, float maxHealth, boolean hasAttackTarget,
                      Boolean losToEnemy, float enemyDistance, int reservationCountForClaim,
-                     boolean hasGun) {
+                     boolean hasGun, int shotsFired, int ammo, int magazineSize) {
         this.tick = tick;
         this.label = label;
         this.state = state;
@@ -37,5 +43,8 @@ public final class SimSample {
         this.enemyDistance = enemyDistance;
         this.reservationCountForClaim = reservationCountForClaim;
         this.hasGun = hasGun;
+        this.shotsFired = shotsFired;
+        this.ammo = ammo;
+        this.magazineSize = magazineSize;
     }
 }
