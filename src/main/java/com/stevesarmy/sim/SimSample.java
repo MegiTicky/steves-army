@@ -28,11 +28,25 @@ public final class SimSample {
     public final int ammo;
     /** Magazine capacity; -1 when no gun reports one. */
     public final int magazineSize;
+    /** Horizontal distance from the soldier to its claimed cover slot center; -1 when no cover claimed. */
+    public final double coverSlotOffset;
+    /** Cover-anchor velocity pulls since spawn (CoverPositionController telemetry); -1 when unavailable. */
+    public final int anchorPulls;
+    /** Body sample points visible to the nearest enemy's eye (CoverFidelityProbe); -1 when not probed. */
+    public final int exposedBodyRays;
+    /** Head-band body points visible to the threat; a hiding soldier with head rays has a pose failure. */
+    public final int exposedHeadRays;
+    /** Total body points probed; 0 when not probed. */
+    public final int probedBodyRays;
+    /** Soldier is mid reload (facade) or has a pending reload flag. */
+    public final boolean reloading;
 
     public SimSample(int tick, String label, CombatStateSnapshot state,
                      float health, float maxHealth, boolean hasAttackTarget,
                      Boolean losToEnemy, float enemyDistance, int reservationCountForClaim,
-                     boolean hasGun, int shotsFired, int ammo, int magazineSize) {
+                     boolean hasGun, int shotsFired, int ammo, int magazineSize,
+                     double coverSlotOffset, int anchorPulls,
+                     int exposedBodyRays, int exposedHeadRays, int probedBodyRays, boolean reloading) {
         this.tick = tick;
         this.label = label;
         this.state = state;
@@ -46,5 +60,11 @@ public final class SimSample {
         this.shotsFired = shotsFired;
         this.ammo = ammo;
         this.magazineSize = magazineSize;
+        this.coverSlotOffset = coverSlotOffset;
+        this.anchorPulls = anchorPulls;
+        this.exposedBodyRays = exposedBodyRays;
+        this.exposedHeadRays = exposedHeadRays;
+        this.probedBodyRays = probedBodyRays;
+        this.reloading = reloading;
     }
 }

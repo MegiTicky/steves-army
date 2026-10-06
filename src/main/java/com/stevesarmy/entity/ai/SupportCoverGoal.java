@@ -36,6 +36,11 @@ public final class SupportCoverGoal extends Goal implements CoverGoalController 
         this.setFlags(EnumSet.of(Flag.MOVE, Flag.LOOK));
     }
 
+    /** The wrapped cover state machine (debug/sim surface, mirrors MachineGunnerSupportGoal). */
+    public CoverTacticalGoal getCoverController() {
+        return coverController;
+    }
+
     @Override
     public boolean canUse() {
         if (phase == SupportPhase.DUTY) return soldier.isAlive();

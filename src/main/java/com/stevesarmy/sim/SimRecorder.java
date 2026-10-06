@@ -61,7 +61,9 @@ public final class SimRecorder {
 
     public void soldier(String label, CombatStateSnapshot s, Boolean los,
                         Double nearestEnemyX, Double nearestEnemyZ,
-                        int shotsFired, boolean hasGun, int ammo, int magazineSize, float health) {
+                        int shotsFired, boolean hasGun, int ammo, int magazineSize, float health,
+                        double slotOffset, int anchorPulls, int exposedRays, int exposedHeadRays,
+                        int probedRays, boolean reloading) {
         if (current == null) return;
         if (!firstSoldier) current.append(',');
         firstSoldier = false;
@@ -107,6 +109,21 @@ public final class SimRecorder {
         current.append(",\"sf\":").append(shotsFired);
         if (hasGun) {
             current.append(",\"am\":").append(ammo).append(",\"mg\":").append(magazineSize);
+        }
+        if (slotOffset >= 0) {
+            current.append(",\"cd\":").append(String.format("%.3f", slotOffset));
+        }
+        if (anchorPulls >= 0) {
+            current.append(",\"ap\":").append(anchorPulls);
+        }
+        if (exposedRays >= 0) {
+            current.append(",\"xr\":").append(exposedRays).append(",\"pr\":").append(probedRays);
+            if (exposedHeadRays > 0) {
+                current.append(",\"xh\":").append(exposedHeadRays);
+            }
+        }
+        if (reloading) {
+            current.append(",\"rl\":1");
         }
         current.append('}');
     }

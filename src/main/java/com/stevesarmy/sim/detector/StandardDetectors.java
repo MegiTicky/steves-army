@@ -34,7 +34,9 @@ public final class StandardDetectors {
             new PathFailStorm(),
             new PositionDeadlock(),
             new FireStarvation(),
-            new ReservationDrift());
+            new ReservationDrift(),
+            new CoverDockDrift(),
+            new ExposedWhileHiding());
     }
 
     /** Longest run helper: indexes of a maximal run where the predicate holds. */
@@ -480,6 +482,144 @@ public final class StandardDetectors {
                         "IN_COVER state held " + span + "t with no current cover position — ghost cover claim");
                     v.with("coverState", end.state.coverState)
                         .with("wantCoverReason", end.state.wantCoverReason);
+                    out.add(v);
+                }
+            }
+            return out;
+        }
+    }
+
+    // 11. idle-in-cover soldier sits off its cover slot ------------------------
+    //
+    // The anchor velocity is what docks a soldier to the exact slot center
+    // (0.08 deadzone). A soldier that claims IN_COVER, is idle (HIDING), is
+    // neither suppressed nor reloading, and still sits > 0.30 blocks off the
+    // slot means the final-phase velocity manipulation never engaged.
+
+    static final class CoverDockDrift implements SimDetector {
+        @Override public String name() { return "CoverDockDrift"; }
+
+        @Override
+        public List<SimViolation> evaluate(SimRunResult run) {
+            List<SimViolation> out = new ArrayList<>();
+            for (String label : run.timeline.soldierLabels()) {
+                List<SimSample> series = run.timeline.series(label);
+                // unsuppressed idle drift: anchor should own the position
+                for (Run r : runs(series, s -> idleInCover(s)
+                        && !s.reloading
+                        && s.state.suppressionLevel < 0.3f
+                        && s.coverSlotOffset > SimTuning.DOCK_DRIFT_FAIL_OFFSET)) {
+                    int span = spanTicks(series, r);
+                    if (span < SimTuning.DOCK_DRIFT_TICKS) continue;
+                    SimSample end = series.get(r.toIdx);
+                    double maxOffset = 0;
+                    for (int i = r.fromIdx; i <= r.toIdx; i++) {
+                        maxOffset = Math.max(maxOffset, series.get(i).coverSlotOffset);
+                    }
+                    SimViolation v = new SimViolation(SimViolation.Severity.FAIL, name(), end.tick, label,
+                        "idle in cover but sits " + String.format("%.2f", end.coverSlotOffset)
+                            + " blocks off the slot center for " + span + "t — anchor velocity not docking");
+                    v.with("maxSlotOffset", String.format("%.2f", maxOffset))
+                        .with("currentCover", end.state.currentCover)
+                        .with("peekState", end.state.peekState)
+                        .with("coverState", end.state.coverState);
+                    out.add(v);
+                }
+                // suppressed idle drift: anchor is suspended by design, but the
+                // soldier must not leave the cover block entirely
+                for (Run r : runs(series, s -> idleInCover(s)
+                        && !s.reloading
+                        && s.state.suppressionLevel >= 0.3f
+                        && s.coverSlotOffset > SimTuning.DOCK_DRIFT_SUPPRESSED_OFFSET)) {
+                    int span = spanTicks(series, r);
+                    if (span < SimTuning.DOCK_DRIFT_TICKS) continue;
+                    SimSample end = series.get(r.toIdx);
+                    SimViolation v = new SimViolation(SimViolation.Severity.WARN, name(), end.tick, label,
+                        "suppressed idle soldier " + String.format("%.2f", end.coverSlotOffset)
+                            + " blocks off its cover slot for " + span + "t — outside the cover block");
+                    v.with("currentCover", end.state.currentCover)
+                        .with("peekState", end.state.peekState);
+                    out.add(v);
+                }
+            }
+            return out;
+        }
+
+        private boolean idleInCover(SimSample s) {
+            return s.state.currentCover != null
+                && ("IN_COVER".equals(s.state.coverState) || "SUPPRESSED_IN_COVER".equals(s.state.coverState))
+                && "HIDING".equals(s.state.peekState);
+        }
+    }
+
+    // 12. "hiding" soldier physically visible to the threat --------------------
+    //
+    // HIDING means the 0.6-high low-crouch box: behind any cover (half or
+    // full) every body ray must be blocked. A standing-height hitbox left in
+    // HIDING (pose never engaged) lights this up over half cover.
+    // Only docked samples count (offset <= 0.5 = inside the slot block): the
+    // claim->docked transit legitimately walks exposed, and drift is the
+    // CoverDockDrift detector's problem. Standing in half cover tolerates
+    // HEAD exposure (you look over the wall) but feet/mid rays visible mean
+    // the torso is not behind the block.
+
+    /** Inside the claimed slot block — the exposure checks only judge docked soldiers. */
+    private static boolean dockedInCover(SimSample s) {
+        return s.state.currentCover != null
+            && s.coverSlotOffset >= 0 && s.coverSlotOffset <= 0.5;
+    }
+
+    static final class ExposedWhileHiding implements SimDetector {
+        @Override public String name() { return "ExposedWhileHiding"; }
+
+        @Override
+        public List<SimViolation> evaluate(SimRunResult run) {
+            List<SimViolation> out = new ArrayList<>();
+            for (String label : run.timeline.soldierLabels()) {
+                List<SimSample> series = run.timeline.series(label);
+                for (Run r : runs(series, s -> s.exposedBodyRays > 0
+                        && "HIDING".equals(s.state.peekState)
+                        && dockedInCover(s))) {
+                    int span = spanTicks(series, r);
+                    if (span < SimTuning.EXPOSED_HIDING_TICKS) continue;
+                    SimSample end = series.get(r.toIdx);
+                    int worst = 0;
+                    int worstHead = 0;
+                    for (int i = r.fromIdx; i <= r.toIdx; i++) {
+                        worst = Math.max(worst, series.get(i).exposedBodyRays);
+                        worstHead = Math.max(worstHead, series.get(i).exposedHeadRays);
+                    }
+                    SimViolation v = new SimViolation(SimViolation.Severity.FAIL, name(), end.tick, label,
+                        worst + "/" + end.probedBodyRays + " body rays visible to the threat while HIDING in cover for "
+                            + span + "t — cover claim is not physical protection");
+                    v.with("worstExposedRays", worst)
+                        .with("worstHeadRays", worstHead)
+                        .with("probedRays", end.probedBodyRays)
+                        .with("currentCover", end.state.currentCover)
+                        .with("coverType", end.state.currentCoverType)
+                        .with("suppressionLevel", String.format("%.2f", end.state.suppressionLevel));
+                    out.add(v);
+                }
+                // torso (feet+mid) visible while standing in half cover — head
+                // exposure is the doctrine, torso exposure is a bad slot
+                for (Run r : runs(series, s -> s.exposedBodyRays - Math.max(0, s.exposedHeadRays) > 0
+                        && "STANDING_IN_HALF_COVER".equals(s.state.peekState)
+                        && dockedInCover(s))) {
+                    int span = spanTicks(series, r);
+                    if (span < SimTuning.EXPOSED_HIDING_TICKS) continue;
+                    SimSample end = series.get(r.toIdx);
+                    int worstTorso = 0;
+                    for (int i = r.fromIdx; i <= r.toIdx; i++) {
+                        worstTorso = Math.max(worstTorso,
+                            series.get(i).exposedBodyRays - Math.max(0, series.get(i).exposedHeadRays));
+                    }
+                    SimViolation v = new SimViolation(SimViolation.Severity.WARN, name(), end.tick, label,
+                        worstTorso + " torso rays visible to the threat while standing in half cover for "
+                            + span + "t — slot does not shield the body");
+                    v.with("worstTorsoRays", worstTorso)
+                        .with("currentCover", end.state.currentCover)
+                        .with("coverType", end.state.currentCoverType)
+                        .with("slotOffset", String.format("%.2f", end.coverSlotOffset));
                     out.add(v);
                 }
             }

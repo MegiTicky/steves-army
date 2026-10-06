@@ -17,6 +17,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.level.GameRules;
+import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.event.server.ServerStartedEvent;
 import net.minecraftforge.event.server.ServerStoppingEvent;
@@ -40,15 +41,14 @@ import java.util.UUID;
 public final class SimManager {
     private SimManager() {}
 
+    /** Base Y for scenario fixtures: a sky platform, independent of world terrain. */
     private static final int Y_BASE = 160;
     /**
      * Vertical spacing between scenario fixtures. Chunks are full columns, so
-     * this only separates the fixtures in the air — but the build limit caps
-     * the origin: the tallest fixture reaches origin.y + 2, and the world's
-     * last buildable layer is y=319. 20Y spacing keeps all registry scenarios
-     * at or below Y=280 + fixture height.
+     * this only separates the fixtures in the air — 8Y per scenario keeps the
+     * full registry under the y=319 build limit.
      */
-    private static final int Y_SEPARATION = 20;
+    private static final int Y_SEPARATION = 8;
     private static final List<SimDetector> DETECTORS = StandardDetectors.all();
 
     private enum Phase { IDLE, RUNNING, CLEANUP, DONE }
@@ -213,6 +213,30 @@ public final class SimManager {
             // NOT hasValidAttackTarget(), which is the player-issued ATTACK
             // objective BlockPos and is never set in scenarios.
             net.minecraft.world.entity.LivingEntity combatTarget = soldier.getTarget();
+
+            // cover-dock fidelity probe: slot offset, anchor telemetry, body exposure
+            double slotOffset = -1;
+            if (snap.currentCover != null) {
+                Vec3 slot = CoverTacticalGoal.getCoverStandingPositionStatic(snap.currentCover);
+                double dx = soldier.getX() - slot.x;
+                double dz = soldier.getZ() - slot.z;
+                slotOffset = Math.sqrt(dx * dx + dz * dz);
+            }
+            int anchorPulls = -1;
+            if (soldier.getMoveControl() instanceof com.stevesarmy.entity.ai.CoverPositionController ctrl) {
+                anchorPulls = ctrl.getDebugAnchorPulls();
+            }
+            int exposedRays = -1;
+            int exposedHeadRays = -1;
+            int probedRays = 0;
+            if (nearest != null) {
+                CoverFidelityProbe.Exposures rays = CoverFidelityProbe.probe(
+                    level, soldier, nearest.getEyePosition());
+                exposedRays = rays.exposed();
+                exposedHeadRays = rays.exposedHead();
+                probedRays = rays.probed();
+            }
+
             timeline.add(new SimSample(simTick, label, snap,
                 soldier.getHealth(), soldier.getMaxHealth(),
                 combatTarget != null && combatTarget.isAlive(), los,
@@ -220,21 +244,28 @@ public final class SimManager {
                 hasGun,
                 shotCounts.getOrDefault(soldier.getUUID(), 0),
                 hasGun ? GunIntegration.getCurrentAmmo(soldier) : -1,
-                hasGun ? GunIntegration.getMagazineSize(soldier) : -1));
+                hasGun ? GunIntegration.getMagazineSize(soldier) : -1,
+                slotOffset, anchorPulls, exposedRays, exposedHeadRays, probedRays,
+                soldier.isPreparingOrReloading()));
             recorder.soldier(label, snap, los, nearestX, nearestZ,
                 shotCounts.getOrDefault(soldier.getUUID(), 0),
                 hasGun,
                 hasGun ? GunIntegration.getCurrentAmmo(soldier) : -1,
                 hasGun ? GunIntegration.getMagazineSize(soldier) : -1,
-                soldier.getHealth());
+                soldier.getHealth(),
+                slotOffset, anchorPulls, exposedRays, exposedHeadRays, probedRays,
+                soldier.isPreparingOrReloading());
         }
         recorder.endFrame(context.enemies);
     }
 
-    /** MG goal is a wrapper shell; unwrap to the real CoverTacticalGoal for sampling. */
+    /** Wrapper cover goals (MG, support) shell a real CoverTacticalGoal; unwrap for sampling. */
     private static CombatStateSnapshot captureFor(SoldierEntity soldier) {
         if (soldier.getCoverTacticalGoal() instanceof CoverTacticalGoal goal) {
             return goal.captureStateSnapshot();
+        }
+        if (soldier.getCoverTacticalGoal() instanceof com.stevesarmy.entity.ai.SupportCoverGoal supportGoal) {
+            return supportGoal.getCoverController().captureStateSnapshot();
         }
         if (soldier.getCoverTacticalGoal() instanceof com.stevesarmy.entity.ai.MachineGunnerSupportGoal mgGoal) {
             return mgGoal.getCoverController().captureStateSnapshot();

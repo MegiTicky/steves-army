@@ -44,7 +44,7 @@ public final class SimReportWriter {
         sb.append("scenario : ").append(result.scenario.name).append('\n');
         sb.append("desc     : ").append(result.scenario.description).append('\n');
         sb.append("duration : ").append(result.durationTicks).append(" ticks (").append(simTick).append(" simulated)\n");
-        sb.append("guns     : ").append(result.gunsLoaded ? "LOADED (armed scenario)" : "ABSENT — firing assertions skipped\n");
+        sb.append("guns     : ").append(result.gunsLoaded ? "LOADED (armed scenario)" : "ABSENT — firing assertions skipped").append('\n');
         sb.append("outcome  : ").append(result.failed() ? "FAIL" : "PASS").append('\n');
         sb.append("samples  : ").append(result.timeline.sampleCount()).append('\n');
         sb.append('\n');
@@ -75,6 +75,42 @@ public final class SimReportWriter {
         for (String label : result.timeline.soldierLabels()) {
             sb.append(label).append(":\n");
             appendSegmentedTimeline(sb, result, label);
+        }
+
+        sb.append("COVER-DOCK FIDELITY (final slot offset / anchor pulls / worst body rays while hiding)\n");
+        sb.append("--------------------------------------------------------------------------------------\n");
+        for (String label : result.timeline.soldierLabels()) {
+            List<SimSample> series = result.timeline.series(label);
+            if (series.isEmpty()) continue;
+            SimSample last = series.get(series.size() - 1);
+            int maxPulls = 0;
+            int worstHidingRays = 0;
+            int worstHidingHeadRays = 0;
+            int worstStandingBodyRays = 0; // feet+mid bands while standing in half cover (head exposure is doctrine)
+            int worstStandingHeadRays = 0;
+            boolean anyHiding = false;
+            for (SimSample s : series) {
+                maxPulls = Math.max(maxPulls, s.anchorPulls);
+                if (s.state.currentCover == null
+                    || s.coverSlotOffset < 0 || s.coverSlotOffset > 0.5) continue; // docked samples only
+                if ("HIDING".equals(s.state.peekState)) {
+                    anyHiding = true;
+                    worstHidingRays = Math.max(worstHidingRays, s.exposedBodyRays);
+                    worstHidingHeadRays = Math.max(worstHidingHeadRays, s.exposedHeadRays);
+                } else if ("STANDING_IN_HALF_COVER".equals(s.state.peekState)) {
+                    worstStandingBodyRays = Math.max(worstStandingBodyRays,
+                        Math.max(0, s.exposedBodyRays - Math.max(0, s.exposedHeadRays)));
+                    worstStandingHeadRays = Math.max(worstStandingHeadRays, Math.max(0, s.exposedHeadRays));
+                }
+            }
+            String offset = last.coverSlotOffset >= 0 ? String.format("%.2f", last.coverSlotOffset) : "n/a";
+            sb.append("  ").append(label).append(": finalOffset=").append(offset)
+                .append(" anchorPulls=").append(maxPulls >= 0 ? maxPulls : "n/a")
+                .append(" hiding: ").append(anyHiding ? worstHidingRays + " rays (" + worstHidingHeadRays + " head)" : "no-hiding-sample")
+                .append(" standing: ").append(worstStandingBodyRays).append(" body + ").append(worstStandingHeadRays).append(" head")
+                .append(" of ").append(series.stream().filter(s -> s.probedBodyRays > 0)
+                    .mapToInt(s -> s.probedBodyRays).max().orElse(0))
+                .append('\n');
         }
         return sb.toString();
     }

@@ -229,6 +229,10 @@ public final class SimRecordingWriter {
                    '\\nlast search      : ' + (s.ls || '-') +
                    '\\nshots fired      : ' + (s.sf || 0) +
                    (s.am !== undefined ? '\\nammo             : ' + s.am + ' / ' + s.mg : '') +
+                   '\\nslot offset      : ' + (s.cd !== undefined ? s.cd.toFixed(2) + (s.cd > 0.35 ? '  [DRIFT]' : '') : '-') +
+                   '\\nanchor pulls     : ' + (s.ap !== undefined ? s.ap : '-') +
+                   '\\nbody rays exposed: ' + (s.xr !== undefined ? s.xr + ' / ' + s.pr + (s.xh ? '  (head: ' + s.xh + ')' : '') : '-') +
+                   (s.rl ? '\\nRELOADING' : '') +
                    '\\nLoS to enemy     : ' + s.los;
             }
 

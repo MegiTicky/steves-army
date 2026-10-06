@@ -40,6 +40,11 @@ public class CoverPositionController extends MoveControl {
     private String debugMoveSource = "none";
     private String debugMoveReason = "";
     private Vec3 debugLastSetVelocity = Vec3.ZERO;
+    // Sim-harness telemetry: how often the cover-anchor velocity actually engaged.
+    private int debugAnchorTicks;
+    private int debugAnchorPulls;
+    private double debugLastAnchorDistance = -1;
+    private int debugArrivals;
     private boolean controlledReturnToCover;
     private Vec3 coverAnchorTarget;
     private final CqbSteeringAdvisor steeringAdvisor = new CqbSteeringAdvisor();
@@ -188,6 +193,7 @@ public class CoverPositionController extends MoveControl {
         this.lastFailureReason = FailureReason.NONE;
         this.controlledReturnToCover = false;
         this.bestDistanceToTarget = Double.POSITIVE_INFINITY;
+        this.debugArrivals++;
     }
 
     public FailureReason getLastFailureReason() {
@@ -242,6 +248,18 @@ public class CoverPositionController extends MoveControl {
     public String getDebugMoveReason() { return debugMoveReason; }
     public Vec3 getDebugLastSetVelocity() { return debugLastSetVelocity; }
 
+    /** Sim-harness telemetry: ticks the cover-anchor request was active this tick. */
+    public int getDebugAnchorTicks() { return debugAnchorTicks; }
+
+    /** Sim-harness telemetry: ticks the anchor actually nudged velocity toward the slot. */
+    public int getDebugAnchorPulls() { return debugAnchorPulls; }
+
+    /** Sim-harness telemetry: slot distance at the most recent anchored tick; -1 before the first. */
+    public double getDebugLastAnchorDistance() { return debugLastAnchorDistance; }
+
+    /** Sim-harness telemetry: completed move-target arrivals (REACHED_TARGET transitions). */
+    public int getDebugArrivals() { return debugArrivals; }
+
     /** True when passive anchoring can hold the soldier without an explicit move request. */
     public boolean isWithinCoverAnchorDeadzone(Vec3 target) {
         return horizontalDistanceTo(target) <= COVER_ANCHOR_DEADZONE;
@@ -260,10 +278,12 @@ public class CoverPositionController extends MoveControl {
 
     private void applyCoverAnchorVelocity(Vec3 target) {
         if (target == null) return;
+        debugAnchorTicks++;
 
         double dx = target.x - this.mob.getX();
         double dz = target.z - this.mob.getZ();
         double distance = Math.sqrt(dx * dx + dz * dz);
+        debugLastAnchorDistance = distance;
         if (distance < 0.001) return;
 
         double nx = dx / distance;
@@ -276,6 +296,7 @@ public class CoverPositionController extends MoveControl {
         if (towardSpeed < 0.0) {
             velocity = velocity.subtract(new Vec3(nx, 0.0, nz).scale(towardSpeed));
             towardSpeed = 0.0;
+            debugAnchorPulls++;
         }
 
         double desiredSpeed = distance <= COVER_ANCHOR_DEADZONE
@@ -284,8 +305,10 @@ public class CoverPositionController extends MoveControl {
                 (distance - COVER_ANCHOR_DEADZONE) * COVER_ANCHOR_RESPONSE);
         if (towardSpeed < desiredSpeed) {
             velocity = velocity.add(new Vec3(nx, 0.0, nz).scale(desiredSpeed - towardSpeed));
+            debugAnchorPulls++;
         } else if (distance <= COVER_ANCHOR_DEADZONE && towardSpeed > 0.0) {
             velocity = velocity.subtract(new Vec3(nx, 0.0, nz).scale(towardSpeed));
+            debugAnchorPulls++;
         }
 
         this.mob.setDeltaMovement(velocity.x, velocity.y, velocity.z);

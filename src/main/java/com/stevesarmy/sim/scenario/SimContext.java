@@ -109,6 +109,51 @@ public final class SimContext {
         }
     }
 
+    /** Cover-goal snapshot for a label's soldier (null when absent/removed). */
+    public com.stevesarmy.combat.CombatStateSnapshot snapshotOf(String label) {
+        return snapshotOf(byLabel.get(label));
+    }
+
+    public com.stevesarmy.combat.CombatStateSnapshot snapshotOf(SoldierEntity soldier) {
+        if (soldier == null || soldier.isRemoved()) return null;
+        if (soldier.getCoverTacticalGoal() instanceof com.stevesarmy.entity.ai.CoverTacticalGoal goal) {
+            return goal.captureStateSnapshot();
+        }
+        if (soldier.getCoverTacticalGoal() instanceof com.stevesarmy.entity.ai.SupportCoverGoal supportGoal) {
+            return supportGoal.getCoverController().captureStateSnapshot();
+        }
+        if (soldier.getCoverTacticalGoal() instanceof com.stevesarmy.entity.ai.MachineGunnerSupportGoal mgGoal) {
+            return mgGoal.getCoverController().captureStateSnapshot();
+        }
+        return null;
+    }
+
+    /** Knockback impulse (added to delta movement) — stand-in for explosions and melee shoves. */
+    public boolean knockback(String label, double x, double z) {
+        SoldierEntity soldier = byLabel.get(label);
+        if (soldier == null || !soldier.isAlive()) return false;
+        soldier.push(x, 0.0, z);
+        return true;
+    }
+
+    /** Shove only while the soldier is idle in claimed cover (hiding or standing in half cover) — the anchor-recovery probe. */
+    public boolean knockbackIfIdleInCover(String label, double x, double z) {
+        com.stevesarmy.combat.CombatStateSnapshot snap = snapshotOf(label);
+        if (snap == null || snap.currentCover == null) return false;
+        if (!"HIDING".equals(snap.peekState) && !"STANDING_IN_HALF_COVER".equals(snap.peekState)) return false;
+        return knockback(label, x, z);
+    }
+
+    /** Shove only while a reload holds the soldier in claimed cover — the reload-damp probe. */
+    public boolean knockbackIfReloadingInCover(String label, double x, double z) {
+        SoldierEntity soldier = byLabel.get(label);
+        if (soldier == null || !soldier.isAlive() || !soldier.isPreparingOrReloading()) return false;
+        com.stevesarmy.combat.CombatStateSnapshot snap = snapshotOf(soldier);
+        if (snap == null || snap.currentCover == null) return false;
+        soldier.push(x, 0.0, z);
+        return true;
+    }
+
     public SoldierEntity soldier(String label) {
         return byLabel.get(label);
     }

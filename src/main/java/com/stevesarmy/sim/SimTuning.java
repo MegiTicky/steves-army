@@ -39,6 +39,20 @@ public final class SimTuning {
     /** Armed-only: sustained clear LoS with no enemy damage taken. */
     public static final int FIRE_STARVATION_TICKS = 200;
 
+    // --- cover-dock fidelity thresholds -------------------------------------
+    /**
+     * Idle-in-cover soldiers are anchored to the slot center with a 0.08
+     * deadzone, so a healthy steady-state offset is well under 0.15. This
+     * FAIL bound still guarantees the soldier stands in the slot's block
+     * (a half-diagonal is 0.707) while catching real drift.
+     */
+    public static final double DOCK_DRIFT_FAIL_OFFSET = 0.30;
+    public static final int DOCK_DRIFT_TICKS = 60;
+    /** Suppressed idle drift has no anchor (requests are suspended while reloading/suppressed) — only gross ejection reports. */
+    public static final double DOCK_DRIFT_SUPPRESSED_OFFSET = 0.75;
+    /** A hiding soldier with body rays visible to the threat this long has failed physically. */
+    public static final int EXPOSED_HIDING_TICKS = 40;
+
     /** Follow-blocker strings that mean "cover machine owns the legs right now". */
     public static final String BLOCKED_SEEKING = "SEEKING_COVER";
     public static final String BLOCKED_REPOSITIONING = "REPOSITIONING";

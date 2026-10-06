@@ -32,7 +32,9 @@ signals.
 
 Reports land in `run/sim_reports/<scenario>_<timestamp>.txt` (+ `.json`).
 The txt report contains the outcome, every detector violation with its full
-counter-chain evidence, and a per-soldier segmented state timeline. The final
+counter-chain evidence, a per-soldier segmented state timeline, and a
+**cover-dock fidelity** summary line per soldier (final slot offset, anchor
+velocity pulls, worst body rays seen while hiding/standing). The final
 autorun log line `SIM COMPLETE` is the CI-style grep anchor; per-scenario
 `PASS`/`FAIL` is in the report and the `[Sim]` log lines.
 
@@ -85,6 +87,28 @@ Sim samples report the live combat-entity target (`soldier.getTarget()`), not
 `hasValidAttackTarget()` (that flag is the player-issued ATTACK objective and
 is never set in scenarios).
 
+### Cover-arrival fidelity probes (dock suite)
+
+The final phase of getting into cover is velocity manipulation:
+`CoverPositionController` anchors an idle soldier onto the exact slot center
+(block center, 0.08-block deadzone) by adding/removing radial velocity every
+tick, and peek returns dock at a 0.05 tolerance. The dock suite verifies this
+physically instead of trusting the state machine:
+
+- **slot offset** — horizontal distance from the soldier to its claimed
+  cover slot center, sampled every 5t (`cd` in the recording/inspect panel).
+- **anchor pulls** — `CoverPositionController` debug counter: ticks where the
+  anchor actually nudged velocity toward the slot (`ap`).
+- **body-exposure rays** — `CoverFidelityProbe` casts 15 block rays from the
+  nearest enemy's eye to sample points across the soldier's real bounding box
+  (feet/mid/head bands x corners+center); counts rays with a clear line
+  (`xr`, head band `xh`). A healthy low-crouch (0.6-high box) behind any
+  cover probes 0/15; standing in half cover tolerates head rays (you look
+  over the wall) but torso rays mean the slot does not shield the body.
+- **scripted knockback** — `SimContext.knockbackIfIdleInCover` /
+  `knockbackIfReloadingInCover` push the soldier off its slot state-gated
+  (idle-in-cover / mid-reload), standing in for explosions and melee.
+
 ## Architecture
 
 - `sim/SimManager` — tick-loop runner: build fixture → spawn actors → scripted
@@ -98,10 +122,14 @@ is never set in scenarios).
   explicit assertions.
 - `sim/terrain/SimTerrain` — real `setBlock` fixtures (platform with rim walls,
   pockets, cover rows) at a per-scenario Y level; every placed block is
-  tracked and removed at cleanup. Fixtures stack 20Y apart (build limit
-  y=319; placement above it is rejected, so `SimTerrain.block()` fails loudly
-  if a fixture would cross it).
-- `sim/detector/StandardDetectors` — ten pure-over-timeline checks. All
+  tracked and removed at cleanup. Fixtures stack 8Y apart so the full
+  14-scenario registry stays under the y=319 build limit (placement above it
+  is rejected, so `SimTerrain.block()` fails loudly if a fixture would cross
+  it).
+- `sim/CoverFidelityProbe` — the physical cover check behind the dock suite:
+  15 block rays from the nearest enemy's eye across the soldier's bounding
+  box, plus per-sample slot offset and anchor telemetry wiring.
+- `sim/detector/StandardDetectors` — twelve pure-over-timeline checks. All
   thresholds live in `sim/SimTuning`.
 - `sim/SimIsolation` — static-state reset inventory between scenarios
   (reservations, fire-team suppression memory, pending searches, squads,
@@ -117,9 +145,16 @@ is never set in scenarios).
 | `hold_enclosed_pocket` | HOLD in a one-exit pocket; fail-and-escalate without stranding |
 | `persistent_ping_relocation` | Continuous suppression from one origin; relocation dead-ends |
 | `mg_anchor_freshness` | MG centroid/anchor staleness after the shooter moves |
-| `mg_rifleman_seek_contrast` | Live-fire MG vs riflemen fight (`.armed()`, two enemies): both sides reach cover, organic suppression both ways, peek-and-fire cycles |
+| `mg_rifleman_seek_contrast` | Same fire on an MG and two riflemen: both must reach cover (the live MG seek-strand bug) |
 | `pair_suppression_lanes` | Two suppressors; dispersion vs stacking |
 | `open_field_baseline` | No suppression; detector false-positive calibration |
+| `dock_arrival_roles` | Rifleman + MG + AT pulse into cover; each must dock into the exact slot block with the anchor velocity engaged |
+| `dock_arrival_suppressed` | Rifleman + MG arriving under sustained suppression; anchor finishes the docking once pressure ends |
+| `dock_reload_hold` | Armed: scripted reload pins the slot through shoves; anchor re-docks after the reload |
+| `dock_knockback_recovery` | Support role (peek disabled) shoved off its slot while pinned; anchor must recover |
+| `dock_suppressed_drift_recovery` | Rifleman shoved off its slot mid-pin; the suppressed-state anchor re-docks |
+| `dock_cqb_hold_fidelity` | KNOWN FINDING (expected FAIL): a point-blank enemy latches the CQB hold during the approach; anchor starves, soldier locks off-slot and stays fully visible when the enemy flanks past the block |
+| `dock_peek_return` | Armed peek cycles; the return move must land back in the exact slot |
 
 Every scenario except `open_field_baseline` (intentionally bare) places real
 cover: waist-high stone-brick rows (half cover, peekable) and 2-high stacks
@@ -131,13 +166,31 @@ reachable options and the pair/relocation scenarios have distinct candidates.
 StuckSeek, SeekFailLoop, CoverOscillation, PeekThrash (incl. aborted
 peek cycles), SuppressionStarve, FollowEscapeBlocked, PathFailStorm,
 PositionDeadlock, FireStarvation (armed runs only), ReservationDrift
-(+ post-run ReservationLeak check).
+(+ post-run ReservationLeak check), CoverDockDrift (idle soldier sitting
+off its slot — FAIL unsuppressed, WARN when suppressed drift exceeds the
+cover block), ExposedWhileHiding (docked soldier's body rays visible to the
+threat while HIDING — FAIL; torso rays while STANDING_IN_HALF_COVER — WARN).
 
 ## Known findings (2026-10-06, armed sim + MG seek-strand fix)
 
 Status after the MG seek-strand fix, the fixture build-limit repair, and the
 armed-sim work (SimGunHandler + telemetry fixes). Suite state: 6/7 PASS; the
 one FAIL is a pre-existing intermittent.
+
+**Earlier strands (pre-existing, unchanged):**
+
+1. **Post-suppression relocation churn** (`suppressed_follow_escape`,
+   intermittent, fails suite / passes solo) — under sustained pressure a
+   soldier may hop through 3-4 relocation targets inside a 200t window
+   (CoverOscillation fires); ends safely in cover.
+2. **Peek stalls under sustained suppression** (organically visible in the
+   armed contrast run and `dock_peek_return`) — a suppressed soldier sits in
+   MOVING_TO_PEEK for ~110t instead of either committing to the peek or
+   folding back to HIDING; the peek-start decision and the suppression gate
+   disagree.
+3. **Reservation drift (WARN)** — occupied cover unreserved 60-80t after the
+   fight ends; claims outlive released reservations until the goal cycle
+   catches up.
 
 **Earlier same day — the "MG stuck in SEEKING_COVER, never pathing" bug.**
 Four stacked causes, all visible once searches were instrumented (`ls`
@@ -174,16 +227,54 @@ Sampling `soldier.getTarget()` instead made the scout's acquisition visible;
 (`beginFrame` wiped shots before `endFrame` wrote them, so no tracer ever
 survived into the animation) — both fixed.
 
-Remaining strands (all pre-existing):
+## Known findings — dock suite pass (2026-10-06, cover-arrival fidelity)
 
-1. **Post-suppression relocation churn** (`suppressed_follow_escape`,
-   intermittent, fails suite / passes solo) — under sustained pressure a
-   soldier may hop through 3-4 relocation targets inside a 200t window
-   (CoverOscillation fires); ends safely in cover.
-2. **Peek stalls under sustained suppression** (now organically visible in the
-   armed contrast run) — a suppressed soldier sits in MOVING_TO_PEEK for
-   ~110t (left, t85-195) instead of either committing to the peek or folding
-   back to HIDING; the peek-start decision and the suppression gate disagree.
-3. **Reservation drift (WARN)** — occupied cover unreserved 60-80t after the
-   fight ends; claims outlive released reservations until the goal cycle
-   catches up.
+Status after adding the dock suite (7 scenarios), the CoverDockDrift +
+ExposedWhileHiding detectors, the slot-offset / anchor-pull / body-ray
+telemetry, and state-gated knockback actions. Full suite: 14 scenarios,
+8 PASS, 6 FAIL — every FAIL is evidence below, none is a harness artifact.
+
+**VERIFIED WORKING — the final-phase velocity manipulation.** Across roles
+(rifleman, MG, anti-tank, support) and edge cases, the `CoverPositionController`
+anchor does exactly its job: soldiers dock to 0.045-0.08 blocks from the slot
+center (the 0.08 deadzone), a 0.4-impulse shove off the slot is recovered in
+~10 ticks (also mid-suppression, via the suppressed-state handler at
+`CoverTacticalGoal`'s suppressed tick), reload holds damp knockback to ~0,
+and peek returns land back within 0.06 of the slot. Anchor-pull counters and
+per-frame offsets are in every recording.
+
+**BUG — cover picks that do not block the threat line (`ExposedWhileHiding`,
+5 of 14 scenarios).** The cover scorer accepts slots whose blocker misses the
+actual threat geometry: a crouched soldier dead-center in its slot (offset
+0.045!) still probes 12-15/15 exposed body rays when the threat sits at a
+diagonal, because the ray to the soldier passes *beside* the 1-wide block.
+Half-cover rows leak corner rays the same way (AT: 6/15 in
+`dock_arrival_roles`). The protection validation and the physical blocking
+disagree systematically — this is the "they look in cover but are not"
+signature, now measurable. Fix candidates live in the cover scorer's
+protection check (posture-aware rays from the live threat origin), not in
+the movement code.
+
+**BUG — CQB hold starves the cover anchor and outlives its purpose
+(`dock_cqb_hold_fidelity`, expected FAIL).** When an enemy closes to
+CQB_RANGE (5 blocks) while the soldier is still approaching its slot, the
+CQB-engage branch of `CoverPositionController.tick()` zeroes velocity every
+tick and returns *before* the anchor branch — the approach freezes wherever
+it was (0.3-0.8 blocks off-slot). The soldier then claims
+SUPPRESSED_IN_COVER/HIDING indefinitely while the enemy keeps advancing
+*past* the cover block to point-blank on the wrong side: 15/15 body rays
+visible for 345t with zero flank re-evaluation (flank detection lives in
+`tickInCover`, which never runs while suppressed; the same run also trips
+StuckSeek + SuppressionStarve). Two stacked defects: (1) the CQB hold should
+not cancel docking/anchor of an already-claimed cover, and (2) suppressed
+soldiers need a compromised-cover check when the threat crosses to the
+blocker's own side.
+
+**New detector signals on the older scenarios.** `hold_enclosed_pocket`,
+`mg_anchor_freshness`, and `suppressed_follow_escape` now FAIL through
+`ExposedWhileHiding` — the same cover-protection bug firing in their
+fixtures. `persistent_ping_relocation` tripped PeekThrash once under 620t of
+continuous scripted suppression (pressured peek cycles inside the thrash
+window) — treat as calibration-vs-doctrine, not yet a bug claim.
+
+**Earlier same day — the "MG stuck in SEEKING_COVER, never pathing" bug.**
