@@ -63,6 +63,32 @@ public final class CombatStateSnapshot {
     public final String currentCoverType;
     public final String targetCoverType;
 
+    /** Outcome of the most recent cover search; null before the first search. */
+    public final LastSearch lastSearch;
+
+    /** Telemetry for one executed cover search — where it looked and what came back. */
+    public static final class LastSearch {
+        public final String mode;
+        public final String result;
+        public final String phase;
+        public final Vec3 center;
+        public final int radius;
+        public final int tick;
+        /** Consecutive failed (no-cover) searches without an intervening success. */
+        public final int failStreak;
+
+        public LastSearch(String mode, String result, String phase,
+                          Vec3 center, int radius, int tick, int failStreak) {
+            this.mode = mode;
+            this.result = result;
+            this.phase = phase;
+            this.center = center;
+            this.radius = radius;
+            this.tick = tick;
+            this.failStreak = failStreak;
+        }
+    }
+
     public CombatStateSnapshot(UUID soldierId, String role, Vec3 position,
                                String coverState, String peekState, String squadMode,
                                float suppressionLevel, boolean pinned,
@@ -76,7 +102,8 @@ public final class CombatStateSnapshot {
                                boolean mgPipeline, Vec3 mgAnchor, int mgAnchorAgeTicks,
                                Vec3 suppressionCenter, int supCenterFreshTicks, Vec3 laneTarget,
                                BlockPos currentCover, BlockPos targetCover,
-                               String currentCoverType, String targetCoverType) {
+                               String currentCoverType, String targetCoverType,
+                               LastSearch lastSearch) {
         this.soldierId = soldierId;
         this.role = role;
         this.position = position;
@@ -115,5 +142,6 @@ public final class CombatStateSnapshot {
         this.targetCover = targetCover;
         this.currentCoverType = currentCoverType;
         this.targetCoverType = targetCoverType;
+        this.lastSearch = lastSearch;
     }
 }

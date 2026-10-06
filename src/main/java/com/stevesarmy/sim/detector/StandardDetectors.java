@@ -73,8 +73,21 @@ public final class StandardDetectors {
                     int span = spanTicks(series, r);
                     if (span < SimTuning.STUCK_SEEK_TICKS) continue;
                     SimSample end = series.get(r.toIdx);
-                    SimViolation v = new SimViolation(SimViolation.Severity.FAIL, name(), end.tick, label,
-                        "SEEKING_COVER held " + span + "t without reaching cover or escalating");
+                    // A seek that resolves into claimed cover was slow, not
+                    // stranded; FAIL only when the run ends without cover.
+                    boolean resolvedIntoCover = false;
+                    if (r.toIdx + 1 < series.size()) {
+                        SimSample next = series.get(r.toIdx + 1);
+                        resolvedIntoCover = next.state.currentCover != null
+                            || "IN_COVER".equals(next.state.coverState)
+                            || "SUPPRESSED_IN_COVER".equals(next.state.coverState);
+                    }
+                    SimViolation v = new SimViolation(
+                        resolvedIntoCover ? SimViolation.Severity.WARN : SimViolation.Severity.FAIL,
+                        name(), end.tick, label,
+                        resolvedIntoCover
+                            ? "SEEKING_COVER held " + span + "t before reaching cover — slow but resolved"
+                            : "SEEKING_COVER held " + span + "t without reaching cover or escalating");
                     v.with("seekingTicks", end.state.seekingTicks).with("seekingTimeout", end.state.seekingTimeout)
                         .with("failedSearches", end.state.failedSearches)
                         .with("searchExhaustionTicks", end.state.searchExhaustionTicks)
@@ -181,6 +194,7 @@ public final class StandardDetectors {
                 int exposures = 0;
                 int abortedPeeks = 0;
                 int firstExposureTick = -1;
+                int lastExposureTick = -1;
                 String peekState = "";
                 boolean inExposure = false;
                 boolean inPeekMove = false;
@@ -194,6 +208,7 @@ public final class StandardDetectors {
                     if (exposed && !inExposure) {
                         exposures++;
                         if (firstExposureTick < 0) firstExposureTick = s.tick;
+                        lastExposureTick = s.tick;
                     }
                     if (peekMove && !inPeekMove) {
                         inPeekMove = true;
@@ -213,14 +228,18 @@ public final class StandardDetectors {
                     }
                     peekState = s.state.peekState;
                 }
+                boolean exposureWindowThrash = firstExposureTick >= 0
+                    && lastExposureTick - firstExposureTick <= SimTuning.PEEK_THRASH_WINDOW_TICKS;
                 if (coverConstant && cover != null
-                    && (exposures >= SimTuning.PEEK_THRASH_CYCLES || abortedPeeks >= 4)) {
+                    && ((exposures >= SimTuning.PEEK_THRASH_CYCLES && exposureWindowThrash)
+                        || abortedPeeks >= 4)) {
                     SimSample last = series.get(series.size() - 1);
                     SimViolation v = new SimViolation(SimViolation.Severity.FAIL, name(), last.tick, label,
                         exposures + " peek exposures / " + abortedPeeks + " aborted peek cycles from the same cover "
                             + cover + " — peek thrash");
                     v.with("exposures", exposures).with("abortedPeeks", abortedPeeks)
                         .with("firstExposureTick", firstExposureTick)
+                        .with("lastExposureTick", lastExposureTick)
                         .with("peekState", peekState);
                     out.add(v);
                 }
@@ -240,7 +259,12 @@ public final class StandardDetectors {
             Set<String> escapeModes = Set.of("SUPPRESSION_REPOSITION", "CONTINUOUS_SUPPRESSION", "SUPPRESSION_POSITION");
             for (String label : run.timeline.soldierLabels()) {
                 List<SimSample> series = run.timeline.series(label);
-                for (Run r : runs(series, s -> s.state.pinned)) {
+                // Only pins in the open strand the soldier — holding claimed
+                // cover through suppression is correct doctrine, not starvation.
+                for (Run r : runs(series, s -> s.state.pinned
+                        && s.state.currentCover == null
+                        && !"IN_COVER".equals(s.state.coverState)
+                        && !"SUPPRESSED_IN_COVER".equals(s.state.coverState))) {
                     int span = spanTicks(series, r);
                     if (span < SimTuning.SUPPRESSION_STARVE_TICKS) continue;
                     boolean anyEscape = false;
@@ -254,7 +278,7 @@ public final class StandardDetectors {
                     if (!anyEscape) {
                         SimSample end = series.get(r.toIdx);
                         SimViolation v = new SimViolation(SimViolation.Severity.FAIL, name(), end.tick, label,
-                            "PINNED " + span + "t with no relocation and no suppression search ever queued — dead escape chain");
+                            "PINNED in the open " + span + "t with no relocation and no suppression search ever queued — dead escape chain");
                         v.with("relocType", end.state.relocType)
                             .with("queuedModesSeen", String.join(",", modes))
                             .with("suppressionLevel", String.format("%.2f", end.state.suppressionLevel))

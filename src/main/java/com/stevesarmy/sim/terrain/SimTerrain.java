@@ -75,14 +75,21 @@ public final class SimTerrain {
 
     public void block(int x, int y, int z, BlockState state) {
         BlockPos pos = origin.offset(x, y, z);
+        // The world silently rejects blocks above the build limit; surface that
+        // here because a rejected cover block turns a scenario into an
+        // un diagnosable empty-air run.
+        if (pos.getY() > level.getMaxBuildHeight()) {
+            throw new IllegalStateException("Sim fixture block above build limit at " + pos
+                + " — lower the scenario yLevel (SimManager Y_SEPARATION/Y_BASE)");
+        }
         level.setBlockAndUpdate(pos, state);
         placed.add(pos);
     }
 
     public void fill(BlockPos from, BlockPos to, BlockState state) {
         for (BlockPos pos : BlockPos.betweenClosed(from, to)) {
-            level.setBlockAndUpdate(pos.immutable(), state);
-            placed.add(pos.immutable());
+            block(pos.getX() - origin.getX(), pos.getY() - origin.getY(),
+                pos.getZ() - origin.getZ(), state);
         }
     }
 

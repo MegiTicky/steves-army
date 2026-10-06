@@ -87,6 +87,21 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
     
     private static final int COOLDOWN_TICKS = 40;
     private static final int MAX_STUCK_TICKS = 60;
+    /** Covers one search may start walking toward when the best is taken (bounds path cost). */
+    private static final int MAX_RESERVE_CANDIDATE_ATTEMPTS = 4;
+    /** Movement attempts started so far by the current cover search's reserve pools. */
+    private int searchReserveAttempts = 0;
+    /**
+     * Without a cover claim for this long (wall clock, immune to prone walks
+     * and state flips that freeze seekingTicks), the next search widens toward
+     * the squad. Roughly the seek timeout: enough failed searches that radius,
+     * not luck, is the problem.
+     */
+    private static final int SEEK_ESCALATION_TICKS = 120;
+    /** Set once the escalation threshold passed without a cover claim; cleared on claim. */
+    private boolean seekEscalated = false;
+    /** Game tick of the last tick spent in an occupied-cover state. */
+    private int lastInCoverTick = 0;
     private static final int REEVALUATE_INTERVAL_TICKS = 60;
     
     private static final double COVER_REACHED_DISTANCE = 1.5D;
@@ -300,6 +315,17 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
     private BlockPos debugSearchCenter = null;
     /** Why shouldSeekCover last returned true; empty when it returned false. Debug only. */
     private String lastWantCoverReason = "";
+
+    // Last-search telemetry: what the most recent cover search looked at and
+    // what came back. Fills the snapshot's LastSearch so a seek stall is
+    // visible as "searches keep returning nothing from HERE" instead of a
+    // silent frozen state.
+    private int debugSearchRadius = -1;
+    private int noCoverSearchStreak = 0;
+    private String debugLastSearchMode = "";
+    private String debugLastSearchResult = "";
+    private String debugLastSearchPhase = "";
+    private int debugLastSearchTick = -1;
 
     // Per-soldier rate limiters (ticks between repeated log lines)
     private static final int SNAPSHOT_INTERVAL = 20; // 1 second at 20 TPS
@@ -1316,7 +1342,11 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
             currentCover != null ? currentCover.getPosition() : null,
             targetCover != null ? targetCover.getPosition() : null,
             currentCover != null ? currentCover.getType().name() : null,
-            targetCover != null ? targetCover.getType().name() : null);
+            targetCover != null ? targetCover.getType().name() : null,
+            debugLastSearchTick >= 0 ? new CombatStateSnapshot.LastSearch(
+                debugLastSearchMode, debugLastSearchResult, debugLastSearchPhase,
+                debugSearchCenter != null ? Vec3.atBottomCenterOf(debugSearchCenter) : null,
+                debugSearchRadius, debugLastSearchTick, noCoverSearchStreak) : null);
     }
 
     /**
@@ -1973,6 +2003,10 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
         if (state != CoverBehaviorManager.CoverState.SEEKING_COVER) {
             seekingTicks = 0;
         }
+        if (state == CoverBehaviorManager.CoverState.IN_COVER
+            || state == CoverBehaviorManager.CoverState.SUPPRESSED_IN_COVER) {
+            lastInCoverTick = soldier.tickCount;
+        }
         if (state != CoverBehaviorManager.CoverState.REPOSITIONING) {
             repositioningTicks = 0;
         }
@@ -2110,6 +2144,16 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
             if (searchExhaustionCooldown > 0) {
                 enterOpenGroundFallbackPosture();
                 return;
+            }
+
+            // No cover claim for SEEK_ESCALATION_TICKS: widen the next search
+            // toward the squad instead of re-scanning the same empty radius. A
+            // soldier stranded beyond the normal search radius (the MG
+            // follow-formation rim-corner case) would otherwise re-request
+            // identical failing searches until something external changes.
+            if (!seekEscalated
+                && soldier.tickCount - lastInCoverTick >= SEEK_ESCALATION_TICKS) {
+                seekEscalated = true;
             }
 
             requestCoverSearch(soldier.hasValidAttackTarget()
@@ -3675,6 +3719,7 @@ private boolean shouldExitCoverForFollow() {
         validatedCoverPathSource = null;
         validatedCoverPathTick = Long.MIN_VALUE;
         exactPathValidationBudget = new ExactPathValidationBudget();
+        searchReserveAttempts = 0;
         Level level = soldier.level();
         CoverFinder finder = new CoverFinder(level);
         long now = System.currentTimeMillis();
@@ -3693,6 +3738,8 @@ private boolean shouldExitCoverForFollow() {
 
         if (relocationType != RelocationType.NONE && relocationCenter != null) {
             debugSearchCenter = relocationCenter;
+            debugSearchRadius = relocationType == RelocationType.FOLLOW
+                ? (int) FOLLOW_COVER_SEARCH_RADIUS : RELOCATION_SEARCH_RADIUS;
             List<CoverFinder.ScoredCover> relocationCovers = finder.evaluateAndScoreAllFromCenter(
                 relocationCenter, soldier, threatDirection, threats,
                 relocationType == RelocationType.FOLLOW ? (int) FOLLOW_COVER_SEARCH_RADIUS : RELOCATION_SEARCH_RADIUS,
@@ -3782,8 +3829,30 @@ private boolean shouldExitCoverForFollow() {
             if (soldier.hasValidAttackTarget()) {
                 searchRadius = ATTACK_CORRIDOR_SEARCH_RADIUS;
             }
+        } else if (seekEscalated) {
+            // Stranded-seeker escalation: the normal radius from here holds no
+            // cover, so reach back toward the squad (FOLLOW/ATTACK) or widen
+            // around the hold anchor (HOLD). Escalation never redirects the
+            // relocation pipeline, which already searches from its own center.
+            if (soldier.getSquadMode() == SquadMode.HOLD) {
+                BlockPos holdPos = soldier.getHoldPosition();
+                if (holdPos != null && !holdPos.equals(BlockPos.ZERO)) {
+                    searchCenter = holdPos;
+                }
+            } else {
+                LivingEntity owner = soldier.getOwner();
+                if (owner != null && owner.blockPosition().distSqr(soldier.blockPosition()) > 4) {
+                    searchCenter = owner.blockPosition();
+                }
+            }
+        }
+        // Widen even with an anchor: the rear anchor can point away from every
+        // cover (the solo-MG rim case), so the radius must stretch past it.
+        if (seekEscalated) {
+            searchRadius = Math.max(searchRadius, (int) FOLLOW_COVER_SEARCH_RADIUS);
         }
         this.debugSearchCenter = searchCenter;
+        this.debugSearchRadius = searchRadius;
         
         Optional<CoverPoint> bestCover = Optional.empty();
         List<CoverFinder.ScoredCover> reusableScored = null;
@@ -4047,33 +4116,52 @@ private boolean shouldExitCoverForFollow() {
             
             getCoverManager().clearCoverQualityPenalty();
             cancelProneFiringPlan();
-            
-            if (CoverReservationManager.reserve(cover.getPosition(), soldier)) {
-                getCoverManager().setTargetCover(cover);
-                if (soldier.hasValidAttackTarget()) {
-                    attackExpectedCover = cover.getPosition();
-                }
-                boolean movementStarted = moveToCover(cover);
-                if (emergencyCoverSearchActive && !movementStarted && !isReloadBlockedMove()) {
-                    blacklistCover(cover.getPosition(), BlacklistReason.PATH_FAILED);
-                    CoverReservationManager.release(cover.getPosition(), soldier);
-                    getCoverManager().clearTargetCover();
-                    logCoverSearchPerformance(finder, searchStarted, CoverMoveResult.NO_COVER_FOUND, "emergency-path");
-                    return CoverMoveResult.NO_COVER_FOUND;
-                }
-                if (!movementStarted && pendingRetryCover == null && !isReloadBlockedMove()) {
-                    if (getCoverManager().getTargetCover() != null) {
-                        blacklistCover(cover.getPosition(), BlacklistReason.PATH_FAILED);
-                    }
-                    getCoverManager().setState(getCoverManager().getCurrentCover() != null
-                        ? CoverBehaviorManager.CoverState.IN_COVER
-                        : CoverBehaviorManager.CoverState.NO_COVER);
-                    logCoverSearchPerformance(finder, searchStarted, CoverMoveResult.NO_COVER_FOUND,
-                        "path-failed");
-                    return CoverMoveResult.NO_COVER_FOUND;
-                }
+
+            // Reserve the best cover that is actually claimable. A taken best
+            // cover (a squadmate claimed it first) must fall through to the
+            // next candidate instead of failing the whole search: reservation
+            // failures never blacklist, so the old single-candidate attempt
+            // re-selected the same reserved cover forever and the soldier
+            // stranded in SEEKING_COVER with no movement.
+            //
+            // Candidate pools, in order: the selected best, then the
+            // soldier-centered scored list, then — when the soldier has
+            // drifted away from the intended search center (MG rear anchor,
+            // hold position) — a protection-filtered pool from that center.
+            int reserveAttempts = 0;
+            final BlockPos selectedPos = cover.getPosition();
+            CoverMoveResult outcome = tryReservePool(
+                java.util.List.of(new CoverFinder.ScoredCover(cover, Float.MAX_VALUE)),
+                currentCover, reserveAttemptsCap());
+            if (outcome == CoverMoveResult.COVER_STARTED) {
                 logCoverSearchPerformance(finder, searchStarted, CoverMoveResult.COVER_STARTED, "selected");
                 return CoverMoveResult.COVER_STARTED;
+            }
+            List<CoverFinder.ScoredCover> soldierPool = reusableScored == null
+                ? List.of() : reusableScored.stream()
+                    .filter(sc -> !sc.cover.getPosition().equals(selectedPos))
+                    .toList();
+            outcome = tryReservePool(soldierPool, currentCover, reserveAttemptsCap());
+            if (outcome == CoverMoveResult.COVER_STARTED) {
+                logCoverSearchPerformance(finder, searchStarted, CoverMoveResult.COVER_STARTED, "reserve-fallback");
+                return CoverMoveResult.COVER_STARTED;
+            }
+            if (searchCenter != null && searchCenter.distSqr(soldier.blockPosition()) > 4) {
+                List<CoverFinder.ScoredCover> centerPool = finder.evaluateAndScoreAllFromCenter(
+                    searchCenter, soldier, threatDirection, threats, searchRadius, squadCtx);
+                if (finder.hasPrimaryThreat(soldier, threatDirection)) {
+                    centerPool = centerPool.stream()
+                        .filter(sc -> finder.isPrimaryThreatProtected(sc.cover, soldier, threatDirection))
+                        .collect(java.util.stream.Collectors.toList());
+                }
+                centerPool = centerPool.stream()
+                    .filter(sc -> !sc.cover.getPosition().equals(selectedPos))
+                    .toList();
+                outcome = tryReservePool(centerPool, currentCover, reserveAttemptsCap());
+                if (outcome == CoverMoveResult.COVER_STARTED) {
+                    logCoverSearchPerformance(finder, searchStarted, CoverMoveResult.COVER_STARTED, "center-reserve-fallback");
+                    return CoverMoveResult.COVER_STARTED;
+                }
             }
             logCoverSearchPerformance(finder, searchStarted, CoverMoveResult.NO_COVER_FOUND, "reservation");
             return CoverMoveResult.NO_COVER_FOUND;
@@ -4104,6 +4192,47 @@ private boolean shouldExitCoverForFollow() {
         getCoverManager().setState(CoverBehaviorManager.CoverState.NO_COVER);
         logCoverSearchPerformance(finder, searchStarted, CoverMoveResult.NO_COVER_FOUND, "none");
         return CoverMoveResult.NO_COVER_FOUND;
+    }
+
+    /**
+     * Tries to reserve and start moving to the first usable candidate in the
+     * pool. PATH/reject outcomes leave the candidate blacklisted or skipped so
+     * the next pool gets its turn. Bounds total movement attempts across all
+     * pools of one search — every attempt runs a real path calculation.
+     */
+    private CoverMoveResult tryReservePool(List<CoverFinder.ScoredCover> pool,
+                                           CoverPoint currentCover, int attemptCap) {
+        for (CoverFinder.ScoredCover candidate : pool) {
+            CoverPoint candidateCover = candidate.cover;
+            if (failedCoverPositions.contains(candidateCover.getPosition())) continue;
+            if (currentCover != null
+                && candidateCover.getPosition().equals(currentCover.getPosition())) continue;
+            if (currentCover != null
+                && soldier.position().distanceTo(candidateCover.getPosition().getCenter())
+                    < COVER_REACHED_DISTANCE) {
+                continue;
+            }
+            if (searchReserveAttempts >= attemptCap) break;
+            if (!CoverReservationManager.reserve(candidateCover.getPosition(), soldier)) continue;
+            searchReserveAttempts++;
+            getCoverManager().setTargetCover(candidateCover);
+            if (soldier.hasValidAttackTarget()) {
+                attackExpectedCover = candidateCover.getPosition();
+            }
+            boolean movementStarted = moveToCover(candidateCover);
+            if (!movementStarted && pendingRetryCover == null && !isReloadBlockedMove()) {
+                blacklistCover(candidateCover.getPosition(), BlacklistReason.PATH_FAILED);
+                CoverReservationManager.release(candidateCover.getPosition(), soldier);
+                getCoverManager().clearTargetCover();
+                continue;
+            }
+            return CoverMoveResult.COVER_STARTED;
+        }
+        return CoverMoveResult.NO_COVER_FOUND;
+    }
+
+    private int reserveAttemptsCap() {
+        return MAX_RESERVE_CANDIDATE_ATTEMPTS;
     }
 
     private Optional<CoverPoint> selectBestAvailableCover(CoverFinder finder,
@@ -4174,11 +4303,20 @@ private boolean shouldExitCoverForFollow() {
                                             CoverMoveResult result, String phase) {
         long totalNanos = System.nanoTime() - started;
         String mode = getExecutingSearchMode().name();
+        debugLastSearchMode = mode;
+        debugLastSearchResult = result.name();
+        debugLastSearchPhase = phase;
+        debugLastSearchTick = soldier.tickCount;
         PerformanceMetrics.recordCoverSearchOutcome(mode, result.name(), phase,
             exactPathValidationBudget.getUsed(), exactPathValidationBudget.isExhausted());
         if (result == CoverMoveResult.COVER_STARTED) {
+            noCoverSearchStreak = 0;
             clearFailedSearch();
         } else {
+            if (result == CoverMoveResult.NO_COVER_FOUND
+                || result == CoverMoveResult.NO_ELIGIBLE_COVER) {
+                noCoverSearchStreak++;
+            }
             recordFailedSearch(getExecutingSearchMode(), result, phase);
         }
         if (!DiagnosticLogManager.isCoverPerformanceLoggingEnabled()) return;
@@ -5714,6 +5852,7 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
         // Reset search exhaustion state on successful cover acquisition
         consecutiveFailedSearches = 0;
         searchExhaustionCooldown = 0;
+        seekEscalated = false;
         repositioningTicks = 0;
         // Promote target to current — releases old reservation, sets metadata
         getCoverManager().promoteTargetToCurrentCover();

@@ -24,6 +24,7 @@ public final class SimRegistry {
             holdEnclosedPocket(),
             persistentPingRelocation(),
             mgAnchorFreshness(),
+            mgRiflemanSeekContrast(),
             pairSuppressionLanes(),
             openFieldBaseline());
     }
@@ -165,6 +166,68 @@ public final class SimRegistry {
                     .anyMatch(s -> s.state.suppressionCenter != null && s.state.supCenterFreshTicks >= 0
                         && s.state.supCenterFreshTicks <= 120))
             .build();
+    }
+
+    // 4b. MG vs riflemen under identical fire — the MG seek-strand bug ---------
+
+    private static SimScenario mgRiflemanSeekContrast() {
+        return SimScenario.builder("mg_rifleman_seek_contrast")
+            .description("MG and two riflemen take the same incoming fire from one enemy (two-way "
+                + "combat, guns modeled as deterministic suppression). Riflemen must claim the "
+                + "nearby cover rows; the MG must not strand in SEEKING_COVER with zero movement — "
+                + "the live combat bug where the MG never gets into cover.")
+            .duration(700)
+            .terrain(t -> {
+                t.platform();
+                t.coverRow(16, 21, 18, 21, 1); // waist-high rows the squad should claim
+                t.coverRow(16, 27, 18, 27, 1);
+                t.coverBlock(22, 24, 2);       // head-high hard cover mid-line
+                t.coverRow(40, 20, 42, 20, 1); // enemy-side cover
+                t.coverRow(40, 28, 42, 28, 1);
+                t.coverBlock(39, 24, 2);
+            })
+            .setup(ctx -> {
+                ctx.spawnAnchor(4, 0, 24);
+                ctx.spawnFriendly(ModEntities.MACHINE_GUNNER.get(), "gunner", 12, 0, 24, SquadMode.FOLLOW);
+                ctx.spawnFriendly(ModEntities.SOLDIER.get(), "left", 12, 0, 14, SquadMode.FOLLOW);
+                ctx.spawnFriendly(ModEntities.SOLDIER.get(), "right", 12, 0, 34, SquadMode.FOLLOW);
+                ctx.spawnEnemy(36, 0, 24);
+            })
+            .suppress(null, 40, 660, 15) // the enemy engages the whole squad
+            .assertThat("left rifleman claims cover by t200 and still holds it at t400",
+                view -> claimedCoverByAndHeld(view, "left", 200, 400))
+            .assertThat("right rifleman claims cover by t200 and still holds it at t400",
+                view -> claimedCoverByAndHeld(view, "right", 200, 400))
+            .assertThat("MG gets into cover (or genuinely relocates) instead of seeking in place",
+                view -> mgEngagedCover(view, "gunner"))
+            .build();
+    }
+
+    /** Claims a cover by {@code byTick} and still holds one at {@code holdTick}. */
+    private static boolean claimedCoverByAndHeld(SimScenario.SimRunResultView view, String label,
+                                                 int byTick, int holdTick) {
+        boolean claimed = false;
+        boolean held = false;
+        for (SimSample s : view.timeline().series(label)) {
+            if (s.tick <= byTick && s.state.currentCover != null) claimed = true;
+            if (s.tick == holdTick && s.state.currentCover != null) held = true;
+        }
+        return claimed && held;
+    }
+
+    /**
+     * The MG is expected to end up in cover like any rifleman. Fails the
+     * seek-strand signature: never claims cover and never leaves its
+     * spawn neighborhood while the cover machine runs.
+     */
+    private static boolean mgEngagedCover(SimScenario.SimRunResultView view, String label) {
+        Vec3 spawn = null;
+        for (SimSample s : view.timeline().series(label)) {
+            if (s.state.currentCover != null) return true;
+            if (spawn == null) spawn = s.state.position;
+            if (spawn != null && s.state.position.distanceTo(spawn) > 6.0) return true;
+        }
+        return false;
     }
 
     // 5. two suppressors on one threat — dispersion, no duplicated anchor ------

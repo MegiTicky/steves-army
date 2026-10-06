@@ -21,6 +21,9 @@ signals.
 # headless: run every scenario, write reports, halt the server
 .\gradlew runServer -Psim.autorun=true
 
+# headless: run a single scenario (fast iteration)
+.\gradlew runServer -Psim.autorun=true -Psim.scenario=mg_rifleman_seek_contrast
+
 # interactive: from the dev client or a server console
 /stevesarmy_sim run all
 /stevesarmy_sim run hold_enclosed_pocket
@@ -44,8 +47,10 @@ colored by cover type), tan blocks are half cover and pale steel blocks are
 full cover, yellow lines are shots fired with an impact dot at the aim point,
 red squares are enemies. The event feed below the scrubber is append-only.
 Play at 0.5–10x, scrub, and click a soldier for its full state snapshot at
-that tick (including shots fired and magazine). The same data ships
-machine-readable as `<scenario>_<timestamp>_recording.json`. You can also
+that tick (including shots fired, magazine, and the `last search` line —
+mode/phase/result plus where the search looked and its no-cover streak). The
+same data ships machine-readable as
+`<scenario>_<timestamp>_recording.json`. You can also
 watch a run live: `/stevesarmy_sim run <name>` from the dev client and fly up
 to the fixture (platform at Y=160+, west edge of the world origin).
 
@@ -80,7 +85,9 @@ deployed game) get all of this automatically.
   explicit assertions.
 - `sim/terrain/SimTerrain` — real `setBlock` fixtures (platform with rim walls,
   pockets, cover rows) at a per-scenario Y level; every placed block is
-  tracked and removed at cleanup.
+  tracked and removed at cleanup. Fixtures stack 20Y apart (build limit
+  y=319; placement above it is rejected, so `SimTerrain.block()` fails loudly
+  if a fixture would cross it).
 - `sim/detector/StandardDetectors` — ten pure-over-timeline checks. All
   thresholds live in `sim/SimTuning`.
 - `sim/SimIsolation` — static-state reset inventory between scenarios
@@ -97,6 +104,7 @@ deployed game) get all of this automatically.
 | `hold_enclosed_pocket` | HOLD in a one-exit pocket; fail-and-escalate without stranding |
 | `persistent_ping_relocation` | Continuous suppression from one origin; relocation dead-ends |
 | `mg_anchor_freshness` | MG centroid/anchor staleness after the shooter moves |
+| `mg_rifleman_seek_contrast` | Same fire on an MG and two riflemen: both must reach cover (the live MG seek-strand bug) |
 | `pair_suppression_lanes` | Two suppressors; dispersion vs stacking |
 | `open_field_baseline` | No suppression; detector false-positive calibration |
 
@@ -112,35 +120,51 @@ peek cycles), SuppressionStarve, FollowEscapeBlocked, PathFailStorm,
 PositionDeadlock, FireStarvation (armed runs only), ReservationDrift
 (+ post-run ReservationLeak check).
 
-## Known findings (2026-10-06, post cover-fixture pass)
+## Known findings (2026-10-06, MG seek-strand fix)
 
-Findings after the scenarios gained real cover blocks (the first pass ran four
-scenarios on a bare slab, which conflated "no cover found" with "cover machine
-dead"):
+Status after the MG seek-strand fix (reserve fallback + seek escalation) and
+the fixture build-limit repair. Five full-suite runs; the two remaining FAILs
+are separate, pre-existing strands.
 
-1. **Escape chain dead while pinned** — in `suppressed_follow_escape` both
-   soldiers hold cover through a 370t pin with `queuedModesSeen` empty and
-   `relocType=NONE`; reorganization (REPOSITIONING/SEEKING, bob) only starts
-   ~70t after the injection stops at t400. The escape chain does engage from
-   the open (`persistent_ping_relocation` PASSes: cover at t35, reposition at
-   t40-55 under fire) — it is reaching-cover-then-staying that never escalates.
-2. **Suppression gates cover acquisition** (`pair_suppression_lanes`) — both
-   soldiers spend 640t pinned in the open 7 blocks from valid cover. The
-   suppression gate blocks starting a search; the brief decay dips (5-25t)
-   where `SEEKING_COVER` blips through are too short for the async search to
-   return before the next burst re-pins and cancels it.
-3. **MG seek dead-wait** (`mg_anchor_freshness`) — MG held SEEKING_COVER 695t
-   with `searchPending=false`, `targetCover=null`, `failedSearches=0` — the
-   seek state is held with no pending search, no result, and no failure
-   counted; nothing re-issues or escalates. (Pre-fixture pass the search
-   stayed `pending=true` forever; now it resolves to nothing and the state
-   still doesn't move.)
-4. **Cover churn under fire** — bob claimed 4 distinct covers within 200t
-   (`CoverOscillation`) once suppression dipped; alice/bob also show
-   MOVING_TO_PEEK → RETURNING cycles that never reach EXPOSED at sup ~1.0.
-5. **Reservation drift/leak (WARN)** — occupied cover unreserved 60t+; one
-   orphaned reservation at cleanup.
-6. **Detection candidate** — baseline scout does not acquire an enemy 30
-   blocks due south (its facing) within 20s; zero detector violations (the
-   calibration goal holds), but the targeting assertion fails. Needs a
-   TargetAcquisition/FoF look before recalibrating.
+**Fixed this pass — the "MG stuck in SEEKING_COVER, never pathing" bug.**
+Three stacked causes, all visible once searches were instrumented (`ls`
+telemetry: mode/phase/result/center/streak per search):
+
+1. **Reservation spin** — the base search reserved only the single best
+   candidate; if a squadmate held it, the whole search returned
+   `NO_COVER_FOUND("reservation")` and reservation failures never blacklist,
+   so the same taken cover was re-selected forever (streak 108+). Fix: ordered
+   reserve pools (selected best → soldier-centered list → protection-filtered
+   list from the intended search center), bounded to 4 movement attempts per
+   search — the same pattern the relocation branch always had.
+2. **Anchor pointed away from cover** — the MG rear anchor (behind the squad
+   line) sat 14+ blocks from every cover, and radius 12 from it saw nothing.
+   Fix: seek escalation — after 120t without a cover claim (wall clock, so
+   prone-walk detours can't hide the stall), the search widens to the FOLLOW
+   radius and re-centers on the owner when no anchor exists.
+3. **`seekingTicks` is a blind clock** — it freezes while the goal walks to a
+   prone spot (`proneFiringDestination` branch returns early), so any
+   seekingTicks-based stall detector under-reports by 3-4x. Escalation now
+   arms on ticks-since-last-cover-claim instead.
+
+Also repaired along the way: fixtures for scenarios 5+ ran at Y≥320 — the
+world silently rejected every block above the build limit (y=319), so those
+scenarios fought on empty air (this fabricated the old "pinned in the open
+7 blocks from cover" pair finding). Y spacing is now 20Y and out-of-range
+placement throws.
+
+Remaining strands (all pre-existing, not the MG seek bug):
+
+1. **Detection gap** (`open_field_baseline`) — the scout sees the enemy
+   (peeks EXPOSED with clear LoS) but never acquires the attack target within
+   400t; targeting assertion fails. Needs a TargetAcquisition/FoF look.
+2. **Post-suppression relocation churn** (`suppressed_follow_escape`,
+   intermittent) — when sustained pressure ends, a soldier may hop through
+   3-4 relocation targets in ~50t before settling. Ends safely in cover.
+3. **MG seeks slowly** (~230t to cover under sustained fire in the contrast
+   scenario, WARN-level) — most of it is the prone-lane selector intercepting
+   searches (`prone-lane/COVER_STARTED` without a cover claim) while guns are
+   absent; in armed runs the prone deployment is the point. Worth revisiting
+   if armed runs still show slow MG cover claims.
+4. **Reservation drift (WARN)** — occupied cover unreserved 60-75t; one
+   orphaned reservation at cleanup in some runs.

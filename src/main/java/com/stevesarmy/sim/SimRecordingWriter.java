@@ -225,6 +225,7 @@ public final class SimRecordingWriter {
                    '\\ncurrentCover     : ' + (s.cx !== undefined ? p(s.cx) + ', ' + p(s.cz) + (s.ck ? '  [' + s.ck + ']' : '') : '-') +
                    '\\ntargetCover      : ' + (s.tx !== undefined ? p(s.tx) + ', ' + p(s.tz) + (s.tk ? '  [' + s.tk + ']' : '') : '-') +
                    '\\nrelocCenter      : ' + (s.rx !== undefined ? p(s.rx) + ', ' + p(s.rz) : '-') +
+                   '\\nlast search      : ' + (s.ls || '-') +
                    '\\nshots fired      : ' + (s.sf || 0) +
                    (s.am !== undefined ? '\\nammo             : ' + s.am + ' / ' + s.mg : '') +
                    '\\nLoS to enemy     : ' + s.los;

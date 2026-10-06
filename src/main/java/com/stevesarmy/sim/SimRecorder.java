@@ -96,6 +96,13 @@ public final class SimRecorder {
             current.append(",\"nx\":").append(num(nearestEnemyX))
                 .append(",\"nz\":").append(num(nearestEnemyZ));
         }
+        if (s.lastSearch != null) {
+            CombatStateSnapshot.LastSearch ls = s.lastSearch;
+            current.append(",\"ls\":").append(quote(
+                ls.mode + "/" + ls.phase + "/" + ls.result
+                    + " @" + (ls.center != null ? (int) ls.center.x + "," + (int) ls.center.z : "?")
+                    + " r" + ls.radius + " t" + ls.tick + " s" + ls.failStreak));
+        }
         current.append(",\"sf\":").append(shotsFired);
         if (hasGun) {
             current.append(",\"am\":").append(ammo).append(",\"mg\":").append(magazineSize);

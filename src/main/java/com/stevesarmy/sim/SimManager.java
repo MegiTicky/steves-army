@@ -14,7 +14,6 @@ import com.stevesarmy.sim.scenario.SimContext;
 import com.stevesarmy.sim.scenario.SimScenario;
 import com.stevesarmy.sim.terrain.SimTerrain;
 import net.minecraft.core.BlockPos;
-import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.level.GameRules;
@@ -42,7 +41,14 @@ public final class SimManager {
     private SimManager() {}
 
     private static final int Y_BASE = 160;
-    private static final int Y_SEPARATION = 40;
+    /**
+     * Vertical spacing between scenario fixtures. Chunks are full columns, so
+     * this only separates the fixtures in the air — but the build limit caps
+     * the origin: the tallest fixture reaches origin.y + 2, and the world's
+     * last buildable layer is y=319. 20Y spacing keeps all registry scenarios
+     * at or below Y=280 + fixture height.
+     */
+    private static final int Y_SEPARATION = 20;
     private static final List<SimDetector> DETECTORS = StandardDetectors.all();
 
     private enum Phase { IDLE, RUNNING, CLEANUP, DONE }
@@ -74,9 +80,20 @@ public final class SimManager {
     @SubscribeEvent
     public static void onServerStarted(ServerStartedEvent event) {
         if (!Boolean.getBoolean("sim.autorun")) return;
-        MinecraftServer server = event.getServer();
-        StevesArmyMod.LOGGER.info("[Sim] sim.autorun detected — running all scenarios headless");
-        start(server.overworld(), SimRegistry.all(), true);
+        List<SimScenario> scenarios = SimRegistry.all();
+        // Optional single-scenario filter for fast iteration: -Dsim.scenario=<name>
+        String only = System.getProperty("sim.scenario", "");
+        if (!only.isEmpty()) {
+            scenarios = scenarios.stream()
+                .filter(s -> s.name.equals(only))
+                .toList();
+            if (scenarios.isEmpty()) {
+                StevesArmyMod.LOGGER.error("[Sim] sim.scenario='{}' matches no registered scenario", only);
+                return;
+            }
+        }
+        StevesArmyMod.LOGGER.info("[Sim] sim.autorun detected — running {} scenario(s) headless", scenarios.size());
+        start(event.getServer().overworld(), scenarios, true);
     }
 
     public static boolean running() {

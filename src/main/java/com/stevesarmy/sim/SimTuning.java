@@ -24,6 +24,8 @@ public final class SimTuning {
     public static final int COVER_OSCILLATION_WINDOW_TICKS = 200;
     /** Peek cycles (expose→return) on roughly the same cover before it is thrash. */
     public static final int PEEK_THRASH_CYCLES = 5;
+    /** Thrash requires the cycles to be RAPID: all within this span (doctrine peeks run ~90-160t apart). */
+    public static final int PEEK_THRASH_WINDOW_TICKS = 300;
     /** PINNED this long with no relocation/reposition queued means the escape chain is dead. */
     public static final int SUPPRESSION_STARVE_TICKS = 240;
     /** FOLLOW gate holds this long after suppression clears, or seek-blocked without progress. */
