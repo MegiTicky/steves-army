@@ -80,6 +80,9 @@ public final class SimManager {
     @SubscribeEvent
     public static void onServerStarted(ServerStartedEvent event) {
         if (!Boolean.getBoolean("sim.autorun")) return;
+        // Optional per-candidate score traces: -Dsim.coverlog=true
+        com.stevesarmy.debug.DiagnosticLogManager.setCoverScoreLoggingEnabled(
+            Boolean.getBoolean("sim.coverlog"));
         List<SimScenario> scenarios = SimRegistry.all();
         // Optional single-scenario filter for fast iteration: -Dsim.scenario=<name>
         String only = System.getProperty("sim.scenario", "");
