@@ -1219,3 +1219,23 @@ flowchart TD
     KB --> NH
     KB --> PH
 ```
+
+## Danger map (per-squad LoS exposure intelligence)
+
+`squad/SquadDangerMap` (one per `SquadData`, transient, not persisted) scores
+nearby positions by line-of-sight exposure to the squad's known threats:
+2x2 cells, leg/eye height probes with a 6-ray body-span fan, baked from
+threat origins through VisibilityRay (smoke- and foliage-aware) under a
+global per-tick ray budget. Driven from `SoldierEntity.tick` (first member
+per squad does the work); the threat view refreshes every 10t from
+`SquadThreatIntel` and invalidates baked cells on threat death or drift.
+
+Consumers: the cover scorer subtracts a danger term and the claim gate
+refuses hotter candidates while cooler ones exist (`CoverFinder`, mirrored
+in the pure async pilot); AT and SUPPORT pathfinding pay a corridor danger
+cost (`DangerCorridor` captured on the server thread, applied in
+`AsyncSoldierPathfinder`'s A* and its synchronous branch). The map is
+pure intelligence: with all consumer weights at 0 it changes no behavior.
+Verification lives in the sim harness (see SIM_HARNESS.md): an independent
+vanilla-clip oracle recomputes every cell and the suite fails on
+divergence.

@@ -12,6 +12,7 @@ import net.minecraft.world.level.pathfinder.NodeEvaluator;
 import net.minecraft.world.level.pathfinder.Path;
 import net.minecraft.world.level.pathfinder.PathFinder;
 import net.minecraft.world.level.pathfinder.Target;
+import javax.annotation.Nullable;
 import java.util.AbstractMap;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -44,7 +45,21 @@ public final class AsyncSoldierPathfinder extends PathFinder {
     public Path findPath(PathNavigationRegion region, Mob mob, Set<BlockPos> positions,
                          float maxDistance, int reachRange, float maxVisitedNodesMultiplier) {
         if (positions.isEmpty()) return null;
+        // Synchronous requests (cover validation, SupportDutyController's direct
+        // createPath calls, queue-full fallbacks) run the SAME corridor-aware
+        // pipeline on the calling thread — the danger cost must not depend on
+        // how the request was made.
         if (!asyncRequest.getAsBoolean()) {
+            HazardAwarePathPreparation syncPreparation = prepare(region, mob, positions, maxDistance, reachRange);
+            if (syncPreparation != null) {
+                try {
+                    return processPath(syncPreparation.evaluator(), syncPreparation.start(), syncPreparation.targets(),
+                        maxDistance, reachRange, maxVisitedNodesMultiplier, syncPreparation.corridor());
+                } finally {
+                    NodeEvaluatorPool.release(syncPreparation.evaluator());
+                }
+            }
+            PerformanceMetrics.recordAsyncPathFallback();
             return new PathFinder(synchronousEvaluator, maxVisitedNodes)
                 .findPath(region, mob, positions, maxDistance, reachRange, maxVisitedNodesMultiplier);
         }
@@ -62,7 +77,7 @@ public final class AsyncSoldierPathfinder extends PathFinder {
             level.getGameTime(), () -> {
             try {
                 return processPath(preparation.evaluator(), preparation.start(), preparation.targets(),
-                    maxDistance, reachRange, maxVisitedNodesMultiplier);
+                    maxDistance, reachRange, maxVisitedNodesMultiplier, preparation.corridor());
             } finally {
                 NodeEvaluatorPool.release(preparation.evaluator());
             }
@@ -97,7 +112,11 @@ public final class AsyncSoldierPathfinder extends PathFinder {
                     evaluator.getGoal(position.getX(), position.getY(), position.getZ()),
                     position.immutable()));
             }
-            return new HazardAwarePathPreparation(evaluator, start, List.copyOf(targets));
+            // server-thread danger capture: the worker only sees the immutable corridor
+            DangerCorridor corridor = level instanceof net.minecraft.server.level.ServerLevel serverLevel
+                ? DangerCorridor.capture(serverLevel, mob, positions, level.getGameTime())
+                : null;
+            return new HazardAwarePathPreparation(evaluator, start, List.copyOf(targets), corridor);
         } catch (RuntimeException exception) {
             if (prepared) {
                 NodeEvaluatorPool.release(evaluator);
@@ -112,11 +131,11 @@ public final class AsyncSoldierPathfinder extends PathFinder {
     private Path processPath(NodeEvaluator evaluator, Node start,
                              List<Map.Entry<Target, BlockPos>> targets,
                              float maxDistance, int reachRange,
-                             float maxVisitedNodesMultiplier) {
+                             float maxVisitedNodesMultiplier, @Nullable DangerCorridor corridor) {
         long workerStart = System.nanoTime();
         try {
             return processPathInternal(evaluator, start, targets, maxDistance, reachRange,
-                maxVisitedNodesMultiplier);
+                maxVisitedNodesMultiplier, corridor);
         } finally {
             PerformanceMetrics.recordAsyncPathCompleted(System.nanoTime() - workerStart);
         }
@@ -125,7 +144,7 @@ public final class AsyncSoldierPathfinder extends PathFinder {
     private Path processPathInternal(NodeEvaluator evaluator, Node start,
                              List<Map.Entry<Target, BlockPos>> targets,
                              float maxDistance, int reachRange,
-                             float maxVisitedNodesMultiplier) {
+                             float maxVisitedNodesMultiplier, @Nullable DangerCorridor corridor) {
         start.g = 0.0F;
         start.h = getBestHeuristic(start, targets);
         start.f = start.h;
@@ -155,7 +174,8 @@ public final class AsyncSoldierPathfinder extends PathFinder {
                 Node neighbor = neighbors[index];
                 float distance = distance(node, neighbor);
                 neighbor.walkedDistance = node.walkedDistance + distance;
-                float cost = node.g + distance + neighbor.costMalus;
+                float dangerCost = corridor == null ? 0.0F : corridor.costAt(neighbor);
+                float cost = node.g + distance + neighbor.costMalus + dangerCost;
                 if (neighbor.walkedDistance < maxDistance
                     && (!neighbor.inOpenSet() || cost < neighbor.g)) {
                     neighbor.cameFrom = node;
@@ -197,8 +217,9 @@ public final class AsyncSoldierPathfinder extends PathFinder {
         if (best == null) {
             PerformanceMetrics.recordAsyncPathNullResult();
         }
-        return best;
+                return best;
     }
+
 
     private float getBestHeuristic(Node node, List<Map.Entry<Target, BlockPos>> targets) {
         float best = Float.MAX_VALUE;
@@ -222,5 +243,6 @@ public final class AsyncSoldierPathfinder extends PathFinder {
     }
 
     private record HazardAwarePathPreparation(NodeEvaluator evaluator, Node start,
-                                              List<Map.Entry<Target, BlockPos>> targets) {}
+                                              List<Map.Entry<Target, BlockPos>> targets,
+                                              @Nullable DangerCorridor corridor) {}
 }

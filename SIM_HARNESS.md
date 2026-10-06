@@ -137,6 +137,55 @@ physically instead of trusting the state machine:
 - `combat/CombatStateSnapshot` — the shared per-soldier snapshot extracted
   from `CoverTacticalGoal`; feeds both the debug packet and the harness.
 
+## Danger-map verification rig (2026-10-07)
+
+The harness is also the ground-truth rig for the per-squad danger map
+(`squad/SquadDangerMap`). Three layers:
+
+- **Oracle** (`sim/DangerOracle`): recomputes per-cell exposure with
+  independent vanilla clips — never through VisibilityRay or map code. Grid
+  convention (the map mirrors it exactly): 2x2 cells keyed
+  `(floorDiv(x,2), floorDiv(z,2))`, probes at leg 0.4 / eye 1.6 with a
+  6-ray body-span fan (center ±0.45 perpendicular to the threat axis);
+  per-height bits boolean, score fractional (weight × 100 × exposedRays/6).
+- **Threat injection**: `ctx.injectThreat(x, z)` writes a synthetic
+  sighting straight into `SquadThreatIntel` (no entity, fully
+  deterministic); `refreshInjectedThreats` renews the 200t freshness
+  window, `moveInjectedThreat` teleports one (origin-drift invalidation),
+  `markInjectedThreatsDead` kills them. The oracle is computed from the
+  injection record at scenario end, so killed threats leave it.
+- **Judgment**: SimManager sweeps the live sampler (the soldier's real map,
+  or a scenario-registered stub) over the verification region at finish;
+  `DangerOracleMismatch` FAILs beyond a per-cell tolerance (one fan-ray
+  of slack absorbs clip-code grazing) and a 10% fraction (knife-edge cells
+  vs systematic errors). `DangerProbeDisagreement` cross-checks sampled
+  danger against CoverFidelityProbe body rays (WARN; the standing-vs-prone
+  gap is doctrine, so the hot-side rule requires the leg bit).
+  `DangerBudgetExceeded` enforces the global per-tick ray budget.
+
+The **red/green self-tests** (`danger_selftest_*`, expected FAILs) prove
+the rig bites: all-zero / all-max / mirrored stub samplers must trip the
+mismatch detector. Real-map scenarios: `danger_oracle_*` (open field,
+ridge shadow, lone-block bits, crossfire union), `danger_oracle_no_intel`
+(empty state = verified-safe zero), `danger_decay_real` (threat death
+decays within the view-refresh window), `danger_shift_real` (origin drift
+re-bakes the shadow), `danger_multi_squad_budget` (two squads share the
+budget), `danger_path_detour` (an attacking AT routes along the wall's
+shadow lane instead of the exposed diagonal).
+
+Consumers (stage 2a/2b): the cover scorer subtracts
+`dangerCoverWeight × danger/100` per candidate and the claim gate drops
+candidates hotter than `dangerClaimMaxScore` while any known candidate is
+cooler; pathfinding adds `roleWeight × danger/100` to corridor cells for
+AT (4.0) and SUPPORT (6.0) — sync paths included (SupportDutyController's
+direct createPath calls run the same corridor pipeline). Cell resolution
+note: the map evaluates cell centers, not exact slots — slot-exact
+protection stays with CoverQualityEvaluator's cone check.
+
+`sweepLeftoverFixtureBlocks` removes fixture-palette blocks left above
+Y_BASE by crashed sessions at startup — strays poison every heightmap
+query downstream. Fixtures now stack 5Y apart (32 scenarios must fit
+under the build limit).
 ## Scenarios (v1 — cover/suppression strand)
 
 | Scenario | What it reproduces |

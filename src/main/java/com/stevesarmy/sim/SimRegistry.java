@@ -50,7 +50,8 @@ public final class SimRegistry {
             dangerDecayProperty(),
             dangerDecayReal(),
             dangerShiftReal(),
-            dangerMultiSquadBudget());
+            dangerMultiSquadBudget(),
+            dangerPathDetour());
     }
 
     public static SimScenario byName(String name) {
@@ -1390,6 +1391,55 @@ public final class SimRegistry {
             .assertThat("bravo's cell bakes hot (>=80 by t100)",
                 view -> view.timeline().series("bravo").stream()
                     .filter(s -> s.tick >= 100).allMatch(s -> s.dangerAtSoldier >= 80))
+            .build();
+    }
+
+    /** PATHFINDING: an attacking AT must route around exposed ground when a shadowed lane exists. */
+    private static SimScenario dangerPathDetour() {
+        return SimScenario.builder("danger_path_detour")
+            .description("PATHFINDING (anti-tank): an AT with an ATTACK objective across the field must "
+                + "route around exposed ground - a long wall offers a shadowed lane along its west face; "
+                + "the corridor danger cost must bias the approach into the shadow (AT doctrine: covered "
+                + "approach). Measured as the share of travel samples reading low danger.")
+            .duration(800)
+            .action(0, "refresh injected threat", ctx -> ctx.refreshInjectedThreats())
+            .action(150, "refresh injected threat", ctx -> ctx.refreshInjectedThreats())
+            .action(300, "refresh injected threat", ctx -> ctx.refreshInjectedThreats())
+            .action(450, "refresh injected threat", ctx -> ctx.refreshInjectedThreats())
+            .action(600, "refresh injected threat", ctx -> ctx.refreshInjectedThreats())
+            .terrain(t -> {
+                t.platform();
+                // one long wall: the west face is a connected shadow lane from the
+                // spawn to the north gap; everything east of it is exposed
+                t.coverRow(24, 12, 24, 34, 3);
+            })
+            .setup(ctx -> {
+                ctx.spawnAnchor(6, 0, 42);
+                com.stevesarmy.entity.SoldierEntity hunter = ctx.spawnFriendly(
+                    ModEntities.ANTI_TANK.get(), "hunter", 8, 0, 40, SquadMode.HOLD);
+                ctx.injectThreat(32, 18);
+                // ATTACK objective east of the wall - the direct line crosses exposed ground
+                hunter.setAttackTarget(ctx.terrain.at(42, 0, 8));
+                hunter.setHoldPosition(ctx.terrain.at(42, 0, 8));
+            })
+            .assertThat("hunter reaches the objective (within 8 blocks by t760)",
+                view -> {
+                    java.util.List<SimSample> series = view.timeline().series("hunter");
+                    if (series.isEmpty()) return false;
+                    SimSample last = series.get(series.size() - 1);
+                    return last.state.position != null
+                        && last.state.position.distanceTo(new Vec3(42.5, 160, 8.5)) < 8.0;
+                })
+            .assertThat("approach stays in shadow (>=50% of travel samples read danger <= 50)",
+                view -> {
+                    java.util.List<SimSample> series = view.timeline().series("hunter");
+                    long enRoute = series.stream()
+                        .filter(s -> s.tick >= 40 && s.tick <= 720 && s.dangerAtSoldier >= 0).count();
+                    long lowDanger = series.stream()
+                        .filter(s -> s.tick >= 40 && s.tick <= 620 && s.dangerAtSoldier >= 0
+                            && s.dangerAtSoldier <= 50).count();
+                    return enRoute >= 20 && lowDanger * 100 >= enRoute * 50;
+                })
             .build();
     }
 

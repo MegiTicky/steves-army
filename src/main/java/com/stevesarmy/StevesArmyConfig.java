@@ -52,6 +52,8 @@ public class StevesArmyConfig {
     public static final ForgeConfigSpec.DoubleValue DANGER_THREAT_RANGE;
     public static final ForgeConfigSpec.DoubleValue DANGER_COVER_WEIGHT;
     public static final ForgeConfigSpec.IntValue DANGER_CLAIM_MAX_SCORE;
+    public static final ForgeConfigSpec.DoubleValue DANGER_PATH_ANTI_TANK_WEIGHT;
+    public static final ForgeConfigSpec.DoubleValue DANGER_PATH_SUPPORT_WEIGHT;
 
     public static final ForgeConfigSpec.DoubleValue SPACING_DISTANCE;
 
@@ -416,6 +418,19 @@ public class StevesArmyConfig {
                      "hotter, the least-dangerous one is taken (no open-field paralysis).",
                      "Default: 80")
             .defineInRange("dangerClaimMaxScore", 80, 0, 100);
+
+        DANGER_PATH_ANTI_TANK_WEIGHT = BUILDER
+            .comment("Pathfinding danger cost for ANTI_TANK soldiers: a fully-exposed corridor cell",
+                     "adds this much malus (vanilla fire-type malus is ~8-16). Tank hunters approach",
+                     "hard targets through covered ground; 0 disables.",
+                     "Default: 4.0")
+            .defineInRange("dangerPathAntiTankWeight", 4.0, 0.0, 16.0);
+
+        DANGER_PATH_SUPPORT_WEIGHT = BUILDER
+            .comment("Pathfinding danger cost for SUPPORT soldiers - strongest avoidance: logistics",
+                     "routes through low-danger ground. 0 disables.",
+                     "Default: 6.0")
+            .defineInRange("dangerPathSupportWeight", 6.0, 0.0, 16.0);
 
         BUILDER.pop();
 
@@ -1137,6 +1152,14 @@ BUILDER.pop();
 
     public static int getDangerClaimMaxScore() {
         return DANGER_CLAIM_MAX_SCORE.get();
+    }
+
+    public static double getDangerPathAntiTankWeight() {
+        return DANGER_PATH_ANTI_TANK_WEIGHT.get();
+    }
+
+    public static double getDangerPathSupportWeight() {
+        return DANGER_PATH_SUPPORT_WEIGHT.get();
     }
 
     public static double getMachineGunnerDetectionDistance() {

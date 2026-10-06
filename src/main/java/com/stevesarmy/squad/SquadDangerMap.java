@@ -285,10 +285,18 @@ public final class SquadDangerMap {
             if (exposed > 0) {
                 score += threat.weight() * 100.0 * exposed / (double) RAYS_PER_THREAT;
             }
+            if ((cx == 22 || cx == 23) && (cz == 9 || cz == 19) && debugBakes < 4) {
+                debugBakes++;
+                com.stevesarmy.StevesArmyMod.LOGGER.info(
+                    "[DangerMap][dbg] bake ({},{}) surface={} origin={} eyeExposed={}/3 legExposed={}/3 score={}",
+                    cx, cz, surfaceY, threat.origin(), exposedEye, exposedLeg, score);
+            }
         }
         cells.put(key, new Cell((float) Math.min(100.0, score), anyEye, anyLeg,
             activeThreats.size(), gameTime, surfaceY));
     }
+
+    private byte debugBakes;
 
     /** Cells bake nearest-first around the anchor and never leave the ambient radius. */
     private void rebuildBakeOrder(long anchorCell) {
@@ -380,6 +388,51 @@ public final class SquadDangerMap {
         return cell;
     }
 
+    /** Rays one cell bake spends at the current threat count (for capture-side budgeting). */
+    public int raysPerCell() {
+        return Math.max(1, activeThreats.size()) * RAYS_PER_THREAT;
+    }
+
+    /**
+     * Synchronous on-demand bake for corridor capture: returns a fresh cell,
+     * baking it first (within the caller's ray allowance) when missing or
+     * stale. Paths computed at scenario start — before the ambient ring has
+     * reached the route — still get danger-aware costing. Never loads chunks.
+     */
+    @Nullable
+    public Cell bakeCellNow(ServerLevel level, double x, double z, SquadThreatIntel intel,
+                            long gameTime, int[] rayAllowance) {
+        if (!StevesArmyConfig.isDangerMapEnabled() || rayAllowance[0] <= 0) {
+            return cellAt(x, z, gameTime);
+        }
+        int raysPerCell = raysPerCell();
+        if (rayAllowance[0] < raysPerCell) return cellAt(x, z, gameTime);
+        Cell fresh = cellAt(x, z, gameTime);
+        if (fresh != null) return fresh;
+        // align the threat view (the tick driver refreshes it every 10t; a
+        // fresh capture right after a sighting needs it now)
+        if (lastViewRefresh == Long.MIN_VALUE || gameTime - lastViewRefresh >= VIEW_REFRESH_INTERVAL_TICKS) {
+            lastViewRefresh = gameTime;
+            refreshActiveThreats(level, intel, gameTime);
+        }
+        if (activeThreats.isEmpty()) return null;
+        long key = cellKey(x, z);
+        if (cells.size() >= MAX_CELLS) {
+            cells.clear();
+            bakeOrder = new long[0];
+            bakeCursor = 0;
+        }
+        int cx = floorDiv2(x);
+        int cz = floorDiv2(z);
+        if (!isCellInLoadedChunk(level, key)) return null;
+        if (!RayBudget.trySpend(raysPerCell, gameTime, StevesArmyConfig.getDangerRayBudgetPerTick())) {
+            return null;
+        }
+        rayAllowance[0] -= raysPerCell;
+        bakeCell(level, key, gameTime);
+        return cellAt(x, z, gameTime);
+    }
+
     public int bakedCellCount() {
         return cells.size();
     }
@@ -433,6 +486,11 @@ public final class SquadDangerMap {
 
     private static long cellKey(double x, double z) {
         return packCell(floorDiv2(x), floorDiv2(z));
+    }
+
+    /** Public cell-key helper for consumers (pathfinding corridor capture). */
+    public static long cellKeyFor(double x, double z) {
+        return cellKey(x, z);
     }
 
     private static long packCell(int cx, int cz) {
