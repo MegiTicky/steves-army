@@ -320,6 +320,7 @@ public class PingClientEvents {
             ArmorDoctrineDebugRenderer.render(event.getPoseStack(), event.getCamera());
             SuppressPingDebugRenderer.render(event.getPoseStack(), event.getCamera());
             SidearmDebugRenderer.render(event.getPoseStack(), event.getCamera());
+            com.stevesarmy.client.DangerMapDebugRenderer.render(event.getPoseStack(), event.getCamera());
             CommandStickRenderer.render(event.getPoseStack(), event.getCamera(), event.getPartialTick());
         }
     }

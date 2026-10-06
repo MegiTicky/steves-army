@@ -23,6 +23,8 @@ public final class SimIsolation {
         PerformanceMetrics.reset();
         // virtual magazines from the previous scenario must not leak into the next
         SimGunHandler.resetForSim();
+        // per-tick danger-ray budget telemetry is per-scenario
+        com.stevesarmy.squad.SquadDangerMap.resetForSim();
         // stale raytrace caches from the previous fixture's geometry must not
         // leak into the next scenario's LoS results
         com.stevesarmy.combat.VisibilityRay.invalidateCache(level);

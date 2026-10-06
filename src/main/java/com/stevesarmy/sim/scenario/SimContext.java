@@ -35,10 +35,12 @@ public final class SimContext {
     public final Map<String, SoldierEntity> byLabel = new LinkedHashMap<>();
     public TargetEntity anchor;
 
-    /** Synthetic threat sighting written straight into the squad's shared intel (deterministic, no entity). */
-    public record InjectedThreat(UUID threatId, Vec3 eye, float accuracy) {}
+    /** Synthetic threat sighting written straight into a squad's shared intel (deterministic, no entity). */
+    public record InjectedThreat(UUID threatId, Vec3 eye, float accuracy, BlockPos surface, UUID owningSquadId) {}
 
     private final List<InjectedThreat> injectedThreats = new ArrayList<>();
+    /** Threats killed via markInjectedThreatsDead — excluded from the end-of-run oracle. */
+    private final java.util.Set<UUID> deadInjectedThreats = new java.util.HashSet<>();
     private DangerSampler dangerSampler;
     /** Fixture-local verification region {x1,z1,x2,z2} for the danger oracle; null = whole field inset by 3. */
     private int[] dangerVerificationRegion;
@@ -125,30 +127,82 @@ public final class SimContext {
     }
 
     public InjectedThreat injectThreat(double x, double z, float accuracy) {
-        if (anchor == null) {
+        SquadData squad = squadForThreats();
+        if (squad == null) {
             throw new IllegalStateException("spawn an anchor before injectThreat — the squad owns the intel");
         }
+        return injectThreat(squad, x, z, accuracy);
+    }
+
+    /** Squad-targeted injection for multi-squad scenarios. */
+    public InjectedThreat injectThreat(SquadData squad, double x, double z) {
+        return injectThreat(squad, x, z, 1.0f);
+    }
+
+    public InjectedThreat injectThreat(SquadData squad, double x, double z, float accuracy) {
         UUID threatId = UUID.randomUUID();
         BlockPos surface = terrain.at((int) x, 0, (int) z);
-        SquadData squad = SquadManager.get(level).getSquadByLeader(anchor.getUUID()).orElse(null);
-        if (squad == null) {
-            throw new IllegalStateException("no squad for anchor — spawn the anchor first");
-        }
-        squad.getThreatIntel().reportThreatPosition(anchor.getUUID(), threatId, surface, accuracy, level);
+        squad.getThreatIntel().reportThreatPosition(squad.getLeaderId(), threatId, surface, accuracy, level);
         InjectedThreat threat = new InjectedThreat(threatId,
-            new Vec3(surface.getX() + 0.5, surface.getY() + 1.6, surface.getZ() + 0.5), accuracy);
+            new Vec3(surface.getX() + 0.5, surface.getY() + 1.6, surface.getZ() + 0.5), accuracy, surface,
+            squad.getSquadId());
         injectedThreats.add(threat);
         return threat;
     }
 
+    /** Re-reports every injected sighting (same ids, same positions) — refreshes intel freshness. */
+    public void refreshInjectedThreats() {
+        SquadManager mgr = SquadManager.get(level);
+        for (InjectedThreat threat : injectedThreats) {
+            SquadData squad = mgr.getSquadById(threat.owningSquadId()).orElse(null);
+            if (squad == null) continue;
+            squad.getThreatIntel().reportThreatPosition(squad.getLeaderId(), threat.threatId(),
+                threat.surface(), threat.accuracy(), level);
+        }
+    }
+
+    /**
+     * Teleports an injected sighting: same threat id at a new surface position.
+     * The danger map must treat this as origin drift (shadow shifts).
+     */
+    public InjectedThreat moveInjectedThreat(InjectedThreat threat, double x, double z) {
+        SquadManager mgr = SquadManager.get(level);
+        SquadData squad = mgr.getSquadById(threat.owningSquadId()).orElse(null);
+        BlockPos newSurface = terrain.at((int) x, 0, (int) z);
+        Vec3 newEye = new Vec3(newSurface.getX() + 0.5, newSurface.getY() + 1.6, newSurface.getZ() + 0.5);
+        InjectedThreat moved = new InjectedThreat(threat.threatId(), newEye, threat.accuracy(), newSurface,
+            threat.owningSquadId());
+        injectedThreats.set(injectedThreats.indexOf(threat), moved);
+        if (squad != null) {
+            squad.getThreatIntel().reportThreatPosition(squad.getLeaderId(), threat.threatId(),
+                newSurface, threat.accuracy(), level);
+        }
+        return moved;
+    }
+
+    private SquadData squadForThreats() {
+        return anchor == null ? null
+            : SquadManager.get(level).getSquadByLeader(anchor.getUUID()).orElse(null);
+    }
+
+    /** Squad owned by a specific anchor (multi-squad scenarios inject per squad). */
+    public SquadData squadForAnchor(TargetEntity anchorEntity) {
+        return anchorEntity == null ? null
+            : SquadManager.get(level).getSquadByLeader(anchorEntity.getUUID()).orElse(null);
+    }
+
     /** Kills every injected sighting (the intel entry, not an entity) — the decay property probe. */
     public void markInjectedThreatsDead() {
-        SquadData squad = anchor == null ? null
-            : SquadManager.get(level).getSquadByLeader(anchor.getUUID()).orElse(null);
-        if (squad == null) return;
+        SquadManager mgr = SquadManager.get(level);
         for (InjectedThreat threat : injectedThreats) {
-            squad.getThreatIntel().markThreatDead(threat.threatId());
+            deadInjectedThreats.add(threat.threatId());
+            mgr.getSquadById(threat.owningSquadId())
+                .ifPresent(squad -> squad.getThreatIntel().markThreatDead(threat.threatId()));
         }
+    }
+
+    public boolean isInjectedThreatDead(UUID threatId) {
+        return deadInjectedThreats.contains(threatId);
     }
 
     public List<InjectedThreat> injectedThreats() {

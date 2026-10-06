@@ -48,6 +48,8 @@ public final class SimSample {
     public final float syncedCoverHeight;
     /** Danger-map score (0..100) at the soldier's position; -1 when no danger source is wired. */
     public final double dangerAtSoldier;
+    /** Leg-height exposure bit behind {@link #dangerAtSoldier} (false when no data or a stub sampler). */
+    public final boolean dangerLegExposed;
 
     public SimSample(int tick, String label, CombatStateSnapshot state,
                      float health, float maxHealth, boolean hasAttackTarget,
@@ -56,7 +58,7 @@ public final class SimSample {
                      double coverSlotOffset, int anchorPulls,
                      int exposedBodyRays, int exposedHeadRays, int probedBodyRays, boolean reloading,
                      String posture, boolean rising, float syncedCoverHeight,
-                     double dangerAtSoldier) {
+                     double dangerAtSoldier, boolean dangerLegExposed) {
         this.tick = tick;
         this.label = label;
         this.state = state;
@@ -80,5 +82,6 @@ public final class SimSample {
         this.rising = rising;
         this.syncedCoverHeight = syncedCoverHeight;
         this.dangerAtSoldier = dangerAtSoldier;
+        this.dangerLegExposed = dangerLegExposed;
     }
 }

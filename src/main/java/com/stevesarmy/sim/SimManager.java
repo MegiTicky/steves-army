@@ -45,10 +45,12 @@ public final class SimManager {
     private static final int Y_BASE = 160;
     /**
      * Vertical spacing between scenario fixtures. Chunks are full columns, so
-     * this only separates the fixtures in the air — 8Y per scenario keeps the
-     * full registry under the y=319 build limit.
+     * this only separates the fixtures in the air — the registry must fit
+     * under the y=320 build limit: Y_BASE + (registry size - 1) * spacing
+     * &lt; 320. At 31 scenarios that means 5Y (160 + 30*5 = 310); fixtures are
+     * 4Y tall (floor + 3-high rim), so 5Y leaves one clear block of air.
      */
-    private static final int Y_SEPARATION = 8;
+    private static final int Y_SEPARATION = 5;
     private static final List<SimDetector> DETECTORS = StandardDetectors.all();
 
     private enum Phase { IDLE, RUNNING, CLEANUP, DONE }
@@ -116,10 +118,36 @@ public final class SimManager {
         yLevel = Y_BASE;
         autorun = isAutorun;
         discardLeftoverSimEntities();
+        sweepLeftoverFixtureBlocks();
         // Unarmed tail state from an aborted run must not leak into this session
         SimGunHandler.setArmed(false);
         beginScenario();
         return true;
+    }
+
+    /**
+     * Aborted autorun sessions leave fixture blocks floating in the sky (a
+     * crash mid-scenario skips that scenario's cleanup — any Y, not just near
+     * the build limit). Every stray fixture-palette block above Y_BASE poisons
+     * heightmap queries for the danger map and every future scenario. Runs
+     * once per session, BEFORE scenario 1 builds, so nothing live is removed.
+     */
+    private static void sweepLeftoverFixtureBlocks() {
+        int removed = 0;
+        BlockPos from = new BlockPos(-2, Y_BASE + 1, -2);
+        BlockPos to = new BlockPos(64, level.getMaxBuildHeight() - 1, 64);
+        for (BlockPos pos : BlockPos.betweenClosed(from, to)) {
+            net.minecraft.world.level.block.state.BlockState state = level.getBlockState(pos);
+            if (state.is(net.minecraft.world.level.block.Blocks.SMOOTH_STONE)
+                || state.is(net.minecraft.world.level.block.Blocks.STONE_BRICKS)) {
+                level.removeBlock(pos, false);
+                removed++;
+            }
+        }
+        if (removed > 0) {
+            StevesArmyMod.LOGGER.warn("[Sim] swept {} leftover fixture blocks above y={} from a previous session",
+                removed, Y_BASE);
+        }
     }
 
     @SubscribeEvent
@@ -240,10 +268,27 @@ public final class SimManager {
                 probedRays = rays.probed();
             }
 
-            // danger read: scenario-registered stub sampler (rig self-tests);
-            // the live per-squad map adapter replaces this in Phase 1
+            // danger read: scenario-registered stub sampler (rig self-tests)
+            // wins; otherwise the soldier's real per-squad danger map, which
+            // also exposes the per-height bits the probe detector needs
             double dangerAtSoldier = -1;
+            boolean dangerLegExposed = false;
             DangerSampler sampler = context.dangerSampler();
+            if (sampler == null && soldier.getSquadId() != null) {
+                com.stevesarmy.squad.SquadData squadData = com.stevesarmy.squad.SquadManager.get(level)
+                    .getSquadById(soldier.getSquadId()).orElse(null);
+                if (squadData != null) {
+                    com.stevesarmy.squad.SquadDangerMap.Cell cell = squadData.getDangerMap()
+                        .cellAt(soldier.getX(), soldier.getZ(), level.getGameTime());
+                    if (cell != null) {
+                        dangerAtSoldier = cell.score;
+                        dangerLegExposed = cell.legExposed;
+                    } else {
+                        dangerAtSoldier = squadData.getDangerMap()
+                            .dangerAt(soldier.getX(), soldier.getZ(), level.getGameTime());
+                    }
+                }
+            }
             if (sampler != null) {
                 dangerAtSoldier = sampler.dangerScoreAt(soldier.getX(), soldier.getZ());
             }
@@ -260,7 +305,7 @@ public final class SimManager {
                 soldier.isPreparingOrReloading(),
                 soldier.getPose().name(), soldier.isHalfCoverRising(),
                 snap.currentCover != null ? soldier.getSyncedCoverCurrentHeight() : -1f,
-                dangerAtSoldier));
+                dangerAtSoldier, dangerLegExposed));
             recorder.soldier(label, snap, los, nearestX, nearestZ,
                 shotCounts.getOrDefault(soldier.getUUID(), 0),
                 hasGun,
@@ -271,7 +316,7 @@ public final class SimManager {
                 soldier.isPreparingOrReloading(),
                 soldier.getPose().name(), soldier.isHalfCoverRising(),
                 snap.currentCover != null ? soldier.getSyncedCoverCurrentHeight() : -1f,
-                dangerAtSoldier);
+                dangerAtSoldier, dangerLegExposed);
         }
         recorder.endFrame(context.enemies);
     }
@@ -327,13 +372,36 @@ public final class SimManager {
             int z2 = region != null ? region[3] : scenario.depth - 3;
             List<DangerOracle.ThreatOrigin> origins = new ArrayList<>();
             for (SimContext.InjectedThreat threat : context.injectedThreats()) {
+                if (context.isInjectedThreatDead(threat.threatId())) continue;
                 origins.add(new DangerOracle.ThreatOrigin(threat.eye(), 1.0));
             }
             result.dangerOracle = DangerOracle.compute(level, origins, x1, z1, x2, z2,
                 terrain.origin.getY());
-            if (context.dangerSweepEnabled() && context.dangerSampler() != null) {
+            DangerSampler sweepSampler = context.dangerSampler();
+            com.stevesarmy.squad.SquadDangerMap probeMap = null;
+            if (sweepSampler == null) {
+                // no stub registered: sweep the soldier's REAL danger map against the oracle
+                for (SoldierEntity soldier : context.friendlies) {
+                    if (soldier.isRemoved() || soldier.getSquadId() == null) continue;
+                    com.stevesarmy.squad.SquadData squadData = com.stevesarmy.squad.SquadManager.get(level)
+                        .getSquadById(soldier.getSquadId()).orElse(null);
+                    if (squadData == null) continue;
+                    final com.stevesarmy.squad.SquadDangerMap map = squadData.getDangerMap();
+                    probeMap = map;
+                    final long now = level.getGameTime();
+                    sweepSampler = (x, z) -> map.dangerAt(x, z, now);
+                    break;
+                }
+            }
+            if (context.dangerSweepEnabled() && sweepSampler != null) {
                 result.oracleSweep = DangerOracle.sweep(result.dangerOracle,
-                    context.dangerSampler(), SimTuning.DANGER_CELL_TOLERANCE);
+                    sweepSampler, SimTuning.DANGER_CELL_TOLERANCE);
+            }
+            if (probeMap != null) {
+                StevesArmyMod.LOGGER.info("[Sim] danger map: bakedCells={} activeThreats={} maxRaysPerTick={} (budget {})",
+                    probeMap.bakedCellCount(), probeMap.activeThreatCount(),
+                    com.stevesarmy.squad.SquadDangerMap.debugMaxRaysUsedPerTick(),
+                    com.stevesarmy.StevesArmyConfig.getDangerRayBudgetPerTick());
             }
             recorder.setDangerOverlay(result.dangerOracle);
         }
@@ -379,6 +447,15 @@ public final class SimManager {
         if (orphaned > 0) {
             result.violations.add(new SimViolation(SimViolation.Severity.WARN, "ReservationLeak",
                 simTick, "-", orphaned + " reservation(s) outlived their claimants at cleanup"));
+        }
+
+        // danger-map ray budget is a hard perf contract: baking must defer, never overshoot
+        int maxRays = com.stevesarmy.squad.SquadDangerMap.debugMaxRaysUsedPerTick();
+        int budget = com.stevesarmy.StevesArmyConfig.getDangerRayBudgetPerTick();
+        if (maxRays > budget) {
+            result.violations.add(new SimViolation(SimViolation.Severity.FAIL, "DangerBudgetExceeded",
+                simTick, "-", maxRays + " danger rays spent in one tick vs budget " + budget
+                    + " — baking overspent the shared per-tick budget"));
         }
 
         SimReportWriter.write(result, simTick);

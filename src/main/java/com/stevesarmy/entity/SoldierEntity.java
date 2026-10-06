@@ -1368,10 +1368,17 @@ public class SoldierEntity extends PathfinderMob implements Container {
         return this.isAlive() && this.distanceTo(player) <= 64.0F;
     }
 
-    @Override
+    /** Feeds the squad's shared danger map (first member per tick does the work; no-op without a squad). */
+    private void tickSquadDangerMap() {
+        if (!(level() instanceof ServerLevel serverLevel)) return;
+        UUID squad = getSquadId();
+        if (squad == null) return;
+        com.stevesarmy.squad.SquadManager.get(serverLevel).getSquadById(squad)
+            .ifPresent(data -> data.tickDangerMap(serverLevel, serverLevel.getGameTime(), position()));
+    }
+
     public void tick() {
         super.tick();
-
         if (this.level().isClientSide) {
             com.stevesarmy.network.SyncSoldierInventoryPacket.applyPendingInventory(this);
         }
@@ -1381,6 +1388,7 @@ public class SoldierEntity extends PathfinderMob implements Container {
             threatAwareness.tick();
             holdMovementForReload();
             updateCrawlFacing();
+            tickSquadDangerMap();
             // Reload and cover helpers may hold navigation and update their own
             // crouch state. A live firing-prone plan remains the authoritative
             // posture until that plan explicitly cancels it.

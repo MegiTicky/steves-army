@@ -89,9 +89,14 @@ public final class DangerMapDetectors {
                         .with("peekState", end.state.peekState);
                     out.add(v);
                 }
-                // map says hot where the body probe is fully clear
+                // map says hot where the body probe is fully clear. The map's
+                // score is the STANDING danger (eye ray over waist-high cover)
+                // while the probe measures the prone HIDING body — that gap is
+                // doctrine, not error, and only fires when the LEG bit also
+                // says the prone body is exposed.
                 for (StandardDetectors.Run r : StandardDetectors.runs(series,
                         s -> s.dangerAtSoldier > SimTuning.DANGER_PROBE_HOT_MIN
+                            && s.dangerLegExposed
                             && s.probedBodyRays == 15
                             && s.exposedBodyRays == 0)) {
                     int span = StandardDetectors.spanTicks(series, r);

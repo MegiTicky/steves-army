@@ -76,7 +76,7 @@ public final class SimRecorder {
                         double slotOffset, int anchorPulls, int exposedRays, int exposedHeadRays,
                         int probedRays, boolean reloading,
                         String posture, boolean rising, float syncedCoverHeight,
-                        double dangerAtSoldier) {
+                        double dangerAtSoldier, boolean dangerLegExposed) {
         if (current == null) return;
         if (!firstSoldier) current.append(',');
         firstSoldier = false;
@@ -149,6 +149,9 @@ public final class SimRecorder {
         }
         if (dangerAtSoldier >= 0) {
             current.append(",\"dm\":").append((int) Math.round(dangerAtSoldier));
+            if (dangerLegExposed) {
+                current.append(",\"dle\":1");
+            }
         }
         current.append('}');
     }

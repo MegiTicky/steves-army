@@ -104,6 +104,14 @@ public class CombatDebugCommand {
                 .then(Commands.literal("off")
                     .executes(ctx -> setSuppressPingDebug(ctx, false))))
 
+            // === DANGER MAP ===
+            .then(Commands.literal("dangermap")
+                .executes(ctx -> setDangerMapDebug(ctx, true))
+                .then(Commands.literal("on")
+                    .executes(ctx -> setDangerMapDebug(ctx, true)))
+                .then(Commands.literal("off")
+                    .executes(ctx -> setDangerMapDebug(ctx, false))))
+
             // === COVER STATE MACHINE ===
             .then(Commands.literal("coverstate")
                 .executes(ctx -> setCoverStateDebug(ctx, true))
@@ -367,6 +375,7 @@ public class CombatDebugCommand {
              "  mg evaluate [entity] - Evaluate MG firing-position pipeline (read-only)\n" +
              "  armor [off|minimal|verbose] - Toggle armor-doctrine debug render\n" +
             "  suppressping [on|off] - Toggle the suppress-ping debug render\n" +
+            "  dangermap [on|off]  - Toggle the danger-map overlay\n" +
              "  armor <entity>      - Print one soldier's armor-doctrine role/gates\n" +
              "  metrics [on|off|reset] - Collect/show opt-in performance counters\n" +
             "  log cover [on|off]  - Toggle cover behavior logging\n" +
@@ -422,6 +431,7 @@ public class CombatDebugCommand {
         DiagnosticLogManager.enableAll();
         if (context.getSource().getEntity() instanceof ServerPlayer player) {
             CoverStateDebugManager.setEnabled(player, true);
+            com.stevesarmy.combat.DangerMapDebugManager.setEnabled(player, true);
         }
 
         context.getSource().sendSuccess(() -> Component.literal(
@@ -455,6 +465,7 @@ public class CombatDebugCommand {
         CoverDebugManager.setShowSolidBlocks(false);
         if (context.getSource().getEntity() instanceof ServerPlayer player) {
             CoverStateDebugManager.setEnabled(player, false);
+            com.stevesarmy.combat.DangerMapDebugManager.setEnabled(player, false);
         }
 
         context.getSource().sendSuccess(() -> Component.literal(
@@ -1120,6 +1131,18 @@ public class CombatDebugCommand {
         return 1;
     }
 
+    private static int setDangerMapDebug(CommandContext<CommandSourceStack> context, boolean enabled) {
+        CommandSourceStack source = context.getSource();
+        if (!(source.getEntity() instanceof ServerPlayer player)) {
+            source.sendFailure(Component.literal("Player only command"));
+            return 0;
+        }
+        com.stevesarmy.combat.DangerMapDebugManager.setEnabled(player, enabled);
+        source.sendSuccess(() -> Component.literal("Danger map debug render: "
+            + (enabled ? "ON" : "OFF")), false);
+        return 1;
+    }
+
     private static int setCoverStateDebug(CommandContext<CommandSourceStack> context, boolean enabled) {
         CommandSourceStack source = context.getSource();
         if (!(source.getEntity() instanceof ServerPlayer player)) {
@@ -1772,6 +1795,9 @@ public class CombatDebugCommand {
             "  Cover points: " + (CoverDebugManager.isVisualizationEnabled() ? "ON" : "OFF") + "\n" +
             "  Rays: " + (CoverDebugManager.isShowRays() ? "ON" : "OFF") + "\n" +
             "  Solid blocks: " + (CoverDebugManager.isShowSolidBlocks() ? "ON" : "OFF") + "\n" +
+            "  Danger map overlay: " + (com.stevesarmy.combat.DangerMapDebugManager.isEnabled(
+                context.getSource().getEntity() instanceof net.minecraft.server.level.ServerPlayer p
+                    ? p.getUUID() : null) ? "ON" : "OFF") + "\n" +
             "  Untargeted: " + CombatDebugRenderer.getMaxUntargeted()
         ), false);
         return 1;

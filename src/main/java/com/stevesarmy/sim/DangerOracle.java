@@ -19,13 +19,11 @@ import java.util.Map;
  * <p>Grid convention (the real map in squad/ must match): cells quantize to
  * 2x2 horizontal blocks ({@code floorDiv(x,2), floorDiv(z,2)}), the sample
  * point is the cell center at the standing surface, probed at LEG (0.4) and
- * EYE (1.6) heights. Per threat, ANY exposed probe height marks the cell
- * exposed (a walking body occupies both); the per-height BITS stay on the
- * cell for posture-aware consumers (prone protection = leg bit clear, cover
- * quality = eye bit). Cell score = sum of {@code weight * 100} over threats
- * with any exposure, clamped to 100 — center-line truth; the 15-ray fan
- * width problem (lone narrow blocks leaking flank rays) is the fidelity
- * probe + DangerProbeDisagreement detector's domain, not this oracle's.</p>
+ * EYE (1.6) heights with a 3-ray body-span fan (center ± 0.45 perpendicular
+ * to the threat axis). Per threat, exposure is FRACTIONAL —
+ * {@code weight * 100 * exposedRays/6} — so a fan-width leak past a narrow
+ * block reads as partial danger, not a lucky zero; the per-height BITS stay
+ * boolean (any ray exposed). The map in squad/ mirrors this exactly.</p>
  */
 public final class DangerOracle {
     private DangerOracle() {}
@@ -33,6 +31,8 @@ public final class DangerOracle {
     public static final double LEG_HEIGHT = 0.4;
     public static final double EYE_HEIGHT = 1.6;
     public static final int CELL_SIZE = 2;
+    private static final double BODY_HALF_SPAN = 0.45;
+    private static final int RAYS_PER_THREAT = 6;
 
     public record ThreatOrigin(Vec3 eye, double weight) {}
 
@@ -99,14 +99,27 @@ public final class DangerOracle {
                 boolean anyLeg = false;
                 double score = 0.0;
                 for (ThreatOrigin threat : threats) {
-                    // bits are independent: an open cell reads both true, a
-                    // slit wall reads leg-only, a waist-high wall reads eye-only
-                    boolean eye = rayClear(level, threat.eye(), centerX, surfaceY + EYE_HEIGHT, centerZ);
-                    boolean leg = rayClear(level, threat.eye(), centerX, surfaceY + LEG_HEIGHT, centerZ);
-                    anyEye |= eye;
-                    anyLeg |= leg;
-                    if (eye || leg) {
-                        score += threat.weight() * 100.0;
+                    // 3-ray body-span fan per height, mirroring SquadDangerMap.bakeCell
+                    Vec3 toCell = new Vec3(centerX - threat.eye().x, 0, centerZ - threat.eye().z);
+                    Vec3 perpendicular = toCell.lengthSqr() < 1.0e-6
+                        ? new Vec3(1, 0, 0)
+                        : new Vec3(-toCell.z, 0, toCell.x).normalize().scale(BODY_HALF_SPAN);
+                    int exposedEye = 0;
+                    int exposedLeg = 0;
+                    for (int i = -1; i <= 1; i++) {
+                        Vec3 lateral = perpendicular.scale(i);
+                        boolean eye = rayClear(level, threat.eye(),
+                            centerX + lateral.x, surfaceY + EYE_HEIGHT, centerZ + lateral.z);
+                        boolean leg = rayClear(level, threat.eye(),
+                            centerX + lateral.x, surfaceY + LEG_HEIGHT, centerZ + lateral.z);
+                        if (eye) exposedEye++;
+                        if (leg) exposedLeg++;
+                    }
+                    anyEye |= exposedEye > 0;
+                    anyLeg |= exposedLeg > 0;
+                    int exposed = exposedEye + exposedLeg;
+                    if (exposed > 0) {
+                        score += threat.weight() * 100.0 * exposed / (double) RAYS_PER_THREAT;
                     }
                 }
                 cells.put(packCell(cx, cz), new OracleCell(

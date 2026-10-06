@@ -1,0 +1,117 @@
+package com.stevesarmy.client;
+
+import com.mojang.blaze3d.systems.RenderSystem;
+import com.mojang.blaze3d.vertex.DefaultVertexFormat;
+import com.mojang.blaze3d.vertex.PoseStack;
+import com.mojang.blaze3d.vertex.BufferBuilder;
+import com.mojang.blaze3d.vertex.Tesselator;
+import com.mojang.blaze3d.vertex.VertexFormat;
+import com.stevesarmy.network.DangerMapDebugPacket;
+import net.minecraft.client.Camera;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.Font;
+import net.minecraft.client.renderer.GameRenderer;
+import net.minecraft.client.renderer.MultiBufferSource;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.phys.Vec3;
+
+/**
+ * Danger-map overlay (/stevesarmy_debug dangermap): one ground quad per baked
+ * cell — red for eye-exposed (alpha scales with score), orange for leg-only,
+ * faint green for baked-safe shadow — plus a labeled marker at each active
+ * threat origin.
+ */
+public final class DangerMapDebugRenderer {
+    private DangerMapDebugRenderer() {}
+
+    public static void render(PoseStack poseStack, Camera camera) {
+        if (!ClientDangerMapDebugData.INSTANCE.renderEnabled()) {
+            return;
+        }
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.player == null || mc.level == null) return;
+
+        Vec3 cam = camera.getPosition();
+
+        RenderSystem.setShader(GameRenderer::getPositionColorShader);
+        RenderSystem.enableBlend();
+        RenderSystem.defaultBlendFunc();
+        RenderSystem.disableCull();
+        RenderSystem.enableDepthTest();
+
+        Tesselator tesselator = Tesselator.getInstance();
+        BufferBuilder buf = tesselator.getBuilder();
+        buf.begin(VertexFormat.Mode.QUADS, DefaultVertexFormat.POSITION_COLOR);
+
+        for (DangerMapDebugPacket.Cell cell : ClientDangerMapDebugData.INSTANCE.cells()) {
+            BlockPos pos = BlockPos.of(cell.packedPos());
+            float alpha;
+            if (cell.eyeExposed()) {
+                alpha = (float) (0.10 + 0.30 * cell.score() / 100.0);
+                color(buf, cam, pos, 255, 60, 40, alpha);
+            } else if (cell.legExposed()) {
+                color(buf, cam, pos, 255, 170, 60, 0.22f);
+            } else {
+                color(buf, cam, pos, 80, 255, 140, 0.07f);
+            }
+        }
+        tesselator.end();
+
+        for (DangerMapDebugPacket.Threat threat : ClientDangerMapDebugData.INSTANCE.threats()) {
+            renderThreatMarker(poseStack, cam, threat);
+        }
+
+        RenderSystem.enableCull();
+        RenderSystem.disableBlend();
+    }
+
+    /** One axis-aligned ground quad covering the 2x2 cell whose min corner is {@code pos}. */
+    private static void color(BufferBuilder buf, Vec3 cam, BlockPos pos,
+                              int r, int g, int b, float alpha) {
+        double x1 = pos.getX() - cam.x;
+        double y = pos.getY() + 0.05 - cam.y;
+        double z1 = pos.getZ() - cam.z;
+        double x2 = x1 + 2;
+        double z2 = z1 + 2;
+        buf.vertex(x1, y, z1).color(r, g, b, (int) (alpha * 255)).endVertex();
+        buf.vertex(x1, y, z2).color(r, g, b, (int) (alpha * 255)).endVertex();
+        buf.vertex(x2, y, z2).color(r, g, b, (int) (alpha * 255)).endVertex();
+        buf.vertex(x2, y, z1).color(r, g, b, (int) (alpha * 255)).endVertex();
+    }
+
+    private static void renderThreatMarker(PoseStack poseStack, Vec3 cam, DangerMapDebugPacket.Threat threat) {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.font == null) return;
+
+        // vertical tick at the origin
+        Tesselator tesselator = Tesselator.getInstance();
+        BufferBuilder buf = tesselator.getBuilder();
+        buf.begin(VertexFormat.Mode.DEBUG_LINES, DefaultVertexFormat.POSITION_COLOR);
+        double x = threat.pos().x - cam.x;
+        double y1 = threat.pos().y - cam.y;
+        double y2 = y1 + 1.2;
+        int lineColor = threat.hardTarget() ? 0xFFFF3030 : 0xFFFF8030;
+        buf.vertex(x, y1, threat.pos().z - cam.z).color(lineColor).endVertex();
+        buf.vertex(x, y2, threat.pos().z - cam.z).color(lineColor).endVertex();
+        tesselator.end();
+
+        MultiBufferSource.BufferSource buffers = mc.renderBuffers().bufferSource();
+        String label = (threat.hardTarget() ? "HARD " : "") + "threat w=" + String.format("%.1f", threat.weight());
+        billboard(mc.font, poseStack, cam, threat.pos().add(0, 1.4, 0), label,
+            threat.hardTarget() ? 0xFFFF5050 : 0xFFFFA050, buffers);
+        buffers.endBatch();
+    }
+
+    private static void billboard(Font font, PoseStack poseStack, Vec3 cameraPos, Vec3 position, String text,
+                                  int color, MultiBufferSource.BufferSource buffers) {
+        Minecraft mc = Minecraft.getInstance();
+        Vec3 relative = position.subtract(cameraPos);
+        poseStack.pushPose();
+        poseStack.translate(relative.x, relative.y, relative.z);
+        poseStack.mulPose(mc.gameRenderer.getMainCamera().rotation());
+        poseStack.scale(-0.025f, -0.025f, 0.025f);
+        font.drawInBatch(text, -font.width(text) / 2.0f, 0, color, false, poseStack.last().pose(), buffers,
+            Font.DisplayMode.NORMAL, 0, 15728880);
+        poseStack.popPose();
+    }
+}

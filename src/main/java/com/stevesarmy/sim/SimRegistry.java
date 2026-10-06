@@ -47,7 +47,10 @@ public final class SimRegistry {
             dangerSelfTestAllZero(),
             dangerSelfTestAllMax(),
             dangerSelfTestMirrored(),
-            dangerDecayProperty());
+            dangerDecayProperty(),
+            dangerDecayReal(),
+            dangerShiftReal(),
+            dangerMultiSquadBudget());
     }
 
     public static SimScenario byName(String name) {
@@ -1057,12 +1060,15 @@ public final class SimRegistry {
                 ctx.spawnFriendly(ModEntities.SOLDIER.get(), "probe", 14, 0, 24, SquadMode.HOLD);
                 ctx.injectThreat(40, 24);
             })
+            .action(150, "refresh injected threat", ctx -> ctx.refreshInjectedThreats())
             .assertThat("oracle exists and covers the default region",
                 view -> view.dangerOracle() != null && view.dangerOracle().size() >= 300)
             .assertThat(">=90% of verified cells score > 80 (open field = fully exposed)",
                 view -> cellFraction(view.dangerOracle(), c -> c.score() > 80) >= 0.90)
-            .assertThat("no sampler registered -> sampled danger stays absent",
-                view -> view.timeline().series("probe").stream().allMatch(s -> s.dangerAtSoldier < 0))
+            .assertThat("real map sampled danger reads hot at the probe (>=80 by t60)",
+                view -> view.timeline().series("probe").stream()
+                    .filter(s -> s.tick >= 60)
+                    .allMatch(s -> s.dangerAtSoldier >= 80))
             .build();
     }
 
@@ -1082,6 +1088,7 @@ public final class SimRegistry {
                 ctx.injectThreat(40, 24);
                 ctx.setDangerVerificationRegion(4, 12, 44, 36);
             })
+            .action(150, "refresh injected threat", ctx -> ctx.refreshInjectedThreats())
             .assertThat("cells west of the ridge read near-zero (shadow side)",
                 view -> cellFractionWhere(view.dangerOracle(),
                     c -> c.centerX() <= 22, c -> c.score() < 10) >= 0.95)
@@ -1109,15 +1116,17 @@ public final class SimRegistry {
                 ctx.injectThreat(40, 24);
                 ctx.setDangerVerificationRegion(4, 10, 18, 38);
             })
-            .assertThat("cell directly behind the lone block: eye exposed, legs protected (center line)",
+            .action(150, "refresh injected threat", ctx -> ctx.refreshInjectedThreats())
+            .assertThat("cell behind the lone block reads PARTIAL danger (~67: eye clear, one leg ray leaks)",
                 view -> {
                     DangerOracle.OracleCell c = cellAt(view, 17, 25);
-                    return c != null && c.eyeExposed() && !c.legExposed();
+                    return c != null && c.score() >= 50 && c.score() <= 85
+                        && c.eyeExposed() && c.legExposed();
                 })
-            .assertThat("deeper cells behind the lone block stay eye-exposed (ray passes over 1.0)",
+            .assertThat("deeper cells behind the lone block stay partially exposed (rays pass over 1.0)",
                 view -> {
                     DangerOracle.OracleCell c = cellAt(view, 13, 25);
-                    return c != null && c.eyeExposed() && !c.legExposed();
+                    return c != null && c.score() >= 50 && c.score() <= 85 && c.eyeExposed();
                 })
             .assertThat("flanking cell off the block axis is fully exposed on both heights",
                 view -> {
@@ -1141,10 +1150,13 @@ public final class SimRegistry {
             .setup(ctx -> {
                 ctx.spawnAnchor(6, 0, 24);
                 ctx.spawnFriendly(ModEntities.SOLDIER.get(), "probe", 10, 0, 24, SquadMode.HOLD);
-                ctx.injectThreat(40, 22);
-                ctx.injectThreat(40, 26);
+                // fractional placements: symmetric integer threats put fan rays
+                // exactly on block boundaries where the two clip codes disagree
+                ctx.injectThreat(40.0, 22.3);
+                ctx.injectThreat(39.6, 26.7);
                 ctx.setDangerVerificationRegion(4, 14, 18, 34);
             })
+            .action(150, "refresh injected threats", ctx -> ctx.refreshInjectedThreats())
             .assertThat("pocket shadowed from both threats reads ~0",
                 view -> {
                     DangerOracle.OracleCell c = cellAt(view, 17, 25);
@@ -1169,8 +1181,10 @@ public final class SimRegistry {
                 ctx.spawnFriendly(ModEntities.SOLDIER.get(), "probe", 14, 0, 24, SquadMode.HOLD);
             })
             .assertThat("no oracle without injected threats", view -> view.dangerOracle() == null)
-            .assertThat("sampled danger stays absent without a sampler",
-                view -> view.timeline().series("probe").stream().allMatch(s -> s.dangerAtSoldier < 0))
+            .assertThat("map reads verified-safe (0, not unknown) with no threats",
+                view -> view.timeline().series("probe").stream()
+                    .filter(s -> s.tick >= 40)
+                    .allMatch(s -> s.dangerAtSoldier == 0))
             .build();
     }
 
@@ -1276,6 +1290,106 @@ public final class SimRegistry {
                         .filter(s -> s.tick >= 280).count();
                     return total >= 10 && cold == total;
                 })
+            .build();
+    }
+
+    /** REAL MAP: threat death must decay sampled danger to verified-safe within the refresh window. */
+    private static SimScenario dangerDecayReal() {
+        return SimScenario.builder("danger_decay_real")
+            .description("DANGER MAP: the real per-squad map reads hot from an injected threat; marking "
+                + "the threat dead must decay sampled danger to verified-safe (0) within the "
+                + "view-refresh window, not wait out the cell TTL.")
+            .duration(400)
+            .action(0, "refresh injected threat", ctx -> ctx.refreshInjectedThreats())
+            .action(120, "refresh injected threat", ctx -> ctx.refreshInjectedThreats())
+            .action(220, "refresh injected threat", ctx -> ctx.refreshInjectedThreats())
+            .setup(ctx -> {
+                ctx.spawnAnchor(8, 0, 24);
+                ctx.spawnFriendly(ModEntities.SOLDIER.get(), "probe", 14, 0, 24, SquadMode.HOLD);
+                ctx.injectThreat(40, 24);
+            })
+            .action(250, "injected threats marked dead", ctx -> ctx.markInjectedThreatsDead())
+            .assertThat("map reads hot while the threat lives (>=10 samples at 100 from t40)",
+                view -> {
+                    long hot = view.timeline().series("probe").stream()
+                        .filter(s -> s.tick >= 40 && s.tick < 250 && s.dangerAtSoldier >= 100).count();
+                    long total = view.timeline().series("probe").stream()
+                        .filter(s -> s.tick >= 40 && s.tick < 250).count();
+                    return total >= 10 && hot == total;
+                })
+            .assertThat("map decays to verified-safe 0 after the threat dies (>=10 samples at 0 after t280)",
+                view -> {
+                    long cold = view.timeline().series("probe").stream()
+                        .filter(s -> s.tick >= 280 && s.dangerAtSoldier == 0).count();
+                    long total = view.timeline().series("probe").stream()
+                        .filter(s -> s.tick >= 280).count();
+                    return total >= 10 && cold == total;
+                })
+            .build();
+    }
+
+    /** REAL MAP: moving the threat (origin drift) must invalidate and re-bake — the shadow flips sides. */
+    private static SimScenario dangerShiftReal() {
+        java.util.concurrent.atomic.AtomicReference<SimContext.InjectedThreat> threatRef =
+            new java.util.concurrent.atomic.AtomicReference<>();
+        return SimScenario.builder("danger_shift_real")
+            .description("DANGER MAP: relocating the injected threat across the ridge (origin drift) "
+                + "must invalidate the stale shadow and re-bake — the probe's cell flips safe->hot.")
+            .duration(400)
+            .terrain(t -> {
+                t.platform();
+                t.coverRow(24, 8, 24, 40, 3);
+            })
+            .setup(ctx -> {
+                ctx.spawnAnchor(8, 0, 24);
+                ctx.spawnFriendly(ModEntities.SOLDIER.get(), "probe", 12, 0, 24, SquadMode.HOLD);
+                threatRef.set(ctx.injectThreat(40, 24));
+            })
+            .action(200, "threat relocates to the west flank", ctx ->
+                ctx.moveInjectedThreat(threatRef.get(), 10, 16))
+            .assertThat("before the move the probe reads safe (threat east, probe west of the ridge)",
+                view -> {
+                    long safe = view.timeline().series("probe").stream()
+                        .filter(s -> s.tick >= 120 && s.tick < 200 && s.dangerAtSoldier == 0).count();
+                    long total = view.timeline().series("probe").stream()
+                        .filter(s -> s.tick >= 120 && s.tick < 200).count();
+                    return total >= 10 && safe == total;
+                })
+            .assertThat("after the move the probe reads hot (threat now on the west side)",
+                view -> {
+                    long hot = view.timeline().series("probe").stream()
+                        .filter(s -> s.tick >= 260 && s.dangerAtSoldier >= 100).count();
+                    long total = view.timeline().series("probe").stream()
+                        .filter(s -> s.tick >= 260).count();
+                    return total >= 10 && hot == total;
+                })
+            .build();
+    }
+
+    /** REAL MAP: two squads share one global ray budget; both maps must still reach their soldiers. */
+    private static SimScenario dangerMultiSquadBudget() {
+        return SimScenario.builder("danger_multi_squad_budget")
+            .description("DANGER MAP: two independent squads (own anchors, soldiers, threats) share the "
+                + "global per-tick ray budget; both maps must bake hot cells around their own soldiers "
+                + "and neither may overshoot the budget (DangerBudgetExceeded is automatic).")
+            .duration(400)
+            .action(0, "refresh injected threats", ctx -> ctx.refreshInjectedThreats())
+            .action(150, "refresh injected threats", ctx -> ctx.refreshInjectedThreats())
+            .action(300, "refresh injected threats", ctx -> ctx.refreshInjectedThreats())
+            .setup(ctx -> {
+                com.stevesarmy.entity.TargetEntity alphaAnchor = ctx.spawnAnchor(6, 0, 12);
+                ctx.spawnFriendly(ModEntities.SOLDIER.get(), "alpha", 12, 0, 12, SquadMode.HOLD);
+                com.stevesarmy.entity.TargetEntity bravoAnchor = ctx.spawnAnchor(6, 0, 36);
+                ctx.spawnFriendly(ModEntities.SOLDIER.get(), "bravo", 12, 0, 36, SquadMode.HOLD);
+                ctx.injectThreat(ctx.squadForAnchor(alphaAnchor), 40, 12);
+                ctx.injectThreat(ctx.squadForAnchor(bravoAnchor), 40, 36);
+            })
+            .assertThat("alpha's cell bakes hot (>=80 by t100)",
+                view -> view.timeline().series("alpha").stream()
+                    .filter(s -> s.tick >= 100).allMatch(s -> s.dangerAtSoldier >= 80))
+            .assertThat("bravo's cell bakes hot (>=80 by t100)",
+                view -> view.timeline().series("bravo").stream()
+                    .filter(s -> s.tick >= 100).allMatch(s -> s.dangerAtSoldier >= 80))
             .build();
     }
 

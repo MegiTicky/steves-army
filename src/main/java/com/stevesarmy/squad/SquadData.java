@@ -5,6 +5,8 @@ import com.stevesarmy.StevesArmyMod;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.Tag;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.phys.Vec3;
 
 import javax.annotation.Nullable;
 import java.util.*;
@@ -26,6 +28,8 @@ public class SquadData {
     private UUID grenadeReservationOwner;
     private long grenadeReservationUntilTick = NO_GRENADE_THROW;
     private transient SquadCoverPeekabilityCache coverPeekabilityCache = new SquadCoverPeekabilityCache();
+    /** Transient line-of-sight danger grid — runtime-only, rebuilt from intel in seconds. */
+    private transient SquadDangerMap dangerMap = new SquadDangerMap();
     @Nullable
     private String callsign;
     @Nullable
@@ -257,6 +261,31 @@ public class SquadData {
         }
         return coverPeekabilityCache;
     }
+
+    /** Transient per-squad line-of-sight danger grid (rebuilt from intel in seconds after a reload). */
+    public SquadDangerMap getDangerMap() {
+        if (dangerMap == null) {
+            dangerMap = new SquadDangerMap();
+        }
+        return dangerMap;
+    }
+
+    /**
+     * Per-tick danger-map maintenance — the squad's tick driver. Safe to call
+     * from every member: the map de-duplicates by game time so only the first
+     * caller does work. Costs nothing while the squad has no known threats.
+     */
+    public void tickDangerMap(ServerLevel level, long gameTime, Vec3 anchorSample) {
+        if (!loggedFirstDangerTick) {
+            loggedFirstDangerTick = true;
+            StevesArmyMod.LOGGER.info("[DangerMap] first driver tick: squad={} intelThreats={} enabled={}",
+                squadId, threatIntel.getThreatCount(), StevesArmyConfig.isDangerMapEnabled());
+        }
+        if (!StevesArmyConfig.isDangerMapEnabled()) return;
+        getDangerMap().tick(level, gameTime, anchorSample, threatIntel);
+    }
+
+    private transient boolean loggedFirstDangerTick;
 
     public void tickIntelCleanup(long currentGameTime) {
         threatIntel.tickCleanup(currentGameTime);
