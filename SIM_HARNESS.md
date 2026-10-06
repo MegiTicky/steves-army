@@ -56,21 +56,34 @@ to the fixture (platform at Y=160+, west edge of the world origin).
 
 ### Guns & ammo in the sim
 
-**Sim friendlies have no gun and no ammo today.** Two reasons stack: TaCZ is
-compile-only in dev (its SRG-refmapped mixins FML-hard-fail against userdev
-classes), and the mod's no-TaCZ fallback (`GunIntegration.FallbackGunHandler`)
-is a deliberate stub — `hasGun()=false`, every `shoot()` returns `NOT_GUN` —
-so nobody fires even though soldiers exist and target. Suppression pressure is
-therefore deterministic `SuppressionTracker` injection, reports print
-`guns: ABSENT`, and firing-chain detectors/assertions skip themselves.
+**Armed scenarios fight with real sim guns** (`sim/SimGunHandler`, installed
+per scenario when the builder calls `.armed()`): a hitscan rifle (30-round
+mag, ~600 RPM, 4 dmg, 64-block range; the MG gets a 100-round belt, `mg` gun
+tab and `isMachineGun=true` so the base-of-fire doctrine engages). Every shot
+clips against real blocks, damages the first living thing it crosses, and
+feeds the same near-miss segment check TaCZ bullets use
+(`IncomingFireHandler.checkNearMissLineSegment`) — so suppression, weapon
+threat intel and fire-superiority tracking run on both sides organically.
+The handler is wired through a dedicated facade override
+(`GunIntegration.installSimGunHandler`) and makes `isAnyGunLoaded()` true
+while armed, which opens the combat goal's whole firing chain; un-armed
+scenarios uninstall it and keep the deterministic scripted-pressure model
+(`FallbackGunHandler` stays a stub).
+
+Unarmed scenarios still suppress via scripted injection
+(`.suppress(label, from, until, interval)` → repeated `SuppressionTracker`
+near-misses) and reports print `guns: ABSENT` with firing-chain detectors
+skipped.
 
 Every successful round fired through `GunIntegration.shoot*` (any shooter,
-TaCZ or a future real fallback) is tapped by `GunIntegration.shotListener`,
-which the harness installs per scenario: shots appear as yellow tracers in
-the animation frame they were fired, per-soldier `shots fired` counters and
-`ammo / magazine` show in the inspect panel, and `SimSample.shotsFired` is
-available to detectors. Armed runs (TaCZ on the runtime classpath, e.g. the
-deployed game) get all of this automatically.
+sim gun, TaCZ or a future real fallback) is tapped by
+`GunIntegration.shotListener`, which the harness installs per scenario:
+shots appear as yellow tracers in the frame they were fired in, per-soldier
+`shots fired` counters, `ammo / magazine` and `hp` show in the inspect panel
+and per-frame recording, and `SimSample.shotsFired` is available to detectors.
+Sim samples report the live combat-entity target (`soldier.getTarget()`), not
+`hasValidAttackTarget()` (that flag is the player-issued ATTACK objective and
+is never set in scenarios).
 
 ## Architecture
 
@@ -104,7 +117,7 @@ deployed game) get all of this automatically.
 | `hold_enclosed_pocket` | HOLD in a one-exit pocket; fail-and-escalate without stranding |
 | `persistent_ping_relocation` | Continuous suppression from one origin; relocation dead-ends |
 | `mg_anchor_freshness` | MG centroid/anchor staleness after the shooter moves |
-| `mg_rifleman_seek_contrast` | Same fire on an MG and two riflemen: both must reach cover (the live MG seek-strand bug) |
+| `mg_rifleman_seek_contrast` | Live-fire MG vs riflemen fight (`.armed()`, two enemies): both sides reach cover, organic suppression both ways, peek-and-fire cycles |
 | `pair_suppression_lanes` | Two suppressors; dispersion vs stacking |
 | `open_field_baseline` | No suppression; detector false-positive calibration |
 
@@ -120,58 +133,57 @@ peek cycles), SuppressionStarve, FollowEscapeBlocked, PathFailStorm,
 PositionDeadlock, FireStarvation (armed runs only), ReservationDrift
 (+ post-run ReservationLeak check).
 
-## Known findings (2026-10-06, MG seek-strand fix)
+## Known findings (2026-10-06, armed sim + MG seek-strand fix)
 
-Status after the MG seek-strand fix (reserve fallback + seek escalation) and
-the fixture build-limit repair. Five full-suite runs; the two remaining FAILs
-are separate, pre-existing strands.
+Status after the MG seek-strand fix, the fixture build-limit repair, and the
+armed-sim work (SimGunHandler + telemetry fixes). Suite state: 6/7 PASS; the
+one FAIL is a pre-existing intermittent.
 
-**Fixed this pass — the "MG stuck in SEEKING_COVER, never pathing" bug.**
+**Earlier same day — the "MG stuck in SEEKING_COVER, never pathing" bug.**
 Four stacked causes, all visible once searches were instrumented (`ls`
-telemetry: mode/phase/result/center/streak per search):
+telemetry: mode/phase/result/center/streak per search): (1) reservation spin —
+only the single best candidate was ever reserved, so a squadmate-held cover
+was re-selected forever (reservation failures never blacklist); fixed with
+ordered reserve pools bounded to 4 movement attempts per search. (2) the MG
+rear anchor pointed away from every cover; fixed with seek escalation (120t
+wall-clock without a claim widens the radius and re-centers the search).
+(3) `seekingTicks` freezes during prone-walk detours, so escalation now arms
+on ticks-since-last-cover-claim. (4) prone deployment received an empty cover
+list for target-less soldiers, making its physical-cover gate vacuous — the
+soldier prone-walked into the open while suppressed (the visible westward
+wander); fixed by always passing the scored covers and refusing prone while
+suppressed. Also repaired: fixtures at Y≥320 were silently rejected by the
+build limit (empty-air scenarios) — Y spacing is 20Y and placement throws.
 
-1. **Reservation spin** — the base search reserved only the single best
-   candidate; if a squadmate held it, the whole search returned
-   `NO_COVER_FOUND("reservation")` and reservation failures never blacklist,
-   so the same taken cover was re-selected forever (streak 108+). Fix: ordered
-   reserve pools (selected best → soldier-centered list → protection-filtered
-   list from the intended search center), bounded to 4 movement attempts per
-   search — the same pattern the relocation branch always had.
-2. **Anchor pointed away from cover** — the MG rear anchor (behind the squad
-   line) sat 14+ blocks from every cover, and radius 12 from it saw nothing.
-   Fix: seek escalation — after 120t without a cover claim (wall clock, so
-   prone-walk detours can't hide the stall), the search widens to the FOLLOW
-   radius and re-centers on the owner when no anchor exists.
-3. **`seekingTicks` is a blind clock** — it freezes while the goal walks to a
-   prone spot (`proneFiringDestination` branch returns early), so any
-   seekingTicks-based stall detector under-reports by 3-4x. Escalation now
-   arms on ticks-since-last-cover-claim instead.
-4. **Prone deployment bypassed the cover gate** — `findAndMoveToCover` passed
-   an empty cover list to the prone selector whenever the soldier had no
-   attack target, making its "use physical cover instead" check vacuous; the
-   soldier then walked to open-ground prone firing positions while under
-   fire (the visible westward wander, exposed, ~200t). Fix: the scored cover
-   list is always passed to the gate, and the selector refuses prone
-   deployment while suppressed. Post-fix the MG claims cover on its first
-   search (IN_COVER by t20, same as the riflemen).
+**Armed-sim pass — sim soldiers now fight real firefights.**
+`mg_rifleman_seek_contrast` runs with sim guns both ways: the squad claims
+cover by t20-35 (MG included — the seek bug stays fixed under live fire),
+takes organic suppression up to 1.0 from enemy near-misses, peeks and fires
+back (EXPOSED/RETURNING cycles visible per soldier), and kills both enemies
+by ~t300 while taking real damage. Enemy return fire suppressed the gunner
+and one rifleman for ~150t. Zero detector violations. This is the peek-system
+probe the harness was missing: pinned soldiers must expose and fire, and now
+they demonstrably do.
 
-Also repaired along the way: fixtures for scenarios 5+ ran at Y≥320 — the
-world silently rejected every block above the build limit (y=319), so those
-scenarios fought on empty air (this fabricated the old "pinned in the open
-7 blocks from cover" pair finding). Y spacing is now 20Y and out-of-range
-placement throws.
+**Also resolved: the "detection gap" was a telemetry bug, not an AI bug.**
+Sim samples used `soldier.hasValidAttackTarget()`, which is the player-issued
+ATTACK *objective* (a BlockPos from the command stick — never set in
+scenarios), so `open_field_baseline`'s targeting assertion could never pass.
+Sampling `soldier.getTarget()` instead made the scout's acquisition visible;
+`open_field_baseline` now passes. The tracer buffer had the same class of bug
+(`beginFrame` wiped shots before `endFrame` wrote them, so no tracer ever
+survived into the animation) — both fixed.
 
-Remaining strands (all pre-existing, not the MG seek bug):
+Remaining strands (all pre-existing):
 
-1. **Detection gap** (`open_field_baseline`) — the scout sees the enemy
-   (peeks EXPOSED with clear LoS) but never acquires the attack target within
-   400t; targeting assertion fails. Needs a TargetAcquisition/FoF look.
-2. **Post-suppression relocation churn** (`suppressed_follow_escape`,
-   intermittent) — when sustained pressure ends, a soldier may hop through
-   3-4 relocation targets in ~50t before settling. Ends safely in cover.
-3. **Peek aborts under sustained suppression** (intermittent) — a soldier in
-   full cover starts a peek, suppression re-pins mid-cycle, and it folds back
-   without exposing (4+ aborted cycles tripped PeekThrash once). The
-   peek-start decision and the suppression gate disagree.
-4. **Reservation drift (WARN)** — occupied cover unreserved 60-80t; one
-   orphaned reservation at cleanup in some runs.
+1. **Post-suppression relocation churn** (`suppressed_follow_escape`,
+   intermittent, fails suite / passes solo) — under sustained pressure a
+   soldier may hop through 3-4 relocation targets inside a 200t window
+   (CoverOscillation fires); ends safely in cover.
+2. **Peek stalls under sustained suppression** (now organically visible in the
+   armed contrast run) — a suppressed soldier sits in MOVING_TO_PEEK for
+   ~110t (left, t85-195) instead of either committing to the peek or folding
+   back to HIDING; the peek-start decision and the suppression gate disagree.
+3. **Reservation drift (WARN)** — occupied cover unreserved 60-80t after the
+   fight ends; claims outlive released reservations until the goal cycle
+   catches up.

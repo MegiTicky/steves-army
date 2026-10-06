@@ -217,6 +217,7 @@ public final class SimRecordingWriter {
               return 'label            : ' + s.l +
                    '\\ncoverState       : ' + s.cs +
                    '\\npeekState        : ' + s.ps +
+                   (s.hp !== undefined ? '\\nhealth           : ' + s.hp.toFixed(1) : '') +
                    '\\nsuppression      : ' + s.sup.toFixed(2) + (s.pin ? '   [PINNED]' : '') +
                    '\\nfollowBlockedBy  : ' + (s.fb || '-') +
                    '\\nwantCover        : ' + (s.wc || '-') +

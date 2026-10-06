@@ -48,7 +48,6 @@ public final class SimRecorder {
 
     /** One fired round, drawn as a tracer for the frame being built. */
     public void shot(double fromX, double fromZ, double toX, double toZ) {
-        if (current == null) return;
         shots.add("[" + num(fromX) + "," + num(fromZ) + "," + num(toX) + "," + num(toZ) + "]");
     }
 
@@ -56,18 +55,20 @@ public final class SimRecorder {
         current = new StringBuilder();
         current.append("{\"t\":").append(tick).append(",\"s\":[");
         firstSoldier = true;
-        shots.clear();
+        // NOTE: do not clear `shots` here — shots fire during the level tick,
+        // before this Phase.END sampling point; endFrame drains the buffer.
     }
 
     public void soldier(String label, CombatStateSnapshot s, Boolean los,
                         Double nearestEnemyX, Double nearestEnemyZ,
-                        int shotsFired, boolean hasGun, int ammo, int magazineSize) {
+                        int shotsFired, boolean hasGun, int ammo, int magazineSize, float health) {
         if (current == null) return;
         if (!firstSoldier) current.append(',');
         firstSoldier = false;
         current.append("{\"l\":").append(quote(label))
             .append(",\"x\":").append(num(s.position.x))
             .append(",\"z\":").append(num(s.position.z))
+            .append(",\"hp\":").append(num(health))
             .append(",\"cs\":").append(quote(s.coverState))
             .append(",\"ps\":").append(quote(s.peekState))
             .append(",\"sup\":").append(String.format("%.2f", s.suppressionLevel))
@@ -128,6 +129,7 @@ public final class SimRecorder {
         current.append("]}");
         frames.add(current.toString());
         current = null;
+        shots.clear();
     }
 
     /** Full JSON document for the HTML player (and the machine-readable recording file). */

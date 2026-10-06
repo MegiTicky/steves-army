@@ -172,11 +172,13 @@ public final class SimRegistry {
 
     private static SimScenario mgRiflemanSeekContrast() {
         return SimScenario.builder("mg_rifleman_seek_contrast")
-            .description("MG and two riflemen take the same incoming fire from one enemy (two-way "
-                + "combat, guns modeled as deterministic suppression). Riflemen must claim the "
-                + "nearby cover rows; the MG must not strand in SEEKING_COVER with zero movement — "
-                + "the live combat bug where the MG never gets into cover.")
+            .description("Live-fire MG vs riflemen fight: both sides armed with sim guns, so "
+                + "suppression is organic (real near-misses, real return fire). Riflemen must "
+                + "claim the nearby cover rows; the MG must not strand in SEEKING_COVER with "
+                + "zero movement — the live combat bug where the MG never gets into cover. "
+                + "This is also the peek-system probe: pinned soldiers must expose and fire.")
             .duration(700)
+            .armed()
             .terrain(t -> {
                 t.platform();
                 t.coverRow(16, 21, 18, 21, 1); // waist-high rows the squad should claim
@@ -191,15 +193,26 @@ public final class SimRegistry {
                 ctx.spawnFriendly(ModEntities.MACHINE_GUNNER.get(), "gunner", 12, 0, 24, SquadMode.FOLLOW);
                 ctx.spawnFriendly(ModEntities.SOLDIER.get(), "left", 12, 0, 14, SquadMode.FOLLOW);
                 ctx.spawnFriendly(ModEntities.SOLDIER.get(), "right", 12, 0, 34, SquadMode.FOLLOW);
-                ctx.spawnEnemy(36, 0, 24);
+                // two shooters so the squad's near-miss suppression can't pin
+                // the whole enemy side silent — a live exchange both ways
+                ctx.spawnEnemy(38, 0, 22);
+                ctx.spawnEnemy(38, 0, 26);
             })
-            .suppress(null, 40, 660, 15) // the enemy engages the whole squad
             .assertThat("left rifleman claims cover by t200 and still holds it at t400",
                 view -> claimedCoverByAndHeld(view, "left", 200, 400))
             .assertThat("right rifleman claims cover by t200 and still holds it at t400",
                 view -> claimedCoverByAndHeld(view, "right", 200, 400))
             .assertThat("MG gets into cover (or genuinely relocates) instead of seeking in place",
                 view -> mgEngagedCover(view, "gunner"))
+            .assertThat("squad fights back — the enemy takes damage from friendly fire",
+                view -> view.enemyHealthEnd() < view.enemyHealthStart())
+            .assertThat("riflemen actually fire at the enemy during the fight",
+                view -> view.timeline().series("left").stream().anyMatch(s -> s.shotsFired > 0)
+                    && view.timeline().series("right").stream().anyMatch(s -> s.shotsFired > 0))
+            .assertThat("at least one soldier peeks out of cover to engage (EXPOSED)",
+                view -> view.timeline().soldierLabels().stream()
+                    .anyMatch(label -> view.timeline().series(label).stream()
+                        .anyMatch(s -> "EXPOSED".equals(s.state.peekState))))
             .build();
     }
 

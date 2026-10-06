@@ -113,6 +113,8 @@ public final class SimManager {
         yLevel = Y_BASE;
         autorun = isAutorun;
         discardLeftoverSimEntities();
+        // Unarmed tail state from an aborted run must not leak into this session
+        SimGunHandler.setArmed(false);
         beginScenario();
         return true;
     }
@@ -177,6 +179,9 @@ public final class SimManager {
         level.setThunderLevel(0.0f);
         level.getGameRules().getRule(GameRules.RULE_DAYLIGHT).set(false, level.getServer());
         level.getGameRules().getRule(GameRules.RULE_DOMOBSPAWNING).set(false, level.getServer());
+        // Armed scenarios fight with real sim guns (organic suppression both
+        // ways); unarmed ones keep the deterministic scripted-pressure model.
+        SimGunHandler.setArmed(scenario.armed);
         phase = Phase.RUNNING;
     }
 
@@ -204,9 +209,13 @@ public final class SimManager {
 
             String label = labelOf(soldier);
             boolean hasGun = GunIntegration.hasGun(soldier);
+            // Live combat-entity target (what the firing/peek chains key on) —
+            // NOT hasValidAttackTarget(), which is the player-issued ATTACK
+            // objective BlockPos and is never set in scenarios.
+            net.minecraft.world.entity.LivingEntity combatTarget = soldier.getTarget();
             timeline.add(new SimSample(simTick, label, snap,
                 soldier.getHealth(), soldier.getMaxHealth(),
-                soldier.hasValidAttackTarget(), los,
+                combatTarget != null && combatTarget.isAlive(), los,
                 nearest == null ? -1f : soldier.distanceTo(nearest), reservation,
                 hasGun,
                 shotCounts.getOrDefault(soldier.getUUID(), 0),
@@ -216,7 +225,8 @@ public final class SimManager {
                 shotCounts.getOrDefault(soldier.getUUID(), 0),
                 hasGun,
                 hasGun ? GunIntegration.getCurrentAmmo(soldier) : -1,
-                hasGun ? GunIntegration.getMagazineSize(soldier) : -1);
+                hasGun ? GunIntegration.getMagazineSize(soldier) : -1,
+                soldier.getHealth());
         }
         recorder.endFrame(context.enemies);
     }

@@ -21,6 +21,8 @@ public final class SimIsolation {
         FireTeamSuppressionTracker.resetForSim();
         SquadManager.get(level).resetForSim();
         PerformanceMetrics.reset();
+        // virtual magazines from the previous scenario must not leak into the next
+        SimGunHandler.resetForSim();
         // stale raytrace caches from the previous fixture's geometry must not
         // leak into the next scenario's LoS results
         com.stevesarmy.combat.VisibilityRay.invalidateCache(level);
