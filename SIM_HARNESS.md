@@ -127,7 +127,7 @@ the fixture build-limit repair. Five full-suite runs; the two remaining FAILs
 are separate, pre-existing strands.
 
 **Fixed this pass — the "MG stuck in SEEKING_COVER, never pathing" bug.**
-Three stacked causes, all visible once searches were instrumented (`ls`
+Four stacked causes, all visible once searches were instrumented (`ls`
 telemetry: mode/phase/result/center/streak per search):
 
 1. **Reservation spin** — the base search reserved only the single best
@@ -146,6 +146,14 @@ telemetry: mode/phase/result/center/streak per search):
    prone spot (`proneFiringDestination` branch returns early), so any
    seekingTicks-based stall detector under-reports by 3-4x. Escalation now
    arms on ticks-since-last-cover-claim instead.
+4. **Prone deployment bypassed the cover gate** — `findAndMoveToCover` passed
+   an empty cover list to the prone selector whenever the soldier had no
+   attack target, making its "use physical cover instead" check vacuous; the
+   soldier then walked to open-ground prone firing positions while under
+   fire (the visible westward wander, exposed, ~200t). Fix: the scored cover
+   list is always passed to the gate, and the selector refuses prone
+   deployment while suppressed. Post-fix the MG claims cover on its first
+   search (IN_COVER by t20, same as the riflemen).
 
 Also repaired along the way: fixtures for scenarios 5+ ran at Y≥320 — the
 world silently rejected every block above the build limit (y=319), so those
@@ -161,10 +169,9 @@ Remaining strands (all pre-existing, not the MG seek bug):
 2. **Post-suppression relocation churn** (`suppressed_follow_escape`,
    intermittent) — when sustained pressure ends, a soldier may hop through
    3-4 relocation targets in ~50t before settling. Ends safely in cover.
-3. **MG seeks slowly** (~230t to cover under sustained fire in the contrast
-   scenario, WARN-level) — most of it is the prone-lane selector intercepting
-   searches (`prone-lane/COVER_STARTED` without a cover claim) while guns are
-   absent; in armed runs the prone deployment is the point. Worth revisiting
-   if armed runs still show slow MG cover claims.
-4. **Reservation drift (WARN)** — occupied cover unreserved 60-75t; one
+3. **Peek aborts under sustained suppression** (intermittent) — a soldier in
+   full cover starts a peek, suppression re-pins mid-cycle, and it folds back
+   without exposing (4+ aborted cycles tripped PeekThrash once). The
+   peek-start decision and the suppression gate disagree.
+4. **Reservation drift (WARN)** — occupied cover unreserved 60-80t; one
    orphaned reservation at cleanup in some runs.

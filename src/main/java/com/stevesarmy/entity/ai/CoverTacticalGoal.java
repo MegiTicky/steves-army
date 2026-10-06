@@ -4044,7 +4044,11 @@ private boolean shouldExitCoverForFollow() {
                     }
                 }
             } else {
-                tacticalCovers = List.of();
+                // No attack target: still feed the scored list to the prone
+                // gate. An empty list makes its physical-cover check vacuous
+                // and the soldier deploys prone in the open next to usable
+                // cover (the stranded-MG wander).
+                tacticalCovers = reusableScored;
             }
             Optional<DefensivePositionCandidate.ProneFiringCandidate> prone =
                 DefensivePositionSelector.selectProne(soldier, soldier.getTarget(), getThreats(), tacticalCovers,

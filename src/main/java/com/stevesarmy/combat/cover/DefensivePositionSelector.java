@@ -65,6 +65,10 @@ public final class DefensivePositionSelector {
     private static String getSafetyGateReason(SoldierEntity soldier, @Nullable LivingEntity target,
                                                CombatGoalController combatGoal) {
         if (soldier.hasValidPingMoveTarget()) return "movement_command";
+        // A prone lane is an open-ground firing position, never a response to
+        // incoming fire: suppressed soldiers must reach cover, not lie down
+        // where they stand.
+        if (soldier.getCoverBehaviorManager().isSuppressed()) return "suppressed";
         if (target != null && target.isAlive() && soldier.distanceTo(target) <= 10.0) return "close_target";
         for (LivingEntity other : combatGoal.getPotentialTargets()) {
             if (other != target && other.isAlive() && !soldier.isFriendlyTo(other)
