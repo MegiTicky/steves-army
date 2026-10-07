@@ -173,14 +173,14 @@ re-bakes the shadow), `danger_multi_squad_budget` (two squads share the
 budget), `danger_path_detour` (an attacking AT routes along the wall's
 shadow lane instead of the exposed diagonal).
 
-Consumers (stage 2a/2b): the cover scorer subtracts
-`dangerCoverWeight × danger/100` per candidate and the claim gate drops
-candidates hotter than `dangerClaimMaxScore` while any known candidate is
-cooler; pathfinding adds `roleWeight × danger/100` to corridor cells for
-AT (4.0) and SUPPORT (6.0) — sync paths included (SupportDutyController's
-direct createPath calls run the same corridor pipeline). Cell resolution
-note: the map evaluates cell centers, not exact slots — slot-exact
-protection stays with CoverQualityEvaluator's cone check.
+Consumers (stage 2b, pathfinding only): pathfinding adds
+`roleWeight × danger/100` to corridor cells — graded per role (rifleman
+1.5, machine gunner 3.0, garrison 2.0, AT 4.0, support 6.0) — sync paths
+included (SupportDutyController's direct createPath calls run the same
+corridor pipeline). The stage-2a cover-scoring danger term + claim gate
+were REVERTED (2d803ba): cover selection reads nothing from the map
+(doctrine: the danger map is "prefer safer path", never "safer cover");
+the `dangerCoverWeight`/`dangerClaimMaxScore` config keys no longer exist.
 
 `sweepLeftoverFixtureBlocks` removes fixture-palette blocks left above
 Y_BASE by crashed sessions at startup — strays poison every heightmap

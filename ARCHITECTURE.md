@@ -1230,11 +1230,13 @@ global per-tick ray budget. Driven from `SoldierEntity.tick` (first member
 per squad does the work); the threat view refreshes every 10t from
 `SquadThreatIntel` and invalidates baked cells on threat death or drift.
 
-Consumers: the cover scorer subtracts a danger term and the claim gate
-refuses hotter candidates while cooler ones exist (`CoverFinder`, mirrored
-in the pure async pilot); AT and SUPPORT pathfinding pay a corridor danger
-cost (`DangerCorridor` captured on the server thread, applied in
-`AsyncSoldierPathfinder`'s A* and its synchronous branch). The map is
+Consumers: pathfinding only. Every combat role pays a corridor danger cost
+(`DangerCorridor` captured on the server thread, applied in
+`AsyncSoldierPathfinder`'s A* and its synchronous branch; graded weights —
+rifleman 1.5, machine gunner 3.0, garrison 2.0, anti-tank 4.0, support 6.0,
+vehicle crew exempt). Cover scoring deliberately reads nothing from the
+map: the earlier danger term + claim gate were reverted (2d803ba) — the
+map is "prefer safer path" intelligence, not a cover veto. The map is
 pure intelligence: with all consumer weights at 0 it changes no behavior.
 Verification lives in the sim harness (see SIM_HARNESS.md): an independent
 vanilla-clip oracle recomputes every cell and the suite fails on
