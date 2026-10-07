@@ -41,6 +41,9 @@ public final class DangerMapDebugRenderer {
 
         Tesselator tesselator = Tesselator.getInstance();
         BufferBuilder buf = tesselator.getBuilder();
+        // the pose matrix carries the camera rotation — raw vertices would draw
+        // the overlay glued to one view direction instead of the world
+        org.joml.Matrix4f matrix = poseStack.last().pose();
         buf.begin(VertexFormat.Mode.QUADS, DefaultVertexFormat.POSITION_COLOR);
 
         for (DangerMapDebugPacket.Cell cell : ClientDangerMapDebugData.INSTANCE.cells()) {
@@ -48,11 +51,11 @@ public final class DangerMapDebugRenderer {
             float alpha;
             if (cell.eyeExposed()) {
                 alpha = (float) (0.10 + 0.30 * cell.score() / 100.0);
-                color(buf, cam, pos, 255, 60, 40, alpha);
+                color(buf, matrix, cam, pos, 255, 60, 40, alpha);
             } else if (cell.legExposed()) {
-                color(buf, cam, pos, 255, 170, 60, 0.22f);
+                color(buf, matrix, cam, pos, 255, 170, 60, 0.22f);
             } else {
-                color(buf, cam, pos, 80, 255, 140, 0.07f);
+                color(buf, matrix, cam, pos, 80, 255, 140, 0.07f);
             }
         }
         tesselator.end();
@@ -64,7 +67,7 @@ public final class DangerMapDebugRenderer {
                 BlockPos pos = BlockPos.of(cell.packedPos());
                 float intensity = cell.score() / 100.0f;
                 float alpha = 0.10f + 0.30f * intensity;
-                color(buf, cam, pos, 60, 140, 255, alpha);
+                color(buf, matrix, cam, pos, 60, 140, 255, alpha);
             }
         }
         tesselator.end();
@@ -94,17 +97,18 @@ public final class DangerMapDebugRenderer {
     }
 
     /** One axis-aligned ground quad covering the 2x2 cell whose min corner is {@code pos}. */
-    private static void color(BufferBuilder buf, Vec3 cam, BlockPos pos,
+    private static void color(BufferBuilder buf, org.joml.Matrix4f matrix, Vec3 cam, BlockPos pos,
                               int r, int g, int b, float alpha) {
-        double x1 = pos.getX() - cam.x;
-        double y = pos.getY() + 0.05 - cam.y;
-        double z1 = pos.getZ() - cam.z;
-        double x2 = x1 + 2;
-        double z2 = z1 + 2;
-        buf.vertex(x1, y, z1).color(r, g, b, (int) (alpha * 255)).endVertex();
-        buf.vertex(x1, y, z2).color(r, g, b, (int) (alpha * 255)).endVertex();
-        buf.vertex(x2, y, z2).color(r, g, b, (int) (alpha * 255)).endVertex();
-        buf.vertex(x2, y, z1).color(r, g, b, (int) (alpha * 255)).endVertex();
+        float x1 = (float) (pos.getX() - cam.x);
+        float y = (float) (pos.getY() + 0.05 - cam.y);
+        float z1 = (float) (pos.getZ() - cam.z);
+        float x2 = x1 + 2;
+        float z2 = z1 + 2;
+        int a = (int) (alpha * 255);
+        buf.vertex(matrix, x1, y, z1).color(r, g, b, a).endVertex();
+        buf.vertex(matrix, x1, y, z2).color(r, g, b, a).endVertex();
+        buf.vertex(matrix, x2, y, z2).color(r, g, b, a).endVertex();
+        buf.vertex(matrix, x2, y, z1).color(r, g, b, a).endVertex();
     }
 
     private static void renderThreatMarker(PoseStack poseStack, Vec3 cam, DangerMapDebugPacket.Threat threat) {
@@ -112,15 +116,16 @@ public final class DangerMapDebugRenderer {
         if (mc.font == null) return;
 
         // vertical tick at the origin
+        org.joml.Matrix4f matrix = poseStack.last().pose();
         Tesselator tesselator = Tesselator.getInstance();
         BufferBuilder buf = tesselator.getBuilder();
         buf.begin(VertexFormat.Mode.DEBUG_LINES, DefaultVertexFormat.POSITION_COLOR);
-        double x = threat.pos().x - cam.x;
-        double y1 = threat.pos().y - cam.y;
-        double y2 = y1 + 1.2;
+        float x = (float) (threat.pos().x - cam.x);
+        float y1 = (float) (threat.pos().y - cam.y);
+        float y2 = y1 + 1.2f;
         int lineColor = threat.hardTarget() ? 0xFFFF3030 : 0xFFFF8030;
-        buf.vertex(x, y1, threat.pos().z - cam.z).color(lineColor).endVertex();
-        buf.vertex(x, y2, threat.pos().z - cam.z).color(lineColor).endVertex();
+        buf.vertex(matrix, x, y1, (float) (threat.pos().z - cam.z)).color(lineColor).endVertex();
+        buf.vertex(matrix, x, y2, (float) (threat.pos().z - cam.z)).color(lineColor).endVertex();
         tesselator.end();
 
         MultiBufferSource.BufferSource buffers = mc.renderBuffers().bufferSource();
