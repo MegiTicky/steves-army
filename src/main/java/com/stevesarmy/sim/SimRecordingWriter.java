@@ -86,7 +86,7 @@ public final class SimRecordingWriter {
                <tr><td><span class="sq" style="background:#9c8a4d"></span></td><td>half cover</td>
                    <td><span class="sq" style="background:#cfd8e6"></span></td><td>full cover</td></tr>
                <tr><td><span style="color:#ffe066">&mdash;</span></td><td>shot (dot = impact)</td>
-                   <td><span style="display:inline-block;width:14px;height:14px;background:rgba(255,60,40,.35)"></span></td><td>danger (LoS oracle)</td></tr>
+                   <td><span style="display:inline-block;width:14px;height:14px;background:rgba(255,60,40,.35)"></span></td><td>danger (baked map)</td></tr>
                <tr><td><span style="display:inline-block;width:14px;height:14px;background:#4dff88;border-radius:50%"></span></td><td>standing</td>
                    <td><span style="display:inline-block;width:9px;height:9px;background:#4dff88;border-radius:50%"></span></td><td>crouched</td></tr>
                <tr><td><span style="display:inline-block;width:16px;height:7px;background:#4dff88;border-radius:50%"></span></td><td>prone</td>

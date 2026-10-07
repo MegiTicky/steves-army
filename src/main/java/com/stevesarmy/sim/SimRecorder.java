@@ -57,6 +57,19 @@ public final class SimRecorder {
         }
     }
 
+    /**
+     * Live-map overlay for scenarios with no injected threats: the squad's
+     * actual baked danger cells, appended to the same tint layer so the
+     * animation shows the real gradient the soldiers acted on.
+     */
+    public void addDangerOverlayCells(java.util.List<com.stevesarmy.squad.SquadDangerMap.NearCell> cells) {
+        for (com.stevesarmy.squad.SquadDangerMap.NearCell cell : cells) {
+            if (cell.score() < 0.5) continue;
+            dangerOverlay.add("[" + num(cell.centerX()) + "," + num(cell.centerZ()) + ","
+                + (int) Math.round(cell.score()) + "]");
+        }
+    }
+
     /** One fired round, drawn as a tracer for the frame being built. */
     public void shot(double fromX, double fromZ, double toX, double toZ) {
         shots.add("[" + num(fromX) + "," + num(fromZ) + "," + num(toX) + "," + num(toZ) + "]");

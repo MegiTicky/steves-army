@@ -47,10 +47,12 @@ public final class SimManager {
      * Vertical spacing between scenario fixtures. Chunks are full columns, so
      * this only separates the fixtures in the air — the registry must fit
      * under the y=320 build limit: Y_BASE + (registry size - 1) * spacing
-     * &lt; 320. At 31 scenarios that means 5Y (160 + 30*5 = 310); fixtures are
-     * 4Y tall (floor + 3-high rim), so 5Y leaves one clear block of air.
+     * &lt; 320. At 33 scenarios that means 4Y (160 + 32*4 = 288, rim tops 290);
+     * fixtures are 4Y tall (floor + 3-high rim), so 4Y stacks them exactly
+     * edge to edge — no air gap, but nothing crosses the build limit and no
+     * fixture overlaps another.
      */
-    private static final int Y_SEPARATION = 5;
+    private static final int Y_SEPARATION = 4;
     private static final List<SimDetector> DETECTORS = StandardDetectors.all();
 
     private enum Phase { IDLE, RUNNING, CLEANUP, DONE }
@@ -404,6 +406,24 @@ public final class SimManager {
                     com.stevesarmy.StevesArmyConfig.getDangerRayBudgetPerTick());
             }
             recorder.setDangerOverlay(result.dangerOracle);
+        } else {
+            // live-source scenario: no oracle exists — export each friendly
+            // squad's actual baked map so the animation shows the real
+            // gradient the soldiers acted on
+            java.util.Set<java.util.UUID> exportedSquads = new java.util.HashSet<>();
+            for (SoldierEntity soldier : context.friendlies) {
+                if (soldier.isRemoved() || soldier.getSquadId() == null) continue;
+                if (!exportedSquads.add(soldier.getSquadId())) continue;
+                com.stevesarmy.squad.SquadData squadData = com.stevesarmy.squad.SquadManager.get(level)
+                    .getSquadById(soldier.getSquadId()).orElse(null);
+                if (squadData == null) continue;
+                com.stevesarmy.squad.SquadDangerMap map = squadData.getDangerMap();
+                net.minecraft.world.phys.Vec3 anchor = map.anchor();
+                if (anchor == null) continue;
+                recorder.addDangerOverlayCells(map.snapshotCells(anchor.x, anchor.z,
+                    com.stevesarmy.StevesArmyConfig.getDangerAmbientRadius(),
+                    level.getGameTime(), 1000));
+            }
         }
 
         for (SimDetector detector : DETECTORS) {

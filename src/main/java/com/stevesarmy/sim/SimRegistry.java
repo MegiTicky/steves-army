@@ -51,7 +51,8 @@ public final class SimRegistry {
             dangerDecayReal(),
             dangerShiftReal(),
             dangerMultiSquadBudget(),
-            dangerPathDetour());
+            dangerPathDetour(),
+            dangerDetourLive());
     }
 
     public static SimScenario byName(String name) {
@@ -1422,6 +1423,87 @@ public final class SimRegistry {
                 hunter.setAttackTarget(ctx.terrain.at(42, 0, 8));
                 hunter.setHoldPosition(ctx.terrain.at(42, 0, 8));
             })
+            .assertThat("hunter reaches the objective (within 8 blocks by t760)",
+                view -> {
+                    java.util.List<SimSample> series = view.timeline().series("hunter");
+                    if (series.isEmpty()) return false;
+                    SimSample last = series.get(series.size() - 1);
+                    return last.state.position != null
+                        && last.state.position.distanceTo(new Vec3(42.5, 160, 8.5)) < 8.0;
+                })
+            .assertThat("approach stays in shadow (>=50% of travel samples read danger <= 50)",
+                view -> {
+                    java.util.List<SimSample> series = view.timeline().series("hunter");
+                    long enRoute = series.stream()
+                        .filter(s -> s.tick >= 40 && s.tick <= 720 && s.dangerAtSoldier >= 0).count();
+                    long lowDanger = series.stream()
+                        .filter(s -> s.tick >= 40 && s.tick <= 620 && s.dangerAtSoldier >= 0
+                            && s.dangerAtSoldier <= 50).count();
+                    return enRoute >= 20 && lowDanger * 100 >= enRoute * 50;
+                })
+            .build();
+    }
+
+    /**
+     * LIVE-source variant of danger_path_detour: identical wall footprint and
+     * identical routing/arrival assertions, but the danger gradient is fed by
+     * real combat instead of an injected intel sighting — a real enemy entity,
+     * a real spotter squadmate whose own detection writes the shared squad
+     * intel, and the per-squad map bakes from that live sighting stream.
+     *
+     * <p>Geometry lessons from the first three drafts: a spotter docked behind
+     * full cover loses LoS and the sighting ages out after 200 ticks (the map
+     * clears — correct staleness behavior, wrong test geometry); a free enemy
+     * converges on whatever it can see, including down the AT's own shadow
+     * lane (the corridor is symmetric — enemies route on danger too); and
+     * hard cover near the enemy lures the friendly cover pilot into docking
+     * on the enemy's own walls (far-side blocks score as "blocks the threat
+     * line"). So the wall's north six blocks are HALF height: the spotter
+     * docks behind them with peek-over LoS that never breaks, the enemy's
+     * engagement-range stop parks it east of the wall, and no cover exists
+     * near the nest to lure anyone. Guns stay absent so the A/B against
+     * danger_path_detour isolates exactly the threat-source variable. This is
+     * also the first danger scenario whose animation draws the threat: real
+     * entities are recorded, injected sightings are not.
+     */
+    private static SimScenario dangerDetourLive() {
+        return SimScenario.builder("danger_detour_live")
+            .description("PATHFINDING (anti-tank, LIVE intel): the danger gradient comes from a real enemy "
+                + "entity, not an injected sighting. A spotter behind the wall's half-height north section "
+                + "holds peek-over LoS and its detections feed the shared squad map; the AT must still take "
+                + "the full-height west-face shadow lane on its covered approach and arrive.")
+            .duration(800)
+            .terrain(t -> {
+                t.platform();
+                // one long wall: the west face is a connected shadow lane from the
+                // spawn to the north end; everything east of it is exposed.
+                // North six blocks are HALF height: the spotter's peek-over post
+                // (eye rays clear, leg rays blocked), keeping its LoS alive.
+                t.coverRow(24, 18, 24, 34, 3);
+                t.coverRow(24, 12, 24, 17, 1);
+            })
+            .setup(ctx -> {
+                ctx.spawnAnchor(6, 0, 42);
+                com.stevesarmy.entity.SoldierEntity hunter = ctx.spawnFriendly(
+                    ModEntities.ANTI_TANK.get(), "hunter", 8, 0, 40, SquadMode.HOLD);
+                // two-man squad = the real friendliness chain: the spotter's own
+                // detection writes shared squad intel, which is what bakes the map
+                // the hunter's corridor cost reads
+                ctx.spawnFriendly(ModEntities.SOLDIER.get(), "spotter", 22, 0, 14, SquadMode.HOLD);
+                // real enemy east of the wall; its engagement-range stop parks it
+                // 8-9 blocks from the spotter's last-known position, off the route
+                ctx.spawnEnemy(34, 0, 16);
+                // ATTACK objective east of the wall - the direct line crosses exposed ground
+                hunter.setAttackTarget(ctx.terrain.at(42, 0, 8));
+                hunter.setHoldPosition(ctx.terrain.at(42, 0, 8));
+            })
+            .assertThat("live loop: squad map reads danger > 20 at the spotter by t150",
+                view -> {
+                    java.util.List<SimSample> series = view.timeline().series("spotter");
+                    return series.stream()
+                        .filter(s -> s.tick >= 40 && s.tick <= 150)
+                        .anyMatch(s -> s.dangerAtSoldier > 20);
+                })
             .assertThat("hunter reaches the objective (within 8 blocks by t760)",
                 view -> {
                     java.util.List<SimSample> series = view.timeline().series("hunter");
