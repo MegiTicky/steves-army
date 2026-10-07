@@ -72,7 +72,8 @@ public final class DangerMapDebugManager {
 
     public static void sendSnapshot(ServerPlayer player) {
         if (!SUBSCRIBERS.contains(player.getUUID())) {
-            NetworkHandler.sendTo(player, new DangerMapDebugPacket(false, List.of(), List.of()));
+            NetworkHandler.sendTo(player, new DangerMapDebugPacket(false, List.of(), List.of(),
+                List.of(), new DangerMapDebugPacket.Stats(0, 0, 0, 0)));
             return;
         }
         ServerLevel level = player.serverLevel();
@@ -80,10 +81,12 @@ public final class DangerMapDebugManager {
         Vec3 center = player.position();
 
         Set<UUID> squadIds = new HashSet<>();
+        List<SoldierEntity> soldiersNear = new ArrayList<>();
         for (SoldierEntity soldier : level.getEntitiesOfClass(SoldierEntity.class,
                 player.getBoundingBox().inflate(SOLDIER_SCAN_RADIUS), SoldierEntity::isAlive)) {
             if (soldier.getSquadId() != null) {
                 squadIds.add(soldier.getSquadId());
+                soldiersNear.add(soldier);
             }
         }
 
@@ -107,6 +110,40 @@ public final class DangerMapDebugManager {
                     new Vec3(threat.x(), threat.y(), threat.z()), threat.weight(), threat.hardTarget()));
             }
         }
-        NetworkHandler.sendTo(player, new DangerMapDebugPacket(true, cells, threats));
+
+        // pathfinding corridors: the most recent capture per soldier, nearest
+        // soldiers first, so the overlay shows the costs the CURRENT plan used
+        soldiersNear.sort(java.util.Comparator.comparingDouble(s -> s.distanceToSqr(center)));
+        List<DangerMapDebugPacket.Corridor> corridors = new ArrayList<>();
+        for (SoldierEntity soldier : soldiersNear) {
+            if (corridors.size() >= 4) break;
+            com.stevesarmy.entity.ai.pathfinding.DangerCorridor.CorridorDebug debug =
+                com.stevesarmy.entity.ai.pathfinding.DangerCorridor.debugFor(soldier.getUUID());
+            if (debug == null || gameTime - debug.gameTime() > 60) continue;
+            SquadDangerMap squadMap = SquadManager.get(level).getSquadById(soldier.getSquadId())
+                .map(SquadData::getDangerMap).orElse(null);
+            List<DangerMapDebugPacket.Cell> corridorCells = new ArrayList<>();
+            for (java.util.Map.Entry<Long, Float> entry : debug.cellDanger().entrySet()) {
+                if (corridorCells.size() >= 256) break;
+                long key = entry.getKey();
+                int cx = (int) (key >> 32);
+                int cz = (int) (key << 32 >> 32);
+                SquadDangerMap.Cell mapCell = squadMap != null
+                    ? squadMap.cellAt(cx * 2.0 + 1.0, cz * 2.0 + 1.0, gameTime) : null;
+                int surfaceY = mapCell != null ? mapCell.surfaceY : soldier.blockPosition().getY();
+                long packed = new BlockPos(cx * 2, surfaceY, cz * 2).asLong();
+                corridorCells.add(new DangerMapDebugPacket.Cell(packed,
+                    Math.round(entry.getValue() * 100.0f), false, false));
+            }
+            if (corridorCells.isEmpty()) continue;
+            corridors.add(new DangerMapDebugPacket.Corridor(debug.target(), debug.roleWeight(),
+                corridorCells));
+        }
+
+        DangerMapDebugPacket.Stats stats = new DangerMapDebugPacket.Stats(
+            cells.size(), threats.size(),
+            SquadDangerMap.debugMaxRaysUsedPerTick(),
+            com.stevesarmy.StevesArmyConfig.getDangerRayBudgetPerTick());
+        NetworkHandler.sendTo(player, new DangerMapDebugPacket(true, cells, threats, corridors, stats));
     }
 }

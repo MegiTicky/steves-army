@@ -10,6 +10,9 @@ public final class ClientDangerMapDebugData {
     private volatile boolean renderEnabled;
     private volatile List<DangerMapDebugPacket.Cell> cells = List.of();
     private volatile List<DangerMapDebugPacket.Threat> threats = List.of();
+    private volatile List<DangerMapDebugPacket.Corridor> corridors = List.of();
+    private volatile DangerMapDebugPacket.Stats stats =
+        new DangerMapDebugPacket.Stats(0, 0, 0, 0);
 
     private ClientDangerMapDebugData() {}
 
@@ -17,15 +20,21 @@ public final class ClientDangerMapDebugData {
         renderEnabled = packet.renderEnabled();
         cells = packet.cells();
         threats = packet.threats();
+        corridors = packet.corridors();
+        stats = packet.stats();
     }
 
     public boolean renderEnabled() { return renderEnabled; }
     public List<DangerMapDebugPacket.Cell> cells() { return cells; }
     public List<DangerMapDebugPacket.Threat> threats() { return threats; }
+    public List<DangerMapDebugPacket.Corridor> corridors() { return corridors; }
+    public DangerMapDebugPacket.Stats stats() { return stats; }
 
     public void clear() {
         renderEnabled = false;
         cells = List.of();
         threats = List.of();
+        corridors = List.of();
+        stats = new DangerMapDebugPacket.Stats(0, 0, 0, 0);
     }
 }

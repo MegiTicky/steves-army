@@ -1,6 +1,7 @@
 package com.stevesarmy.network;
 
 import com.stevesarmy.client.ClientDangerMapDebugData;
+import net.minecraft.core.BlockPos;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.api.distmarker.Dist;
@@ -19,20 +20,37 @@ import java.util.function.Supplier;
 public final class DangerMapDebugPacket {
     private static final int MAX_CELLS = 2048;
     private static final int MAX_THREATS = 24;
+    private static final int MAX_CORRIDORS = 4;
+    private static final int MAX_CORRIDOR_CELLS = 256;
 
     /** Cell center at the standing surface: (cx*2+1, surfaceY, cz*2+1) packed via BlockPos.asLong. */
     public record Cell(long packedPos, int score, boolean eyeExposed, boolean legExposed) {}
 
     public record Threat(Vec3 pos, float weight, boolean hardTarget) {}
 
+    /**
+     * One soldier's last captured pathfinding corridor: sampled cells (same
+     * packing as {@link Cell}, {@code score} = danger multiplier 0-100) plus
+     * the route target and the role weight applied to it in A*.
+     */
+    public record Corridor(BlockPos target, float weight, List<Cell> cells) {}
+
+    /** Per-subscriber bake stats for a quick MSPT sanity check. */
+    public record Stats(int cells, int threats, int raysLastTick, int rayBudget) {}
+
     private final boolean renderEnabled;
     private final List<Cell> cells;
     private final List<Threat> threats;
+    private final List<Corridor> corridors;
+    private final Stats stats;
 
-    public DangerMapDebugPacket(boolean renderEnabled, List<Cell> cells, List<Threat> threats) {
+    public DangerMapDebugPacket(boolean renderEnabled, List<Cell> cells, List<Threat> threats,
+                                List<Corridor> corridors, Stats stats) {
         this.renderEnabled = renderEnabled;
         this.cells = List.copyOf(cells);
         this.threats = List.copyOf(threats);
+        this.corridors = List.copyOf(corridors);
+        this.stats = stats;
     }
 
     public DangerMapDebugPacket(FriendlyByteBuf buf) {
@@ -51,13 +69,27 @@ public final class DangerMapDebugPacket {
             decodedThreats.add(new Threat(readVec(buf), buf.readFloat(), buf.readBoolean()));
         }
         threats = List.copyOf(decodedThreats);
+
+        int corridorCount = Math.min(buf.readVarInt(), MAX_CORRIDORS);
+        List<Corridor> decodedCorridors = new ArrayList<>(corridorCount);
+        for (int i = 0; i < corridorCount; i++) {
+            BlockPos target = buf.readBlockPos();
+            float weight = buf.readFloat();
+            int corridorCellCount = Math.min(buf.readVarInt(), MAX_CORRIDOR_CELLS);
+            List<Cell> corridorCells = new ArrayList<>(corridorCellCount);
+            for (int j = 0; j < corridorCellCount; j++) {
+                corridorCells.add(new Cell(buf.readLong(), buf.readUnsignedByte(), false, false));
+            }
+            decodedCorridors.add(new Corridor(target, weight, List.copyOf(corridorCells)));
+        }
+        corridors = List.copyOf(decodedCorridors);
+        stats = new Stats(buf.readVarInt(), buf.readVarInt(), buf.readVarInt(), buf.readVarInt());
     }
 
     public static void encode(DangerMapDebugPacket packet, FriendlyByteBuf buf) {
         buf.writeBoolean(packet.renderEnabled);
         buf.writeVarInt(Math.min(packet.cells.size(), MAX_CELLS));
-        for (int i = 0; i < packet.cells.size() && i < MAX_CELLS; i++) {
-            Cell cell = packet.cells.get(i);
+        for (Cell cell : packet.cells) {
             buf.writeLong(cell.packedPos());
             buf.writeByte(Math.max(0, Math.min(100, cell.score())));
             buf.writeBoolean(cell.eyeExposed());
@@ -70,6 +102,22 @@ public final class DangerMapDebugPacket {
             buf.writeFloat(threat.weight());
             buf.writeBoolean(threat.hardTarget());
         }
+        buf.writeVarInt(Math.min(packet.corridors.size(), MAX_CORRIDORS));
+        for (int i = 0; i < packet.corridors.size() && i < MAX_CORRIDORS; i++) {
+            Corridor corridor = packet.corridors.get(i);
+            buf.writeBlockPos(corridor.target());
+            buf.writeFloat(corridor.weight());
+            buf.writeVarInt(Math.min(corridor.cells().size(), MAX_CORRIDOR_CELLS));
+            for (int j = 0; j < corridor.cells().size() && j < MAX_CORRIDOR_CELLS; j++) {
+                Cell cell = corridor.cells().get(j);
+                buf.writeLong(cell.packedPos());
+                buf.writeByte(Math.max(0, Math.min(100, cell.score())));
+            }
+        }
+        buf.writeVarInt(packet.stats.cells());
+        buf.writeVarInt(packet.stats.threats());
+        buf.writeVarInt(packet.stats.raysLastTick());
+        buf.writeVarInt(packet.stats.rayBudget());
     }
 
     public static void handle(DangerMapDebugPacket packet, Supplier<NetworkEvent.Context> ctx) {
@@ -81,6 +129,8 @@ public final class DangerMapDebugPacket {
     public boolean renderEnabled() { return renderEnabled; }
     public List<Cell> cells() { return cells; }
     public List<Threat> threats() { return threats; }
+    public List<Corridor> corridors() { return corridors; }
+    public Stats stats() { return stats; }
 
     private static void writeVec(FriendlyByteBuf buf, Vec3 value) {
         buf.writeDouble(value.x);

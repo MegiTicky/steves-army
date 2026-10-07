@@ -43,6 +43,23 @@ public final class DangerCorridor {
         this.roleWeight = roleWeight;
     }
 
+    /** Debug snapshot of one soldier's last captured corridor, for the /stevesarmy_debug dangermap overlay. */
+    public record CorridorDebug(long gameTime, float roleWeight, BlockPos target,
+                                java.util.Map<Long, Float> cellDanger) {}
+
+    private static final java.util.Map<java.util.UUID, CorridorDebug> LAST_CORRIDORS =
+        new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** Last corridor captured for this soldier, or null. Entries age out; callers must check recency. */
+    @Nullable
+    public static CorridorDebug debugFor(java.util.UUID soldierId) {
+        return LAST_CORRIDORS.get(soldierId);
+    }
+
+    public static void resetForSim() {
+        LAST_CORRIDORS.clear();
+    }
+
     @Nullable
     public static DangerCorridor capture(ServerLevel level, Mob mob, Set<BlockPos> targets, long gameTime) {
         if (!(mob instanceof SoldierEntity soldier) || targets.isEmpty()) return null;
@@ -63,6 +80,8 @@ public final class DangerCorridor {
             sampleSegment(level, map, captured, origin, target, gameTime, squad.getThreatIntel(), rayAllowance);
         }
         if (captured.isEmpty()) return null;
+        LAST_CORRIDORS.put(soldier.getUUID(), new CorridorDebug(gameTime, weight,
+            targets.iterator().next(), new java.util.HashMap<>(captured)));
         return new DangerCorridor(captured, weight);
     }
 

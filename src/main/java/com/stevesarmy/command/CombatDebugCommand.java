@@ -375,7 +375,7 @@ public class CombatDebugCommand {
              "  mg evaluate [entity] - Evaluate MG firing-position pipeline (read-only)\n" +
              "  armor [off|minimal|verbose] - Toggle armor-doctrine debug render\n" +
             "  suppressping [on|off] - Toggle the suppress-ping debug render\n" +
-            "  dangermap [on|off]  - Toggle the danger-map overlay\n" +
+            "  dangermap [on|off]  - Danger-map overlay: baked cells (red=eye-exposed, orange=leg-only, green=shadow), blue=path corridors, threat markers, bake stats\n" +
              "  armor <entity>      - Print one soldier's armor-doctrine role/gates\n" +
              "  metrics [on|off|reset] - Collect/show opt-in performance counters\n" +
             "  log cover [on|off]  - Toggle cover behavior logging\n" +

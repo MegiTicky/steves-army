@@ -25,6 +25,8 @@ public final class SimIsolation {
         SimGunHandler.resetForSim();
         // per-tick danger-ray budget telemetry is per-scenario
         com.stevesarmy.squad.SquadDangerMap.resetForSim();
+        // last-corridor overlay snapshots must not leak between soldiers/scenarios
+        com.stevesarmy.entity.ai.pathfinding.DangerCorridor.resetForSim();
         // stale raytrace caches from the previous fixture's geometry must not
         // leak into the next scenario's LoS results
         com.stevesarmy.combat.VisibilityRay.invalidateCache(level);

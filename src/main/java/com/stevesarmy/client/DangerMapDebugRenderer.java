@@ -57,9 +57,36 @@ public final class DangerMapDebugRenderer {
         }
         tesselator.end();
 
+        // pathfinding corridors: blue tint over the map, alpha by danger x weight
+        buf.begin(VertexFormat.Mode.QUADS, DefaultVertexFormat.POSITION_COLOR);
+        for (DangerMapDebugPacket.Corridor corridor : ClientDangerMapDebugData.INSTANCE.corridors()) {
+            for (DangerMapDebugPacket.Cell cell : corridor.cells()) {
+                BlockPos pos = BlockPos.of(cell.packedPos());
+                float intensity = cell.score() / 100.0f;
+                float alpha = 0.10f + 0.30f * intensity;
+                color(buf, cam, pos, 60, 140, 255, alpha);
+            }
+        }
+        tesselator.end();
+
         for (DangerMapDebugPacket.Threat threat : ClientDangerMapDebugData.INSTANCE.threats()) {
             renderThreatMarker(poseStack, cam, threat);
         }
+
+        MultiBufferSource.BufferSource buffers = mc.renderBuffers().bufferSource();
+        for (DangerMapDebugPacket.Corridor corridor : ClientDangerMapDebugData.INSTANCE.corridors()) {
+            String label = "corridor w=" + String.format("%.1f", corridor.weight())
+                + " (" + corridor.cells().size() + " cells)";
+            billboard(mc.font, poseStack, cam, Vec3.atLowerCornerOf(corridor.target()).add(0, 1.2, 0),
+                label, 0xFF70B0FF, buffers);
+        }
+        DangerMapDebugPacket.Stats stats = ClientDangerMapDebugData.INSTANCE.stats();
+        Vec3 playerTop = mc.player.position().add(0, 3.1, 0);
+        billboard(mc.font, poseStack, cam, playerTop,
+            "dangermap: " + stats.cells() + " cells | " + stats.threats() + " threats | rays "
+                + stats.raysLastTick() + "/" + stats.rayBudget() + "t",
+            0xFFE0E0E0, buffers);
+        buffers.endBatch();
 
         RenderSystem.enableCull();
         RenderSystem.disableBlend();
