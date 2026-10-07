@@ -88,11 +88,15 @@ public final class SimManager {
         com.stevesarmy.debug.DiagnosticLogManager.setCoverScoreLoggingEnabled(
             Boolean.getBoolean("sim.coverlog"));
         List<SimScenario> scenarios = SimRegistry.all();
-        // Optional single-scenario filter for fast iteration: -Dsim.scenario=<name>
+        // Optional scenario filter for fast iteration: -Dsim.scenario=<name>[,<name>...]
+        // (a server boot costs minutes; one boot can serve several scenarios)
         String only = System.getProperty("sim.scenario", "");
         if (!only.isEmpty()) {
+            java.util.Set<String> wanted = java.util.Arrays.stream(only.split(","))
+                .map(String::trim).filter(s -> !s.isEmpty())
+                .collect(java.util.stream.Collectors.toSet());
             scenarios = scenarios.stream()
-                .filter(s -> s.name.equals(only))
+                .filter(s -> wanted.contains(s.name))
                 .toList();
             if (scenarios.isEmpty()) {
                 StevesArmyMod.LOGGER.error("[Sim] sim.scenario='{}' matches no registered scenario", only);
