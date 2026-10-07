@@ -106,11 +106,13 @@ public class CombatDebugCommand {
 
             // === DANGER MAP ===
             .then(Commands.literal("dangermap")
-                .executes(ctx -> setDangerMapDebug(ctx, true))
+                .executes(ctx -> setDangerMapDebug(ctx, true, false))
                 .then(Commands.literal("on")
-                    .executes(ctx -> setDangerMapDebug(ctx, true)))
+                    .executes(ctx -> setDangerMapDebug(ctx, true, false)))
+                .then(Commands.literal("all")
+                    .executes(ctx -> setDangerMapDebug(ctx, true, true)))
                 .then(Commands.literal("off")
-                    .executes(ctx -> setDangerMapDebug(ctx, false))))
+                    .executes(ctx -> setDangerMapDebug(ctx, false, false))))
 
             // === COVER STATE MACHINE ===
             .then(Commands.literal("coverstate")
@@ -375,7 +377,7 @@ public class CombatDebugCommand {
              "  mg evaluate [entity] - Evaluate MG firing-position pipeline (read-only)\n" +
              "  armor [off|minimal|verbose] - Toggle armor-doctrine debug render\n" +
             "  suppressping [on|off] - Toggle the suppress-ping debug render\n" +
-            "  dangermap [on|off]  - Danger-map overlay: baked cells (red=eye-exposed, orange=leg-only, green=shadow), blue=path corridors, threat markers, bake stats\n" +
+            "  dangermap [on|off|all] - Danger-map overlay for YOUR squads ('all' includes enemy/other players'): baked cells (red=eye-exposed, orange=leg-only, green=shadow), blue=path corridors, threat markers, bake stats\n" +
              "  armor <entity>      - Print one soldier's armor-doctrine role/gates\n" +
              "  metrics [on|off|reset] - Collect/show opt-in performance counters\n" +
             "  log cover [on|off]  - Toggle cover behavior logging\n" +
@@ -1131,15 +1133,16 @@ public class CombatDebugCommand {
         return 1;
     }
 
-    private static int setDangerMapDebug(CommandContext<CommandSourceStack> context, boolean enabled) {
+    private static int setDangerMapDebug(CommandContext<CommandSourceStack> context, boolean enabled,
+                                         boolean showAllSquads) {
         CommandSourceStack source = context.getSource();
         if (!(source.getEntity() instanceof ServerPlayer player)) {
             source.sendFailure(Component.literal("Player only command"));
             return 0;
         }
-        com.stevesarmy.combat.DangerMapDebugManager.setEnabled(player, enabled);
+        com.stevesarmy.combat.DangerMapDebugManager.setEnabled(player, enabled, showAllSquads);
         source.sendSuccess(() -> Component.literal("Danger map debug render: "
-            + (enabled ? "ON" : "OFF")), false);
+            + (enabled ? (showAllSquads ? "ON (all squads)" : "ON (my squads)") : "OFF")), false);
         return 1;
     }
 

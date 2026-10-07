@@ -19,10 +19,14 @@ import java.util.Set;
 
 /**
  * Server-thread capture of danger costs along a requested path's corridor,
- * consumed by the async A* cost line on the worker thread. Doctrine: AT and
- * SUPPORT route through low-danger ground (the AT approaches hard targets
- * through shadow; support never crosses killing ground), frontline roles
- * cross exposed ground under control and get no malus in this stage.
+ * consumed by the async A* cost line on the worker thread. Doctrine: every
+ * role gets a graded avoidance weight — SUPPORT strongest (logistics never
+ * crosses killing ground), then AT (hard targets approached through shadow),
+ * MG (base-of-fire cautious), garrison and rifleman lightest (assault roles
+ * still cross exposed ground when the objective demands it, but prefer
+ * shadow when the detour is cheap). VEHICLE_CREW is exempt (crew move with
+ * their vehicle). The weight applies symmetrically: enemy soldiers run the
+ * same stack and detour around their opponents' kill zones too.
  *
  * <p>Cells within {@code CORRIDOR_WIDTH} of the straight segment to any
  * target are sampled from the squad's live danger map (O(1) lookups, no
@@ -151,7 +155,10 @@ public final class DangerCorridor {
         return switch (role) {
             case ANTI_TANK -> (float) StevesArmyConfig.getDangerPathAntiTankWeight();
             case SUPPORT -> (float) StevesArmyConfig.getDangerPathSupportWeight();
-            default -> 0.0f;
+            case MACHINE_GUNNER -> (float) StevesArmyConfig.getDangerPathMachineGunnerWeight();
+            case GARRISON -> (float) StevesArmyConfig.getDangerPathGarrisonWeight();
+            case RIFLEMAN -> (float) StevesArmyConfig.getDangerPathRiflemanWeight();
+            case VEHICLE_CREW -> 0.0f;
         };
     }
 

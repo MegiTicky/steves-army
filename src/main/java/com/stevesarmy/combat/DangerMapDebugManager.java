@@ -26,7 +26,8 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * Server-side subscriptions and snapshots for the danger-map overlay
  * (/stevesarmy_debug dangermap): the baked cells and active threat views of
- * every squad with soldiers near the subscriber, packed into one packet.
+ * the subscriber's own squads (default) or every squad with soldiers nearby
+ * ({@code dangermap all}), packed into one packet.
  */
 @Mod.EventBusSubscriber(modid = StevesArmyMod.MODID)
 public final class DangerMapDebugManager {
@@ -34,7 +35,8 @@ public final class DangerMapDebugManager {
     private static final int SEND_INTERVAL_TICKS = 10;
     private static final int MAX_CELLS_PER_PLAYER = 2048;
 
-    private static final Set<UUID> SUBSCRIBERS = ConcurrentHashMap.newKeySet();
+    /** playerId → showAllSquads. Default view: only squads owned by the viewing player. */
+    private static final java.util.Map<UUID, Boolean> SUBSCRIBERS = new ConcurrentHashMap<>();
     private static final int LOG_INTERVAL_TICKS = 40;
     private static int sendCountdown = SEND_INTERVAL_TICKS;
     private static int logCountdown = 0;
@@ -42,12 +44,16 @@ public final class DangerMapDebugManager {
     private DangerMapDebugManager() {}
 
     public static boolean isEnabled(UUID playerId) {
-        return SUBSCRIBERS.contains(playerId);
+        return SUBSCRIBERS.containsKey(playerId);
     }
 
     public static boolean setEnabled(ServerPlayer player, boolean enabled) {
+        return setEnabled(player, enabled, false);
+    }
+
+    public static boolean setEnabled(ServerPlayer player, boolean enabled, boolean showAllSquads) {
         if (enabled) {
-            SUBSCRIBERS.add(player.getUUID());
+            SUBSCRIBERS.put(player.getUUID(), showAllSquads);
         } else {
             SUBSCRIBERS.remove(player.getUUID());
         }
@@ -66,14 +72,15 @@ public final class DangerMapDebugManager {
         sendCountdown = 0;
         MinecraftServer server = event.getServer();
         for (ServerPlayer player : server.getPlayerList().getPlayers()) {
-            if (SUBSCRIBERS.contains(player.getUUID())) {
+            if (SUBSCRIBERS.containsKey(player.getUUID())) {
                 sendSnapshot(player);
             }
         }
     }
 
     public static void sendSnapshot(ServerPlayer player) {
-        if (!SUBSCRIBERS.contains(player.getUUID())) {
+        Boolean showAllSquads = SUBSCRIBERS.get(player.getUUID());
+        if (showAllSquads == null) {
             NetworkHandler.sendTo(player, new DangerMapDebugPacket(false, List.of(), List.of(),
                 List.of(), new DangerMapDebugPacket.Stats(0, 0, 0, 0, 0, 0)));
             return;
@@ -84,12 +91,15 @@ public final class DangerMapDebugManager {
 
         Set<UUID> squadIds = new HashSet<>();
         List<SoldierEntity> soldiersNear = new ArrayList<>();
+        boolean mineOnly = !showAllSquads;
         for (SoldierEntity soldier : level.getEntitiesOfClass(SoldierEntity.class,
                 player.getBoundingBox().inflate(SOLDIER_SCAN_RADIUS), SoldierEntity::isAlive)) {
-            if (soldier.getSquadId() != null) {
-                squadIds.add(soldier.getSquadId());
-                soldiersNear.add(soldier);
+            if (soldier.getSquadId() == null) continue;
+            if (mineOnly && !soldier.getOwnerUUID().map(player.getUUID()::equals).orElse(false)) {
+                continue;
             }
+            squadIds.add(soldier.getSquadId());
+            soldiersNear.add(soldier);
         }
 
         List<DangerMapDebugPacket.Cell> cells = new ArrayList<>();

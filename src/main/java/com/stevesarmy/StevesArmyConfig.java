@@ -54,6 +54,9 @@ public class StevesArmyConfig {
     public static final ForgeConfigSpec.IntValue DANGER_CLAIM_MAX_SCORE;
     public static final ForgeConfigSpec.DoubleValue DANGER_PATH_ANTI_TANK_WEIGHT;
     public static final ForgeConfigSpec.DoubleValue DANGER_PATH_SUPPORT_WEIGHT;
+    public static final ForgeConfigSpec.DoubleValue DANGER_PATH_RIFLEMAN_WEIGHT;
+    public static final ForgeConfigSpec.DoubleValue DANGER_PATH_MACHINE_GUNNER_WEIGHT;
+    public static final ForgeConfigSpec.DoubleValue DANGER_PATH_GARRISON_WEIGHT;
 
     public static final ForgeConfigSpec.DoubleValue SPACING_DISTANCE;
 
@@ -431,6 +434,25 @@ public class StevesArmyConfig {
                      "routes through low-danger ground. 0 disables.",
                      "Default: 6.0")
             .defineInRange("dangerPathSupportWeight", 6.0, 0.0, 16.0);
+
+        DANGER_PATH_RIFLEMAN_WEIGHT = BUILDER
+            .comment("Pathfinding danger cost for RIFLEMAN soldiers - lightest avoidance: assault",
+                     "roles cross exposed ground when the objective demands it, but prefer shadow",
+                     "when the detour is cheap. 0 disables.",
+                     "Default: 1.5")
+            .defineInRange("dangerPathRiflemanWeight", 1.5, 0.0, 16.0);
+
+        DANGER_PATH_MACHINE_GUNNER_WEIGHT = BUILDER
+            .comment("Pathfinding danger cost for MACHINE_GUNNER soldiers: base-of-fire doctrine",
+                     "is more cautious than riflemen but still closes to its lane. 0 disables.",
+                     "Default: 3.0")
+            .defineInRange("dangerPathMachineGunnerWeight", 3.0, 0.0, 16.0);
+
+        DANGER_PATH_GARRISON_WEIGHT = BUILDER
+            .comment("Pathfinding danger cost for GARRISON soldiers: mostly stationary, but their",
+                     "occasional repositioning prefers low-danger ground. 0 disables.",
+                     "Default: 2.0")
+            .defineInRange("dangerPathGarrisonWeight", 2.0, 0.0, 16.0);
 
         BUILDER.pop();
 
@@ -1160,6 +1182,18 @@ BUILDER.pop();
 
     public static double getDangerPathSupportWeight() {
         return DANGER_PATH_SUPPORT_WEIGHT.get();
+    }
+
+    public static double getDangerPathRiflemanWeight() {
+        return DANGER_PATH_RIFLEMAN_WEIGHT.get();
+    }
+
+    public static double getDangerPathMachineGunnerWeight() {
+        return DANGER_PATH_MACHINE_GUNNER_WEIGHT.get();
+    }
+
+    public static double getDangerPathGarrisonWeight() {
+        return DANGER_PATH_GARRISON_WEIGHT.get();
     }
 
     public static double getMachineGunnerDetectionDistance() {
