@@ -50,8 +50,6 @@ public class StevesArmyConfig {
     public static final ForgeConfigSpec.IntValue DANGER_CELL_TTL_TICKS;
     public static final ForgeConfigSpec.IntValue DANGER_MAX_THREATS;
     public static final ForgeConfigSpec.DoubleValue DANGER_THREAT_RANGE;
-    public static final ForgeConfigSpec.DoubleValue DANGER_COVER_WEIGHT;
-    public static final ForgeConfigSpec.IntValue DANGER_CLAIM_MAX_SCORE;
     public static final ForgeConfigSpec.DoubleValue DANGER_PATH_ANTI_TANK_WEIGHT;
     public static final ForgeConfigSpec.DoubleValue DANGER_PATH_SUPPORT_WEIGHT;
     public static final ForgeConfigSpec.DoubleValue DANGER_PATH_RIFLEMAN_WEIGHT;
@@ -408,19 +406,6 @@ public class StevesArmyConfig {
             .comment("Threats farther than this from the squad anchor are ignored by the map.",
                      "Default: 96.0 blocks")
             .defineInRange("dangerThreatRange", 96.0, 16.0, 256.0);
-
-        DANGER_COVER_WEIGHT = BUILDER
-            .comment("How strongly the squad danger map re-ranks cover candidates: a fully-exposed",
-                     "slot loses this much score (existing terms sum to ~1.05).",
-                     "Default: 0.35")
-            .defineInRange("dangerCoverWeight", 0.35, 0.0, 1.0);
-
-        DANGER_CLAIM_MAX_SCORE = BUILDER
-            .comment("Claim gate: while any known candidate sits at or below this danger score,",
-                     "hotter candidates are refused for claiming entirely. If every candidate is",
-                     "hotter, the least-dangerous one is taken (no open-field paralysis).",
-                     "Default: 80")
-            .defineInRange("dangerClaimMaxScore", 80, 0, 100);
 
         DANGER_PATH_ANTI_TANK_WEIGHT = BUILDER
             .comment("Pathfinding danger cost for ANTI_TANK soldiers: a fully-exposed corridor cell",
@@ -1166,14 +1151,6 @@ BUILDER.pop();
 
     public static double getDangerThreatRange() {
         return DANGER_THREAT_RANGE.get();
-    }
-
-    public static double getDangerCoverWeight() {
-        return DANGER_COVER_WEIGHT.get();
-    }
-
-    public static int getDangerClaimMaxScore() {
-        return DANGER_CLAIM_MAX_SCORE.get();
     }
 
     public static double getDangerPathAntiTankWeight() {

@@ -60,9 +60,7 @@ public record CoverSearchInput(
         float coverHeight,
         Set<Direction> protectedDirections,
         List<Vec3> firingOrigins,
-        float legacyScore,
-        float dangerScore,
-        boolean dangerLegExposed
+        float legacyScore
     ) {
         public CoverCandidateSnapshot {
             position = position == null ? BlockPos.ZERO : position.immutable();
@@ -71,17 +69,6 @@ public record CoverSearchInput(
             protectedDirections = protectedDirections == null ? Set.of() : Set.copyOf(protectedDirections);
             firingOrigins = firingOrigins == null ? List.of() : firingOrigins.stream()
                 .map(CoverSearchInput::copy).toList();
-            // -1 = unknown (no danger data); never clamp into the 0..100 band
-            dangerScore = dangerScore < -1.0f ? -1.0f : Math.min(dangerScore, 100.0f);
-        }
-
-        /** Back-compat constructor for callers without danger data. */
-        public CoverCandidateSnapshot(BlockPos position, com.stevesarmy.combat.cover.CoverType type,
-                                      float quality, boolean canShootFrom, float coverHeight,
-                                      Set<Direction> protectedDirections, List<Vec3> firingOrigins,
-                                      float legacyScore) {
-            this(position, type, quality, canShootFrom, coverHeight, protectedDirections,
-                firingOrigins, legacyScore, -1.0f, false);
         }
     }
 

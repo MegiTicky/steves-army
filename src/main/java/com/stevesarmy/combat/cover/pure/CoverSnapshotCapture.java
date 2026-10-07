@@ -110,8 +110,7 @@ public final class CoverSnapshotCapture {
                                                                                float score) {
         return new CoverSearchInput.CoverCandidateSnapshot(
             cover.getPosition(), cover.getType(), cover.getQuality(), cover.canShootFrom(),
-            cover.getCoverHeight(), cover.getProtectedDirections(), firingOrigins(level, cover), score,
-            cover.getDangerScore(), cover.isDangerLegExposed());
+            cover.getCoverHeight(), cover.getProtectedDirections(), firingOrigins(level, cover), score);
     }
 
     private static void addCandidateRays(Set<BlockPos> cells,
