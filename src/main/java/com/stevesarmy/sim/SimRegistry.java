@@ -54,7 +54,8 @@ public final class SimRegistry {
             dangerPathDetour(),
             dangerDetourLive(),
             travelRerouteSuppressed(),
-            travelCrawlSuppressed());
+            travelCrawlSuppressed(),
+            coverApproachCrawlSuppressed());
     }
 
     public static SimScenario byName(String name) {
@@ -1564,11 +1565,11 @@ public final class SimRegistry {
                 marcherId[0] = marcher.getUUID();
                 slabY[0] = ctx.terrain.at(0, 0, 0).getY();
             })
-            .action(20, "near-miss pressure", ctx -> ctx.injectSuppressionFromGround("marcher", 1, 30.5, 30.5, 2.0))
-            .action(30, "near-miss pressure", ctx -> ctx.injectSuppressionFromGround("marcher", 1, 30.5, 30.5, 2.0))
-            .action(40, "near-miss pressure", ctx -> ctx.injectSuppressionFromGround("marcher", 1, 30.5, 30.5, 2.0))
-            .action(50, "near-miss pressure", ctx -> ctx.injectSuppressionFromGround("marcher", 1, 30.5, 30.5, 2.0))
-            .action(60, "near-miss pressure", ctx -> ctx.injectSuppressionFromGround("marcher", 1, 30.5, 30.5, 2.0))
+            .action(20, "near-miss pressure", ctx -> ctx.injectSuppressionFromGround("marcher", 1, 30.5, 30.5, 2.0, 3.0f))
+            .action(30, "near-miss pressure", ctx -> ctx.injectSuppressionFromGround("marcher", 1, 30.5, 30.5, 2.0, 3.0f))
+            .action(40, "near-miss pressure", ctx -> ctx.injectSuppressionFromGround("marcher", 1, 30.5, 30.5, 2.0, 3.0f))
+            .action(50, "near-miss pressure", ctx -> ctx.injectSuppressionFromGround("marcher", 1, 30.5, 30.5, 2.0, 3.0f))
+            .action(60, "near-miss pressure", ctx -> ctx.injectSuppressionFromGround("marcher", 1, 30.5, 30.5, 2.0, 3.0f))
             .action(65, "probe", ctx -> {
                 var s = ctx.soldier("marcher");
                 var squad = com.stevesarmy.squad.SquadManager.get((net.minecraft.server.level.ServerLevel) s.level())
@@ -1615,22 +1616,15 @@ public final class SimRegistry {
 
     /**
      * SUPPRESSED-TRAVELER (crawl): a rifleman marching east to a hold objective
-     * passes behind a 1-high wall with the shooter north of it. The cells along
-     * the wall read the crawl-hide pattern (standing eye exposed over the top,
-     * legs shielded), so the suppressed march drops low through the stretch and
-     * stands again once suppression decays below the pressured threshold.
-     * Origin-only fire, same rationale and FOLLOW_RANGE scoping as
-     * travel_reroute_suppressed.
-     */
-    /**
-     * SUPPRESSED-TRAVELER (crawl): a rifleman marching east to a hold objective
      * passes along a 1-high wall with the shooter crouched low behind it (origin
      * at wall-top height). South-of-wall cells read the crawl-hide pattern
      * (standing eye clears the wall top, legs are shielded), so the suppressed
      * march drops low through the stretch and stands again once the pressure
-     * decays below the pressured threshold. Origin-only fire, same rationale and
-     * FOLLOW_RANGE scoping as travel_reroute_suppressed; the hold goal stops at
-     * its 10-block radius, so arrival means reaching the radius.
+     * decays below the pressured threshold. Origin-only fire at realistic bullet
+     * speed (3.0 caps the tracker's speed multiplier; the traveler resistance
+     * roughly cancels it), same rationale and FOLLOW_RANGE scoping as
+     * travel_reroute_suppressed; the hold goal stops at its 10-block radius, so
+     * arrival means reaching the radius.
      */
     private static SimScenario travelCrawlSuppressed() {
         final int[] slabY = new int[1];
@@ -1652,11 +1646,11 @@ public final class SimRegistry {
                 marcher.setHoldPosition(ctx.terrain.at(40, 0, 22));
                 slabY[0] = ctx.terrain.at(0, 0, 0).getY();
             })
-            .action(20, "near-miss pressure", ctx -> ctx.injectSuppressionFromGround("marcher", 1, 24.5, 8.5, 1.0))
-            .action(30, "near-miss pressure", ctx -> ctx.injectSuppressionFromGround("marcher", 1, 24.5, 8.5, 1.0))
-            .action(40, "near-miss pressure", ctx -> ctx.injectSuppressionFromGround("marcher", 1, 24.5, 8.5, 1.0))
-            .action(50, "near-miss pressure", ctx -> ctx.injectSuppressionFromGround("marcher", 1, 24.5, 8.5, 1.0))
-            .action(60, "near-miss pressure", ctx -> ctx.injectSuppressionFromGround("marcher", 1, 24.5, 8.5, 1.0))
+            .action(20, "near-miss pressure", ctx -> ctx.injectSuppressionFromGround("marcher", 1, 24.5, 8.5, 1.0, 3.0f))
+            .action(30, "near-miss pressure", ctx -> ctx.injectSuppressionFromGround("marcher", 1, 24.5, 8.5, 1.0, 3.0f))
+            .action(40, "near-miss pressure", ctx -> ctx.injectSuppressionFromGround("marcher", 1, 24.5, 8.5, 1.0, 3.0f))
+            .action(50, "near-miss pressure", ctx -> ctx.injectSuppressionFromGround("marcher", 1, 24.5, 8.5, 1.0, 3.0f))
+            .action(60, "near-miss pressure", ctx -> ctx.injectSuppressionFromGround("marcher", 1, 24.5, 8.5, 1.0, 3.0f))
             .assertThat("crawls through the shielded stretch (low posture while inside the wall band)",
                 view -> view.timeline().series("marcher").stream()
                     .filter(s -> s.state.position != null
@@ -1688,6 +1682,62 @@ public final class SimRegistry {
                 })
             .assertThat("pressure was real (suppression peaked at or above pressured)",
                 view -> maxSuppression(view, "marcher") >= 0.5f)
+            .build();
+    }
+
+    /**
+     * SUPPRESSED-TRAVELER (cover approach): sustained realistic fire pins a
+     * rifleman marching west along a 1-high wall, the cover goal takes over and
+     * claims a south-face wall cell, and the approach to that cover crosses
+     * crawl-hidden cells (shooter crouched north of the wall: standing eye
+     * clears, legs shielded). The universal travel crawl fires on the route to
+     * cover even while pinned - pinned means dive, the approach happens low.
+     */
+    private static SimScenario coverApproachCrawlSuppressed() {
+        return SimScenario.builder("cover_approach_crawl")
+            .description("SUPPRESSED COVER APPROACH: sustained fire pins a rifleman marching along a "
+                + "1-high wall; the cover goal claims a wall cell and the approach to it crosses "
+                + "crawl-hidden cells, so the soldier goes low on the way to cover while pinned.")
+            .duration(400)
+            .terrain(t -> {
+                t.platform();
+                // east-west 1-high wall north of the march lane (z=20): south-face
+                // cells are eye-exposed / leg-shielded against the low northern shooter
+                t.coverRow(10, 20, 30, 20, 1);
+            })
+            .setup(ctx -> {
+                ctx.spawnAnchor(6, 0, 42);
+                com.stevesarmy.entity.SoldierEntity marcher = ctx.spawnFriendly(
+                    ModEntities.SOLDIER.get(), "marcher", 30, 0, 26, SquadMode.HOLD);
+                marcher.setHoldPosition(ctx.terrain.at(12, 0, 26));
+            })
+            .action(15, "near-miss pressure", ctx -> ctx.injectSuppressionFromGround("marcher", 3, 20.5, 8.5, 1.0, 3.0f))
+            .action(30, "near-miss pressure", ctx -> ctx.injectSuppressionFromGround("marcher", 3, 20.5, 8.5, 1.0, 3.0f))
+            .action(45, "near-miss pressure", ctx -> ctx.injectSuppressionFromGround("marcher", 3, 20.5, 8.5, 1.0, 3.0f))
+            .action(60, "near-miss pressure", ctx -> ctx.injectSuppressionFromGround("marcher", 3, 20.5, 8.5, 1.0, 3.0f))
+            .action(75, "near-miss pressure", ctx -> ctx.injectSuppressionFromGround("marcher", 3, 20.5, 8.5, 1.0, 3.0f))
+            .action(90, "near-miss pressure", ctx -> ctx.injectSuppressionFromGround("marcher", 3, 20.5, 8.5, 1.0, 3.0f))
+            .action(105, "near-miss pressure", ctx -> ctx.injectSuppressionFromGround("marcher", 3, 20.5, 8.5, 1.0, 3.0f))
+            .action(120, "near-miss pressure", ctx -> ctx.injectSuppressionFromGround("marcher", 3, 20.5, 8.5, 1.0, 3.0f))
+            .assertThat("fire was heavy enough to pin (realistic sustained fire must pin for the dive)",
+                view -> maxSuppression(view, "marcher") >= 0.9f)
+            .assertThat("cover claimed (the dive actually started)",
+                view -> view.timeline().series("marcher").stream()
+                    .anyMatch(s -> s.state != null && s.state.coverState != null
+                        && ("SEEKING_COVER".equals(s.state.coverState)
+                            || "REPOSITIONING".equals(s.state.coverState))))
+            .assertThat("goes low on the approach to cover (crawl posture while moving to cover under pressure)",
+                view -> view.timeline().series("marcher").stream()
+                    .anyMatch(s -> s.state != null && s.state.coverState != null
+                        && ("SEEKING_COVER".equals(s.state.coverState)
+                            || "REPOSITIONING".equals(s.state.coverState))
+                        && s.state.suppressionLevel >= 0.5f
+                        && "SWIMMING".equals(s.posture)))
+            .assertThat("reaches cover (the approach ends in cover, not stranded in the open)",
+                view -> view.timeline().series("marcher").stream()
+                    .anyMatch(s -> s.state != null && s.state.coverState != null
+                        && ("IN_COVER".equals(s.state.coverState)
+                            || "SUPPRESSED_IN_COVER".equals(s.state.coverState))))
             .build();
     }
 

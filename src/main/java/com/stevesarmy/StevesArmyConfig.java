@@ -57,6 +57,7 @@ public class StevesArmyConfig {
     public static final ForgeConfigSpec.DoubleValue DANGER_PATH_GARRISON_WEIGHT;
     public static final ForgeConfigSpec.BooleanValue DANGER_TRAVEL_RESPONSE;
     public static final ForgeConfigSpec.IntValue DANGER_TRAVEL_REROUTE_COOLDOWN_TICKS;
+    public static final ForgeConfigSpec.DoubleValue DANGER_TRAVEL_SUPPRESSION_GAIN;
 
     public static final ForgeConfigSpec.DoubleValue SPACING_DISTANCE;
 
@@ -442,10 +443,11 @@ public class StevesArmyConfig {
             .defineInRange("dangerPathGarrisonWeight", 2.0, 0.0, 16.0);
 
         DANGER_TRAVEL_RESPONSE = BUILDER
-            .comment("Suppressed-traveler doctrine: a soldier marching to an objective who comes",
-                     "under fire keeps moving - the cover goal defers, the squad map bakes the",
-                     "shooter from the near-misses, the path re-routes around the new shadow,",
-                     "and the soldier crawls through stretches where the map says crawling hides.",
+            .comment("Suppressed-traveler doctrine: a soldier moving under fire keeps moving -",
+                     "the squad map bakes the shooter from the near-misses, the path re-routes",
+                     "around the new shadow, and the soldier crawls through any stretch where",
+                     "the map says crawling hides - hold marches, ping moves, and the approach",
+                     "to cover alike. Pinned soldiers still dive for cover, but crawl there low.",
                      "Cover-seek waits until pinned or arrival. false restores stop-at-cover doctrine.",
                      "Default: true")
             .define("dangerTravelResponse", true);
@@ -455,6 +457,15 @@ public class StevesArmyConfig {
                      "fire re-routes the march without recomputing a path on every near-miss.",
                      "Default: 60 ticks (3 s)")
             .defineInRange("dangerTravelRerouteCooldownTicks", 60, 20, 200);
+
+        DANGER_TRAVEL_SUPPRESSION_GAIN = BUILDER
+            .comment("Suppression gain multiplier for soldiers actively traveling (hold march or",
+                     "GO_TO ping move). Real bullet speeds pin a stationary soldier in ~2-3",
+                     "near-misses; a moving soldier is a harder target to suppress, so the",
+                     "pressured band - where re-routing and no-cover-dive apply - lasts seconds",
+                     "instead of a fraction of a second. 1.0 disables the resistance.",
+                     "Default: 0.35")
+            .defineInRange("dangerTravelSuppressionGain", 0.35, 0.05, 1.0);
 
         BUILDER.pop();
 
@@ -1196,6 +1207,10 @@ BUILDER.pop();
 
     public static int getDangerTravelRerouteCooldownTicks() {
         return DANGER_TRAVEL_REROUTE_COOLDOWN_TICKS.get();
+    }
+
+    public static double getDangerTravelSuppressionGain() {
+        return DANGER_TRAVEL_SUPPRESSION_GAIN.get();
     }
 
     public static double getMachineGunnerDetectionDistance() {

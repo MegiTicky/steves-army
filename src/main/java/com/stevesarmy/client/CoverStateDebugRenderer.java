@@ -118,6 +118,12 @@ public final class CoverStateDebugRenderer {
                     snapshot.followBlockedBy(), snapshot.ownerDist()),
                 stranded ? RED : YELLOW, buffers, -0.75);
         }
+        if (snapshot.traveling() || snapshot.travelCrawl()
+                || snapshot.crawlHidesHere() || snapshot.travelReroutesServed() > 0) {
+            billboard(font, poseStack, cameraPos, base,
+                travelLine(snapshot),
+                snapshot.travelCrawl() ? YELLOW : GRAY, buffers, -1.25);
+        }
         if (snapshot.mgPipeline()) {
             billboard(font, poseStack, cameraPos, base,
                 mgLine(snapshot), GRAY, buffers, -1.0);
@@ -153,6 +159,23 @@ public final class CoverStateDebugRenderer {
             seg.append("(low)");
         }
         return seg.toString();
+    }
+
+    /**
+     * Suppressed-traveler doctrine segment: moving/crawling state and the
+     * served-reroute counter. CRAWL+ = engaged and the map underfoot still
+     * says crawling hides; a bare rr count means the doctrine armed but the
+     * soldier never crossed crawl-hidden ground.
+     */
+    private static String travelLine(CoverStateDebugPacket snapshot) {
+        StringBuilder line = new StringBuilder(snapshot.traveling() ? "TRAVEL" : "travel");
+        if (snapshot.travelCrawl()) {
+            line.append(" CRAWL").append(snapshot.crawlHidesHere() ? '+' : '?');
+        } else if (snapshot.crawlHidesHere()) {
+            line.append(" crawlHides");
+        }
+        line.append(" rr=").append(snapshot.travelReroutesServed());
+        return line.toString();
     }
 
     private static String countersLine(CoverStateDebugPacket snapshot) {

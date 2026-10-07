@@ -69,6 +69,11 @@ public class CoverStateDebugPacket {
     private final float currentCoverHeight;
     private final String currentCoverType;
 
+    private final boolean traveling;
+    private final boolean travelCrawl;
+    private final boolean crawlHidesHere;
+    private final int travelReroutesServed;
+
     public CoverStateDebugPacket(boolean renderEnabled, UUID soldierId, String role, Vec3 soldierPos,
                                  String coverState, String peekState, String squadMode,
                                  float suppressionLevel, boolean pinned,
@@ -82,7 +87,9 @@ public class CoverStateDebugPacket {
                                  boolean mgPipeline, Vec3 mgAnchor, int mgAnchorAgeTicks,
                                  Vec3 suppressionCenter, int supCenterFreshTicks, Vec3 laneTarget,
                                  String posture, boolean lowCrouching, boolean emergencyPosture,
-                                 float currentCoverHeight, String currentCoverType) {
+                                 float currentCoverHeight, String currentCoverType,
+                                 boolean traveling, boolean travelCrawl, boolean crawlHidesHere,
+                                 int travelReroutesServed) {
         this.renderEnabled = renderEnabled;
         this.soldierId = soldierId;
         this.role = role;
@@ -123,6 +130,10 @@ public class CoverStateDebugPacket {
         this.emergencyPosture = emergencyPosture;
         this.currentCoverHeight = currentCoverHeight;
         this.currentCoverType = currentCoverType;
+        this.traveling = traveling;
+        this.travelCrawl = travelCrawl;
+        this.crawlHidesHere = crawlHidesHere;
+        this.travelReroutesServed = travelReroutesServed;
     }
 
     /** Wire view of a shared {@code CombatStateSnapshot}; fields map 1:1. */
@@ -167,7 +178,11 @@ public class CoverStateDebugPacket {
             s.lowCrouching,
             s.emergencyPosture,
             s.currentCoverHeight,
-            s.currentCoverType);
+            s.currentCoverType,
+            s.traveling,
+            s.travelCrawl,
+            s.crawlHidesHere,
+            s.travelReroutesServed);
     }
 
     public CoverStateDebugPacket(FriendlyByteBuf buf) {        this.renderEnabled = buf.readBoolean();
@@ -210,6 +225,10 @@ public class CoverStateDebugPacket {
         this.emergencyPosture = buf.readBoolean();
         this.currentCoverHeight = buf.readFloat();
         this.currentCoverType = buf.readUtf();
+        this.traveling = buf.readBoolean();
+        this.travelCrawl = buf.readBoolean();
+        this.crawlHidesHere = buf.readBoolean();
+        this.travelReroutesServed = buf.readVarInt();
     }
 
     private static Vec3 readVec(FriendlyByteBuf buf) {
@@ -267,6 +286,10 @@ public class CoverStateDebugPacket {
         buf.writeBoolean(msg.emergencyPosture);
         buf.writeFloat(msg.currentCoverHeight);
         buf.writeUtf(msg.currentCoverType == null ? "" : msg.currentCoverType);
+        buf.writeBoolean(msg.traveling);
+        buf.writeBoolean(msg.travelCrawl);
+        buf.writeBoolean(msg.crawlHidesHere);
+        buf.writeVarInt(msg.travelReroutesServed);
     }
 
     public static void handle(CoverStateDebugPacket msg, Supplier<NetworkEvent.Context> ctx) {
@@ -321,4 +344,8 @@ public class CoverStateDebugPacket {
     public boolean emergencyPosture() { return emergencyPosture; }
     public float currentCoverHeight() { return currentCoverHeight; }
     public String currentCoverType() { return currentCoverType; }
+    public boolean traveling() { return traveling; }
+    public boolean travelCrawl() { return travelCrawl; }
+    public boolean crawlHidesHere() { return crawlHidesHere; }
+    public int travelReroutesServed() { return travelReroutesServed; }
 }

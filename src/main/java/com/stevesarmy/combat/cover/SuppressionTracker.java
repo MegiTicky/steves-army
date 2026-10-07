@@ -55,6 +55,15 @@ public class SuppressionTracker {
     }
 
     public void onNearMiss(Vec3 bulletPath, LivingEntity soldier, float bulletSpeed, LivingEntity shooter) {
+        onNearMiss(bulletPath, soldier, bulletSpeed, shooter, 1.0f);
+    }
+
+    /**
+     * @param gainScale caller-side scaling of this event's suppression gain -
+     *                  the traveling-soldier resistance (moving targets are
+     *                  harder to suppress) applies it below 1.0.
+     */
+    public void onNearMiss(Vec3 bulletPath, LivingEntity soldier, float bulletSpeed, LivingEntity shooter, float gainScale) {
         double distance = soldier.position().distanceTo(bulletPath);
         if (distance >= NEAR_MISS_THRESHOLD) return;
 
@@ -72,7 +81,8 @@ public class SuppressionTracker {
 
         float weaponMultiplier = shooter != null && GunIntegration.isMachineGun(shooter)
             ? MACHINE_GUN_SUPPRESSION_MULTIPLIER : 1.0f;
-        float add = distanceFactor * NEAR_MISS_SUPPRESSION * speedMultiplier * burstMultiplier * weaponMultiplier;
+        float add = distanceFactor * NEAR_MISS_SUPPRESSION * speedMultiplier * burstMultiplier
+            * weaponMultiplier * Math.max(0.0f, gainScale);
         recordSuppressionEvent(add, now);
         nearMissCount++;
         traceSuppressionEvent(soldier, "near-miss", add);

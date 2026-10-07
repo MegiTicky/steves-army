@@ -59,6 +59,11 @@ public class SoldierGroundNavigation extends GroundPathNavigation {
         return this.createPath(target, accuracy);
     }
 
+    /** Read-back of the current navigation speed (no vanilla getter in 1.20.1). */
+    public double getNavSpeedModifier() {
+        return this.speedModifier;
+    }
+
     @Override
     public boolean moveTo(double x, double y, double z, double speedModifier) {
         if (isPreparingOrReloading() && !isCoverApproachDuringReload()) {

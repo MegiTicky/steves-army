@@ -116,12 +116,25 @@ public final class SimContext {
      */
     public void injectSuppressionFrom(String label, int nearMissBursts,
                                       double originX, double originY, double originZ) {
+        injectSuppressionFrom(label, nearMissBursts, originX, originY, originZ, 1.0f);
+    }
+
+    /**
+     * Deterministic pressure from a fixed firing origin: the near-miss also
+     * carries the origin, so the full suppressed-traveler chain (squad intel
+     * feed, danger-map bake, travel reroute, crawl posture) sees a shooter
+     * position without needing a live enemy entity. Real TaCZ rounds travel
+     * fast enough to cap the tracker's speed multiplier at 3.0 - pass
+     * {@code bulletSpeed=3.0f} for realistic per-round gain.
+     */
+    public void injectSuppressionFrom(String label, int nearMissBursts,
+                                      double originX, double originY, double originZ, float bulletSpeed) {
         SoldierEntity soldier = byLabel.get(label);
         if (soldier == null || !soldier.isAlive()) return;
         net.minecraft.world.phys.Vec3 origin = new net.minecraft.world.phys.Vec3(originX, originY, originZ);
         for (int i = 0; i < nearMissBursts; i++) {
             net.minecraft.world.phys.Vec3 bulletPath = soldier.position().add(0.5, 0, 0);
-            soldier.getCoverBehaviorManager().onNearMiss(bulletPath, soldier, 1.0f, null, origin);
+            soldier.getCoverBehaviorManager().onNearMiss(bulletPath, soldier, bulletSpeed, null, origin);
         }
     }
 
@@ -132,8 +145,14 @@ public final class SimContext {
      */
     public void injectSuppressionFromGround(String label, int nearMissBursts,
                                             double originX, double originZ, double heightAboveSurface) {
+        injectSuppressionFromGround(label, nearMissBursts, originX, originZ, heightAboveSurface, 1.0f);
+    }
+
+    public void injectSuppressionFromGround(String label, int nearMissBursts,
+                                            double originX, double originZ, double heightAboveSurface,
+                                            float bulletSpeed) {
         BlockPos surface = terrain.at((int) Math.floor(originX), 0, (int) Math.floor(originZ));
-        injectSuppressionFrom(label, nearMissBursts, originX, surface.getY() + heightAboveSurface, originZ);
+        injectSuppressionFrom(label, nearMissBursts, originX, surface.getY() + heightAboveSurface, originZ, bulletSpeed);
     }
 
     /** Fresh enemy at a new spot (discard + spawn so threat intel re-detects cleanly). */

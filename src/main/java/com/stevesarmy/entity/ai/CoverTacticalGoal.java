@@ -991,6 +991,7 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
         relocationCenter = destination.immutable();
         relocationCommandGeneration = commandGeneration;
         goToRelocationTicks = 0;
+        getCoverManager().setGoToRelocationActive(true);
         return true;
     }
 
@@ -1162,6 +1163,7 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
         relocationCenter = null;
         relocationCommandGeneration = -1;
         goToRelocationTicks = 0;
+        getCoverManager().setGoToRelocationActive(false);
     }
 
     private void failGoToRelocation() {
@@ -1350,7 +1352,12 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
             soldier.getPose().name(),
             soldier.isLowCrouching(),
             soldier.hasEmergencyEngagementPosture(),
-            currentCover != null ? soldier.getSyncedCoverCurrentHeight() : -1f);
+            currentCover != null ? soldier.getSyncedCoverCurrentHeight() : -1f,
+            mgr.isGoToRelocationActive()
+                || com.stevesarmy.entity.ai.SoldierHoldPositionGoal.isTravelingToObjective(soldier),
+            soldier.getTravelCrawlController().isCrawlActive(),
+            soldier.getTravelCrawlController().isCrawlHidingHere(),
+            mgr.getTravelReroutesServed());
     }
 
     /**
@@ -1942,6 +1949,23 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
             }
             failGoToRelocation();
             return;
+        }
+
+        // Suppressed-traveler doctrine: a near-miss during a GO_TO ping move
+        // raised a reroute request (the manager accepts it while a relocation is
+        // in flight). Re-path to the claimed cover - the async search bakes the
+        // squad map's fresh shadow into the new route's danger corridor.
+        if (relocationType == RelocationType.GO_TO
+            && getCoverManager().consumeTravelRerouteRequest()) {
+            CoverPoint rerouteTarget = getCoverManager().getTargetCover();
+            if (rerouteTarget != null) {
+                moveToCover(rerouteTarget);
+                if (DiagnosticLogManager.isCoverLoggingEnabled()) {
+                    StevesArmyMod.LOGGER.info("[TravelResponse] Soldier {} re-routing GO_TO move to {} under fire (suppression={})",
+                        soldier.getId(), rerouteTarget.getPosition(),
+                        String.format("%.2f", getCoverManager().getSuppressionLevel()));
+                }
+            }
         }
 
         if (relocationType == RelocationType.FOLLOW && relocationCenter != null) {

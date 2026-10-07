@@ -47,7 +47,7 @@ public final class SimManager {
      * Vertical spacing between scenario fixtures. Chunks are full columns, so
      * this only separates the fixtures in the air — the registry must fit
      * under the y=320 build limit: Y_BASE + (registry size - 1) * spacing
-     * &lt; 320. At 33 scenarios that means 4Y (160 + 32*4 = 288, rim tops 290);
+     * &lt; 320. At 36 scenarios that means 4Y (160 + 35*4 = 300, rim tops 302);
      * fixtures are 4Y tall (floor + 3-high rim), so 4Y stacks them exactly
      * edge to edge — no air gap, but nothing crosses the build limit and no
      * fixture overlaps another.

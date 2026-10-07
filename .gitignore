@@ -31,3 +31,4 @@ libs/
 META-INF/
 /com/
 mcp/
+.video_agent/

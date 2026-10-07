@@ -76,6 +76,15 @@ public final class CombatStateSnapshot {
     /** Synced cover height the pose gate reads; -1 when no cover claimed. */
     public final float currentCoverHeight;
 
+    /** Suppressed-traveler doctrine: executing a long move (hold march / GO_TO). */
+    public final boolean traveling;
+    /** Universal travel crawl engaged (movement posture from TravelCrawlController). */
+    public final boolean travelCrawl;
+    /** The ground underfoot currently reads "crawling hides" on the squad danger map. */
+    public final boolean crawlHidesHere;
+    /** Served travel re-routes (near-miss-driven path recomputes) since spawn. */
+    public final int travelReroutesServed;
+
     /** Telemetry for one executed cover search — where it looked and what came back. */
     public static final class LastSearch {
         public final String mode;
@@ -115,7 +124,9 @@ public final class CombatStateSnapshot {
                                String currentCoverType, String targetCoverType,
                                LastSearch lastSearch,
                                String posture, boolean lowCrouching, boolean emergencyPosture,
-                               float currentCoverHeight) {
+                               float currentCoverHeight,
+                               boolean traveling, boolean travelCrawl, boolean crawlHidesHere,
+                               int travelReroutesServed) {
         this.soldierId = soldierId;
         this.role = role;
         this.position = position;
@@ -159,5 +170,9 @@ public final class CombatStateSnapshot {
         this.lowCrouching = lowCrouching;
         this.emergencyPosture = emergencyPosture;
         this.currentCoverHeight = currentCoverHeight;
+        this.traveling = traveling;
+        this.travelCrawl = travelCrawl;
+        this.crawlHidesHere = crawlHidesHere;
+        this.travelReroutesServed = travelReroutesServed;
     }
 }

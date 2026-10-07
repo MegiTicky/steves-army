@@ -231,6 +231,7 @@ public class SoldierEntity extends PathfinderMob implements Container {
     /** Set by the vehicle crew goal while it holds a hull MG or periscope station. */
     private boolean vehicleCrewActive;
     private final ThreatAwareness threatAwareness;
+    private final com.stevesarmy.entity.ai.TravelCrawlController travelCrawl;
     private final GrenadeTacticalController grenadeTacticalController;
     private final SoldierHealController healController;
     
@@ -399,6 +400,7 @@ public class SoldierEntity extends PathfinderMob implements Container {
         this.coverBehaviorManager = new CoverBehaviorManager(this);
         this.peekController = new PeekController();
         this.threatAwareness = new ThreatAwareness();
+        this.travelCrawl = new com.stevesarmy.entity.ai.TravelCrawlController(this);
         this.grenadeTacticalController = new GrenadeTacticalController(this);
         this.healController = new SoldierHealController(this);
         this.inventory.setMainHandChangedCallback(stack -> {
@@ -1389,6 +1391,7 @@ public class SoldierEntity extends PathfinderMob implements Container {
             holdMovementForReload();
             updateCrawlFacing();
             tickSquadDangerMap();
+            travelCrawl.tick();
             // Reload and cover helpers may hold navigation and update their own
             // crouch state. A live firing-prone plan remains the authoritative
             // posture until that plan explicitly cancels it.
@@ -2500,6 +2503,11 @@ public BlockPos getPingMoveTarget() {
      */
     public ThreatAwareness getThreatAwareness() {
         return threatAwareness;
+    }
+
+    /** Universal suppressed-movement posture controller (dangerTravelResponse). */
+    public com.stevesarmy.entity.ai.TravelCrawlController getTravelCrawlController() {
+        return travelCrawl;
     }
     
     public void syncThreatDirection(Vec3 direction) {

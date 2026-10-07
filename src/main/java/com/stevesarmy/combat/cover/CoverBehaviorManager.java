@@ -59,6 +59,8 @@ public class CoverBehaviorManager {
     private int travelReroutesServed = 0;
     /** Not Long.MIN_VALUE: (tickCount - MIN_VALUE) overflows and silently disables the feed. */
     private int lastTravelIntelFeedTick = -TRAVEL_INTEL_FEED_INTERVAL_TICKS;
+    /** A GO_TO ping relocation is in flight (set/cleared by CoverTacticalGoal). */
+    private boolean goToRelocationActive = false;
     
     private int peekCountSameCover = 0;
     private int savedPeekCount = 0;
@@ -453,9 +455,23 @@ public class CoverBehaviorManager {
         if (shooter != null && soldier instanceof com.stevesarmy.entity.SoldierEntity s && s.isFriendlyTo(shooter)) {
             return;
         }
-        suppressionTracker.onNearMiss(bulletPath, soldier, bulletSpeed, shooter);
+        // Travel suppression resistance: a moving soldier is a harder target to
+        // suppress, so the pressured band (re-route / no-cover-dive doctrine)
+        // survives sustained real fire instead of being blown through in ~0.3 s.
+        float gainScale = 1.0f;
+        if (StevesArmyConfig.isDangerTravelResponseEnabled() && isActivelyTraveling(soldier)) {
+            gainScale = (float) StevesArmyConfig.getDangerTravelSuppressionGain();
+        }
+        suppressionTracker.onNearMiss(bulletPath, soldier, bulletSpeed, shooter, gainScale);
         recordSuppressionFiringOrigin(firingOrigin);
         handleSuppressedTravel(soldier, shooter, firingOrigin);
+    }
+
+    /** True while the soldier is executing a long move: hold-march or GO_TO ping relocation. */
+    private boolean isActivelyTraveling(net.minecraft.world.entity.LivingEntity subject) {
+        if (!(subject instanceof SoldierEntity se)) return false;
+        if (goToRelocationActive) return true;
+        return com.stevesarmy.entity.ai.SoldierHoldPositionGoal.isTravelingToObjective(se);
     }
 
     /**
@@ -550,7 +566,10 @@ public class CoverBehaviorManager {
             BlockPos reportPos;
             if (shooter != null) {
                 threatId = shooter.getUUID();
-                reportPos = shooter.blockPosition();
+                // Eye position, not block center: a shooter hugging low cover
+                // has his block center below the obstacle line, and bakes from
+                // there read every cell as safe. Rays must start at eye height.
+                reportPos = BlockPos.containing(shooter.getEyePosition());
             } else {
                 // Unknown shooter: key the threat by the rounded firing origin so
                 // consecutive shots from the same spot stay one shadow.
@@ -567,17 +586,17 @@ public class CoverBehaviorManager {
             }
         }
 
-        // 2. Reroute request: only while actually marching (no cover claim, path
-        //    active) and pressured but not yet pinned - pinned hands control back
-        //    to the cover goal. The cooldown keeps sustained fire from re-pathing
-        //    on every individual miss.
+        // 2. Reroute request: only while actually marching (no cover claim, or a
+        //    GO_TO ping relocation in flight) and pressured but not yet pinned -
+        //    pinned hands control back to the cover goal. The cooldown keeps
+        //    sustained fire from re-pathing on every individual miss.
         if (now < travelRerouteCooldownUntilTick) return;
         float suppression = suppressionTracker.getSuppressionLevel();
         if (suppression < SuppressionTracker.PRESSURED_THRESHOLD
             || suppression >= SuppressionTracker.PINNED_THRESHOLD) {
             return;
         }
-        if (state != CoverState.NO_COVER) return;
+        if (state != CoverState.NO_COVER && !goToRelocationActive) return;
         if (traveler.getNavigation().isDone()) return;
         travelReroutePending = true;
         travelRerouteCooldownUntilTick = now + StevesArmyConfig.getDangerTravelRerouteCooldownTicks();
@@ -586,6 +605,15 @@ public class CoverBehaviorManager {
     /** Current personal suppression level (0..1) for travel-posture decisions. */
     public float getSuppressionLevel() {
         return suppressionTracker.getSuppressionLevel();
+    }
+
+    /** CoverTacticalGoal marks GO_TO ping relocations so travel logic can see them. */
+    public void setGoToRelocationActive(boolean active) {
+        this.goToRelocationActive = active;
+    }
+
+    public boolean isGoToRelocationActive() {
+        return goToRelocationActive;
     }
 
     /** One-shot: a marching soldier under fire asked the hold goal to re-route. */
