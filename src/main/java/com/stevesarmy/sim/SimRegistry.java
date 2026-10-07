@@ -25,6 +25,7 @@ public final class SimRegistry {
             persistentPingRelocation(),
             mgAnchorFreshness(),
             mgRiflemanSeekContrast(),
+            mgSuppressionRoundRobin(),
             pairSuppressionLanes(),
             openFieldBaseline(),
             dockArrivalRoles(),
@@ -198,6 +199,113 @@ public final class SimRegistry {
     }
 
     // 4b. MG vs riflemen under identical fire — the MG seek-strand bug ---------
+
+    // 4c. MG round-robin suppression — bursts rotate across last-seen positions
+
+    /**
+     * One armed machine gunner vs two GUNLESS enemies spawned in the open in
+     * front of 2-high dig-in walls. The MG's near-misses pin them and their
+     * own cover AI docks them behind the walls, which are tall enough to
+     * actually break line of sight at this range — then the MG suppresses
+     * last-seen positions, and the round-robin doctrine must spread bursts
+     * across BOTH positions instead of stacking every burst on one contact.
+     */
+    private static SimScenario mgSuppressionRoundRobin() {
+        return SimScenario.builder("mg_suppression_round_robin")
+            .description("MG suppression distribution: armed MG + squadmates vs two lane-aligned "
+                + "enemies at two distances, pinned in windows so LOS breaks while targets are "
+                + "held. Asserts bursts cover BOTH enemy positions with alternation and no "
+                + "fixation. KNOWN SCOPE LIMIT: in-sim the autonomous suppression plan never "
+                + "arms (no [Suppression] claims in any geometry tried), so this proves "
+                + "squad-level burst distribution, not MG-internal rotation; rotation switches "
+                + "are observable in-game via suppression debug logging "
+                + "('[Suppression] ... round-robin rotates').")
+            .duration(700)
+            .armed()
+            .field(56, 48)
+            .terrain(t -> {
+                t.platform();
+                t.coverRow(16, 21, 18, 21, 1);   // gunner's rows; each enemy sits on one row lane
+                t.coverRow(16, 27, 18, 27, 1);
+                t.coverRow(40, 20, 42, 24, 1);   // near enemy's cover (lane of row z=21)
+                t.coverRow(52, 24, 54, 28, 1);   // far enemy's cover (lane of row z=27)
+            })
+            .setup(ctx -> {
+                ctx.spawnAnchor(4, 0, 24);
+                ctx.spawnFriendly(ModEntities.MACHINE_GUNNER.get(), "gunner", 12, 0, 24, SquadMode.FOLLOW);
+                // squadmates: the contrast scenario's MG only acquires targets
+                // with the squad present (shared detection feeds the gunner)
+                ctx.spawnFriendly(ModEntities.SOLDIER.get(), "left", 12, 0, 14, SquadMode.FOLLOW);
+                ctx.spawnFriendly(ModEntities.SOLDIER.get(), "right", 12, 0, 34, SquadMode.FOLLOW);
+                ctx.spawnEnemyLabeled("enemyA", 38, 0, 22);
+                ctx.spawnEnemyLabeled("enemyB", 50, 0, 26);
+                // Deterministic intel: hand the squad its sightings directly
+                // and keep them fresh for the whole run.
+                ctx.injectThreat(38, 22, 1.0f);
+                ctx.injectThreat(50, 26, 1.0f);
+            })
+            .action(90, "refresh threat intel", ctx -> ctx.refreshInjectedThreats())
+            .action(180, "refresh threat intel", ctx -> ctx.refreshInjectedThreats())
+            .action(270, "refresh threat intel", ctx -> ctx.refreshInjectedThreats())
+            .action(360, "refresh threat intel", ctx -> ctx.refreshInjectedThreats())
+            .action(450, "refresh threat intel", ctx -> ctx.refreshInjectedThreats())
+            .action(540, "refresh threat intel", ctx -> ctx.refreshInjectedThreats())
+            .action(630, "refresh threat intel", ctx -> ctx.refreshInjectedThreats())
+            // Pinning windows: force the prone-duck that breaks LOS while the
+            // MG still holds the target — the mid-fight moment where
+            // suppression on last-seen positions arms.
+            .suppress("enemyA", 150, 350, 10)
+            .suppress("enemyB", 150, 350, 10)
+            .suppress("enemyA", 450, 650, 10)
+            .suppress("enemyB", 450, 650, 10)
+            .assertThat("MG bursts land on BOTH enemy positions (round-robin distribution)",
+                view -> countShotsNear(view, 38, 22, 8.0) >= 4 && countShotsNear(view, 50, 26, 8.0) >= 4)
+            .assertThat("bursts alternate between the two positions (>=1 cluster transition)",
+                view -> shotClusterTransitions(view, 38, 22, 50, 26, 8.0) >= 1)
+            .assertThat("no single-target fixation: neither position absorbs >75% of clustered shots",
+                view -> {
+                    int a = countShotsNear(view, 38, 22, 8.0);
+                    int b = countShotsNear(view, 50, 26, 8.0);
+                    int total = a + b;
+                    return total > 0 && Math.max(a, b) * 4 <= total * 3;
+                })
+            .assertThat("MG actually fired a sustained engagement (>=20 tracer rounds)",
+                view -> view.shots().size() >= 20)
+            .build();
+    }
+
+    private static int countShotsNear(SimScenario.SimRunResultView view, double x, double z, double radius) {
+        int count = 0;
+        for (double[] shot : view.shots()) {
+            double dx = shot[2] - x;
+            double dz = shot[3] - z;
+            if (dx * dx + dz * dz <= radius * radius) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    /** Fire-order transitions between two shot-endpoint clusters (ignoring unclustered shots). */
+    private static int shotClusterTransitions(SimScenario.SimRunResultView view,
+                                              double ax, double az, double bx, double bz, double radius) {
+        int last = 0;
+        int transitions = 0;
+        for (double[] shot : view.shots()) {
+            double daSq = sq(shot[2] - ax) + sq(shot[3] - az);
+            double dbSq = sq(shot[2] - bx) + sq(shot[3] - bz);
+            double rSq = radius * radius;
+            int cluster = daSq > rSq && dbSq > rSq ? 0 : (daSq <= dbSq ? 1 : 2);
+            if (cluster == 0) continue;
+            if (last != 0 && cluster != last) transitions++;
+            last = cluster;
+        }
+        return transitions;
+    }
+
+    private static double sq(double v) {
+        return v * v;
+    }
 
     private static SimScenario mgRiflemanSeekContrast() {
         return SimScenario.builder("mg_rifleman_seek_contrast")

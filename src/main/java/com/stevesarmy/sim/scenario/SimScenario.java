@@ -29,6 +29,8 @@ public final class SimScenario {
         com.stevesarmy.sim.DangerOracle.Oracle dangerOracle();
         /** Violations the generic detectors produced this run (danger self-tests assert on these). */
         java.util.List<com.stevesarmy.sim.SimViolation> violations();
+        /** Recorded tracer endpoints in fire order; each entry is {fromX, fromZ, toX, toZ}. */
+        java.util.List<double[]> shots();
     }
 
     public final String name;

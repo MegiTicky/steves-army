@@ -87,6 +87,12 @@ public final class SimManager {
         // Optional per-candidate score traces: -Dsim.coverlog=true
         com.stevesarmy.debug.DiagnosticLogManager.setCoverScoreLoggingEnabled(
             Boolean.getBoolean("sim.coverlog"));
+        // Optional suppression-chain traces: -Dsim.suplog=true
+        com.stevesarmy.debug.DiagnosticLogManager.setSuppressionLoggingEnabled(
+            Boolean.getBoolean("sim.suplog"));
+        // Optional combat-goal decision traces: -Dsim.ailog=true
+        com.stevesarmy.debug.DiagnosticLogManager.setAttackLoggingEnabled(
+            Boolean.getBoolean("sim.ailog"));
         List<SimScenario> scenarios = SimRegistry.all();
         // Optional scenario filter for fast iteration: -Dsim.scenario=<name>[,<name>...]
         // (a server boot costs minutes; one boot can serve several scenarios)
@@ -445,6 +451,7 @@ public final class SimManager {
             @Override public float enemyHealthEnd() { return enemyHealthEnd; }
             @Override public DangerOracle.Oracle dangerOracle() { return result.dangerOracle; }
             @Override public List<SimViolation> violations() { return result.violations; }
+            @Override public List<double[]> shots() { return recorder.shotTracers(); }
         };
         for (SimScenario.Assertion assertion : scenario.assertions) {
             try {

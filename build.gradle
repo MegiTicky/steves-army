@@ -92,11 +92,14 @@ minecraft {
             args '--nogui'
             // -Psim.autorun=true makes the dedicated server run every scenario
             // headless at startup, write reports to run/sim_reports/, then halt.
-            // -Psim.scenario=<name> narrows the autorun to a single scenario.
+            // -Psim.scenario=<name> narrows the autorun (comma-separated list ok).
             // -Psim.coverlog=true enables per-candidate [CoverScore] traces.
+            // -Psim.suplog / -Psim.ailog enable [Suppression] / combat-goal traces.
             property 'sim.autorun', (project.findProperty('sim.autorun') ?: 'false').toString()
             property 'sim.scenario', (project.findProperty('sim.scenario') ?: '').toString()
             property 'sim.coverlog', (project.findProperty('sim.coverlog') ?: 'false').toString()
+            property 'sim.suplog', (project.findProperty('sim.suplog') ?: 'false').toString()
+            property 'sim.ailog', (project.findProperty('sim.ailog') ?: 'false').toString()
         }
 
         // This run config launches GameTestServer and runs all registered gametests, then exits.

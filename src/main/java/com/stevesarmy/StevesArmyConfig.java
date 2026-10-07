@@ -31,6 +31,8 @@ public class StevesArmyConfig {
     public static final ForgeConfigSpec.IntValue FIRING_MISS_STREAK_CAP;
     public static final ForgeConfigSpec.DoubleValue FIRING_MISS_STREAK_RECOVERY_SCALE;
     public static final ForgeConfigSpec.IntValue FIRING_MISS_STREAK_DECAY_TICKS;
+    public static final ForgeConfigSpec.BooleanValue MG_SUPPRESSION_ROUND_ROBIN;
+    public static final ForgeConfigSpec.IntValue MG_SUPPRESSION_ROTATION_SIZE;
 
     /** How a suppressed soldier reacts when returning direct fire. */
     public enum SuppressedFireMode { SPRAY, HOLD }
@@ -302,6 +304,20 @@ public class StevesArmyConfig {
             .comment("Ticks without shooting for one streak step to cool off (20 to 600).",
                      "Default: 100 (5 seconds per step)")
             .defineInRange("missStreakDecayTicks", 100, 20, 600);
+
+        MG_SUPPRESSION_ROUND_ROBIN = BUILDER
+            .comment("Machine gunners rotate suppression bursts round-robin across known threats'",
+                     " last-seen positions instead of stacking every burst on one contact.",
+                     "Unsuppressed (unclaimed, not-yet-pinned) enemies come first in the",
+                     "rotation; riflemen and heavy-ping fire are unchanged.",
+                     "Default: true")
+            .define("mgSuppressionRoundRobin", true);
+
+        MG_SUPPRESSION_ROTATION_SIZE = BUILDER
+            .comment("Maximum number of threats in a machine gunner's round-robin suppression",
+                     "rotation (2 to 6). Single-contact fights are unaffected.",
+                     "Default: 3")
+            .defineInRange("mgSuppressionRotationSize", 3, 2, 6);
 
         BUILDER.pop();
         
@@ -1083,6 +1099,14 @@ BUILDER.pop();
 
     public static boolean isDynamicFiringEnabled() {
         return DYNAMIC_FIRING_ENABLED.get();
+    }
+
+    public static boolean isMgSuppressionRoundRobinEnabled() {
+        return MG_SUPPRESSION_ROUND_ROBIN.get();
+    }
+
+    public static int getMgSuppressionRotationSize() {
+        return MG_SUPPRESSION_ROTATION_SIZE.get();
     }
 
     public static float getFiringPersonalityStrength() {

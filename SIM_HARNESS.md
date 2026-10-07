@@ -195,6 +195,7 @@ under the build limit).
 | `persistent_ping_relocation` | Continuous suppression from one origin; relocation dead-ends |
 | `mg_anchor_freshness` | MG centroid/anchor staleness after the shooter moves |
 | `mg_rifleman_seek_contrast` | Same fire on an MG and two riflemen: both must reach cover (the live MG seek-strand bug) |
+| `mg_suppression_round_robin` | Armed MG vs two dug-in enemies: suppression bursts must rotate across BOTH last-seen positions (round-robin, no fixation); enemy A pinned via injection so the unsuppressed-first rank applies. Asserts on recorded tracer clusters (`view.shots()`) |
 | `pair_suppression_lanes` | Two suppressors; dispersion vs stacking |
 | `open_field_baseline` | No suppression; detector false-positive calibration |
 | `dock_arrival_roles` | Rifleman + MG + AT pulse into cover; each must dock into the exact slot block with the anchor velocity engaged |

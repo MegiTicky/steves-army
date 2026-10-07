@@ -21,6 +21,7 @@ public final class SimRecorder {
     private final List<String> frames = new ArrayList<>();
     private final List<String> events = new ArrayList<>();
     private final List<String> shots = new ArrayList<>();
+    private final List<double[]> shotTracers = new ArrayList<>();
     private final List<String> dangerOverlay = new ArrayList<>();
     private StringBuilder current;
     private boolean firstSoldier;
@@ -73,6 +74,12 @@ public final class SimRecorder {
     /** One fired round, drawn as a tracer for the frame being built. */
     public void shot(double fromX, double fromZ, double toX, double toZ) {
         shots.add("[" + num(fromX) + "," + num(fromZ) + "," + num(toX) + "," + num(toZ) + "]");
+        shotTracers.add(new double[]{fromX, fromZ, toX, toZ});
+    }
+
+    /** Cumulative fire-ordered tracer endpoints (frame export never drains this). */
+    public List<double[]> shotTracers() {
+        return shotTracers;
     }
 
     public void beginFrame(int tick) {

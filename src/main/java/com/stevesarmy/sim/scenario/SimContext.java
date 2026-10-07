@@ -96,6 +96,26 @@ public final class SimContext {
         return enemy;
     }
 
+    /** Enemy with a label so injection/assertion helpers can target it. */
+    public EnemySoldierEntity spawnEnemyLabeled(String label, int x, int y, int z) {
+        EnemySoldierEntity enemy = spawnEnemy(x, y, z);
+        byLabel.put(label, enemy);
+        return enemy;
+    }
+
+    /** Strip a soldier's guns so it cannot return fire (scenario pressure control). */
+    public void disarmSoldier(String label) {
+        SoldierEntity soldier = byLabel.get(label);
+        if (soldier == null) return;
+        com.stevesarmy.inventory.SoldierInventory inv = soldier.getSoldierInventory();
+        inv.setItem(com.stevesarmy.inventory.SoldierInventory.SLOT_MAIN_HAND,
+            net.minecraft.world.item.ItemStack.EMPTY);
+        inv.setItem(com.stevesarmy.inventory.SoldierInventory.SLOT_SIDEARM,
+            net.minecraft.world.item.ItemStack.EMPTY);
+        soldier.setItemSlot(net.minecraft.world.entity.EquipmentSlot.MAINHAND,
+            net.minecraft.world.item.ItemStack.EMPTY);
+    }
+
     /** Deterministic pressure: repeated near-misses against the soldier's own tracker. */
     public void injectSuppression(String labelOrNull, int nearMissBursts) {
         List<SoldierEntity> targets = labelOrNull == null

@@ -127,6 +127,10 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
     private Vec3 suppressionTargetAimPoint = null;
     private int suppressionLaneSlot = 0;
     private float suppressionLaneSide = 1.0F;
+    // Round-robin MG suppression: prioritized threats this plan cycles bursts
+    // across; the index advances once per completed burst.
+    private List<UUID> suppressionRotation = List.of();
+    private int suppressionRotationIndex = -1;
 
     // Sidearm policy changes equipment only. Vehicle contacts are adapted into
     // the ordinary direct-fire pipeline below; they never own cover or movement.
@@ -1340,6 +1344,8 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
         suppressionFirstShotTick = -1;
         suppressionLastSeenTick = -1;
         suppressionLaneSlot = 0;
+        suppressionRotation = List.of();
+        suppressionRotationIndex = -1;
         pendingSuppressionThreat = null;
         isSuppressing = false;
         
@@ -2692,13 +2698,19 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
             }
         }
         
-        if (GunIntegration.isReloading(soldier) || 
-            GunIntegration.isBolting(soldier) || 
+        if (GunIntegration.isReloading(soldier) ||
+            GunIntegration.isBolting(soldier) ||
             GunIntegration.isDrawing(soldier)) {
+            if (machineGunnerPipeline && isSuppressionDebugLogging() && soldier.tickCount % 100 == 0) {
+                StevesArmyMod.LOGGER.info("[Suppression] MG {} gate: weapon cycling (reload/bolt/draw)", soldier.getId());
+            }
             return false;
         }
-        
+
         if (target != null && TargetAcquisition.hasLineOfSight(soldier, target)) {
+            if (machineGunnerPipeline && isSuppressionDebugLogging() && soldier.tickCount % 100 == 0) {
+                StevesArmyMod.LOGGER.info("[Suppression] MG {} gate: held target has LOS — direct fire owns", soldier.getId());
+            }
             return false;
         }
 
@@ -2717,7 +2729,7 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
 
         List<SquadThreatIntel.ThreatKnowledge> suppressibleThreats = intel.getAllThreats().stream()
             .filter(threat -> threat.isAlive)
-            .sorted(Comparator.comparingDouble(threat -> -threat.accuracy))
+            .sorted(suppressionCandidateOrder(intel))
             .collect(Collectors.toList());
         if (suppressibleThreats.isEmpty()) {
             return false;
@@ -2744,7 +2756,24 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
             pendingSuppressionThreat = threat;
             return true;
         }
-        
+
+        if (machineGunnerPipeline && isSuppressionDebugLogging() && soldier.tickCount % 100 == 0) {
+            StringBuilder reasons = new StringBuilder();
+            for (SquadThreatIntel.ThreatKnowledge threat : suppressibleThreats) {
+                String reason;
+                if (!threat.isAlive) reason = "dead";
+                else if (intel.isThreatStale(threat.threatEntityId, soldier.level().getGameTime())) reason = "stale";
+                else if (threat.lastKnownPosition == null) reason = "no-pos";
+                else if (threat.isHardTarget) reason = "hard";
+                else if (soldier.position().distanceTo(threat.lastKnownPosition.getCenter()) > SUPPRESSION_MAX_RANGE) reason = "range";
+                else if (GunIntegration.isAnyGunLoaded() && GunIntegration.hasGun(soldier) && getTotalAmmo() == 0) reason = "no-ammo";
+                else if (intel.getSuppressionCount(threat.threatEntityId) >= getMaxSuppressorsForThreat(threat)) reason = "slots";
+                else if (hasAssignedMachineGunner(intel, threat)) reason = "mg-assigned";
+                else reason = "ELIGIBLE";
+                reasons.append(' ').append(threat.threatEntityId.toString(), 0, 6).append('=').append(reason);
+            }
+            StevesArmyMod.LOGGER.info("[Suppression] MG {} scan: threats:{}", soldier.getId(), reasons);
+        }
         return false;
     }
 
@@ -3434,6 +3463,10 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
             burstCooldownTicks = 0;
             ticksSinceLastBurstShot = 0;
             burstWaitingForBolt = false;
+            suppressionRotation = machineGunnerPipeline && isMgSuppressionRoundRobinEnabled()
+                ? buildSuppressionRotation(intel, suppressionTargetUUID)
+                : List.of();
+            suppressionRotationIndex = Math.max(0, suppressionRotation.indexOf(suppressionTargetUUID));
         }
         
         if (suppressionTargetPos == null) {
@@ -3611,6 +3644,11 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
                     }
                     burstCooldownTicks = pauseTicks;
                     burstShotsFired = 0;
+                    // Round-robin MGs point the next burst at a different
+                    // last-seen position; direct-fire preemption outranks it.
+                    if (visibleContactAimPoint == null) {
+                        advanceMgSuppressionRotation();
+                    }
                 }
             }
             case NEED_BOLT -> {
@@ -3647,6 +3685,127 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
         if (lateral.lengthSqr() < 1.0e-4) return anchor;
         return anchor.add(lateral.normalize()
             .scale(suppressionLaneSide * (0.5 + 0.75 * suppressionLaneSlot)));
+    }
+
+    /**
+     * Candidate order for the next suppression target. Default: highest
+     * reported accuracy first. Round-robin machine gunners instead prefer
+     * threats nobody holds a suppression claim on, then threats whose own
+     * tracker does not (or cannot) read as pinned, then accuracy — spreading
+     * fire beats stacking it on one contact.
+     */
+    private Comparator<SquadThreatIntel.ThreatKnowledge> suppressionCandidateOrder(SquadThreatIntel intel) {
+        Comparator<SquadThreatIntel.ThreatKnowledge> order =
+            Comparator.comparingDouble(threat -> -threat.accuracy);
+        if (machineGunnerPipeline && isMgSuppressionRoundRobinEnabled()) {
+            order = Comparator
+                .comparingInt((SquadThreatIntel.ThreatKnowledge threat) -> threat.isSuppressed ? 1 : 0)
+                .thenComparingInt(threat -> isThreatPinned(threat) ? 1 : 0)
+                .thenComparingDouble(threat -> -threat.accuracy);
+        }
+        return order;
+    }
+
+    /** True when the threat entity is one of our soldiers and its tracker reads pinned. */
+    private boolean isThreatPinned(SquadThreatIntel.ThreatKnowledge threat) {
+        if (soldier.level() instanceof ServerLevel serverLevel
+            && serverLevel.getEntity(threat.threatEntityId) instanceof SoldierEntity enemySoldier) {
+            return enemySoldier.getCoverBehaviorManager().getSuppressionLevel()
+                >= com.stevesarmy.combat.cover.SuppressionTracker.PINNED_THRESHOLD;
+        }
+        return false;
+    }
+
+    private boolean isMgSuppressionRoundRobinEnabled() {
+        return StevesArmyConfig.isMgSuppressionRoundRobinEnabled();
+    }
+
+    /**
+     * The round-robin rotation for a fresh suppression plan: prioritized
+     * known threats capped at the configured size, with the claimed threat
+     * always a member so the index walk stays total.
+     */
+    private List<UUID> buildSuppressionRotation(SquadThreatIntel intel, UUID currentTarget) {
+        List<UUID> rotation = new ArrayList<>();
+        intel.getAllThreats().stream()
+            .filter(threat -> threat.isAlive)
+            .filter(threat -> !threat.isHardTarget)
+            .filter(threat -> threat.lastKnownPosition != null)
+            .filter(threat -> !intel.isThreatStale(threat.threatEntityId, soldier.level().getGameTime()))
+            .sorted(suppressionCandidateOrder(intel))
+            .limit(StevesArmyConfig.getMgSuppressionRotationSize())
+            .map(threat -> threat.threatEntityId)
+            .forEach(rotation::add);
+        if (!rotation.contains(currentTarget)) {
+            rotation.add(0, currentTarget);
+            while (rotation.size() > StevesArmyConfig.getMgSuppressionRotationSize()) {
+                rotation.remove(rotation.size() - 1);
+            }
+        }
+        return List.copyOf(rotation);
+    }
+
+    /**
+     * Round-robin advance: once a burst completes, the machine gunner walks
+     * the rotation for the next threat that is still fresh, LOS-reachable
+     * from this eye, and claimable — the next burst lands on a different
+     * last-seen position instead of stacking on one contact. The claim moves
+     * with the aim so squad bookkeeping mirrors who is firing at whom; a
+     * claim lost to a paired gunner simply skips to the next entry. Finding
+     * no candidate keeps the current target — rotation never cancels a
+     * working plan.
+     */
+    private void advanceMgSuppressionRotation() {
+        if (suppressionRotation.size() < 2 || suppressionTargetUUID == null) {
+            return;
+        }
+        SquadThreatIntel intel = getSquadIntel();
+        if (intel == null) {
+            return;
+        }
+        UUID current = suppressionTargetUUID;
+        long now = soldier.level().getGameTime();
+        long maxContactAge = FireControl.SUPPRESSION_CONTACT_MAX_TICKS / 2;
+        for (int step = 1; step <= suppressionRotation.size(); step++) {
+            int candidateIndex = Math.floorMod(suppressionRotationIndex + step, suppressionRotation.size());
+            UUID candidate = suppressionRotation.get(candidateIndex);
+            if (candidate.equals(current)) {
+                continue;
+            }
+            SquadThreatIntel.ThreatKnowledge knowledge = intel.getThreat(candidate).orElse(null);
+            if (knowledge == null || !knowledge.isAlive || knowledge.isHardTarget
+                || knowledge.lastKnownPosition == null
+                || intel.isThreatStale(candidate, now)
+                || now - knowledge.lastSeenTime > maxContactAge
+                || soldier.position().distanceTo(knowledge.lastKnownPosition.getCenter()) > SUPPRESSION_MAX_RANGE) {
+                continue;
+            }
+            Vec3 candidateAim = knowledge.lastVisibleAimPoint != null
+                ? knowledge.lastVisibleAimPoint
+                : Vec3.atCenterOf(knowledge.lastKnownPosition).add(0, 1.0, 0);
+            if (!TargetAcquisition.hasNearLineOfSightToPosition(soldier, candidateAim, SUPPRESSION_LOS_TOLERANCE)) {
+                continue;
+            }
+            if (!intel.tryClaimThreatSuppression(candidate, soldier.getUUID(), now,
+                getMaxSuppressorsForThreat(knowledge))) {
+                continue;
+            }
+            intel.releaseThreatSuppression(current, soldier.getUUID());
+            suppressionTargetUUID = candidate;
+            suppressionTargetPos = knowledge.lastKnownPosition;
+            suppressionTargetAimPoint = knowledge.lastVisibleAimPoint;
+            suppressionLastSeenTick = knowledge.lastSeenTime;
+            suppressionLaneSlot = Math.max(0, intel.getSuppressionCount(candidate) - 1);
+            suppressionLaneSide = ((soldier.getUUID().hashCode() ^ candidate.hashCode()) & 1) == 0
+                ? 1.0F : -1.0F;
+            suppressionRotationIndex = candidateIndex;
+            if (isSuppressionDebugLogging()) {
+                StevesArmyMod.LOGGER.info("[Suppression] Soldier {} round-robin rotates to threat {} (slot {}/{})",
+                    soldier.getId(), candidate.toString().substring(0, 8),
+                    candidateIndex + 1, suppressionRotation.size());
+            }
+            return;
+        }
     }
 
     private SuppressionWeaponProfile getSuppressionWeaponProfile() {
