@@ -3340,6 +3340,17 @@ private void tickRepositioning() {
         }
 
         if (soldier.getSquadMode() == SquadMode.HOLD) {
+            // Suppressed-traveler doctrine: a soldier marching to a hold objective
+            // beyond the hold radius keeps moving through pressure -
+            // SoldierHoldPositionGoal re-routes around the squad map's shadow and
+            // crawls stretches where crawling hides. Cover-seek resumes when pinned
+            // or on arrival.
+            if (StevesArmyConfig.isDangerTravelResponseEnabled()
+                    && !getCoverManager().isPinned()
+                    && SoldierHoldPositionGoal.isTravelingToObjective(soldier)) {
+                lastWantCoverReason = "";
+                return false;
+            }
             boolean hasValid = getCoverManager().getCurrentCover() != null && isCoverStillValid();
             boolean result = !hasValid;
             if (DiagnosticLogManager.isCoverLoggingEnabled()) {

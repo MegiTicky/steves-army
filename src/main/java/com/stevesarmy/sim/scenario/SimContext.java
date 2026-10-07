@@ -108,6 +108,34 @@ public final class SimContext {
         }
     }
 
+    /**
+     * Deterministic pressure from a fixed firing origin: the near-miss also
+     * carries the origin, so the full suppressed-traveler chain (squad intel
+     * feed, danger-map bake, travel reroute, crawl posture) sees a shooter
+     * position without needing a live enemy entity.
+     */
+    public void injectSuppressionFrom(String label, int nearMissBursts,
+                                      double originX, double originY, double originZ) {
+        SoldierEntity soldier = byLabel.get(label);
+        if (soldier == null || !soldier.isAlive()) return;
+        net.minecraft.world.phys.Vec3 origin = new net.minecraft.world.phys.Vec3(originX, originY, originZ);
+        for (int i = 0; i < nearMissBursts; i++) {
+            net.minecraft.world.phys.Vec3 bulletPath = soldier.position().add(0.5, 0, 0);
+            soldier.getCoverBehaviorManager().onNearMiss(bulletPath, soldier, 1.0f, null, origin);
+        }
+    }
+
+    /**
+     * {@link #injectSuppressionFrom} with the origin Y resolved against this
+     * scenario's terrain slab - fixtures stack 4Y apart, so absolute Y literals
+     * point into another scenario's slab whenever more than one scenario runs.
+     */
+    public void injectSuppressionFromGround(String label, int nearMissBursts,
+                                            double originX, double originZ, double heightAboveSurface) {
+        BlockPos surface = terrain.at((int) Math.floor(originX), 0, (int) Math.floor(originZ));
+        injectSuppressionFrom(label, nearMissBursts, originX, surface.getY() + heightAboveSurface, originZ);
+    }
+
     /** Fresh enemy at a new spot (discard + spawn so threat intel re-detects cleanly). */
     public EnemySoldierEntity moveEnemy(EnemySoldierEntity old, int x, int y, int z) {
         old.discard();

@@ -1,11 +1,18 @@
 package com.stevesarmy.combat.cover;
 
+import com.stevesarmy.StevesArmyConfig;
 import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.combat.GunIntegration;
 import com.stevesarmy.entity.SoldierEntity;
+import com.stevesarmy.squad.SquadData;
+import com.stevesarmy.squad.SquadManager;
+import com.stevesarmy.squad.SquadThreatIntel;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.phys.Vec3;
+
+import java.util.UUID;
 
 public class CoverBehaviorManager {
     
@@ -43,6 +50,15 @@ public class CoverBehaviorManager {
     private long recentSuppressionFiringOriginTime = 0L;
 
     private static final long SUPPRESSION_FIRING_ORIGIN_MEMORY_MS = 15000L;
+
+    // Suppressed-traveler doctrine (dangerTravelResponse): see handleSuppressedTravel.
+    /** Squad intel report cadence for near-miss shooters (one per sustained burst). */
+    private static final int TRAVEL_INTEL_FEED_INTERVAL_TICKS = 40;
+    private boolean travelReroutePending = false;
+    private int travelRerouteCooldownUntilTick = 0;
+    private int travelReroutesServed = 0;
+    /** Not Long.MIN_VALUE: (tickCount - MIN_VALUE) overflows and silently disables the feed. */
+    private int lastTravelIntelFeedTick = -TRAVEL_INTEL_FEED_INTERVAL_TICKS;
     
     private int peekCountSameCover = 0;
     private int savedPeekCount = 0;
@@ -439,6 +455,7 @@ public class CoverBehaviorManager {
         }
         suppressionTracker.onNearMiss(bulletPath, soldier, bulletSpeed, shooter);
         recordSuppressionFiringOrigin(firingOrigin);
+        handleSuppressedTravel(soldier, shooter, firingOrigin);
     }
 
     /**
@@ -502,6 +519,88 @@ public class CoverBehaviorManager {
             recentSuppressionFiringOrigin = firingOrigin;
             recentSuppressionFiringOriginTime = System.currentTimeMillis();
         }
+    }
+
+    /**
+     * Suppressed-traveler doctrine (dangerTravelResponse): near-misses against a
+     * soldier who is marching in the open do two things beyond personal
+     * suppression - they report the shooter to squad intel so the danger map
+     * bakes the new shadow, and they raise a travel-reroute flag that
+     * SoldierHoldPositionGoal consumes to recompute the march path around it.
+     * Cover-seek itself keeps waiting until pinned (CoverTacticalGoal decides).
+     */
+    private void handleSuppressedTravel(net.minecraft.world.entity.LivingEntity suppressed,
+                                        @javax.annotation.Nullable net.minecraft.world.entity.LivingEntity shooter,
+                                        @javax.annotation.Nullable Vec3 firingOrigin) {
+        if (!StevesArmyConfig.isDangerTravelResponseEnabled()) return;
+        if (!(suppressed instanceof SoldierEntity traveler)) return;
+        if (!(traveler.level() instanceof ServerLevel serverLevel)) return;
+        UUID squadId = traveler.getSquadId();
+        if (squadId == null) return;
+
+        int now = traveler.tickCount;
+
+        // 1. Intel feed: the squad learns where fire is coming from even though
+        //    nobody has spotted the shooter. Rate-limited to one report per
+        //    burst-sized window; ThreatKnowledge dedupes by threat id.
+        if (now - lastTravelIntelFeedTick >= TRAVEL_INTEL_FEED_INTERVAL_TICKS
+                && (shooter != null || firingOrigin != null)) {
+            lastTravelIntelFeedTick = now;
+            UUID threatId;
+            BlockPos reportPos;
+            if (shooter != null) {
+                threatId = shooter.getUUID();
+                reportPos = shooter.blockPosition();
+            } else {
+                // Unknown shooter: key the threat by the rounded firing origin so
+                // consecutive shots from the same spot stay one shadow.
+                reportPos = BlockPos.containing(firingOrigin);
+                threatId = UUID.nameUUIDFromBytes(
+                    ("sa-suppression|" + reportPos.getX() + "," + reportPos.getY() + "," + reportPos.getZ())
+                        .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            }
+            SquadThreatIntel intel = SquadManager.get(serverLevel).getSquadById(squadId)
+                .map(SquadData::getThreatIntel).orElse(null);
+            if (intel != null) {
+                intel.reportThreatPosition(traveler.getUUID(), threatId, reportPos,
+                    0.5f, serverLevel);
+            }
+        }
+
+        // 2. Reroute request: only while actually marching (no cover claim, path
+        //    active) and pressured but not yet pinned - pinned hands control back
+        //    to the cover goal. The cooldown keeps sustained fire from re-pathing
+        //    on every individual miss.
+        if (now < travelRerouteCooldownUntilTick) return;
+        float suppression = suppressionTracker.getSuppressionLevel();
+        if (suppression < SuppressionTracker.PRESSURED_THRESHOLD
+            || suppression >= SuppressionTracker.PINNED_THRESHOLD) {
+            return;
+        }
+        if (state != CoverState.NO_COVER) return;
+        if (traveler.getNavigation().isDone()) return;
+        travelReroutePending = true;
+        travelRerouteCooldownUntilTick = now + StevesArmyConfig.getDangerTravelRerouteCooldownTicks();
+    }
+
+    /** Current personal suppression level (0..1) for travel-posture decisions. */
+    public float getSuppressionLevel() {
+        return suppressionTracker.getSuppressionLevel();
+    }
+
+    /** One-shot: a marching soldier under fire asked the hold goal to re-route. */
+    public boolean consumeTravelRerouteRequest() {
+        boolean pending = travelReroutePending;
+        travelReroutePending = false;
+        if (pending) {
+            travelReroutesServed++;
+        }
+        return pending;
+    }
+
+    /** Sim/debug telemetry: how many travel re-routes this soldier has served. */
+    public int getTravelReroutesServed() {
+        return travelReroutesServed;
     }
 
     public void onExplosion(Vec3 explosionPosition, float exposure) {

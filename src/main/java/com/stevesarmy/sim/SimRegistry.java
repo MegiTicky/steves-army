@@ -52,7 +52,9 @@ public final class SimRegistry {
             dangerShiftReal(),
             dangerMultiSquadBudget(),
             dangerPathDetour(),
-            dangerDetourLive());
+            dangerDetourLive(),
+            travelRerouteSuppressed(),
+            travelCrawlSuppressed());
     }
 
     public static SimScenario byName(String name) {
@@ -1522,6 +1524,170 @@ public final class SimRegistry {
                             && s.dangerAtSoldier <= 50).count();
                     return enRoute >= 20 && lowDanger * 100 >= enRoute * 50;
                 })
+            .build();
+    }
+
+    /**
+     * SUPPRESSED-TRAVELER (reroute): a rifleman marching across open ground to a
+     * hold objective comes under sustained near-miss fire from a fixed origin east
+     * of the lane. The near-misses carry the firing origin, so the squad intel
+     * bakes the shooter, the map bakes the shadow, the march path re-routes around
+     * it, and the soldier still arrives - the traveler defers cover-seek until
+     * pinned (dangerTravelResponse). No enemy entity: the live detection chain is
+     * danger_detour_live's job; this isolates the traveler response to pressure.
+     *
+     * <p>March length stays under the soldier's 32-block FOLLOW_RANGE: async
+     * pathfinding returns a partial (canReach=false) path for anything longer and
+     * the navigation layer hard-stops it - a pre-existing hold-march limitation,
+     * not part of this doctrine. Injection cadence (single burst / 10t) walks
+     * suppression into the pressured band (0.5..0.9) without pinning; pinned
+     * would hand the march to the cover goal, a different doctrine path.
+     */
+    private static SimScenario travelRerouteSuppressed() {
+        // holds the marcher's UUID and the served-reroute count for assertions
+        final java.util.UUID[] marcherId = new java.util.UUID[1];
+        final int[] reroutesServed = new int[1];
+        final int[] slabY = new int[1];
+        return SimScenario.builder("travel_reroute_suppressed")
+            .description("SUPPRESSED TRAVEL (reroute): marching rifleman under near-miss fire keeps marching - "
+                + "the fire origin feeds squad intel, the map bakes the shadow, the hold goal re-routes "
+                + "danger-aware, and the soldier reaches the objective radius without diving for cover. "
+                + "Open field offers no safer lane to deviate toward, so the reroute is proven by the "
+                + "served-reroute counter and the danger-corridor capture, not by path geometry.")
+            .duration(400)
+            .terrain(t -> t.platform())
+            .setup(ctx -> {
+                ctx.spawnAnchor(6, 0, 42);
+                com.stevesarmy.entity.SoldierEntity marcher = ctx.spawnFriendly(
+                    ModEntities.SOLDIER.get(), "marcher", 8, 0, 40, SquadMode.HOLD);
+                marcher.setHoldPosition(ctx.terrain.at(18, 0, 20));
+                marcherId[0] = marcher.getUUID();
+                slabY[0] = ctx.terrain.at(0, 0, 0).getY();
+            })
+            .action(20, "near-miss pressure", ctx -> ctx.injectSuppressionFromGround("marcher", 1, 30.5, 30.5, 2.0))
+            .action(30, "near-miss pressure", ctx -> ctx.injectSuppressionFromGround("marcher", 1, 30.5, 30.5, 2.0))
+            .action(40, "near-miss pressure", ctx -> ctx.injectSuppressionFromGround("marcher", 1, 30.5, 30.5, 2.0))
+            .action(50, "near-miss pressure", ctx -> ctx.injectSuppressionFromGround("marcher", 1, 30.5, 30.5, 2.0))
+            .action(60, "near-miss pressure", ctx -> ctx.injectSuppressionFromGround("marcher", 1, 30.5, 30.5, 2.0))
+            .action(65, "probe", ctx -> {
+                var s = ctx.soldier("marcher");
+                var squad = com.stevesarmy.squad.SquadManager.get((net.minecraft.server.level.ServerLevel) s.level())
+                    .getSquadById(s.getSquadId()).orElse(null);
+                com.stevesarmy.StevesArmyMod.LOGGER.info(
+                    "[ChainProbe] intelThreats={} activeThreats={} bakedCells={} sup={}",
+                    squad == null ? -1 : squad.getThreatIntel().getThreatCount(),
+                    squad == null ? -1 : squad.getDangerMap().activeThreatCount(),
+                    squad == null ? -1 : squad.getDangerMap().bakedCellCount(),
+                    String.format("%.2f", s.getCoverBehaviorManager().getSuppressionLevel()));
+            })
+            .action(120, "sample reroute counter", ctx ->
+                reroutesServed[0] = ctx.soldier("marcher").getCoverBehaviorManager().getTravelReroutesServed())
+            .assertThat("fire origin baked into the squad map (danger > 20 at the marcher mid-march)",
+                view -> view.timeline().series("marcher").stream()
+                    .filter(s -> s.tick >= 40 && s.tick <= 220)
+                    .anyMatch(s -> s.dangerAtSoldier > 20))
+            .assertThat("travel re-route served (near-miss while marching recomputed the path)",
+                view -> reroutesServed[0] >= 1)
+            .assertThat("re-path was danger-aware (corridor captured with baked shadow cells)",
+                view -> {
+                    var debug = com.stevesarmy.entity.ai.pathfinding.DangerCorridor.debugFor(marcherId[0]);
+                    return debug != null && !debug.cellDanger().isEmpty();
+                })
+            .assertThat("march continues under fire (reaches the hold radius before any cover dive)",
+                view -> {
+                    Vec3 hold = new Vec3(18.5, slabY[0], 20.5);
+                    boolean doveToCover = false;
+                    for (SimSample s : view.timeline().series("marcher")) {
+                        if (s.state == null || s.state.position == null) continue;
+                        if (s.state.coverState != null && !"NO_COVER".equals(s.state.coverState)) {
+                            doveToCover = true;
+                        }
+                        if (s.state.position.distanceTo(hold) < 12.0 && !doveToCover) {
+                            return true;
+                        }
+                    }
+                    return false;
+                })
+            .assertThat("pressure was real (suppression peaked at or above pressured)",
+                view -> maxSuppression(view, "marcher") >= 0.5f)
+            .build();
+    }
+
+    /**
+     * SUPPRESSED-TRAVELER (crawl): a rifleman marching east to a hold objective
+     * passes behind a 1-high wall with the shooter north of it. The cells along
+     * the wall read the crawl-hide pattern (standing eye exposed over the top,
+     * legs shielded), so the suppressed march drops low through the stretch and
+     * stands again once suppression decays below the pressured threshold.
+     * Origin-only fire, same rationale and FOLLOW_RANGE scoping as
+     * travel_reroute_suppressed.
+     */
+    /**
+     * SUPPRESSED-TRAVELER (crawl): a rifleman marching east to a hold objective
+     * passes along a 1-high wall with the shooter crouched low behind it (origin
+     * at wall-top height). South-of-wall cells read the crawl-hide pattern
+     * (standing eye clears the wall top, legs are shielded), so the suppressed
+     * march drops low through the stretch and stands again once the pressure
+     * decays below the pressured threshold. Origin-only fire, same rationale and
+     * FOLLOW_RANGE scoping as travel_reroute_suppressed; the hold goal stops at
+     * its 10-block radius, so arrival means reaching the radius.
+     */
+    private static SimScenario travelCrawlSuppressed() {
+        final int[] slabY = new int[1];
+        return SimScenario.builder("travel_crawl_suppressed")
+            .description("SUPPRESSED TRAVEL (crawl): marching rifleman drops low through the 1-high-wall "
+                + "stretch (eyes clear the wall, legs shielded) while suppressed, stands after the "
+                + "pressure eases, and still reaches the objective.")
+            .duration(600)
+            .terrain(t -> {
+                t.platform();
+                // east-west 1-high wall north of the march lane (z=22): south-face
+                // cells are eye-exposed / leg-shielded - the crawl-hide pattern
+                t.coverRow(10, 20, 38, 20, 1);
+            })
+            .setup(ctx -> {
+                ctx.spawnAnchor(6, 0, 42);
+                com.stevesarmy.entity.SoldierEntity marcher = ctx.spawnFriendly(
+                    ModEntities.SOLDIER.get(), "marcher", 14, 0, 22, SquadMode.HOLD);
+                marcher.setHoldPosition(ctx.terrain.at(40, 0, 22));
+                slabY[0] = ctx.terrain.at(0, 0, 0).getY();
+            })
+            .action(20, "near-miss pressure", ctx -> ctx.injectSuppressionFromGround("marcher", 1, 24.5, 8.5, 1.0))
+            .action(30, "near-miss pressure", ctx -> ctx.injectSuppressionFromGround("marcher", 1, 24.5, 8.5, 1.0))
+            .action(40, "near-miss pressure", ctx -> ctx.injectSuppressionFromGround("marcher", 1, 24.5, 8.5, 1.0))
+            .action(50, "near-miss pressure", ctx -> ctx.injectSuppressionFromGround("marcher", 1, 24.5, 8.5, 1.0))
+            .action(60, "near-miss pressure", ctx -> ctx.injectSuppressionFromGround("marcher", 1, 24.5, 8.5, 1.0))
+            .assertThat("crawls through the shielded stretch (low posture while inside the wall band)",
+                view -> view.timeline().series("marcher").stream()
+                    .filter(s -> s.state.position != null
+                        && s.state.position.x >= 12 && s.state.position.x <= 36)
+                    .anyMatch(s -> "SWIMMING".equals(s.posture)))
+            .assertThat("stands again after the pressure eases (standing observed after the first crawl)",
+                view -> {
+                    boolean crawled = false;
+                    for (SimSample s : view.timeline().series("marcher")) {
+                        if ("SWIMMING".equals(s.posture)) crawled = true;
+                        if (crawled && "STANDING".equals(s.posture)) return true;
+                    }
+                    return false;
+                })
+            .assertThat("march continues under fire (reaches the hold radius before any cover dive)",
+                view -> {
+                    Vec3 hold = new Vec3(40.5, slabY[0], 22.5);
+                    boolean doveToCover = false;
+                    for (SimSample s : view.timeline().series("marcher")) {
+                        if (s.state == null || s.state.position == null) continue;
+                        if (s.state.coverState != null && !"NO_COVER".equals(s.state.coverState)) {
+                            doveToCover = true;
+                        }
+                        if (s.state.position.distanceTo(hold) < 12.0 && !doveToCover) {
+                            return true;
+                        }
+                    }
+                    return false;
+                })
+            .assertThat("pressure was real (suppression peaked at or above pressured)",
+                view -> maxSuppression(view, "marcher") >= 0.5f)
             .build();
     }
 

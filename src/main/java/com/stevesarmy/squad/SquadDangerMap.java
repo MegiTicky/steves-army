@@ -392,6 +392,16 @@ public final class SquadDangerMap {
         return cell;
     }
 
+    /**
+     * O(1) crawl signal for suppressed travelers: the position is seen by a
+     * threat at standing eye height but the legs are shielded, i.e. crawling
+     * hides here. Unknown/unbaked ground returns false - never crawl blind.
+     */
+    public boolean isCrawlHiddenAt(double x, double z, long gameTime) {
+        Cell cell = cellAt(x, z, gameTime);
+        return cell != null && cell.eyeExposed && !cell.legExposed;
+    }
+
     /** Rays one cell bake spends at the current threat count (for capture-side budgeting). */
     public int raysPerCell() {
         return Math.max(1, activeThreats.size()) * RAYS_PER_THREAT;

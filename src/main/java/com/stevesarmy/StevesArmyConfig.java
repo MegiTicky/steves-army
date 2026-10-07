@@ -55,6 +55,8 @@ public class StevesArmyConfig {
     public static final ForgeConfigSpec.DoubleValue DANGER_PATH_RIFLEMAN_WEIGHT;
     public static final ForgeConfigSpec.DoubleValue DANGER_PATH_MACHINE_GUNNER_WEIGHT;
     public static final ForgeConfigSpec.DoubleValue DANGER_PATH_GARRISON_WEIGHT;
+    public static final ForgeConfigSpec.BooleanValue DANGER_TRAVEL_RESPONSE;
+    public static final ForgeConfigSpec.IntValue DANGER_TRAVEL_REROUTE_COOLDOWN_TICKS;
 
     public static final ForgeConfigSpec.DoubleValue SPACING_DISTANCE;
 
@@ -438,6 +440,21 @@ public class StevesArmyConfig {
                      "occasional repositioning prefers low-danger ground. 0 disables.",
                      "Default: 2.0")
             .defineInRange("dangerPathGarrisonWeight", 2.0, 0.0, 16.0);
+
+        DANGER_TRAVEL_RESPONSE = BUILDER
+            .comment("Suppressed-traveler doctrine: a soldier marching to an objective who comes",
+                     "under fire keeps moving - the cover goal defers, the squad map bakes the",
+                     "shooter from the near-misses, the path re-routes around the new shadow,",
+                     "and the soldier crawls through stretches where the map says crawling hides.",
+                     "Cover-seek waits until pinned or arrival. false restores stop-at-cover doctrine.",
+                     "Default: true")
+            .define("dangerTravelResponse", true);
+
+        DANGER_TRAVEL_REROUTE_COOLDOWN_TICKS = BUILDER
+            .comment("Minimum ticks between travel re-route requests for one soldier, so sustained",
+                     "fire re-routes the march without recomputing a path on every near-miss.",
+                     "Default: 60 ticks (3 s)")
+            .defineInRange("dangerTravelRerouteCooldownTicks", 60, 20, 200);
 
         BUILDER.pop();
 
@@ -1171,6 +1188,14 @@ BUILDER.pop();
 
     public static double getDangerPathGarrisonWeight() {
         return DANGER_PATH_GARRISON_WEIGHT.get();
+    }
+
+    public static boolean isDangerTravelResponseEnabled() {
+        return DANGER_TRAVEL_RESPONSE.get();
+    }
+
+    public static int getDangerTravelRerouteCooldownTicks() {
+        return DANGER_TRAVEL_REROUTE_COOLDOWN_TICKS.get();
     }
 
     public static double getMachineGunnerDetectionDistance() {

@@ -39,6 +39,10 @@ public class CoverPositionController extends MoveControl {
 
     private String debugMoveSource = "none";
     private String debugMoveReason = "";
+
+    /** Sim-harness telemetry: which subsystem produced the current movement (and why). */
+    public String debugMoveSource() { return debugMoveSource; }
+    public String debugMoveReason() { return debugMoveReason; }
     private Vec3 debugLastSetVelocity = Vec3.ZERO;
     // Sim-harness telemetry: how often the cover-anchor velocity actually engaged.
     private int debugAnchorTicks;

@@ -35,8 +35,8 @@ public class SuppressionTracker {
     private static final float NEAR_MISS_THRESHOLD = 3.0f;
     private static final float NEAR_MISS_SUPPRESSION = 0.25f;
     private static final float DIRECT_FIRE_SUPPRESSION = 0.3f;
-    private static final float PRESSURED_THRESHOLD = 0.5f;
-    private static final float PINNED_THRESHOLD = 0.9f;
+    public static final float PRESSURED_THRESHOLD = 0.5f;
+    public static final float PINNED_THRESHOLD = 0.9f;
     private static final long MIN_PEEK_TIME_MS = 1000;
     private static final long MIN_RECOVERY_TIME_MS = 2500;
     private static final float MAX_SUPPRESSION = 1.0f;

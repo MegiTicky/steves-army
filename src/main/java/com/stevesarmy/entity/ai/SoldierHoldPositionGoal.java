@@ -2,15 +2,19 @@ package com.stevesarmy.entity.ai;
 
 import com.stevesarmy.combat.cover.CoverBehaviorManager;
 import com.stevesarmy.combat.cover.CoverPoint;
+import com.stevesarmy.combat.cover.SuppressionTracker;
 import com.stevesarmy.StevesArmyConfig;
 import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.entity.SoldierEntity;
+import com.stevesarmy.squad.SquadManager;
 import com.stevesarmy.squad.SquadMode;
 import com.stevesarmy.util.SpacingHelper;
 import net.minecraft.core.BlockPos;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.ai.goal.Goal;
 
 import java.util.EnumSet;
+import java.util.UUID;
 
 public class SoldierHoldPositionGoal extends Goal {
     private static final float HOLD_RADIUS_SQ = 100.0f;
@@ -19,16 +23,33 @@ public class SoldierHoldPositionGoal extends Goal {
     private static final int HOLD_REPATH_FAILURE_INTERVAL_TICKS = 100;
     /** Distance the soldier must close per finished path before the retry is treated as a failure. */
     private static final double HOLD_PATH_PROGRESS_SQ = 2.25D;
+    /** March speed while travel-crawling (mirrors CoverTacticalGoal's CRAWL_ROUTE_SPEED). */
+    private static final double CRAWL_TRAVEL_SPEED = 0.65D;
+    /** Crawl/stand posture re-evaluation cadence while marching. */
+    private static final int TRAVEL_CRAWL_CHECK_INTERVAL_TICKS = 10;
     private final SoldierEntity soldier;
     private BlockPos holdPos;
     private final double speedModifier;
     private int repathTimer;
     private double holdDistAtRequestSq;
+    private boolean travelCrawlActive;
+    private int travelCrawlCheckTimer;
 
     public SoldierHoldPositionGoal(SoldierEntity soldier) {
         this.soldier = soldier;
         this.speedModifier = 1.0D;
         this.setFlags(EnumSet.of(Goal.Flag.MOVE));
+    }
+
+    /**
+     * True when the soldier has a hold objective beyond the hold radius, i.e. it
+     * is marching there rather than holding. Drives the suppressed-traveler
+     * exemption in CoverTacticalGoal.shouldSeekCover.
+     */
+    public static boolean isTravelingToObjective(SoldierEntity soldier) {
+        BlockPos hold = soldier.getHoldPosition();
+        if (hold == null || hold.equals(BlockPos.ZERO)) return false;
+        return soldier.distanceToSqr(hold.getX(), hold.getY(), hold.getZ()) > HOLD_RADIUS_SQ;
     }
 
     @Override
@@ -106,6 +127,8 @@ public class SoldierHoldPositionGoal extends Goal {
         soldier.clearFormationOffset();
         this.repathTimer = 0;
         this.holdDistAtRequestSq = 0.0D;
+        this.travelCrawlActive = false;
+        this.travelCrawlCheckTimer = TRAVEL_CRAWL_CHECK_INTERVAL_TICKS;
         navigateToTarget(holdPos);
         this.holdDistAtRequestSq = soldier.distanceToSqr(holdPos.getX(), holdPos.getY(), holdPos.getZ());
         this.repathTimer = StevesArmyConfig.getMoveGoalRepathTicks();
@@ -113,6 +136,7 @@ public class SoldierHoldPositionGoal extends Goal {
 
     @Override
     public void stop() {
+        endTravelCrawl();
         CoverBehaviorManager.CoverState coverState = soldier.getCoverBehaviorManager().getState();
         if (CoverTacticalGoal.isDebugLoggingEnabled()
             && (coverState == CoverBehaviorManager.CoverState.SEEKING_COVER
@@ -171,14 +195,82 @@ public class SoldierHoldPositionGoal extends Goal {
                     ? HOLD_REPATH_FAILURE_INTERVAL_TICKS
                     : StevesArmyConfig.getMoveGoalRepathTicks();
             }
+            tickTravelResponse(coverManager);
         } else {
             soldier.getNavigation().stop();
         }
     }
 
+    /**
+     * Suppressed-traveler response while marching (dangerTravelResponse): consumes
+     * a reroute request raised by CoverBehaviorManager on near-misses (recomputing
+     * the path so the squad map's fresh shadow bends the route), and manages the
+     * travel crawl posture over the squad danger map.
+     */
+    private void tickTravelResponse(CoverBehaviorManager coverManager) {
+        if (!StevesArmyConfig.isDangerTravelResponseEnabled()) return;
+
+        if (coverManager.consumeTravelRerouteRequest() && soldier.getNavigation().getPath() != null) {
+            navigateToTarget(holdPos);
+            holdDistAtRequestSq = soldier.distanceToSqr(holdPos.getX(), holdPos.getY(), holdPos.getZ());
+            repathTimer = StevesArmyConfig.getMoveGoalRepathTicks();
+            if (CoverTacticalGoal.isDebugLoggingEnabled()) {
+                StevesArmyMod.LOGGER.info("[TravelResponse] Soldier {} re-routing march to {} under fire (suppression={})",
+                    soldier.getId(), holdPos, String.format("%.2f", coverManager.getSuppressionLevel()));
+            }
+        }
+
+        if (soldier.isFiringProne()) return;
+        if (--travelCrawlCheckTimer > 0) return;
+        travelCrawlCheckTimer = TRAVEL_CRAWL_CHECK_INTERVAL_TICKS;
+
+        boolean crawlHides = squadDangerMapSaysCrawlHides();
+        boolean pressured = coverManager.getSuppressionLevel() >= SuppressionTracker.PRESSURED_THRESHOLD;
+
+        if (!travelCrawlActive && crawlHides && pressured) {
+            travelCrawlActive = true;
+            soldier.setLowCrouching(true);
+            soldier.getNavigation().setSpeedModifier(CRAWL_TRAVEL_SPEED);
+            if (CoverTacticalGoal.isDebugLoggingEnabled()) {
+                StevesArmyMod.LOGGER.info("[TravelResponse] Soldier {} going low - crawling hides here (suppression={})",
+                    soldier.getId(), String.format("%.2f", coverManager.getSuppressionLevel()));
+            }
+        } else if (travelCrawlActive && (!crawlHides || !pressured)) {
+            travelCrawlActive = false;
+            soldier.setLowCrouching(false);
+            soldier.getNavigation().setSpeedModifier(speedModifier);
+            if (CoverTacticalGoal.isDebugLoggingEnabled()) {
+                StevesArmyMod.LOGGER.info("[TravelResponse] Soldier {} standing back up (crawlHides={}, suppression={})",
+                    soldier.getId(), crawlHides, String.format("%.2f", coverManager.getSuppressionLevel()));
+            }
+        }
+    }
+
+    /** Squad danger map verdict at the soldier's position; unknown ground reads false. */
+    private boolean squadDangerMapSaysCrawlHides() {
+        if (!(soldier.level() instanceof ServerLevel serverLevel)) return false;
+        UUID squadId = soldier.getSquadId();
+        if (squadId == null) return false;
+        return SquadManager.get(serverLevel).getSquadById(squadId)
+            .map(data -> data.getDangerMap().isCrawlHiddenAt(
+                soldier.getX(), soldier.getZ(), serverLevel.getGameTime()))
+            .orElse(false);
+    }
+
+    /** Releases the travel crawl pose only when this goal still owns it. */
+    private void endTravelCrawl() {
+        if (!travelCrawlActive) return;
+        travelCrawlActive = false;
+        if (!soldier.isFiringProne()) {
+            soldier.setLowCrouching(false);
+        }
+        soldier.getNavigation().setSpeedModifier(speedModifier);
+    }
+
     private void navigateToTarget(BlockPos target) {
         if (target == null) return;
         BlockPos spaced = SpacingHelper.applySpacing(target, soldier);
-        soldier.getNavigation().moveTo(spaced.getX(), spaced.getY(), spaced.getZ(), speedModifier);
+        soldier.getNavigation().moveTo(spaced.getX(), spaced.getY(), spaced.getZ(),
+            travelCrawlActive ? CRAWL_TRAVEL_SPEED : speedModifier);
     }
 }
