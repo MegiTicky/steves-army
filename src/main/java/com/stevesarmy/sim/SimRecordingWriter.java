@@ -106,6 +106,7 @@ public final class SimRecordingWriter {
             const outcomeEl = document.getElementById('outcome');
             outcomeEl.textContent = D.outcome;
             outcomeEl.className = 'outcome outcome-' + D.outcome;
+            const px = v => (v + 1) * CS;
 
             // --- terrain layer -----------------------------------------------------
             const terr = document.createElement('canvas');
@@ -144,8 +145,6 @@ public final class SimRecordingWriter {
             const scrub = document.getElementById('scrub');
             scrub.max = D.frames.length - 1;
             let idx = 0, playing = false, timer = null, selected = null;
-
-            const px = v => (v + 1) * CS;
 
             function line(x1, z1, x2, z2, color, dash) {
               ctx.save();
