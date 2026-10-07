@@ -83,8 +83,9 @@ public final class DangerMapDebugRenderer {
         DangerMapDebugPacket.Stats stats = ClientDangerMapDebugData.INSTANCE.stats();
         Vec3 playerTop = mc.player.position().add(0, 3.1, 0);
         billboard(mc.font, poseStack, cam, playerTop,
-            "dangermap: " + stats.cells() + " cells | " + stats.threats() + " threats | rays "
-                + stats.raysLastTick() + "/" + stats.rayBudget() + "t",
+            "dangermap: sent " + stats.cells() + " | baked " + stats.bakedCells()
+                + " | threats " + stats.threats() + " | rays " + stats.raysLastTick()
+                + "/" + stats.rayBudget() + "t | surfMiss " + stats.surfaceMiss(),
             0xFFE0E0E0, buffers);
         buffers.endBatch();
 

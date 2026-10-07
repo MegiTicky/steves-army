@@ -35,7 +35,9 @@ public final class DangerMapDebugManager {
     private static final int MAX_CELLS_PER_PLAYER = 2048;
 
     private static final Set<UUID> SUBSCRIBERS = ConcurrentHashMap.newKeySet();
+    private static final int LOG_INTERVAL_TICKS = 40;
     private static int sendCountdown = SEND_INTERVAL_TICKS;
+    private static int logCountdown = 0;
 
     private DangerMapDebugManager() {}
 
@@ -73,7 +75,7 @@ public final class DangerMapDebugManager {
     public static void sendSnapshot(ServerPlayer player) {
         if (!SUBSCRIBERS.contains(player.getUUID())) {
             NetworkHandler.sendTo(player, new DangerMapDebugPacket(false, List.of(), List.of(),
-                List.of(), new DangerMapDebugPacket.Stats(0, 0, 0, 0)));
+                List.of(), new DangerMapDebugPacket.Stats(0, 0, 0, 0, 0, 0)));
             return;
         }
         ServerLevel level = player.serverLevel();
@@ -92,10 +94,18 @@ public final class DangerMapDebugManager {
 
         List<DangerMapDebugPacket.Cell> cells = new ArrayList<>();
         List<DangerMapDebugPacket.Threat> threats = new ArrayList<>();
+        int bakedCells = 0;
+        int surfaceMiss = 0;
+        Vec3 firstAnchor = null;
         for (UUID squadId : squadIds) {
             SquadData squad = SquadManager.get(level).getSquadById(squadId).orElse(null);
             if (squad == null) continue;
             SquadDangerMap map = squad.getDangerMap();
+            bakedCells += map.bakedCellCount();
+            surfaceMiss += map.debugSurfaceMissCount();
+            if (firstAnchor == null && map.debugAnchor() != null) {
+                firstAnchor = map.debugAnchor();
+            }
             for (SquadDangerMap.NearCell cell : map.snapshotCells(
                     center.x, center.z, SOLDIER_SCAN_RADIUS, gameTime,
                     MAX_CELLS_PER_PLAYER - cells.size())) {
@@ -141,9 +151,21 @@ public final class DangerMapDebugManager {
         }
 
         DangerMapDebugPacket.Stats stats = new DangerMapDebugPacket.Stats(
-            cells.size(), threats.size(),
+            cells.size(), bakedCells, threats.size(),
             SquadDangerMap.debugMaxRaysUsedPerTick(),
-            com.stevesarmy.StevesArmyConfig.getDangerRayBudgetPerTick());
+            com.stevesarmy.StevesArmyConfig.getDangerRayBudgetPerTick(),
+            surfaceMiss);
         NetworkHandler.sendTo(player, new DangerMapDebugPacket(true, cells, threats, corridors, stats));
+
+        if (++logCountdown >= LOG_INTERVAL_TICKS) {
+            logCountdown = 0;
+            Vec3 anchor = firstAnchor;
+            StevesArmyMod.LOGGER.info(
+                "[DangerMap][debug] squads={} bakedCells={} sentCells={} threats={} raysUsed={} surfaceMiss={} anchor={}",
+                squadIds.size(), bakedCells, cells.size(), threats.size(),
+                SquadDangerMap.debugMaxRaysUsedPerTick(), surfaceMiss,
+                anchor == null ? "none" : String.format("(%.0f, %.0f) dist=%.0f", anchor.x, anchor.z,
+                    anchor.distanceTo(center)));
+        }
     }
 }

@@ -35,8 +35,14 @@ public final class DangerMapDebugPacket {
      */
     public record Corridor(BlockPos target, float weight, List<Cell> cells) {}
 
-    /** Per-subscriber bake stats for a quick MSPT sanity check. */
-    public record Stats(int cells, int threats, int raysLastTick, int rayBudget) {}
+    /**
+     * Per-subscriber bake stats for a quick MSPT sanity check.
+     * {@code cells} = cells near the viewer (sent); {@code bakedCells} = total
+     * actually baked across nearby squads; {@code surfaceMiss} = bakes
+     * abandoned to an unloaded chunk probe (rays spent, no cell stored).
+     */
+    public record Stats(int cells, int bakedCells, int threats, int raysLastTick,
+                        int rayBudget, int surfaceMiss) {}
 
     private final boolean renderEnabled;
     private final List<Cell> cells;
@@ -83,7 +89,8 @@ public final class DangerMapDebugPacket {
             decodedCorridors.add(new Corridor(target, weight, List.copyOf(corridorCells)));
         }
         corridors = List.copyOf(decodedCorridors);
-        stats = new Stats(buf.readVarInt(), buf.readVarInt(), buf.readVarInt(), buf.readVarInt());
+        stats = new Stats(buf.readVarInt(), buf.readVarInt(), buf.readVarInt(),
+            buf.readVarInt(), buf.readVarInt(), buf.readVarInt());
     }
 
     public static void encode(DangerMapDebugPacket packet, FriendlyByteBuf buf) {
@@ -115,9 +122,11 @@ public final class DangerMapDebugPacket {
             }
         }
         buf.writeVarInt(packet.stats.cells());
+        buf.writeVarInt(packet.stats.bakedCells());
         buf.writeVarInt(packet.stats.threats());
         buf.writeVarInt(packet.stats.raysLastTick());
         buf.writeVarInt(packet.stats.rayBudget());
+        buf.writeVarInt(packet.stats.surfaceMiss());
     }
 
     public static void handle(DangerMapDebugPacket packet, Supplier<NetworkEvent.Context> ctx) {

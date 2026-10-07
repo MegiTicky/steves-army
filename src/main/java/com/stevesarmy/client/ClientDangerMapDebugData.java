@@ -12,7 +12,7 @@ public final class ClientDangerMapDebugData {
     private volatile List<DangerMapDebugPacket.Threat> threats = List.of();
     private volatile List<DangerMapDebugPacket.Corridor> corridors = List.of();
     private volatile DangerMapDebugPacket.Stats stats =
-        new DangerMapDebugPacket.Stats(0, 0, 0, 0);
+        new DangerMapDebugPacket.Stats(0, 0, 0, 0, 0, 0);
 
     private ClientDangerMapDebugData() {}
 
@@ -35,6 +35,6 @@ public final class ClientDangerMapDebugData {
         cells = List.of();
         threats = List.of();
         corridors = List.of();
-        stats = new DangerMapDebugPacket.Stats(0, 0, 0, 0);
+        stats = new DangerMapDebugPacket.Stats(0, 0, 0, 0, 0, 0);
     }
 }

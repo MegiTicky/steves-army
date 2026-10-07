@@ -254,7 +254,10 @@ public final class SquadDangerMap {
         long cx = key >> 32;
         long cz = (key << 32) >> 32;
         int surfaceY = surfaceY(level, (int) cx, (int) cz);
-        if (surfaceY == Integer.MIN_VALUE) return;
+        if (surfaceY == Integer.MIN_VALUE) {
+            surfaceMisses++;
+            return;
+        }
         double centerX = cx * (double) CELL_SIZE + 1.0;
         double centerZ = cz * (double) CELL_SIZE + 1.0;
 
@@ -297,6 +300,7 @@ public final class SquadDangerMap {
     }
 
     private byte debugBakes;
+    private int surfaceMisses;
 
     /** Cells bake nearest-first around the anchor and never leave the ambient radius. */
     private void rebuildBakeOrder(long anchorCell) {
@@ -439,6 +443,17 @@ public final class SquadDangerMap {
 
     public int activeThreatCount() {
         return activeThreats.size();
+    }
+
+    /** Debug: bakes abandoned because the cell's chunk was not loaded (surface probe failed). */
+    public int debugSurfaceMissCount() {
+        return surfaceMisses;
+    }
+
+    /** Debug: the current ambient-bake anchor (EMA of member positions), or null. */
+    @Nullable
+    public Vec3 debugAnchor() {
+        return anchor;
     }
 
     /** Debug-overlay snapshot: baked cells whose centers lie within {@code radius} of (centerX, centerZ). */
