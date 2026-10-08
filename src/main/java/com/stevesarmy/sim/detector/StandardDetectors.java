@@ -181,6 +181,9 @@ public final class StandardDetectors {
                         // doctrine), and dive-release-march cycles re-claim as
                         // they advance. A refractory tail after the last
                         // suppressed sample covers the post-fire recovery claim.
+                        // Ordered ATTACK advances are the same class: clearing
+                        // doctrine hops cover toward the next unchecked spot on
+                        // purpose, so a short claim chain is the order working.
                         if (s.state.suppressionLevel >= 0.30f) {
                             sawSuppression = true;
                             lastSuppressedTick = s.tick;
@@ -188,6 +191,7 @@ public final class StandardDetectors {
                         }
                         if (sawSuppression && s.tick - lastSuppressedTick <= 60) continue;
                         if (s.state.traveling) continue;
+                        if (s.state.attacking) continue;
                         if (s.state.targetCover != null) distinct.add(s.state.targetCover);
                         if (s.state.currentCover != null) distinct.add(s.state.currentCover);
                     }

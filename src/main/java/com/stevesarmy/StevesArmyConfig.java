@@ -95,6 +95,12 @@ public class StevesArmyConfig {
     public static final ForgeConfigSpec.DoubleValue CQB_DOORWAY_SPACING;
     public static final ForgeConfigSpec.BooleanValue CQB_CORNER_WATCH_ENABLED;
     public static final ForgeConfigSpec.IntValue CQB_LOST_CONTACT_WATCH_TICKS;
+    public static final ForgeConfigSpec.BooleanValue ATTACK_CLEAR_ENABLED;
+    public static final ForgeConfigSpec.IntValue ATTACK_CLEAR_RADIUS;
+    public static final ForgeConfigSpec.IntValue ATTACK_CLEAR_AWARENESS;
+    public static final ForgeConfigSpec.IntValue ATTACK_CLEAR_RAY_BUDGET;
+    public static final ForgeConfigSpec.IntValue ATTACK_CLEAR_SETTLE_TICKS;
+    public static final ForgeConfigSpec.IntValue ATTACK_CLEAR_STALL_TICKS;
     public static final ForgeConfigSpec.DoubleValue CLOSE_COMBAT_SEEK_RADIUS;
     public static final ForgeConfigSpec.IntValue CLOSE_COMBAT_REEVAL_INTERVAL_TICKS;
 
@@ -676,6 +682,49 @@ BUILDER.pop();
                      "position for this long before resuming routine behavior.",
                      "Default: 80 ticks (4 s)")
             .defineInRange("cqbLostContactWatchTicks", 80, 20, 200);
+
+        BUILDER.pop();
+
+        BUILDER.push("attack_clear");
+
+        ATTACK_CLEAR_ENABLED = BUILDER
+            .comment("Attack clearing doctrine: an ATTACK ping defines a bounded area to advance into,",
+                     "actively clear (observe blind spots, resolve contact), then secure - instead of",
+                     "completing the moment soldiers get within 4 blocks of the marker.",
+                     "false restores proximity completion.",
+                     "Default: true")
+            .define("attackClearEnabled", true);
+
+        ATTACK_CLEAR_RADIUS = BUILDER
+            .comment("Clearing boundary radius (blocks) around the ping. The area is flood-filled",
+                     "through walkable space, so walls bound it even when the radius would not.",
+                     "Default: 8 blocks")
+            .defineInRange("attackClearRadius", 8, 4, 16);
+
+        ATTACK_CLEAR_AWARENESS = BUILDER
+            .comment("Close-combat awareness range (blocks): blind-spot observation, threat",
+                     "resolution, and visibility checks use this range, separately from the",
+                     "order's clearing boundary.",
+                     "Default: 16 blocks")
+            .defineInRange("attackClearAwareness", 16, 8, 32);
+
+        ATTACK_CLEAR_RAY_BUDGET = BUILDER
+            .comment("Visibility rays per server tick spent observing unchecked blind spots across",
+                     "all active clearing orders. 0 disables ray observation (proximity only).",
+                     "Default: 24")
+            .defineInRange("attackClearRayBudget", 24, 0, 128);
+
+        ATTACK_CLEAR_SETTLE_TICKS = BUILDER
+            .comment("Once the area is reached, checked, and free of unresolved threats, the squad",
+                     "must stay settled this long before the order completes as Area secured.",
+                     "Default: 80 ticks (4 s)")
+            .defineInRange("attackClearSettleTicks", 80, 20, 400);
+
+        ATTACK_CLEAR_STALL_TICKS = BUILDER
+            .comment("No blind spot checked, no threat resolved, and no soldier progress for this",
+                     "long marks the attack STALLED (reported once; the order persists).",
+                     "Default: 600 ticks (30 s)")
+            .defineInRange("attackClearStallTicks", 600, 100, 2400);
 
         BUILDER.pop();
 
@@ -1650,6 +1699,30 @@ BUILDER.pop();
 
     public static int getCqbLostContactWatchTicks() {
         return CQB_LOST_CONTACT_WATCH_TICKS.get();
+    }
+
+    public static boolean isAttackClearEnabled() {
+        return ATTACK_CLEAR_ENABLED.get();
+    }
+
+    public static int getAttackClearRadius() {
+        return ATTACK_CLEAR_RADIUS.get();
+    }
+
+    public static int getAttackClearAwareness() {
+        return ATTACK_CLEAR_AWARENESS.get();
+    }
+
+    public static int getAttackClearRayBudget() {
+        return ATTACK_CLEAR_RAY_BUDGET.get();
+    }
+
+    public static int getAttackClearSettleTicks() {
+        return ATTACK_CLEAR_SETTLE_TICKS.get();
+    }
+
+    public static int getAttackClearStallTicks() {
+        return ATTACK_CLEAR_STALL_TICKS.get();
     }
 
     public static double getCloseCombatSeekRadius() {

@@ -1911,6 +1911,18 @@ public BlockPos getPingMoveTarget() {
     }
 
     /**
+     * Clearing-doctrine persistence: {@link com.stevesarmy.squad.ClearingCoordinator}
+     * refreshes this while the ATTACK order of record is alive, so the 60s
+     * memory window never silently ends an active order. The timeout still
+     * applies once the order is gone (owner left, order completed/replaced).
+     */
+    public void refreshAttackOrderClock() {
+        if (attackTargetPos != null) {
+            attackTargetTimestamp = System.currentTimeMillis();
+        }
+    }
+
+    /**
      * Keeps the attack objective alive while the soldier is under fire. The
      * 60s memory exists to drop stale objectives, but a fireteam pinned by
      * sustained suppression for longer than that must not silently stop

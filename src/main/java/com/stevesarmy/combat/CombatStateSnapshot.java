@@ -78,6 +78,8 @@ public final class CombatStateSnapshot {
 
     /** Suppressed-traveler doctrine: executing a long move (hold march / GO_TO). */
     public final boolean traveling;
+    /** A live ATTACK order is driving this soldier — cover claims are transient advance bounds. */
+    public final boolean attacking;
     /** Universal travel crawl engaged (movement posture from TravelCrawlController). */
     public final boolean travelCrawl;
     /** The ground underfoot currently reads "crawling hides" on the squad danger map. */
@@ -127,7 +129,7 @@ public final class CombatStateSnapshot {
                                LastSearch lastSearch,
                                String posture, boolean lowCrouching, boolean emergencyPosture,
                                float currentCoverHeight,
-                               boolean traveling, boolean travelCrawl, boolean crawlHidesHere,
+                               boolean traveling, boolean attacking, boolean travelCrawl, boolean crawlHidesHere,
                                int travelReroutesServed, float headYaw) {
         this.soldierId = soldierId;
         this.role = role;
@@ -173,6 +175,7 @@ public final class CombatStateSnapshot {
         this.emergencyPosture = emergencyPosture;
         this.currentCoverHeight = currentCoverHeight;
         this.traveling = traveling;
+        this.attacking = attacking;
         this.travelCrawl = travelCrawl;
         this.crawlHidesHere = crawlHidesHere;
         this.headYaw = headYaw;

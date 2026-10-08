@@ -61,6 +61,10 @@ public final class SquadActivityOverlayRenderer {
         if (opacity.textAlpha() > 0.0f) {
             int textColor = PingCrosshairFade.withAlpha(teamColor(activity.fireTeam()), opacity.textAlpha());
             String label = activity.fireTeam().name() + "  " + activity.type().getDisplayName();
+            String stage = clearingStageLabel(activity.clearingStage());
+            if (stage != null) {
+                label = label + " \u00B7 " + stage;
+            }
             int labelWidth = mc.font.width(label);
             guiGraphics.drawString(mc.font, label, -labelWidth / 2, -halfSize - 13, textColor, true);
 
@@ -79,6 +83,18 @@ public final class SquadActivityOverlayRenderer {
         double scale = 2.0 / Math.pow(distance, 0.3);
         return (float) Math.max(0.5, Math.min(2.0, scale))
             * StevesArmyClientConfig.PING_SCALE.get().floatValue();
+    }
+
+    /** Mirrors ClearingCoordinator.ClearingStage labels (-1 = no clearing order). */
+    private static String clearingStageLabel(int ordinal) {
+        return switch (ordinal) {
+            case 0 -> "ADVANCING";
+            case 1 -> "CLEARING";
+            case 2 -> "SECURING";
+            case 3 -> "SECURED";
+            case 4 -> "STALLED";
+            default -> null;
+        };
     }
 
     private static int teamColor(FireTeam team) {

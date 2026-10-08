@@ -211,6 +211,28 @@ public final class SimContext {
         enemy.getNavigation().moveTo(entity.getX(), entity.blockPosition().getY(), target + 0.5D, 1.0D);
     }
 
+    /**
+     * Issues a real activity-backed ATTACK order for the whole squad: the
+     * anchor is the order owner (SquadActivityManager records it), every
+     * friendly receives the ping. This is the clearing-doctrine path —
+     * scenarios that want the legacy proximity semantics call
+     * {@code soldier.setAttackTarget(...)} directly instead.
+     */
+    public void issueAttackOrder(int x, int z) {
+        if (anchor == null) {
+            throw new IllegalStateException("spawn an anchor before issueAttackOrder — the anchor owns the order");
+        }
+        BlockPos objective = terrain.at(x, 0, z);
+        com.stevesarmy.squad.SquadActivityManager.applyCommandCore(
+            anchor.getUUID(), com.stevesarmy.squad.FireTeam.ALL,
+            com.stevesarmy.ping.PingType.ATTACK, objective,
+            level.dimension().location().hashCode(), List.copyOf(friendlies));
+        for (SoldierEntity soldier : friendlies) {
+            soldier.receivePing(com.stevesarmy.ping.PingType.ATTACK,
+                new Vec3(objective.getX() + 0.5, objective.getY(), objective.getZ() + 0.5));
+        }
+    }
+
     // --- danger-map verification seams ---------------------------------------
 
     /**

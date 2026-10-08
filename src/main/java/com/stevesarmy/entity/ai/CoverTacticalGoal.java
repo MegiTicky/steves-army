@@ -8,6 +8,7 @@ import com.stevesarmy.combat.TargetAcquisition;
 import com.stevesarmy.combat.ThreatAwareness;
 import com.stevesarmy.combat.VisibilityRay;
 import com.stevesarmy.combat.cover.*;
+import com.stevesarmy.squad.ClearingCoordinator;
 import com.stevesarmy.squad.FireTeamSuppressionTracker;
 import com.stevesarmy.squad.SmokeDeploymentCoordinator;
 import com.stevesarmy.combat.cover.pure.CoverSearchResult;
@@ -118,7 +119,6 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
     private static final float BACKWARD_HYSTERESIS_THRESHOLD = 0.35f;
     private static final long MIN_PEEK_INTERVAL_MS = 2000;
     private static final int MAX_SEEKING_TICKS = 200;
-    private static final int MAX_REPOSITIONING_TICKS = 200;
     private static final int MAX_CONSECUTIVE_FAILED_SEARCHES = 4;
     private static final int SEARCH_EXHAUSTION_COOLDOWN_TICKS = 60;
     // An under-fire soldier cannot afford the full exhaustion wait in the open.
@@ -218,6 +218,10 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
     private double attackBestObjectiveDist = Double.MAX_VALUE;
     // Forward frontier: any cover closer to objective than this is acceptable
     private double attackFrontierDistance = Double.MAX_VALUE;
+    /** Clearing-doctrine view for this tick (null = no order of record). */
+    private ClearingCoordinator.ClearingView clearingView = null;
+    /** CLEAR-stage job target the search should dock near (null = plain advance). */
+    private BlockPos clearingPoiTarget = null;
 
     private long lastFlankRepositionTime = 0;
     private long failedFlankSearchFingerprint = Long.MIN_VALUE;
@@ -307,6 +311,10 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
 
     private BlockPos movementAttemptTarget = null;
     private int movementAttemptCount = 0;
+    /** Consecutive stalled-navigation re-issues against the current cover target. */
+    private int noProgressReissues = 0;
+    /** Distance to the current repositioning target when the attempt began (timeout budget input). */
+    private double repositioningStartDist = 2.0;
     private final Map<BlockPos, Path> validatedCoverPaths = new HashMap<>();
     private BlockPos validatedCoverPathSource = null;
     private long validatedCoverPathTick = Long.MIN_VALUE;
@@ -1378,6 +1386,7 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
             currentCover != null ? soldier.getSyncedCoverCurrentHeight() : -1f,
             mgr.isGoToRelocationActive()
                 || com.stevesarmy.entity.ai.SoldierHoldPositionGoal.isTravelingToObjective(soldier),
+            soldier.hasValidAttackTarget() || clearingView != null,
             soldier.getTravelCrawlController().isCrawlActive(),
             soldier.getTravelCrawlController().isCrawlHidingHere(),
             mgr.getTravelReroutesServed(),
@@ -1589,7 +1598,7 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
         }
 
         BlockPos machineGunnerAnchor = getMachineGunnerSearchCenter();
-        if (machineGunnerAnchor != null) {
+        if (machineGunnerAnchor != null && clearingPoiTarget == null) {
             searchCenter = machineGunnerAnchor;
             if (soldier.hasValidAttackTarget()) {
                 searchRadius = ATTACK_CORRIDOR_SEARCH_RADIUS;
@@ -2535,8 +2544,13 @@ private void tickRepositioning() {
             return;
         }
 
-        // Repositioning timeout: if we've been repositioning too long, abort
-        if (repositioningTicks > MAX_REPOSITIONING_TICKS) {
+        // Repositioning timeout: if we've been repositioning too long, abort.
+        // Reload pauses return above, so a reload never burns the window. The
+        // budget scales with the bound's length — a flat cap blacklists covers
+        // mid-walk on long corridor bounds that are walking fine.
+        repositioningTicks++;
+        double timeoutBudget = 100 + Math.max(2, repositioningStartDist) * 30;
+        if (repositioningTicks > timeoutBudget) {
             if (DiagnosticLogManager.isCoverLoggingEnabled()) {
                 StevesArmyMod.LOGGER.info("[CoverNav] Soldier {} repositioning timeout after {} ticks, target={}",
                     soldier.getId(), repositioningTicks, targetCover != null ? targetCover.getPosition() : "null");
@@ -2718,23 +2732,50 @@ private void tickRepositioning() {
             }
         } else {
             stuckTicks = 0;
-            
+
             if (lastSeekingPosition != null) {
                 double moved = currentPos.distanceTo(lastSeekingPosition);
                 if (moved < 0.1) {
                     noProgressTicks++;
                     if (noProgressTicks > 40) {
-                        if (DiagnosticLogManager.isCoverLoggingEnabled()) {
-                            StevesArmyMod.LOGGER.info("[CoverGoal] Soldier {} not progressing toward target cover ({} ticks, moved {}), retrying navigation",
-                                soldier.getId(), noProgressTicks, String.format("%.2f", moved));
-                        }
-                        navigation.stop();
-                        moveToCover(targetCover);
+                        // An accepted path that moves the soldier nowhere is a
+                        // dead bound: one re-issue gives the pathfinder a second
+                        // chance, a third stall condemns the cover. Without this
+                        // escalation the re-issue loop resets its own counter
+                        // forever and the soldier stands at the old cover
+                        // "moving" to the new one until something else interrupts.
                         noProgressTicks = 0;
                         lastSeekingPosition = currentPos;
+                        int stalledReissues = ++noProgressReissues;
+                        if (stalledReissues >= 2) {
+                            noProgressReissues = 0;
+                            if (DiagnosticLogManager.isCoverLoggingEnabled()) {
+                                StevesArmyMod.LOGGER.info("[CoverGoal] Soldier {} cover {} unreachable ({} stalled re-issues), blacklisting and researching",
+                                    soldier.getId(), targetCover.getPosition(), stalledReissues);
+                            }
+                            blacklistCover(targetCover.getPosition(), BlacklistReason.POSITIONING_BLOCKED);
+                            noteSuppressionMoveAborted();
+                            stuckTicks = 0;
+                            getCoverManager().clearTargetCover();
+                            if (getCoverManager().getCurrentCover() != null) {
+                                getCoverManager().setState(CoverBehaviorManager.CoverState.IN_COVER);
+                            } else {
+                                getCoverManager().setState(CoverBehaviorManager.CoverState.SEEKING_COVER);
+                                requestCoverSearch(soldier.hasValidAttackTarget()
+                                    ? QueuedSearchMode.ATTACK_SELECTING : QueuedSearchMode.NORMAL);
+                            }
+                        } else {
+                            if (DiagnosticLogManager.isCoverLoggingEnabled()) {
+                                StevesArmyMod.LOGGER.info("[CoverGoal] Soldier {} not progressing toward target cover ({} ticks, moved {}), retrying navigation",
+                                    soldier.getId(), noProgressTicks, String.format("%.2f", moved));
+                            }
+                            navigation.stop();
+                            moveToCover(targetCover);
+                        }
                     }
                 } else {
                     noProgressTicks = 0;
+                    noProgressReissues = 0;
                     lastSeekingPosition = currentPos;
                 }
             } else {
@@ -3963,17 +4004,26 @@ private boolean shouldExitCoverForFollow() {
         BlockPos searchCenter = soldier.blockPosition();
 
         if (soldier.hasValidAttackTarget()) {
-            BlockPos attackPos = soldier.getAttackTargetPos();
-            Vec3 toTarget = new Vec3(
-                attackPos.getX() - soldier.getX(),
-                0,
-                attackPos.getZ() - soldier.getZ());
-            double distToTarget = toTarget.length();
-            if (distToTarget > 1.0) {
-                toTarget = toTarget.normalize();
-                double ahead = Math.min(distToTarget * 0.25, 6.0);
-                searchCenter = soldier.blockPosition().offset(
-                    (int)(toTarget.x * ahead), 0, (int)(toTarget.z * ahead));
+            if (clearingHold()) {
+                // Secured: watch coverage near the current position, not the
+                // corridor advance's forward bias.
+                searchCenter = soldier.blockPosition();
+            } else if (clearingPoiTarget != null) {
+                // Clearing job: dock near the assigned blind spot.
+                searchCenter = clearingPoiTarget;
+            } else {
+                BlockPos attackPos = soldier.getAttackTargetPos();
+                Vec3 toTarget = new Vec3(
+                    attackPos.getX() - soldier.getX(),
+                    0,
+                    attackPos.getZ() - soldier.getZ());
+                double distToTarget = toTarget.length();
+                if (distToTarget > 1.0) {
+                    toTarget = toTarget.normalize();
+                    double ahead = Math.min(distToTarget * 0.25, 6.0);
+                    searchCenter = soldier.blockPosition().offset(
+                        (int)(toTarget.x * ahead), 0, (int)(toTarget.z * ahead));
+                }
             }
         } else if (soldier.getSquadMode() == SquadMode.HOLD) {
             BlockPos holdPos = soldier.getHoldPosition();
@@ -3994,7 +4044,7 @@ private boolean shouldExitCoverForFollow() {
         }
 
         BlockPos machineGunnerAnchor = getMachineGunnerSearchCenter();
-        if (machineGunnerAnchor != null) {
+        if (machineGunnerAnchor != null && clearingPoiTarget == null) {
             searchCenter = machineGunnerAnchor;
             if (soldier.hasValidAttackTarget()) {
                 searchRadius = ATTACK_CORRIDOR_SEARCH_RADIUS;
@@ -4065,6 +4115,55 @@ private boolean shouldExitCoverForFollow() {
 
         if (bestCover.isPresent()) {
             // The suppression route pass has already selected and path-validated this cover.
+        } else if (soldier.hasValidAttackTarget() && clearingPoiTarget != null && !clearingHold()) {
+            // Clearing job: protection near the assigned blind spot. Covers
+            // inside the objective area are valid now — the area IS the
+            // objective, so the corridor's beyond-the-objective rejection and
+            // its monotonic frontier do not apply here.
+            CoverPoint activeCover = getCoverManager().getCurrentCover();
+            List<CoverFinder.ScoredCover> scored = finder.evaluateAndScoreAllFromCenter(
+                searchCenter, soldier, threatDirection, threats, ATTACK_CORRIDOR_SEARCH_RADIUS, squadCtx);
+            List<CoverFinder.ScoredCover> eligible = new ArrayList<>();
+            for (CoverFinder.ScoredCover sc : scored) {
+                CoverPoint cover = sc.cover;
+                if (activeCover != null && cover.getPosition().equals(activeCover.getPosition())) continue;
+                if (failedCoverPositions.contains(cover.getPosition())) continue;
+                // A blind spot reached from outside the wall observes nothing:
+                // the dock must stand inside the space being cleared.
+                if (!ClearingCoordinator.isInsideClearingArea(soldier, cover.getPosition())) continue;
+                // Never take cover on top of a live contact's last-known spot.
+                if (ClearingCoordinator.nearLiveContact(soldier, cover.getPosition(), 2.25)) continue;
+                if (cover.getPosition().distSqr(clearingPoiTarget) > 144) continue;
+                eligible.add(sc);
+            }
+
+            List<CoverFinder.ScoredCover> protectedEligible = new ArrayList<>();
+            for (CoverFinder.ScoredCover sc : eligible) {
+                if (finder.isPrimaryThreatProtected(sc.cover, soldier, threatDirection)) {
+                    protectedEligible.add(sc);
+                }
+            }
+            List<CoverFinder.ScoredCover> pool = !protectedEligible.isEmpty() ? protectedEligible : eligible;
+            bestCover = selectPreferredCover(pool);
+            if (bestCover.isEmpty() && !pool.isEmpty()) {
+                pool.sort(java.util.Comparator.comparingDouble(
+                    sc -> sc.cover.getPosition().distSqr(clearingPoiTarget)));
+                bestCover = Optional.of(pool.get(0).cover);
+            }
+        } else if (soldier.hasValidAttackTarget() && clearingHold()) {
+            // Secured area: hold-style coverage near the current position —
+            // the plain protected search, no corridor filter, no advance bias.
+            CoverPoint activeCover = getCoverManager().getCurrentCover();
+            List<CoverFinder.ScoredCover> scoredNearby = finder.evaluateAndScoreAll(
+                soldier, threatDirection, threats, SEARCH_RADIUS, true, squadCtx);
+            for (CoverFinder.ScoredCover sc : scoredNearby) {
+                CoverPoint cover = sc.cover;
+                if (activeCover != null && cover.getPosition().equals(activeCover.getPosition())) continue;
+                if (failedCoverPositions.contains(cover.getPosition())) continue;
+                if (!finder.isPrimaryThreatProtected(cover, soldier, threatDirection)) continue;
+                bestCover = Optional.of(cover);
+                break;
+            }
         } else if (soldier.hasValidAttackTarget()) {
             // ATTACK mode: forward-biased search from the beginning
             List<CoverFinder.ScoredCover> scored = finder.evaluateAndScoreAllFromCenter(
@@ -4935,6 +5034,7 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
         // Reset attack phase fields (same as initAttackPhase but
         // we do NOT change attackCommandGeneration — that's done by caller)
         attackPhase = AttackPhase.SELECTING_COVER;
+        clearingPoiTarget = null;
         attackPhaseStartTime = System.currentTimeMillis();
         attackCoverArrivalTime = 0;
         attackExpectedCover = null;
@@ -5199,9 +5299,32 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
             objective.getX() + 0.5, objective.getY() + 0.5, objective.getZ() + 0.5);
         double objRadiusSq = ATTACK_OBJECTIVE_RADIUS * ATTACK_OBJECTIVE_RADIUS;
 
+        // Clearing doctrine: a registered ATTACK order of record turns the
+        // advance into reach-the-area -> clear -> secure. The coordinator
+        // decides what progress the squad needs next and owns completion;
+        // this goal executes it through the existing cover machinery.
+        clearingView = ClearingCoordinator.viewFor(soldier);
+        if (clearingView != null) {
+            clearingPoiTarget = resolveClearingPoi(clearingView);
+            if (clearingView.completed()) {
+                if (attackPhase != AttackPhase.COMPLETE) {
+                    attackPhase = AttackPhase.COMPLETE;
+                    if (attackDebugLog()) {
+                        StevesArmyMod.LOGGER.info("[AttackPhase] Soldier {} clearing order secured, completing", soldier.getId());
+                    }
+                    completeAttackAtObjective();
+                }
+                return;
+            }
+        } else {
+            clearingPoiTarget = null;
+        }
+
         // Objective reached — cover-to-cover advance is complete. No further
         // final approach; soldiers hold the last cover near the objective.
-        if (distToObjective <= objRadiusSq) {
+        // Clearing orders skip this: inside the area the job is CLEAR/SECURE,
+        // and SquadActivityManager finishes the order, not this radius.
+        if (clearingView == null && distToObjective <= objRadiusSq) {
             if (attackPhase != AttackPhase.COMPLETE) {
                 attackPhase = AttackPhase.COMPLETE;
                 updateAttackProgress(objective);
@@ -5216,7 +5339,8 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
         CoverBehaviorManager.CoverState coverState = getCoverManager().getState();
         CoverPoint currentCover = getCoverManager().getCurrentCover();
 
-        if (attackPhase == AttackPhase.SELECTING_COVER && fallbackAdvanceTarget != null) {
+        if (attackPhase == AttackPhase.SELECTING_COVER && fallbackAdvanceTarget != null
+            && !clearingHold()) {
             tickFallbackAdvance();
             if (fallbackAdvanceTarget != null && soldier.tickCount % ATTACK_CORRIDOR_REFRESH_TICKS != 0) {
                 return;
@@ -5234,6 +5358,13 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
                         StevesArmyMod.LOGGER.info("[AttackPhase] Soldier {} SELECTING_COVER -> OCCUPYING_COVER: suppressed, waiting at {}",
                             soldier.getId(), currentCover.getPosition());
                     }
+                    break;
+                }
+
+                // Secured area: settle into a hold-style watch position instead
+                // of continuing the corridor advance.
+                if (clearingHold()) {
+                    requestCoverSearch(QueuedSearchMode.NORMAL);
                     break;
                 }
 
@@ -5402,6 +5533,32 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
                 boolean canAdvance = dwellMet && (recovered || smokeAdvance)
                     && (!fireteamPinned || smokeAdvance) && (!heavyHold || smokeAdvance);
 
+                // Secured area: this soldier's job is to hold a watch position,
+                // not to keep advancing — every advance trigger below is a
+                // clearing-advance trigger and stays off.
+                if (clearingHold()) {
+                    break;
+                }
+
+                // Clearing contribution: the assigned blind spot has been
+                // observed, so this position no longer contributes to the
+                // order. Move to the next useful thing once safety allows —
+                // reaching cover is an intermediate success, never the goal.
+                boolean clearingJobDone = clearingView != null
+                    && clearingView.stage() == ClearingCoordinator.ClearingStage.CLEAR
+                    && clearingView.assignedPoi() != null
+                    && clearingView.assignedPoiChecked();
+                if (clearingJobDone && canAdvance) {
+                    lastAdvanceTriggerTime = System.currentTimeMillis();
+                    if (attackDebugLog()) {
+                        StevesArmyMod.LOGGER.info("[AttackPhase] Soldier {} job target checked, advancing to next",
+                            soldier.getId());
+                    }
+                    attackPhase = AttackPhase.SELECTING_COVER;
+                    requestCoverSearch(QueuedSearchMode.ATTACK_SELECTING);
+                    break;
+                }
+
                 // Hard watchdog: if stuck with all gates passed for >10s, force
                 // advance regardless of peek state or any flickering conditions.
                 if (dwellMet && canAdvance && dwellTime > 10000) {
@@ -5476,6 +5633,33 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
     }
 
     /**
+     * Clearing stage where the squad-level area is checked and contact
+     * resolved: the soldier's job is to hold a watch position, so clearing
+     * advance triggers stay off until the coordinator says otherwise.
+     */
+    private boolean clearingHold() {
+        return clearingView != null
+            && (clearingView.stage() == ClearingCoordinator.ClearingStage.SECURE
+                || clearingView.stage() == ClearingCoordinator.ClearingStage.STALLED);
+    }
+
+    /**
+     * CLEAR-stage job target: the coordinator-assigned blind spot while it is
+     * still unchecked, falling through to the nearest unclaimed unchecked one.
+     * null means advance the plain way (approach corridor or area reposition).
+     */
+    private BlockPos resolveClearingPoi(ClearingCoordinator.ClearingView view) {
+        if (view.stage() != ClearingCoordinator.ClearingStage.CLEAR) {
+            return null;
+        }
+        BlockPos mine = view.assignedPoi();
+        if (mine != null && !view.assignedPoiChecked()) {
+            return mine;
+        }
+        return view.nextPoi();
+    }
+
+    /**
      * Select forward cover biased toward the objective.
      * Returns true if cover was found and navigation started.
      */
@@ -5498,7 +5682,7 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
             (int)(toTarget.x * ahead), 0, (int)(toTarget.z * ahead));
 
         BlockPos machineGunnerAnchor = getMachineGunnerSearchCenter();
-        if (machineGunnerAnchor != null) {
+        if (machineGunnerAnchor != null && clearingPoiTarget == null) {
             searchCenter = machineGunnerAnchor;
         }
 
@@ -5578,17 +5762,23 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
      */
     private void startFallbackAdvance() {
         if (!soldier.hasValidAttackTarget()) return;
-        BlockPos objective = soldier.getAttackTargetPos();
+        // Clearing jobs advance toward the assigned blind-spot check instead
+        // of the raw objective: an unchecked corner can sit far past the
+        // legacy 4-block objective stop, so the stop radius only applies to
+        // plain objective advances.
+        BlockPos guide = clearingPoiTarget != null
+            ? clearingPoiTarget : soldier.getAttackTargetPos();
+        double stopRadius = clearingPoiTarget != null ? 1.0 : ATTACK_OBJECTIVE_RADIUS;
 
         Vec3 toTarget = new Vec3(
-            objective.getX() - soldier.getX(),
+            guide.getX() - soldier.getX(),
             0,
-            objective.getZ() - soldier.getZ());
+            guide.getZ() - soldier.getZ());
         double dist = toTarget.length();
-        if (dist < ATTACK_OBJECTIVE_RADIUS) return;
+        if (dist < stopRadius) return;
 
         Vec3 dir = toTarget.normalize();
-        double advanceLen = Math.min(ATTACK_FALLBACK_ADVANCE_LENGTH, dist - ATTACK_OBJECTIVE_RADIUS);
+        double advanceLen = Math.min(ATTACK_FALLBACK_ADVANCE_LENGTH, dist - stopRadius);
         if (advanceLen < 1.0) return;
 
         Vec3 dest = soldier.position().add(dir.x * advanceLen, 0, dir.z * advanceLen);
@@ -5832,6 +6022,9 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
         if (!target.equals(movementAttemptTarget)) {
             movementAttemptTarget = target.immutable();
             movementAttemptCount = 0;
+            noProgressReissues = 0;
+            repositioningStartDist = soldier.position().distanceTo(
+                net.minecraft.world.phys.Vec3.atCenterOf(target));
             // A new cover must not inherit the previous cover's FAILED verdict,
             // or the goal blacklists every candidate in a row (cover churn loop).
             getPositionController().resetFailureState();

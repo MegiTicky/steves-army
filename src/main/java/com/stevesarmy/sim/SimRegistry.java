@@ -83,7 +83,13 @@ public final class SimRegistry {
             cqbDoorwayQueue(),
             cqbCornerPie(),
             cqbCornerFrozenAimBaseline(),
-            cqbLostContactWatch());
+            cqbLostContactWatch(),
+            clearEmptyRoom(),
+            clearInteriorEnemy(),
+            clearBreakContact(),
+            clearBlockedDoor(),
+            clearSparseOutdoor(),
+            clearLegacyProximityTwin());
     }
 
     public static SimScenario byName(String name) {
@@ -3136,5 +3142,277 @@ public final class SimRegistry {
         } catch (ReflectiveOperationException ignored) {
             // Leave the stamp alone; the keep-alive assert will fail loudly instead.
         }
+    }
+
+    // 14. ATTACK clearing doctrine — area rework acceptance scenarios ----------
+
+    /**
+     * Time-series holder a clearing scenario's sampled probe writes into, so
+     * assertions can verify coordinator behavior (stage progression, order
+     * persistence, target release) without new harness plumbing. Read the
+     * fields from the assertion lambdas; the sampled actions fill them live.
+     */
+    private static final class ClearingProbe {
+        int maxStage = -1;
+        int lastStage = -1;
+        boolean enteredZone = false;
+        boolean targetsCleared = false;
+        boolean lastAllTargetsValid = false;
+        boolean securedSeen = false;
+        boolean stalledSeen = false;
+        boolean enemyDown = false;
+    }
+
+    /**
+     * Registers a sampled probe every {@code step} ticks in [from,to]: reads
+     * the squad's ClearingCoordinator stage plus per-soldier order state into
+     * the probe. {@code zone} marks the objective space for entry assertions
+     * (null = no entry tracking).
+     */
+    private static void addClearingProbe(SimScenario.Builder builder, int from, int to, int step,
+                                         ClearingProbe probe,
+                                         java.util.function.BiPredicate<Double, Double> zone) {
+        for (int t = from; t <= to; t += step) {
+            final int at = t;
+            builder.action(at, "clearing probe", ctx -> {
+                probe.lastStage = com.stevesarmy.squad.ClearingCoordinator.stageOrdinal(
+                    ctx.anchor.getUUID(), com.stevesarmy.squad.FireTeam.ALL);
+                probe.maxStage = Math.max(probe.maxStage, probe.lastStage);
+                if (probe.lastStage == com.stevesarmy.squad.ClearingCoordinator.ClearingStage.SECURED.ordinal()) {
+                    probe.securedSeen = true;
+                }
+                if (probe.lastStage == com.stevesarmy.squad.ClearingCoordinator.ClearingStage.STALLED.ordinal()) {
+                    probe.stalledSeen = true;
+                }
+                boolean allValid = !ctx.friendlies.isEmpty();
+                boolean allCleared = !ctx.friendlies.isEmpty();
+                for (SoldierEntity s : ctx.friendlies) {
+                    if (!s.isAlive()) continue;
+                    if (s.hasValidAttackTarget()) {
+                        allCleared = false;
+                    } else {
+                        allValid = false;
+                    }
+                    if (zone != null && zone.test(s.getX(), s.getZ())) {
+                        probe.enteredZone = true;
+                    }
+                }
+                probe.lastAllTargetsValid = allValid;
+                if (allCleared) {
+                    probe.targetsCleared = true;
+                }
+                boolean anyEnemy = false;
+                boolean allEnemiesDown = true;
+                for (EnemySoldierEntity e : ctx.enemies) {
+                    anyEnemy = true;
+                    if (e.isAlive() && !e.isRemoved()) {
+                        allEnemiesDown = false;
+                    }
+                }
+                if (anyEnemy && allEnemiesDown) {
+                    probe.enemyDown = true;
+                }
+            });
+        }
+    }
+
+    /** West room interior of the CQB course house (walls at x14/x22, z6/z18). */
+    private static final java.util.function.BiPredicate<Double, Double> WEST_ROOM =
+        (x, z) -> x > 14.5 && x < 21.5 && z > 6.5 && z < 17.5;
+
+    /**
+     * ACCEPTANCE (design §1+§2+§6): an empty room with blind corners. The
+     * order completes only when the squad entered the space, observed its
+     * corners, and settled — proximity to the ping is not completion.
+     */
+    private static SimScenario clearEmptyRoom() {
+        ClearingProbe probe = new ClearingProbe();
+        SimScenario.Builder builder = SimScenario.builder("clear_empty_room")
+            .description("ATTACK clearing (acceptance): an empty two-access room with blind corners. "
+                + "The activity-backed order must carry the squad INSIDE the room, observe its "
+                + "wall-adjacent corners, and settle before completing as Area secured - the "
+                + "legacy 4-block proximity completion does not apply to clearing orders.")
+            .duration(1600)
+            .terrain(t -> t.cqbCourse());
+        addClearingProbe(builder, 40, 1580, 20, probe, WEST_ROOM);
+        return builder
+            .setup(ctx -> {
+                ctx.spawnAnchor(22, 0, 38);
+                ctx.spawnFriendly(ModEntities.SOLDIER.get(), "alpha", 22, 0, 38, SquadMode.HOLD);
+                ctx.spawnFriendly(ModEntities.SOLDIER.get(), "bravo", 20, 0, 36, SquadMode.HOLD);
+                ctx.issueAttackOrder(18, 12); // west room center
+            })
+            .assertThat("squad entered the objective room", view -> probe.enteredZone)
+            .assertThat("order completed as SECURED (entered, corners observed, settled)",
+                view -> probe.securedSeen)
+            .assertThat("attack targets released after completion",
+                view -> probe.targetsCleared)
+            .build();
+    }
+
+    /**
+     * ACCEPTANCE (design §5+§6): an enemy fighting from behind interior cover.
+     * The order stays alive through the firefight, completes only once the
+     * contact is resolved (enemy down) and the remaining corners are observed.
+     */
+    private static SimScenario clearInteriorEnemy() {
+        ClearingProbe probe = new ClearingProbe();
+        SimScenario.Builder builder = SimScenario.builder("clear_interior_enemy")
+            .description("ATTACK clearing (acceptance): an enemy holds the objective room behind "
+                + "interior cover. The squad fights through the doorway, resolves the contact "
+                + "(enemy down), and only then secures the room - combat never ends the order "
+                + "early, and completion waits for the check.")
+            .duration(2000)
+            .armed()
+            .terrain(t -> {
+                t.cqbCourse();
+                t.coverBlock(18, 8, 1); // interior cover the enemy can fight from
+            });
+        addClearingProbe(builder, 40, 1980, 20, probe, WEST_ROOM);
+        return builder
+            .setup(ctx -> {
+                ctx.spawnAnchor(22, 0, 38);
+                ctx.spawnFriendly(ModEntities.SOLDIER.get(), "alpha", 22, 0, 38, SquadMode.HOLD);
+                ctx.spawnFriendly(ModEntities.SOLDIER.get(), "bravo", 20, 0, 36, SquadMode.HOLD);
+                ctx.spawnFriendly(ModEntities.SOLDIER.get(), "charlie", 24, 0, 38, SquadMode.HOLD);
+                ctx.spawnEnemyLabeled("raider", 18, 0, 9);
+                ctx.issueAttackOrder(18, 12);
+            })
+            .assertThat("firefight happened (tracers recorded)", view -> !view.shots().isEmpty())
+            .assertThat("interior enemy was killed", view -> probe.enemyDown)
+            .assertThat("squad entered the objective room", view -> probe.enteredZone)
+            .assertThat("order completed as SECURED after the contact resolved",
+                view -> probe.securedSeen)
+            .build();
+    }
+
+    /**
+     * ACCEPTANCE (design §5): contact that breaks. A threat sighting inside the
+     * room goes stale (no re-sighting) — its last-known position becomes a check
+     * target the squad must physically observe before the order can complete.
+     */
+    private static SimScenario clearBreakContact() {
+        ClearingProbe probe = new ClearingProbe();
+        SimScenario.Builder builder = SimScenario.builder("clear_break_contact")
+            .description("ATTACK clearing (acceptance): contact breaks. A threat was sighted inside "
+                + "the objective room and then disappeared; its last-known position is a check "
+                + "target. The order completes only after the squad looked there - losing the "
+                + "sighting neither completes nor cancels the attack.")
+            .duration(1600)
+            .terrain(t -> t.cqbCourse());
+        addClearingProbe(builder, 40, 1580, 20, probe, WEST_ROOM);
+        return builder
+            .setup(ctx -> {
+                ctx.spawnAnchor(22, 0, 38);
+                ctx.spawnFriendly(ModEntities.SOLDIER.get(), "alpha", 22, 0, 38, SquadMode.HOLD);
+                ctx.spawnFriendly(ModEntities.SOLDIER.get(), "bravo", 20, 0, 36, SquadMode.HOLD);
+                ctx.injectThreat(18, 10); // sighted in the room, then gone dark
+                ctx.issueAttackOrder(18, 12);
+            })
+            .assertThat("squad entered the objective room", view -> probe.enteredZone)
+            .assertThat("order completed as SECURED after the stale contact was observed",
+                view -> probe.securedSeen)
+            .assertThat("attack targets released after completion",
+                view -> probe.targetsCleared)
+            .build();
+    }
+
+    /**
+     * ACCEPTANCE (design §4+§7): a sealed objective room. No entry exists, so
+     * no progress into the area is possible: the order reports STALLED (once)
+     * and PERSISTS - no silent timeout, no completion, targets still held.
+     */
+    private static SimScenario clearBlockedDoor() {
+        ClearingProbe probe = new ClearingProbe();
+        SimScenario.Builder builder = SimScenario.builder("clear_blocked_door")
+            .description("ATTACK clearing (acceptance): the objective room is fully sealed (east "
+                + "door and partition door blocked). The squad cannot enter and cannot see the "
+                + "interior: the order reports 'Attack stalled' and then persists indefinitely - "
+                + "no proximity completion, no silent timeout.")
+            .duration(1300)
+            .terrain(t -> {
+                t.cqbCourse();
+                t.block(30, 0, 12, net.minecraft.world.level.block.Blocks.STONE_BRICKS.defaultBlockState());
+                t.block(30, 1, 12, net.minecraft.world.level.block.Blocks.STONE_BRICKS.defaultBlockState());
+                t.block(30, 2, 12, net.minecraft.world.level.block.Blocks.STONE_BRICKS.defaultBlockState());
+                t.block(22, 0, 12, net.minecraft.world.level.block.Blocks.STONE_BRICKS.defaultBlockState());
+                t.block(22, 1, 12, net.minecraft.world.level.block.Blocks.STONE_BRICKS.defaultBlockState());
+                t.block(22, 2, 12, net.minecraft.world.level.block.Blocks.STONE_BRICKS.defaultBlockState());
+            });
+        addClearingProbe(builder, 40, 1280, 20, probe, null);
+        return builder
+            .setup(ctx -> {
+                ctx.spawnAnchor(26, 0, 38);
+                ctx.spawnFriendly(ModEntities.SOLDIER.get(), "alpha", 26, 0, 38, SquadMode.HOLD);
+                ctx.issueAttackOrder(26, 12); // sealed east room center
+            })
+            .assertThat("attack reported STALLED (no safe progress into the area)",
+                view -> probe.stalledSeen)
+            .assertThat("order persists - targets still held at the end of the run",
+                view -> probe.lastAllTargetsValid)
+            .assertThat("order never completed", view -> !probe.securedSeen)
+            .build();
+    }
+
+    /**
+     * ACCEPTANCE (design §1): a sparse outdoor objective. No walls means no
+     * corner POIs and no concealment to check — the order completes by
+     * reaching and settling the space alone. Checking scales to the space.
+     */
+    private static SimScenario clearSparseOutdoor() {
+        ClearingProbe probe = new ClearingProbe();
+        SimScenario.Builder builder = SimScenario.builder("clear_sparse_outdoor")
+            .description("ATTACK clearing (acceptance): a sparse outdoor objective. With no walls "
+                + "there are no corner checks to run - completion is reaching the space and "
+                + "settling into it, proving the check stage scales with what the area contains.")
+            .duration(900)
+            .terrain(t -> t.platform());
+        addClearingProbe(builder, 40, 880, 20, probe, (x, z) -> Math.abs(x - 30.5) < 9 && Math.abs(z - 14.5) < 9);
+        return builder
+            .setup(ctx -> {
+                ctx.spawnAnchor(10, 0, 38);
+                ctx.spawnFriendly(ModEntities.SOLDIER.get(), "alpha", 10, 0, 38, SquadMode.HOLD);
+                ctx.spawnFriendly(ModEntities.SOLDIER.get(), "bravo", 12, 0, 36, SquadMode.HOLD);
+                ctx.issueAttackOrder(30, 14);
+            })
+            .assertThat("squad reached the objective area", view -> probe.enteredZone)
+            .assertThat("order completed as SECURED without any corner checks",
+                view -> probe.securedSeen)
+            .assertThat("attack targets released after completion",
+                view -> probe.targetsCleared)
+            .build();
+    }
+
+    /**
+     * BASELINE TWIN of clear_empty_room: the same room approached with direct
+     * setAttackTarget calls (no activity of record). The legacy path must be
+     * untouched — no clearing coordinator state, legacy proximity completion.
+     */
+    private static SimScenario clearLegacyProximityTwin() {
+        ClearingProbe probe = new ClearingProbe();
+        SimScenario.Builder builder = SimScenario.builder("clear_legacy_proximity_twin")
+            .description("ATTACK legacy baseline: the clear_empty_room geometry approached via direct "
+                + "setAttackTarget (no SquadActivityManager order). The legacy doctrine must be "
+                + "preserved exactly: no clearing coordinator state exists, and the legacy "
+                + "proximity completion releases the targets.")
+            .duration(900)
+            .terrain(t -> t.cqbCourse());
+        addClearingProbe(builder, 40, 880, 20, probe, WEST_ROOM);
+        return builder
+            .setup(ctx -> {
+                ctx.spawnAnchor(22, 0, 38);
+                SoldierEntity alpha = ctx.spawnFriendly(ModEntities.SOLDIER.get(), "alpha", 22, 0, 38, SquadMode.HOLD);
+                SoldierEntity bravo = ctx.spawnFriendly(ModEntities.SOLDIER.get(), "bravo", 20, 0, 36, SquadMode.HOLD);
+                // Direct attack targets — the legacy path, no activity of record.
+                alpha.setAttackTarget(ctx.terrain.at(18, 0, 12));
+                alpha.setHoldPosition(ctx.terrain.at(18, 0, 12));
+                bravo.setAttackTarget(ctx.terrain.at(18, 0, 12));
+                bravo.setHoldPosition(ctx.terrain.at(18, 0, 12));
+            })
+            .assertThat("no clearing coordinator state exists for direct attack targets",
+                view -> probe.maxStage == -1)
+            .assertThat("legacy proximity completion released the targets",
+                view -> probe.targetsCleared)
+            .build();
     }
 }

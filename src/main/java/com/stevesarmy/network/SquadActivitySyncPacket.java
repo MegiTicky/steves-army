@@ -27,7 +27,8 @@ public class SquadActivitySyncPacket {
                 buf.readEnum(SquadActivityType.class),
                 buf.readBlockPos(),
                 buf.readInt(),
-                buf.readLong()
+                buf.readLong(),
+                buf.readVarInt()
             ));
         }
         this.entries = List.copyOf(decoded);
@@ -41,6 +42,7 @@ public class SquadActivitySyncPacket {
             buf.writeBlockPos(entry.objective());
             buf.writeInt(entry.dimension());
             buf.writeLong(entry.generation());
+            buf.writeVarInt(entry.clearingStage());
         }
     }
 
@@ -50,7 +52,11 @@ public class SquadActivitySyncPacket {
         context.setPacketHandled(true);
     }
 
+    /**
+     * @param clearingStage ClearingCoordinator.ClearingStage ordinal for ATTACK
+     *                      orders (-1 = not an attack order / no coordinator state).
+     */
     public record ActivityEntry(FireTeam fireTeam, SquadActivityType type, BlockPos objective,
-                                int dimension, long generation) {
+                                int dimension, long generation, int clearingStage) {
     }
 }

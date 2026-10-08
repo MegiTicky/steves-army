@@ -27,6 +27,8 @@ import java.util.UUID;
 public final class SquadActivityManager {
     private static final Map<UUID, EnumMap<FireTeam, Activity>> ACTIVITIES = new HashMap<>();
     private static final Map<UUID, EnumMap<FireTeam, Long>> GENERATIONS = new HashMap<>();
+    /** Server handle cached from tick() for packet-free completion paths. */
+    private static volatile MinecraftServer serverInstance;
 
     private SquadActivityManager() {
     }
@@ -34,11 +36,20 @@ public final class SquadActivityManager {
     public static void applyCommand(ServerPlayer owner, FireTeam scope, PingType pingType,
                                     BlockPos requestedObjective, int dimension,
                                     List<SoldierEntity> recipients) {
-        UUID ownerId = owner.getUUID();
+        applyCommandCore(owner.getUUID(), scope, pingType, requestedObjective, dimension, recipients);
+        sync(owner);
+    }
 
+    /**
+     * Owner-agnostic order application. The player path calls the overload
+     * above (which syncs afterwards); simulation harnesses issue orders for
+     * non-player owners (anchor entities) through this core directly.
+     */
+    public static void applyCommandCore(UUID ownerId, FireTeam scope, PingType pingType,
+                                        BlockPos requestedObjective, int dimension,
+                                        List<SoldierEntity> recipients) {
         if (pingType == PingType.FOLLOW) {
             clearScope(ownerId, scope);
-            sync(owner);
             return;
         }
 
@@ -49,7 +60,6 @@ public final class SquadActivityManager {
 
         clearScope(ownerId, scope);
         if (recipients.isEmpty()) {
-            sync(owner);
             return;
         }
 
@@ -64,7 +74,6 @@ public final class SquadActivityManager {
             }
             getOwnerActivities(ownerId).put(FireTeam.ALL,
                 new Activity(FireTeam.ALL, activityType, objective.immutable(), dimension, recipientIds, generation));
-            sync(owner);
             return;
         }
 
@@ -91,8 +100,6 @@ public final class SquadActivityManager {
             getOwnerActivities(ownerId).put(team,
                 new Activity(team, activityType, objective.immutable(), dimension, recipientIds, generation));
         }
-
-        sync(owner);
     }
 
     public static void sync(ServerPlayer player) {
@@ -105,7 +112,9 @@ public final class SquadActivityManager {
                     activity.type,
                     activity.objective,
                     activity.dimension,
-                    activity.generation
+                    activity.generation,
+                    activity.type == SquadActivityType.ATTACK
+                        ? ClearingCoordinator.stageOrdinal(player.getUUID(), activity.fireTeam) : -1
                 ));
             }
         }
@@ -113,7 +122,28 @@ public final class SquadActivityManager {
         NetworkHandler.sendTo(player, new SquadActivitySyncPacket(entries));
     }
 
+    /** Immutable read view of one ATTACK activity for the clearing coordinator. */
+    public record AttackActivityView(UUID ownerId, FireTeam fireTeam, BlockPos objective,
+                                     int dimension, Set<UUID> recipientIds, long generation) {
+    }
+
+    /** Snapshot of every live ATTACK activity, for ClearingCoordinator.tick(). */
+    public static List<AttackActivityView> snapshotAttackActivities() {
+        List<AttackActivityView> views = new ArrayList<>();
+        for (Map.Entry<UUID, EnumMap<FireTeam, Activity>> ownerEntry : ACTIVITIES.entrySet()) {
+            for (Activity activity : ownerEntry.getValue().values()) {
+                if (activity.type == SquadActivityType.ATTACK) {
+                    views.add(new AttackActivityView(ownerEntry.getKey(), activity.fireTeam,
+                        activity.objective, activity.dimension,
+                        new HashSet<>(activity.recipientIds), activity.generation));
+                }
+            }
+        }
+        return views;
+    }
+
     public static void tick(MinecraftServer server) {
+        serverInstance = server;
         Set<UUID> changedOwners = new HashSet<>();
 
         for (Map.Entry<UUID, EnumMap<FireTeam, Activity>> ownerEntry : ACTIVITIES.entrySet()) {
@@ -215,16 +245,74 @@ public final class SquadActivityManager {
     }
 
     private static boolean isAttackComplete(MinecraftServer server, Activity activity) {
-        for (UUID recipientId : activity.recipientIds) {
-            SoldierEntity soldier = findSoldier(server, recipientId);
-            if (soldier == null || !soldier.isAlive()) {
-                continue;
+        // The clearing coordinator owns ATTACK completion (area reached, blind
+        // spots observed, contact resolved, squad settled). Proximity alone is
+        // only the fallback when clearing doctrine is disabled or the
+        // coordinator has no state for this order (e.g. direct
+        // setAttackTarget callers that never created an activity).
+        if (ClearingCoordinator.isComplete(activityOwner(activity), activity.fireTeam,
+            activity.generation)) {
+            return true;
+        }
+        if (!com.stevesarmy.StevesArmyConfig.isAttackClearEnabled()) {
+            for (UUID recipientId : activity.recipientIds) {
+                SoldierEntity soldier = findSoldier(server, recipientId);
+                if (soldier == null || !soldier.isAlive()) {
+                    continue;
+                }
+                if (distanceToObjectiveSqr(soldier, activity.objective) > 16.0) {
+                    return false;
+                }
             }
-            if (distanceToObjectiveSqr(soldier, activity.objective) > 16.0) {
-                return false;
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * Clearing-doctrine completion: the activity becomes a HOLD anchored on
+     * the secured objective and every recipient's attack target is released,
+     * so soldiers settle into hold-style watch positions instead of keeping
+     * attack movement alive.
+     */
+    public static void completeAttackToHold(UUID ownerId, FireTeam team, BlockPos objective) {
+        EnumMap<FireTeam, Activity> ownerActivities = ACTIVITIES.get(ownerId);
+        if (ownerActivities == null) {
+            return;
+        }
+        Activity activity = ownerActivities.get(team);
+        if (activity == null || activity.type != SquadActivityType.ATTACK) {
+            return;
+        }
+        for (UUID recipientId : activity.recipientIds) {
+            for (ServerLevel level : serverLevels()) {
+                if (level.getEntity(recipientId) instanceof SoldierEntity soldier) {
+                    soldier.clearAttackTarget();
+                }
             }
         }
-        return true;
+        ownerActivities.put(team, activity.asHold(objective.immutable()));
+        MinecraftServer server = serverInstance;
+        if (server != null) {
+            ServerPlayer player = server.getPlayerList().getPlayer(ownerId);
+            if (player != null) {
+                sync(player);
+            }
+        }
+    }
+
+    private static UUID activityOwner(Activity activity) {
+        for (Map.Entry<UUID, EnumMap<FireTeam, Activity>> entry : ACTIVITIES.entrySet()) {
+            if (entry.getValue().containsValue(activity)) {
+                return entry.getKey();
+            }
+        }
+        return null;
+    }
+
+    private static Iterable<ServerLevel> serverLevels() {
+        MinecraftServer server = serverInstance;
+        return server != null ? server.getAllLevels() : List.of();
     }
 
     private static boolean isGoToComplete(MinecraftServer server, Activity activity) {
