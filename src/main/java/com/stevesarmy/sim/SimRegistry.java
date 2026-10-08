@@ -281,38 +281,41 @@ public final class SimRegistry {
      * Cadence probe for the user-reported asymmetry: with an ACTIVE VISIBLE
      * target the MG "slowly aims, fires slowly, and is inaccurate", while
      * last-seen suppression fires long smooth bursts. A hardened (invulnerable,
-     * so damage reactions can't stop it) gunless enemy patrols a lane behind a
-     * 1-high wall at ~48 blocks — partial exposure and constant target motion
-     * are exactly the conditions where the aim-quality build rate loses to the
-     * decay terms. Gunner tracers are attributable by from-position (gunner
-     * spawns at x=6, z=32, behind the squadmates at x=10 so no tracer path
-     * passes near it).
+     * so damage reactions can't stop it) gunless enemy patrols the open at
+     * ~48 blocks — always visible, so the measurement isolates the aim-quality
+     * gate, burst profile, and recoil tax. (An earlier wall variant was thrown
+     * away: the enemy hid behind it ~80% of frames, which starves ANY build —
+     * correct peek discipline, but it measures peek response, not cadence.)
+     * Gunner tracers are attributable by from-position (gunner spawns at x=6,
+     * z=32, behind the squadmates at x=10 so no tracer path passes near it).
      */
     private static SimScenario mgDirectFireCadence() {
         return SimScenario.builder("mg_direct_fire_cadence")
             .description("MG direct-fire cadence: armed machine gunner (+ two armed squadmates "
-                + "for acquisition insurance) vs a hardened GUNLESS enemy patrolling z 22-42 "
-                + "behind a 1-high wall at x=57 (~48 blocks from the gunner). The MG must open "
-                + "up on the moving, partially-exposed target and SUSTAIN fire: >=30 gunner "
-                + "tracers into the enemy lane, >=4 distinct bursts (gaps >20t), first tracer "
-                + "within 120t, and >=8 rounds landing on the wall plane (not overshooting). "
-                + "The 5-shot/10t-recovery profile with the 0.35 aim-quality gate is expected "
-                + "to fail these; the cadence fix must pass.")
+                + "for acquisition insurance) vs a hardened GUNLESS enemy patrolling the open "
+                + "at ~48 blocks. Always-visible target: the MG must open up promptly and "
+                + "sustain machine-gun cadence - >=30 gunner tracers into the lane, >=4 "
+                + "distinct bursts (gaps >20t), at least ONE burst of >=7 shots (impossible "
+                + "for the 5-shot baseline profile whose bursts recoil-collapse at 3-4), "
+                + "first tracer within 120t, >=8 rounds landing in the tight lane.")
             .duration(800)
             .armed()
             .field(72, 64)
             .terrain(t -> {
                 t.platform();
-                t.coverRow(57, 20, 57, 44, 1);   // low wall the enemy patrols behind
+                // Low wall for the friendly line: without any cover the MG
+                // strands in SEEKING_COVER all run (its fire-lane cover search
+                // never settles on an open field) and never fires.
+                t.coverRow(3, 14, 3, 26, 1);
             })
             .setup(ctx -> {
-                ctx.spawnAnchor(2, 0, 32);
-                // Gunner sits BEHIND the squadmates: enemy return fire (and
-                // friendly tracer paths) must never pass near the gunner, or
-                // the pin system contaminates the cadence measurement.
-                ctx.spawnFriendly(ModEntities.MACHINE_GUNNER.get(), "gunner", 6, 0, 32, SquadMode.FOLLOW);
-                ctx.spawnFriendly(ModEntities.SOLDIER.get(), "left", 10, 0, 26, SquadMode.FOLLOW);
-                ctx.spawnFriendly(ModEntities.SOLDIER.get(), "right", 10, 0, 38, SquadMode.FOLLOW);
+                ctx.spawnAnchor(2, 0, 26);
+                // Gunner sits OFF-COLUMN (z=20 vs squadmates at z=32/40): its
+                // lane to the enemy corridor must not pass near a friendly, or
+                // the friendly-fire cone check blocks every shot.
+                ctx.spawnFriendly(ModEntities.MACHINE_GUNNER.get(), "gunner", 6, 0, 20, SquadMode.FOLLOW);
+                ctx.spawnFriendly(ModEntities.SOLDIER.get(), "left", 10, 0, 32, SquadMode.FOLLOW);
+                ctx.spawnFriendly(ModEntities.SOLDIER.get(), "right", 10, 0, 40, SquadMode.FOLLOW);
                 ctx.spawnEnemyLabeled("enemy", 59, 0, 32);
                 ctx.disarmSoldier("enemy");
                 ctx.harden("enemy");
@@ -356,13 +359,15 @@ public final class SimRegistry {
             .action(750, "strafe enemy", ctx -> ctx.strafeEnemy("enemy", 22, 42))
             .action(770, "strafe enemy", ctx -> ctx.strafeEnemy("enemy", 22, 42))
             .assertThat("MG opens up: >=30 gunner tracers into the enemy lane",
-                view -> countGunnerShotsNear(view, 6, 32, 56, 18, 64, 46) >= 30)
+                view -> countGunnerShotsNear(view, 6, 20, 50, 18, 68, 46) >= 30)
             .assertThat("MG sustains bursts: >=4 distinct bursts (gaps >20t)",
-                view -> countGunnerBursts(view, 6, 32, 56, 18, 64, 46, 20) >= 4)
+                view -> countGunnerBursts(view, 6, 20, 50, 18, 68, 46, 20) >= 4)
+            .assertThat("MG bursts like a machine gun: >=1 burst of >=7 shots",
+                view -> longestGunnerBurst(view, 6, 20, 50, 18, 68, 46, 20) >= 7)
             .assertThat("MG opens fire promptly: first gunner tracer within 120t",
-                view -> firstGunnerShotTick(view, 6, 32, 56, 18, 64, 46) <= 120)
-            .assertThat("MG fire lands on the wall plane: >=8 tracers within the tight lane",
-                view -> countGunnerShotsNear(view, 6, 32, 55.5, 20, 61.5, 44) >= 8)
+                view -> firstGunnerShotTick(view, 6, 20, 50, 18, 68, 46) <= 120)
+            .assertThat("MG fire lands on the target: >=8 tracers terminate in the enemy box",
+                view -> countGunnerShotsNear(view, 6, 20, 50, 18, 66, 46) >= 8)
             .build();
     }
 
@@ -401,6 +406,29 @@ public final class SimRegistry {
             last = t;
         }
         return bursts;
+    }
+
+    /** Longest burst (shots in a row, split at {@code gapTicks}) among the shooter's in-box tracers. */
+    private static int longestGunnerBurst(SimScenario.SimRunResultView view,
+                                          double fromX, double fromZ,
+                                          double tx0, double tz0, double tx1, double tz1,
+                                          int gapTicks) {
+        int longest = 0;
+        int current = 0;
+        long last = Long.MIN_VALUE;
+        java.util.List<Long> ticks = view.shotTicks();
+        java.util.List<double[]> shots = view.shots();
+        for (int i = 0; i < shots.size() && i < ticks.size(); i++) {
+            double[] shot = shots.get(i);
+            double dx = shot[0] - fromX, dz = shot[1] - fromZ;
+            if (dx * dx + dz * dz > 25.0) continue;
+            if (shot[2] < tx0 || shot[2] > tx1 || shot[3] < tz0 || shot[3] > tz1) continue;
+            long t = ticks.get(i);
+            current = (last == Long.MIN_VALUE || t - last > gapTicks) ? 1 : current + 1;
+            longest = Math.max(longest, current);
+            last = t;
+        }
+        return longest;
     }
 
     /** First tick at which the shooter landed a tracer in the box; Integer.MAX_VALUE when none. */

@@ -93,6 +93,9 @@ public final class SimManager {
         // Optional combat-goal decision traces: -Dsim.ailog=true
         com.stevesarmy.debug.DiagnosticLogManager.setAttackLoggingEnabled(
             Boolean.getBoolean("sim.ailog"));
+        // Optional per-shot gate traces: -Dsim.dmglog=true
+        com.stevesarmy.debug.DiagnosticLogManager.setDamageLoggingEnabled(
+            Boolean.getBoolean("sim.dmglog"));
         List<SimScenario> scenarios = SimRegistry.all();
         // Optional scenario filter for fast iteration: -Dsim.scenario=<name>[,<name>...]
         // (a server boot costs minutes; one boot can serve several scenarios)

@@ -17,6 +17,13 @@ public class StevesArmyConfig {
     public static final ForgeConfigSpec.DoubleValue AIM_QUALITY_TARGET_MOVE_PENALTY;
     public static final ForgeConfigSpec.DoubleValue AIM_QUALITY_SWITCH_RESET;
     public static final ForgeConfigSpec.DoubleValue TARGET_SWITCH_IMPROVEMENT;
+    public static final ForgeConfigSpec.IntValue MG_DIRECT_BURST_SHOTS;
+    public static final ForgeConfigSpec.IntValue MG_DIRECT_RECOVERY_TICKS;
+    public static final ForgeConfigSpec.DoubleValue MG_AIM_QUALITY_THRESHOLD_SCALE;
+    public static final ForgeConfigSpec.DoubleValue MG_TARGET_MOVE_PENALTY_SCALE;
+    public static final ForgeConfigSpec.DoubleValue MG_AIM_BUILD_RATE_SCALE;
+    public static final ForgeConfigSpec.DoubleValue MG_RECOIL_AIM_LOSS_SCALE;
+    public static final ForgeConfigSpec.BooleanValue CRAWL_STANCE_RECOIL;
     public static final ForgeConfigSpec.IntValue TARGET_REEVALUATE_INTERVAL;
 
     public static final ForgeConfigSpec.BooleanValue DYNAMIC_FIRING_ENABLED;
@@ -230,6 +237,52 @@ public class StevesArmyConfig {
             .comment("Ticks between target re-evaluation. Default 20 (1 second).",
                      "Lower values = more responsive but higher CPU usage.")
             .defineInRange("targetReevaluateInterval", 20, 5, 100);
+
+        MG_DIRECT_BURST_SHOTS = BUILDER
+            .comment("Burst length for suppressive machine guns in DIRECT fire (0 = legacy 5-shot profile).",
+                     "MGs should hose at an active target the way they do in suppression: long",
+                     "aimed bursts instead of the shared 5-shot profile. Default: 10")
+            .defineInRange("mgDirectBurstShots", 10, 0, 30);
+
+        MG_DIRECT_RECOVERY_TICKS = BUILDER
+            .comment("Inter-burst recovery for suppressive machine guns in DIRECT fire (0 = legacy 10).",
+                     "Default: 6")
+            .defineInRange("mgDirectRecoveryTicks", 6, 0, 40);
+
+        MG_AIM_QUALITY_THRESHOLD_SCALE = BUILDER
+            .comment("Aim-quality gate cap for machine gunners (0 = standard path).",
+                     "MG doctrine is to open up early and walk fire onto the target, so the",
+                     "burst-start gate is capped like SUPPRESSIVE discipline: shotThreshold",
+                     "uses at most this fraction of targetAimQuality. Default: 0.20")
+            .defineInRange("mgAimQualityThresholdScale", 0.20, 0.0, 1.0);
+
+        MG_TARGET_MOVE_PENALTY_SCALE = BUILDER
+            .comment("Scales the target-moving aim decay for machine gunners (1.0 = standard).",
+                     "Tracking fire is the MG's job: without relief the per-tick decay matches",
+                     "the build rate at range and the gunner starves at the gate. Default: 0.4")
+            .defineInRange("mgTargetMovePenaltyScale", 0.4, 0.0, 1.0);
+
+        MG_AIM_BUILD_RATE_SCALE = BUILDER
+            .comment("Aim-quality build-rate multiplier for machine gunners (1.0 = standard).",
+                     "Belt-fed guns stay on target; raises the equilibrium quality at range",
+                     "so sustained bursts survive. Default: 1.5")
+            .defineInRange("mgAimBuildRateScale", 1.5, 1.0, 3.0);
+
+        MG_RECOIL_AIM_LOSS_SCALE = BUILDER
+            .comment("Scales the per-shot recoil aim loss for machine gunners (1.0 = standard).",
+                     "A stationary gunner has the bipod down - the M249's TaCZ recoil (0.4/0.3)",
+                     "charges the full shoulder-fire penalty today and collapses bursts after",
+                     "1-2 shots. Stacks with the crawl multiplier while low-crouching.",
+                     "Default: 0.5")
+            .defineInRange("mgRecoilAimLossScale", 0.5, 0.0, 2.0);
+
+        CRAWL_STANCE_RECOIL = BUILDER
+            .comment("Mirror TaCZ's per-gun crawl_recoil_multiplier into the aim model: while",
+                     "low-crouching (the duck/crawl pose), the per-shot recoil aim loss is",
+                     "multiplied by the gun's crawl_recoil_multiplier (M249: 0.1). Prone keeps",
+                     "its own 0.45 multiplier. Standing in the open pays the full penalty.",
+                     "Default: true")
+            .define("crawlStanceRecoil", true);
 
         BUILDER.pop();
 
@@ -1087,6 +1140,34 @@ BUILDER.pop();
     
     public static float getAimQualitySwitchReset() {
         return AIM_QUALITY_SWITCH_RESET.get().floatValue();
+    }
+
+    public static int getMgDirectBurstShots() {
+        return MG_DIRECT_BURST_SHOTS.get();
+    }
+
+    public static int getMgDirectRecoveryTicks() {
+        return MG_DIRECT_RECOVERY_TICKS.get();
+    }
+
+    public static float getMgAimQualityThresholdScale() {
+        return MG_AIM_QUALITY_THRESHOLD_SCALE.get().floatValue();
+    }
+
+    public static float getMgTargetMovePenaltyScale() {
+        return MG_TARGET_MOVE_PENALTY_SCALE.get().floatValue();
+    }
+
+    public static float getMgAimBuildRateScale() {
+        return MG_AIM_BUILD_RATE_SCALE.get().floatValue();
+    }
+
+    public static float getMgRecoilAimLossScale() {
+        return MG_RECOIL_AIM_LOSS_SCALE.get().floatValue();
+    }
+
+    public static boolean isCrawlStanceRecoilEnabled() {
+        return CRAWL_STANCE_RECOIL.get();
     }
     
     public static float getTargetSwitchImprovement() {

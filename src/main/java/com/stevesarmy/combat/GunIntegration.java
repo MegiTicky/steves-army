@@ -213,6 +213,7 @@ public class GunIntegration {
     public static void lowCrouch(LivingEntity entity, boolean isLowCrouch) { handler().lowCrouch(entity, isLowCrouch); }
     public static boolean isLowCrouching(LivingEntity entity) { return handler().isLowCrouching(entity); }
     public static float[] getGunRecoil(LivingEntity entity) { return handler().getGunRecoil(entity); }
+    public static float getCrawlRecoilMultiplier(LivingEntity entity) { return handler().getCrawlRecoilMultiplier(entity); }
     public static int getRPM(LivingEntity entity) { return handler().getRPM(entity); }
     public static float getBurstMinInterval(LivingEntity entity) { return handler().getBurstMinInterval(entity); }
     public static float getAimInaccuracy(LivingEntity entity) { return handler().getAimInaccuracy(entity); }
@@ -276,6 +277,14 @@ public class GunIntegration {
         void lowCrouch(LivingEntity entity, boolean isLowCrouch);
         boolean isLowCrouching(LivingEntity entity);
         float[] getGunRecoil(LivingEntity entity);
+        /**
+         * TaCZ's per-gun {@code crawl_recoil_multiplier} (1.0 = no reduction):
+         * the recoil the gun actually kicks with while low-crouching. TaCZ
+         * applies it to the real kick via {@link #lowCrouch}; the aim model
+         * mirrors it through here so crawling gunners are not charged the
+         * standing recoil penalty.
+         */
+        default float getCrawlRecoilMultiplier(LivingEntity entity) { return 1.0f; }
         int getRPM(LivingEntity entity);
         float getBurstMinInterval(LivingEntity entity);
         float getAimInaccuracy(LivingEntity entity);
@@ -333,6 +342,7 @@ public class GunIntegration {
         @Override public void lowCrouch(LivingEntity entity, boolean isLowCrouch) { forEntity(entity).lowCrouch(entity, isLowCrouch); }
         @Override public boolean isLowCrouching(LivingEntity entity) { return forEntity(entity).isLowCrouching(entity); }
         @Override public float[] getGunRecoil(LivingEntity entity) { return forEntity(entity).getGunRecoil(entity); }
+        @Override public float getCrawlRecoilMultiplier(LivingEntity entity) { return forEntity(entity).getCrawlRecoilMultiplier(entity); }
         @Override public int getRPM(LivingEntity entity) { return forEntity(entity).getRPM(entity); }
         @Override public float getBurstMinInterval(LivingEntity entity) { return forEntity(entity).getBurstMinInterval(entity); }
         @Override public float getAimInaccuracy(LivingEntity entity) { return forEntity(entity).getAimInaccuracy(entity); }
@@ -1381,6 +1391,36 @@ public class GunIntegration {
                 StevesArmyMod.LOGGER.debug("[TaCZ] Failed to get gun recoil: {}", e.getMessage());
             }
             return new float[]{0.5f, 0.25f};
+        }
+
+        @Override
+        public float getCrawlRecoilMultiplier(LivingEntity entity) {
+            try {
+                ItemStack gunStack = entity.getMainHandItem();
+                Class<?> iGunClass = Class.forName("com.tacz.guns.api.item.IGun");
+                Method getIGunOrNull = iGunClass.getMethod("getIGunOrNull", ItemStack.class);
+                Object iGun = getIGunOrNull.invoke(null, gunStack);
+                if (iGun == null) return 1.0f;
+
+                Method getGunId = iGunClass.getMethod("getGunId", ItemStack.class);
+                Object gunId = getGunId.invoke(iGun, gunStack);
+
+                Class<?> timelessApiClass = Class.forName("com.tacz.guns.api.TimelessAPI");
+                Method getCommonGunIndex = timelessApiClass.getMethod("getCommonGunIndex", ResourceLocation.class);
+                Object indexOpt = getCommonGunIndex.invoke(null, gunId);
+
+                if (indexOpt instanceof Optional<?> opt && opt.isPresent()) {
+                    Object gunIndex = opt.get();
+                    Method getGunData = gunIndex.getClass().getMethod("getGunData");
+                    Object gunData = getGunData.invoke(gunIndex);
+                    Method getCrawlRecoilMultiplier = gunData.getClass().getMethod("getCrawlRecoilMultiplier");
+                    Object multiplier = getCrawlRecoilMultiplier.invoke(gunData);
+                    if (multiplier instanceof Float f) return f;
+                }
+            } catch (Exception e) {
+                StevesArmyMod.LOGGER.debug("[TaCZ] Failed to get crawl recoil multiplier: {}", e.getMessage());
+            }
+            return 1.0f;
         }
 
         @Override

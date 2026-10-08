@@ -978,6 +978,24 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
         return soldier.isFiringProne() ? FIRING_PRONE_RECOIL_LOSS_MULTIPLIER : 1.0f;
     }
 
+    /**
+     * Stance term for the per-shot recoil aim loss: prone-firing and crawl
+     * (TaCZ {@code crawl_recoil_multiplier}, mirrored here because TaCZ
+     * applies it to the real kick via lowCrouch), plus the MG bipod scale —
+     * a stationary gunner has the bipod down and does not pay shoulder-fire
+     * recoil per shot.
+     */
+    private float stanceRecoilLossMultiplier() {
+        float multiplier = getFiringProneRecoilLossMultiplier();
+        if (StevesArmyConfig.isCrawlStanceRecoilEnabled() && soldier.isLowCrouching()) {
+            multiplier *= GunIntegration.getCrawlRecoilMultiplier(soldier);
+        }
+        if (machineGunnerPipeline) {
+            multiplier *= StevesArmyConfig.getMgRecoilAimLossScale();
+        }
+        return multiplier;
+    }
+
     private void startFiringProneOpportunity() {
         firingProneDelayTicks = FIRING_PRONE_DELAY_MIN_TICKS
             + soldier.level().random.nextInt(FIRING_PRONE_DELAY_MAX_TICKS - FIRING_PRONE_DELAY_MIN_TICKS + 1);
@@ -1496,18 +1514,26 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
             thresholdScale = Math.min(thresholdScale, 0.20f);
         }
         thresholdScale = applyDynamicThresholdModifiers(thresholdScale, discipline);
+        if (machineGunnerPipeline) {
+            // MG doctrine: open up early and walk fire onto the target, so the
+            // burst-start gate is hard-capped (same relief SUPPRESSIVE gets).
+            float mgCap = StevesArmyConfig.getMgAimQualityThresholdScale();
+            if (mgCap > 0.0f && thresholdScale > mgCap) {
+                thresholdScale = mgCap;
+            }
+        }
         float shotThreshold = Math.max(mobileFire ? MOBILE_FIRE_THRESHOLD_FLOOR : 0.15f,
             targetAimQ * thresholdScale);
 
         DirectFireWeaponProfile directProfile = getDirectFireWeaponProfile();
         int requestedBurstShotLimit;
         if (mobileFire) {
-            requestedBurstShotLimit = Math.min(directProfile.burstShots, MOBILE_FIRE_MAX_BURST_SHOTS);
-        } else if (dynamicFiringEnabled() && directProfile.burstShots > 1) {
-            requestedBurstShotLimit = FireControl.rollBurstShots(directProfile.burstShots,
+            requestedBurstShotLimit = Math.min(directBurstShotsFor(directProfile), MOBILE_FIRE_MAX_BURST_SHOTS);
+        } else if (dynamicFiringEnabled() && directBurstShotsFor(directProfile) > 1) {
+            requestedBurstShotLimit = FireControl.rollBurstShots(directBurstShotsFor(directProfile),
                 burstBias(), soldier.getRandom());
         } else {
-            requestedBurstShotLimit = directProfile.burstShots;
+            requestedBurstShotLimit = directBurstShotsFor(directProfile);
         }
         if (directBurstCooldownTicks > 0) {
             directBurstCooldownTicks--;
@@ -1660,7 +1686,7 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
                 float[] recoil = AimAccuracyManager.getGunRecoil(soldier);
                 float recoilMagnitude = Math.abs(recoil[0]) + Math.abs(recoil[1]);
                 float recoilLoss = recoilMagnitude * StevesArmyConfig.getAimQualityRecoilScale()
-                    * getFiringProneRecoilLossMultiplier();
+                    * stanceRecoilLossMultiplier();
                 aimQuality = Math.max(0.0f, aimQuality - recoilLoss);
                 if (isDamageDebugLogging()) {
                     StevesArmyMod.LOGGER.info("[Recoil] pitch={}, yaw={}, magnitude={}, recoilLoss={}, aimQuality={}",
@@ -1801,6 +1827,11 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
                 : AimAccuracyManager.getTargetAimQuality(soldier, target);
             float buildRate = staticTarget ? StevesArmyConfig.getAimQualityBuildRate()
                 : AimAccuracyManager.getBuildRate(soldier, target);
+            if (machineGunnerPipeline) {
+                // Belt-fed tracking fire: MGs hold their aim equilibrium at
+                // range instead of bleeding it to the standard decay terms.
+                buildRate *= StevesArmyConfig.getMgAimBuildRateScale();
+            }
             if (dynamicFiringEnabled()) {
                 buildRate *= buildBias();
             }
@@ -1815,8 +1846,11 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
 
             double targetSpeed = staticTarget ? 0.0 : target.getDeltaMovement().horizontalDistanceSqr();
             if (targetSpeed > 0.01) {
-                aimQuality -= mobileFire ? MOBILE_FIRE_TARGET_MOVEMENT_DECAY
-                    : StevesArmyConfig.getAimQualityTargetMovePenalty();
+                float targetMovePenalty = StevesArmyConfig.getAimQualityTargetMovePenalty();
+                if (machineGunnerPipeline) {
+                    targetMovePenalty *= StevesArmyConfig.getMgTargetMovePenaltyScale();
+                }
+                aimQuality -= mobileFire ? MOBILE_FIRE_TARGET_MOVEMENT_DECAY : targetMovePenalty;
             }
 
             if (aimQuality < targetAimQuality) {
@@ -3221,6 +3255,23 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
         return DirectFireWeaponProfile.SINGLE_SHOT;
     }
 
+    /**
+     * MG direct fire runs the machine-gun cadence from config instead of the
+     * shared 5-shot enum constant — an M249 hosing an active target should
+     * look like its suppression bursts, just aimed. 0/disabled falls back.
+     */
+    private int directBurstShotsFor(DirectFireWeaponProfile profile) {
+        if (profile != DirectFireWeaponProfile.MACHINE_GUN) return profile.burstShots;
+        int configured = StevesArmyConfig.getMgDirectBurstShots();
+        return configured > 0 ? configured : profile.burstShots;
+    }
+
+    private int directRecoveryTicksFor(DirectFireWeaponProfile profile) {
+        if (profile != DirectFireWeaponProfile.MACHINE_GUN) return profile.recoveryTicks;
+        int configured = StevesArmyConfig.getMgDirectRecoveryTicks();
+        return configured > 0 ? configured : profile.recoveryTicks;
+    }
+
     private float getDirectBurstContinuationThreshold(float startThreshold) {
         return FireControl.directBurstContinuationThreshold(soldier.getFireDiscipline(), startThreshold);
     }
@@ -3383,7 +3434,7 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
         int shotsFired = directBurstShotsFired;
         directBurstActive = false;
         directBurstShotsFired = 0;
-        directBurstCooldownTicks = rollDirectRecoveryTicks(profile.recoveryTicks);
+        directBurstCooldownTicks = rollDirectRecoveryTicks(directRecoveryTicksFor(profile));
         directBurstProfile = null;
         directBurstShotLimit = 0;
         directBurstContinuationThreshold = 0.0f;
@@ -3634,7 +3685,7 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
                 float recoilMagnitude = Math.abs(recoil[0]) + Math.abs(recoil[1]);
                 aimQuality = Math.max(0.0f, aimQuality - recoilMagnitude
                     * StevesArmyConfig.getAimQualityRecoilScale()
-                    * getFiringProneRecoilLossMultiplier());
+                    * stanceRecoilLossMultiplier());
                 
                 if (burstShotsFired >= burstTarget) {
                     int pauseTicks = rollSuppressionPauseTicks(profile.pauseTicks, hoseFactor);
@@ -4178,7 +4229,7 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
                 float recoilMagnitude = Math.abs(recoil[0]) + Math.abs(recoil[1]);
                 aimQuality = Math.max(0.0f, aimQuality - recoilMagnitude
                     * StevesArmyConfig.getAimQualityRecoilScale()
-                    * getFiringProneRecoilLossMultiplier());
+                    * stanceRecoilLossMultiplier());
 
                 if (pingSuppressHeavy) {
                     // One rocket per ping: spend the heavy phase now and hand
