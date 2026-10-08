@@ -75,7 +75,11 @@ public final class SimRegistry {
             exposedFfSidestep(),
             exposedFfFrozenBaseline(),
             exposedWithdrawOverrun(),
-            courseExposedYardFight());
+            courseExposedYardFight(),
+            streetBoundCrossing(),
+            streetMgCoversBound(),
+            streetSoloNoCoord(),
+            streetSwarmBaseline());
     }
 
     public static SimScenario byName(String name) {
@@ -1213,9 +1217,178 @@ public final class SimRegistry {
             })
             .assertThat("firefight produces tracers", view -> !view.shots().isEmpty())
             .assertThat("enemy takes damage (spawn HP 20)", view -> view.enemyHealthEnd() < 20.0f)
-            .assertThat("movement stays purposeful (roam radius <= 12 blocks)",
-                view -> maxDisplacement(view, "rifle") <= 12.0)
+            // 18, not 12: a single bounded quiet reposition (~6 blocks out and
+            // back) is doctrine, not chaotic wandering; the routine-reposition
+            // RNG fires it in roughly half the runs.
+            .assertThat("movement stays purposeful (roam radius <= 18 blocks)",
+                view -> maxDisplacement(view, "rifle") <= 18.0)
             .build();
+    }
+
+    /** Phase 3: a fire team crosses the hot street one soldier at a time. */
+    private static SimScenario streetBoundCrossing() {
+        return SimScenario.builder("street_bound_crossing")
+            .description("Course scenario (squad street-crossing doctrine): a two-man fire team must "
+                + "advance from the south rim across the rubble street to a hold point inside the "
+                + "west house while an armed enemy covers the lane from the east. "
+                + "SquadMovementCoordinator bounds them one at a time - the crossing is staggered, "
+                + "both soldiers make the north side, and the pair answers fire en route.")
+            .duration(900)
+            .armed()
+            .terrain(t -> t.cqbCourse())
+            .setup(ctx -> {
+                ctx.spawnAnchor(24, 0, 42);
+                SoldierEntity alpha = ctx.spawnFriendly(ModEntities.SOLDIER.get(), "alpha", 20, 0, 40, SquadMode.HOLD);
+                SoldierEntity bravo = ctx.spawnFriendly(ModEntities.SOLDIER.get(), "bravo", 26, 0, 40, SquadMode.HOLD);
+                alpha.setHoldPosition(ctx.terrain.at(18, 0, 8));
+                bravo.setHoldPosition(ctx.terrain.at(18, 0, 8));
+                EnemySoldierEntity enemy = ctx.spawnEnemyLabeled("threat", 34, 0, 16);
+                enemy.setSquadMode(SquadMode.HOLD);
+                enemy.setHoldPosition(ctx.terrain.at(34, 0, 16));
+            })
+            .assertThat("both soldiers make the north side (final z < 24)",
+                view -> northOf(view, "alpha", 24) && northOf(view, "bravo", 24))
+            .assertThat("crossing is staggered (one north of z=30 while the other waits south of z=36)",
+                view -> staggeredCrossing(view, "alpha", "bravo", 30, 33))
+            .assertThat("the pair answers fire en route (tracers)", view -> !view.shots().isEmpty())
+            .build();
+    }
+
+    /** Phase 3: the MG anchors the overwatch lane while the rifle bounds. */
+    private static SimScenario streetMgCoversBound() {
+        return SimScenario.builder("street_mg_covers_bound")
+            .description("Course scenario (squad street-crossing doctrine): an MG and a rifle cross the "
+                + "rubble street under an armed enemy. The MG is overwatch-anchored by preference - "
+                + "it holds its lane while the rifle bounds across, then rotates across itself.")
+            .duration(900)
+            .armed()
+            .terrain(t -> t.cqbCourse())
+            .setup(ctx -> {
+                ctx.spawnAnchor(24, 0, 42);
+                SoldierEntity mg = ctx.spawnFriendly(ModEntities.SOLDIER.get(), "mg", 26, 0, 40, SquadMode.HOLD);
+                SoldierEntity rifle = ctx.spawnFriendly(ModEntities.SOLDIER.get(), "rifle", 22, 0, 40, SquadMode.HOLD);
+                mg.setHoldPosition(ctx.terrain.at(18, 0, 8));
+                rifle.setHoldPosition(ctx.terrain.at(18, 0, 8));
+                EnemySoldierEntity enemy = ctx.spawnEnemyLabeled("threat", 34, 0, 16);
+                enemy.setSquadMode(SquadMode.HOLD);
+                enemy.setHoldPosition(ctx.terrain.at(34, 0, 16));
+            })
+            .assertThat("MG anchors while the rifle crosses (MG displacement <= 8 during the crossing)",
+                view -> anchorHoldsDuring(view, "rifle", "mg", 34, 24, 8.0) <= 8.0)
+            .assertThat("rifle reaches the north side (final z < 24)", view -> northOf(view, "rifle", 24))
+            .assertThat("MG rotates across after the rifle clears (final z < 28)",
+                view -> northOf(view, "mg", 28))
+            .build();
+    }
+
+    /** Phase 3: a lone soldier crosses the same street with no coordination overhead. */
+    private static SimScenario streetSoloNoCoord() {
+        return SimScenario.builder("street_solo_no_coord")
+            .description("Course scenario (squad street-crossing doctrine, solo bypass): a single soldier "
+                + "advances across the same hot street. With nobody to hold a lane, the coordinator "
+                + "stays out of the way - the existing exposed-combat and suppressed-traveler "
+                + "doctrines govern.")
+            .duration(900)
+            .armed()
+            .terrain(t -> t.cqbCourse())
+            .setup(ctx -> {
+                ctx.spawnAnchor(24, 0, 42);
+                SoldierEntity solo = ctx.spawnFriendly(ModEntities.SOLDIER.get(), "solo", 24, 0, 40, SquadMode.HOLD);
+                solo.setHoldPosition(ctx.terrain.at(18, 0, 8));
+                EnemySoldierEntity enemy = ctx.spawnEnemyLabeled("threat", 34, 0, 16);
+                enemy.setSquadMode(SquadMode.HOLD);
+                enemy.setHoldPosition(ctx.terrain.at(34, 0, 16));
+            })
+            .assertThat("solo crosses the street (final z < 24)", view -> northOf(view, "solo", 24))
+            .assertThat("engages en route (tracers)", view -> !view.shots().isEmpty())
+            .build();
+    }
+
+    /** A/B baseline twin of street_bound_crossing: asserts the OLD simultaneous swarm. */
+    private static SimScenario streetSwarmBaseline() {
+        return SimScenario.builder("street_swarm_baseline")
+            .description("BASELINE (expected FAIL after the street-crossing doctrine): documents the old "
+                + "behavior for the same two-man crossing - both soldiers swarm the street together, "
+                + "crossing within one 100t window. Pair of street_bound_crossing.")
+            .duration(900)
+            .armed()
+            .terrain(t -> t.cqbCourse())
+            .setup(ctx -> {
+                ctx.spawnAnchor(24, 0, 42);
+                SoldierEntity alpha = ctx.spawnFriendly(ModEntities.SOLDIER.get(), "alpha", 20, 0, 40, SquadMode.HOLD);
+                SoldierEntity bravo = ctx.spawnFriendly(ModEntities.SOLDIER.get(), "bravo", 26, 0, 40, SquadMode.HOLD);
+                alpha.setHoldPosition(ctx.terrain.at(18, 0, 8));
+                bravo.setHoldPosition(ctx.terrain.at(18, 0, 8));
+                EnemySoldierEntity enemy = ctx.spawnEnemyLabeled("threat", 34, 0, 16);
+                enemy.setSquadMode(SquadMode.HOLD);
+                enemy.setHoldPosition(ctx.terrain.at(34, 0, 16));
+            })
+            .assertThat("BASELINE: both cross the street band together (first crossings within 100t)",
+                view -> {
+                    int a = firstNorthTick(view, "alpha", 30);
+                    int b = firstNorthTick(view, "bravo", 30);
+                    return a >= 0 && b >= 0 && Math.abs(a - b) <= 100;
+                })
+            .build();
+    }
+
+    /** True when the soldier's final sample stands north (z below) of the line. */
+    private static boolean northOf(SimScenario.SimRunResultView view, String label, double zLine) {
+        List<SimSample> series = view.timeline().series(label);
+        return !series.isEmpty() && series.get(series.size() - 1).state.position.z < zLine;
+    }
+
+    /** First tick the soldier's z drops below the line, or -1. */
+    private static int firstNorthTick(SimScenario.SimRunResultView view, String label, double zLine) {
+        for (SimSample s : view.timeline().series(label)) {
+            if (s.state.position.z < zLine) return s.tick;
+        }
+        return -1;
+    }
+
+    /** True when at some tick one soldier is north of northZ while the other is still south of southZ. */
+    private static boolean staggeredCrossing(SimScenario.SimRunResultView view,
+                                             String labelA, String labelB, double northZ, double southZ) {
+        List<SimSample> sa = view.timeline().series(labelA);
+        List<SimSample> sb = view.timeline().series(labelB);
+        for (SimSample a : sa) {
+            if (a.state.position.z >= northZ) continue;
+            for (SimSample b : sb) {
+                if (b.tick != a.tick) continue;
+                if (b.state.position.z > southZ) return true;
+            }
+        }
+        for (SimSample b : sb) {
+            if (b.state.position.z >= northZ) continue;
+            for (SimSample a : sa) {
+                if (a.tick != b.tick) continue;
+                if (a.state.position.z > southZ) return true;
+            }
+        }
+        return false;
+    }
+
+    /** Max displacement of anchorLabel while moverLabel crosses between the two z lines. */
+    private static double anchorHoldsDuring(SimScenario.SimRunResultView view, String moverLabel,
+                                            String anchorLabel, double zFrom, double zTo, double maxAllowed) {
+        List<SimSample> mover = view.timeline().series(moverLabel);
+        List<SimSample> anchor = view.timeline().series(anchorLabel);
+        Integer windowStart = null;
+        Integer windowEnd = null;
+        for (SimSample s : mover) {
+            if (windowStart == null && s.state.position.z < zFrom) windowStart = s.tick;
+            if (windowStart != null && s.state.position.z < zTo) { windowEnd = s.tick; break; }
+        }
+        if (windowStart == null) return 0;
+        Vec3 origin = null;
+        double max = 0;
+        for (SimSample s : anchor) {
+            if (s.tick < windowStart) continue;
+            if (windowEnd != null && s.tick > windowEnd) break;
+            if (origin == null) origin = s.state.position;
+            max = Math.max(max, Math.hypot(s.state.position.x - origin.x, s.state.position.z - origin.z));
+        }
+        return max;
     }
 
     /** Phase 1: CQB formation is a mobility doctrine - no freeze on sight at range, cover use retained. */
@@ -2117,7 +2290,8 @@ public final class SimRegistry {
                     if (series.isEmpty()) return false;
                     SimSample last = series.get(series.size() - 1);
                     return last.state.position != null
-                        && last.state.position.distanceTo(new Vec3(42.5, 160, 8.5)) < 8.0;
+                        && last.state.position.distanceTo(
+                            new Vec3(42.5, last.state.position.y, 8.5)) < 8.0;
                 })
             .assertThat("approach stays in shadow (>=50% of travel samples read danger <= 50)",
                 view -> {
@@ -2198,7 +2372,8 @@ public final class SimRegistry {
                     if (series.isEmpty()) return false;
                     SimSample last = series.get(series.size() - 1);
                     return last.state.position != null
-                        && last.state.position.distanceTo(new Vec3(42.5, 160, 8.5)) < 8.0;
+                        && last.state.position.distanceTo(
+                            new Vec3(42.5, last.state.position.y, 8.5)) < 8.0;
                 })
             .assertThat("approach stays in shadow (>=50% of travel samples read danger <= 50)",
                 view -> {

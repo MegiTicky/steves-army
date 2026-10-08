@@ -1836,8 +1836,28 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
         }
         
         CoverBehaviorManager.CoverState state = getCoverManager().getState();
-        
+        if (com.stevesarmy.debug.DiagnosticLogManager.isCoverScoreLoggingEnabled()
+            && soldier.tickCount % 100 == 0) {
+            CoverPoint dcc = getCoverManager().getCurrentCover();
+            StevesArmyMod.LOGGER.info("[MarchDwell] S{} ccu t{}: state={} sup={} mode={} cover={} hold={} ctx={} bounder={} over={}",
+                soldier.getId(), soldier.tickCount, state, getCoverManager().isSuppressed(), soldier.getSquadMode(),
+                dcc != null ? dcc.getPosition() : "null",
+                soldier.getHoldPosition(), soldier.isInCloseCombatContext(),
+                com.stevesarmy.squad.SquadMovementCoordinator.isBounder(soldier),
+                com.stevesarmy.squad.SquadMovementCoordinator.isOverwatching(soldier));
+        }
         if (state == CoverBehaviorManager.CoverState.IN_COVER && !getCoverManager().isSuppressed()) {
+            // Street-crossing doctrine: a dock is a pause under fire, not a
+            // terminus. A docked soldier whose hold objective is still beyond
+            // the hold radius yields the legs after the quiet dwell - stop()
+            // releases the cover and SoldierHoldPositionGoal resumes the march.
+            if (soldier.getSquadMode() == SquadMode.HOLD
+                && SoldierHoldPositionGoal.shouldResumeMarch(soldier, getCoverManager())) {
+                if (DiagnosticLogManager.isCoverLoggingEnabled()) {
+                    StevesArmyMod.LOGGER.info("[CoverGoal] canContinueToUse=false: quiet dwell expired, resuming hold march");
+                }
+                return false;
+            }
             if (soldier.getSquadMode() == SquadMode.FOLLOW) {
                 LivingEntity owner = soldier.getOwner();
                 if (owner != null && soldier.distanceToSqr(owner) > 15 * 15) {
@@ -3271,6 +3291,20 @@ private void tickRepositioning() {
             }
             recoverySafetyPeekDone = true;
             recoverySafetyPeekInProgress = false;
+        }
+
+        // Squad street-crossing doctrine: an overwatcher holds its routine
+        // repositions while a teammate is mid-bound on the lane it covers
+        // (the coordinator's own bound timeout prevents a permanent hold), and
+        // a bounder without live covering fire waits out the soft cover
+        // window before advancing anyway.
+        if (StevesArmyConfig.isSquadBoundingEnabled()) {
+            if (com.stevesarmy.squad.SquadMovementCoordinator.isOverwatching(soldier)) {
+                return false;
+            }
+            if (com.stevesarmy.squad.SquadMovementCoordinator.awaitingCoveringFire(soldier)) {
+                return false;
+            }
         }
 
         // Soft covering-fire requirement: multiply move chance when no teammate

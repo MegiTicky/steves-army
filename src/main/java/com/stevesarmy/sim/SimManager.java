@@ -42,12 +42,12 @@ public final class SimManager {
     private SimManager() {}
 
     /** Base Y for scenario fixtures: a sky platform, independent of world terrain. */
-    private static final int Y_BASE = 160;
+    private static final int Y_BASE = 100;
     /**
      * Vertical spacing between scenario fixtures. Chunks are full columns, so
      * this only separates the fixtures in the air — the registry must fit
      * under the y=320 build limit: Y_BASE + (registry size - 1) * spacing + 2
-     * &lt;= 319 (rim top). At 3Y that allows 53 scenarios (160 + 52*3 + 2 = 318);
+     * &lt;= 319 (rim top). At 3Y that allows 73 scenarios (100 + 72*3 + 2 = 318);
      * fixtures are cleared between runs, so a 3Y stack never overlaps, and
      * startup sweeps strays left by crashed sessions.
      */

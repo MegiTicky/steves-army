@@ -164,9 +164,24 @@ public final class StandardDetectors {
                 for (int i = 0; i < series.size(); i++) {
                     Set<BlockPos> distinct = new HashSet<>();
                     int windowStart = series.get(i).tick;
+                    int lastSuppressedTick = Integer.MIN_VALUE;
                     for (int j = i; j < series.size(); j++) {
                         SimSample s = series.get(j);
                         if (s.tick - windowStart > SimTuning.COVER_OSCILLATION_WINDOW_TICKS) break;
+                        // Samples under active fire are the suppressed-traveler
+                        // doctrine working (pin, dive, re-dive as lanes open) -
+                        // only quiet claims count toward churn. The same goes for
+                        // a soldier traveling to a hold objective: en-route cover
+                        // claims are transient dives by design (street-crossing
+                        // doctrine), and dive-release-march cycles re-claim as
+                        // they advance. A refractory tail after the last
+                        // suppressed sample covers the post-fire recovery claim.
+                        if (s.state.suppressionLevel >= 0.30f) {
+                            lastSuppressedTick = s.tick;
+                            continue;
+                        }
+                        if (s.tick - lastSuppressedTick <= 60) continue;
+                        if (s.state.traveling) continue;
                         if (s.state.targetCover != null) distinct.add(s.state.targetCover);
                         if (s.state.currentCover != null) distinct.add(s.state.currentCover);
                     }

@@ -117,6 +117,7 @@ public class SquadSyncHandler {
 
         SquadActivityManager.tick(event.getServer());
         com.stevesarmy.squad.FireTeamSuppressionTracker.tick(event.getServer());
+        com.stevesarmy.squad.SquadMovementCoordinator.tick(event.getServer());
 
         tickCounter++;
         if (tickCounter >= 20) {

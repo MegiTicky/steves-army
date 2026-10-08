@@ -32,5 +32,6 @@ public final class SimIsolation {
         com.stevesarmy.combat.VisibilityRay.invalidateCache(level);
         // per-soldier exposed-combat action state must not leak between scenarios
         com.stevesarmy.entity.ai.ExposedCombatController.resetAll();
+        com.stevesarmy.squad.SquadMovementCoordinator.resetAll();
     }
 }

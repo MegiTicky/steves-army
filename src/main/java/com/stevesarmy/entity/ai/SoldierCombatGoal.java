@@ -1696,6 +1696,7 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
         result = GunIntegration.shootWithDeviation(soldier, aimPoint, pitchDev, yawDev);
         
         if (result == GunIntegration.ShootResult.SUCCESS) {
+            com.stevesarmy.squad.SquadMovementCoordinator.noteShot(soldier);
             if (!directBurstActive) {
                 beginDirectFireBurst(directProfile, requestedBurstShotLimit, mobileFire, continuationThreshold);
             }

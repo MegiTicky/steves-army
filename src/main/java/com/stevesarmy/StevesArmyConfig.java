@@ -85,6 +85,12 @@ public class StevesArmyConfig {
     public static final ForgeConfigSpec.DoubleValue EXPOSED_SIDESTEP_BLOCKS;
     public static final ForgeConfigSpec.DoubleValue EXPOSED_WITHDRAW_DISTANCE;
     public static final ForgeConfigSpec.IntValue EXPOSED_WITHDRAW_TIMEOUT_TICKS;
+    public static final ForgeConfigSpec.BooleanValue SQUAD_BOUNDING_ENABLED;
+    public static final ForgeConfigSpec.IntValue SQUAD_BOUND_COVER_WINDOW_TICKS;
+    public static final ForgeConfigSpec.IntValue SQUAD_BOUND_COVER_WAIT_TICKS;
+    public static final ForgeConfigSpec.IntValue SQUAD_BOUND_MAX_TICKS;
+    public static final ForgeConfigSpec.DoubleValue SQUAD_BOUND_THREAT_RANGE;
+    public static final ForgeConfigSpec.IntValue HOLD_MARCH_DWELL_TICKS;
     public static final ForgeConfigSpec.DoubleValue CLOSE_COMBAT_SEEK_RADIUS;
     public static final ForgeConfigSpec.IntValue CLOSE_COMBAT_REEVAL_INTERVAL_TICKS;
 
@@ -683,6 +689,47 @@ BUILDER.pop();
             .comment("A withdrawal that has not ended within this window is abandoned.",
                      "Default: 60 ticks (3 s)")
             .defineInRange("exposedWithdrawTimeoutTicks", 60, 20, 200);
+
+        BUILDER.pop();
+
+        BUILDER.push("squad_movement");
+
+        SQUAD_BOUNDING_ENABLED = BUILDER
+            .comment("Squad street-crossing doctrine: within a fire team advancing across a hot",
+                     "lane, one soldier bounds at a time and the others hold overwatch; a bounder",
+                     "advances under real covering fire (a teammate actually shooting), machine",
+                     "gunners anchor the overwatch, and lone soldiers bypass the coordinator.",
+                     "Default: true")
+            .define("squadBoundingEnabled", true);
+
+        SQUAD_BOUND_COVER_WINDOW_TICKS = BUILDER
+            .comment("A teammate's shot counts as covering fire for this long after it fires.",
+                     "Default: 60 ticks (3 s)")
+            .defineInRange("squadBoundCoverWindowTicks", 60, 10, 200);
+
+        SQUAD_BOUND_COVER_WAIT_TICKS = BUILDER
+            .comment("A bounder without covering fire waits this long before advancing anyway.",
+                     "Default: 60 ticks (3 s)")
+            .defineInRange("squadBoundCoverWaitTicks", 60, 0, 200);
+
+        SQUAD_BOUND_MAX_TICKS = BUILDER
+            .comment("A bound that has not completed within this window is released so the next",
+                     "soldier (rotation) gets the lane. No permanent stalls.",
+                     "Default: 200 ticks (10 s)")
+            .defineInRange("squadBoundMaxTicks", 200, 40, 600);
+
+        HOLD_MARCH_DWELL_TICKS = BUILDER
+            .comment("A docked soldier with the hold point still far away resumes the march after",
+                     "this much quiet dwell time in cover: a dock is a pause under fire, not a",
+                     "terminus (street-crossing doctrine). The dwell resets while suppressed or in",
+                     "the close-combat context; live combat always owns the soldier first.",
+                     "Default: 80 ticks (4 s)")
+            .defineInRange("holdMarchDwellTicks", 80, 20, 400);
+
+        SQUAD_BOUND_THREAT_RANGE = BUILDER
+            .comment("Max distance for a squadmate to count as part of the same bound (blocks).",
+                     "Default: 32 blocks")
+            .defineInRange("squadBoundThreatRange", 32.0, 8.0, 64.0);
 
         BUILDER.pop();
 
@@ -1526,6 +1573,30 @@ BUILDER.pop();
 
     public static int getExposedWithdrawTimeoutTicks() {
         return EXPOSED_WITHDRAW_TIMEOUT_TICKS.get();
+    }
+
+    public static boolean isSquadBoundingEnabled() {
+        return SQUAD_BOUNDING_ENABLED.get();
+    }
+
+    public static int getSquadBoundCoverWindowTicks() {
+        return SQUAD_BOUND_COVER_WINDOW_TICKS.get();
+    }
+
+    public static int getSquadBoundCoverWaitTicks() {
+        return SQUAD_BOUND_COVER_WAIT_TICKS.get();
+    }
+
+    public static int getSquadBoundMaxTicks() {
+        return SQUAD_BOUND_MAX_TICKS.get();
+    }
+
+    public static double getSquadBoundThreatRange() {
+        return SQUAD_BOUND_THREAT_RANGE.get();
+    }
+
+    public static int getHoldMarchDwellTicks() {
+        return HOLD_MARCH_DWELL_TICKS.get();
     }
 
     public static double getCloseCombatSeekRadius() {

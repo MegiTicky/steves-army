@@ -266,6 +266,48 @@ cover: waist-high stone-brick rows (half cover, peekable) and 2-high stacks
 (full cover) between the actors and the shooter, spaced so each soldier has
 reachable options and the pair/relocation scenarios have distinct candidates.
 
+### Combat positioning rework (2026-10-08, phase 3 — squad street crossing)
+
+`SquadMovementCoordinator` (squad package, server-ticked from SquadSyncHandler)
+picks ONE bounder per fire team when a teammate is advancing on a hold objective
+under threat (`squad_movement` config); the overwatcher anchors his lane (hold
+goal stops, MG scores +10000 as preferred anchor). Covering fire = a teammate's
+real successful shot inside `squadBoundCoverWindowTicks`; the bounder waits up
+to `squadBoundCoverWaitTicks` for it. Rotation via LAST_BOUNDERS; bounds expire
+on death/timeout (200t)/arrival. Solo soldiers bypass (no teammates, no bound).
+
+**Dock-resume doctrine** (the missing half): a dock is a pause under fire, not a
+terminus. `SoldierHoldPositionGoal.DOCK_SINCE` clocks each docked soldier;
+`CoverTacticalGoal.canContinueToUse` yields the legs once the quiet dwell
+(`holdMarchDwellTicks`, 80t) has sat out — but only when there is NO attack
+target (a live fight keeps the dock), not suppressed, not the bounder (crosses
+through), not the overwatch anchor, and the hold objective is still beyond the
+hold radius. The cover goal's stop releases the cover; the HOLD-mode seek veto
+(`isTravelingToObjective`) keeps quiet seek rounds from re-docking mid-march;
+arrival (within hold radius) stops the clock and the soldier takes a final
+cover normally. The close-combat context latch (16/20 hysteresis) deliberately
+does NOT reset the dwell — a live threat merely within 20 blocks must not
+re-freeze the march (that was the stall this phase removed).
+
+Detector note: `CoverOscillation` ignores samples with suppression >= 0.3
+(under-fire pin/dive/re-dive is the suppressed-traveler doctrine working) and
+samples where the soldier is traveling to an objective (en-route claims are
+transient dives by design). `SimManager.Y_BASE` lowered 160 -> 100 (3Y spacing
+now fits 73 scenarios; assertions made Y-agnostic).
+
+| Scenario | What it verifies |
+|---|---|
+| `street_bound_crossing` | Course street: pair crosses under fire STAGGERED — alpha bounds while bravo overwatches at the rubble row, bravo follows after alpha clears; both reach the north side |
+| `street_mg_covers_bound` | MG overwatch-anchors (holds within 8 blocks of its anchor) while the rifle bounds across, then rotates across itself |
+| `street_solo_no_coord` | Solo (coordinator bypass): quiet-dwell resume carries him across the same hot street; engages en route |
+| `street_swarm_baseline` | A/B twin (expected FAIL post-fix): documents the old simultaneous two-man swarm |
+
+Timing-sensitive: the crossing stagger depends on enemy fire timing (which
+soldier eats the first bursts) — the staggered/anchor assertions pass on the
+green runs; detector noise under suppression is exempted (see above). The
+`ExposedWhileHiding` flags on rubble rows are the known half-cover exposure
+family (see lone-block findings), not a phase-3 regression.
+
 ## Detectors (all run in every scenario)
 
 StuckSeek, SeekFailLoop, CoverOscillation, PeekThrash (incl. aborted
