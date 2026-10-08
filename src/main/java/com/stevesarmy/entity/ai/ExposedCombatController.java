@@ -73,6 +73,13 @@ public final class ExposedCombatController {
     /** Called by the combat goal whenever FriendlyFireChecker rejects a shot. */
     public static void noteShotBlocked(SoldierEntity soldier, Vec3 aimPoint) {
         State s = state(soldier);
+        // A blocked event long after the last one is a new engagement, not the
+        // old obstruction: restore the sidestep allowance. Production never
+        // calls reset(), so without this the one-attempt cap stays spent for
+        // the soldier's whole session.
+        if (s.shotBlockedAtTick > 0 && soldier.tickCount - s.shotBlockedAtTick > 200) {
+            s.adjustAttempts = 0;
+        }
         s.shotBlockedAtTick = soldier.tickCount;
         s.shotBlockedAim = aimPoint;
     }

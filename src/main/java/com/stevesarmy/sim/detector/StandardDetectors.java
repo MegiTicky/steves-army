@@ -164,7 +164,12 @@ public final class StandardDetectors {
                 for (int i = 0; i < series.size(); i++) {
                     Set<BlockPos> distinct = new HashSet<>();
                     int windowStart = series.get(i).tick;
-                    int lastSuppressedTick = Integer.MIN_VALUE;
+                    // Long + explicit flag: an Integer.MIN_VALUE sentinel would
+                    // overflow the refractory subtraction (tick - MIN_VALUE
+                    // wraps negative) and silently skip every quiet sample
+                    // before the first suppressed one.
+                    long lastSuppressedTick = Long.MIN_VALUE;
+                    boolean sawSuppression = false;
                     for (int j = i; j < series.size(); j++) {
                         SimSample s = series.get(j);
                         if (s.tick - windowStart > SimTuning.COVER_OSCILLATION_WINDOW_TICKS) break;
@@ -177,10 +182,11 @@ public final class StandardDetectors {
                         // they advance. A refractory tail after the last
                         // suppressed sample covers the post-fire recovery claim.
                         if (s.state.suppressionLevel >= 0.30f) {
+                            sawSuppression = true;
                             lastSuppressedTick = s.tick;
                             continue;
                         }
-                        if (s.tick - lastSuppressedTick <= 60) continue;
+                        if (sawSuppression && s.tick - lastSuppressedTick <= 60) continue;
                         if (s.state.traveling) continue;
                         if (s.state.targetCover != null) distinct.add(s.state.targetCover);
                         if (s.state.currentCover != null) distinct.add(s.state.currentCover);

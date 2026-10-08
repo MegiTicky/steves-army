@@ -1180,9 +1180,12 @@ public final class SimRegistry {
     /** Phase 2: an overrunning melee rush meets a bounded withdrawal that keeps the soldier alive. */
     private static SimScenario exposedWithdrawOverrun() {
         return SimScenario.builder("exposed_withdraw_overrun")
-            .description("Exposed-combat doctrine: a disarmed enemy rushes from 15 blocks. The exposed "
-                + "soldier must never be overrun (min gap to the rusher stays >= 2 blocks), keeps "
-                + "creating distance (withdrawal), and still gets shots off while disengaging.")
+            .description("Exposed-combat doctrine: a disarmed enemy rushes from 15 blocks - the sim "
+                + "teleports it onto the soldier every 40t so the rush cannot stall (an unarmed "
+                + "enemy left alone tends to retreat to the boundary, which would pass the gap "
+                + "asserts vacuously). The exposed soldier must never be overrun (min gap >= 2), "
+                + "must actually be threatened (the rush closed inside 6), and still gets shots "
+                + "off while disengaging.")
             .duration(500)
             .armed()
             .terrain(t -> t.platform())
@@ -1193,12 +1196,28 @@ public final class SimRegistry {
                 EnemySoldierEntity rusher = ctx.spawnEnemyLabeled("threat", 39, 0, 24);
                 ctx.disarmSoldier("threat");
             })
+            .action(40, "rusher closes", ctx -> rushToward(ctx, 4))
+            .action(80, "rusher closes", ctx -> rushToward(ctx, 4))
+            .action(120, "rusher closes", ctx -> rushToward(ctx, 4))
+            .action(160, "rusher closes", ctx -> rushToward(ctx, 4))
+            .action(200, "rusher closes", ctx -> rushToward(ctx, 4))
+            .action(240, "rusher closes", ctx -> rushToward(ctx, 4))
+            .assertThat("the rush actually closed (min gap <= 6 blocks - not a vacuous retreat)",
+                view -> minEnemyDistance(view, "rifle") <= 6.0)
             .assertThat("never overrun (min gap to the rusher >= 2.0 blocks)",
                 view -> minEnemyDistance(view, "rifle") >= 2.0)
             .assertThat("fires land while disengaging (rusher damaged, spawn HP 20)",
                 view -> view.enemyHealthEnd() < 20.0f)
             .assertThat("disengages while firing (at least one tracer)", view -> !view.shots().isEmpty())
             .build();
+    }
+
+    /** Teleport the lone enemy to `gap` blocks south of the rifle - a deterministic rush step. */
+    private static void rushToward(com.stevesarmy.sim.scenario.SimContext ctx, double gap) {
+        if (ctx.enemies.isEmpty()) return;
+        SoldierEntity rifle = ctx.byLabel.get("rifle");
+        if (rifle == null || !rifle.isAlive()) return;
+        ctx.moveEnemy(ctx.enemies.get(0), rifle.getBlockX(), 0, rifle.getBlockZ() + (int) gap);
     }
 
     /** Phase 2 course scenario: a street yard fight with sparse rubble - protection or purposeful planting. */
@@ -1269,7 +1288,7 @@ public final class SimRegistry {
             .terrain(t -> t.cqbCourse())
             .setup(ctx -> {
                 ctx.spawnAnchor(24, 0, 42);
-                SoldierEntity mg = ctx.spawnFriendly(ModEntities.SOLDIER.get(), "mg", 26, 0, 40, SquadMode.HOLD);
+                SoldierEntity mg = ctx.spawnFriendly(ModEntities.MACHINE_GUNNER.get(), "mg", 26, 0, 40, SquadMode.HOLD);
                 SoldierEntity rifle = ctx.spawnFriendly(ModEntities.SOLDIER.get(), "rifle", 22, 0, 40, SquadMode.HOLD);
                 mg.setHoldPosition(ctx.terrain.at(18, 0, 8));
                 rifle.setHoldPosition(ctx.terrain.at(18, 0, 8));

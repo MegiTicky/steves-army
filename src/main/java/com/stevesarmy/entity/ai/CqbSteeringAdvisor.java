@@ -160,11 +160,13 @@ public class CqbSteeringAdvisor {
         if (path == null || path.isDone()) {
             return false;
         }
-        // Look two nodes ahead: by the time the doorway is the IMMEDIATE next
-        // node the soldier has often crossed half the final gap at full speed
-        // (the hold must engage before the funnel, not inside it).
+        // Look ahead along the path: A* approaches a wall door by hugging the
+        // wall and TURNING into the opening, so the doorway node sits well out
+        // on the path when the follower still needs to slow. Eight nodes
+        // (~5 blocks) keeps the funnel inside the window on a staggered
+        // approach; the mate-proximity test below does the rest.
         int start = Math.max(0, path.getNextNodeIndex());
-        int end = Math.min(path.getNodeCount(), start + 4);
+        int end = Math.min(path.getNodeCount(), start + 8);
         Vec3 soldierPos = soldier.position();
         double spacing = com.stevesarmy.StevesArmyConfig.getCqbDoorwaySpacing();
         for (int j = start; j < end; j++) {
@@ -174,7 +176,7 @@ public class CqbSteeringAdvisor {
                 continue;
             }
             travelDir = travelDir.normalize();
-            if (!isDoorwayNode(soldier, node, travelDir)) {
+            if (!isDoorwayNode(soldier, node)) {
                 continue;
             }
             for (SoldierEntity mate : soldier.level().getEntitiesOfClass(SoldierEntity.class,
@@ -195,20 +197,21 @@ public class CqbSteeringAdvisor {
     }
 
     /**
-     * A wall doorway in Minecraft places the frame blocks along the travel
-     * line (the wall is 1 thick, the opening 1 wide), so the passage
-     * signature is: solid immediately ahead AND behind the node on the travel
-     * axis, with open sides. A 1-wide trench reads the same, and queuing in
-     * one is correct doctrine anyway.
+     * Direction-invariant 1-wide-gap signature: exactly ONE opposing neighbour
+     * pair around the node is solid (the wall the gap sits in) and the other
+     * pair is the passage. This must NOT be keyed to the follower's
+     * instantaneous travel direction - A* approaches a wall door by hugging
+     * the wall and turning into the opening, so at the doorway node the
+     * travel direction still points along the wall and a travel-relative
+     * frame test reads the door as open ground. A 1-wide corridor or trench
+     * reads the same signature, and queuing in one is correct doctrine anyway.
      */
-    private boolean isDoorwayNode(SoldierEntity soldier, Vec3 node, Vec3 travelDir) {
-        if (!isSolidBeside(soldier, node.add(travelDir.scale(0.9)))
-            && !isSolidBeside(soldier, node.subtract(travelDir.scale(0.9)))) {
-            return false;
-        }
-        Vec3 lateral = new Vec3(-travelDir.z, 0.0, travelDir.x);
-        return !(isSolidBeside(soldier, node.add(lateral.scale(0.7)))
-            && isSolidBeside(soldier, node.subtract(lateral.scale(0.7))));
+    private boolean isDoorwayNode(SoldierEntity soldier, Vec3 node) {
+        boolean ew = isSolidBeside(soldier, node.add(0.7, 0.0, 0.0))
+            && isSolidBeside(soldier, node.add(-0.7, 0.0, 0.0));
+        boolean ns = isSolidBeside(soldier, node.add(0.0, 0.0, 0.7))
+            && isSolidBeside(soldier, node.add(0.0, 0.0, -0.7));
+        return ew != ns;
     }
 
     private boolean isSolidBeside(SoldierEntity soldier, Vec3 at) {

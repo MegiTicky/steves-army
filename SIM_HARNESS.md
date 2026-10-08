@@ -299,8 +299,13 @@ phase removed).
 Detector note: `CoverOscillation` ignores samples with suppression >= 0.3
 (under-fire pin/dive/re-dive is the suppressed-traveler doctrine working) and
 samples where the soldier is traveling to an objective (en-route claims are
-transient dives by design). `SimManager.Y_BASE` lowered 160 -> 100 (3Y spacing
-now fits 73 scenarios; assertions made Y-agnostic).
+transient dives by design). The post-suppression refractory previously used an
+`Integer.MIN_VALUE` sentinel whose subtraction overflowed int and silently
+skipped every quiet sample before the first suppressed sample — quiet-state
+churn was invisible until a suppressed sample happened to occur first; the
+sentinel is now `Long.MIN_VALUE` behind an explicit `sawSuppression` flag.
+`SimManager.Y_BASE` lowered 160 -> 100 (3Y spacing now fits 73 scenarios;
+assertions made Y-agnostic).
 
 | Scenario | What it verifies |
 |---|---|
@@ -321,14 +326,26 @@ Three aim/flow behaviors for close-quarters movement, all riding the existing
 CQB caution activation (manual CQB toggle or enemy near path):
 
 - **Doorway queueing** (`CqbSteeringAdvisor.isDoorwayBlocked` +
-  `CoverPositionController.tickDoorwayQueueHold`): a wall-narrow passage
-  (frame solids along the travel axis, open sides) held occupied by a squadmate
-  within `cqbDoorwaySpacing` (3.5) ahead stops the follower to a creep facing
-  the passage — single-file stack, no clumping in the fatal funnel. Lives in
-  an UNCONDITIONAL branch of MoveControl.tick BEFORE the movement-mode split,
-  so it holds every movement owner alike: cover approaches (controller moves
-  bypass `tickCautionSteering` — that placement was tried and failed), GO_TO
-  relocations, hold marches, and attack approaches.
+  `CoverPositionController.tickDoorwayQueueHold`): a 1-wide gap in a wall —
+  signature is DIRECTION-INVARIANT: exactly one opposing neighbour pair
+  around the node is solid (the wall the gap sits in), the other pair the
+  passage — held by a squadmate within `cqbDoorwaySpacing` (3.5) ahead stops
+  the follower to a creep facing the passage — single-file stack, no clumping
+  in the fatal funnel. Two hard-won lessons: (1) the signature must NOT be
+  keyed to the follower's travel direction — A* approaches a wall door by
+  hugging the wall and TURNING into the opening, so at the doorway node the
+  instantaneous travel direction still runs ALONG the wall and every
+  travel-relative frame test (ahead/behind solids, lateral-solids-vs-travel)
+  misreads the door as open ground; both were tried and failed silently (the
+  scenario asserts passed on pathing luck — validate with the
+  `[DoorwayQueue]` hold logs behind `-Psim.coverlog`, not just asserts).
+  (2) The lookahead needs ~8 nodes: the wall-hug approach puts the doorway
+  node far out on the path while the follower is still several blocks back.
+  Lives in an UNCONDITIONAL branch of MoveControl.tick BEFORE the
+  movement-mode split, so it holds every movement owner alike: cover
+  approaches (controller moves bypass `tickCautionSteering` — that placement
+  was tried and failed), GO_TO relocations, hold marches, and attack
+  approaches.
 - **Corner pie-slicing** (`CqbSteeringAdvisor.getCornerWatchPos`, consumed in
   SoldierCombatGoal.tickScanning): while approaching a path bend with a known
   threat within 12 blocks of the apex, pre-aim 4 blocks past the corner into

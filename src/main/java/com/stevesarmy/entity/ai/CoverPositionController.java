@@ -538,6 +538,11 @@ public class CoverPositionController extends MoveControl {
         this.mob.setXxa(0.0F);
         applyCoverAnchorVelocity(anchorTarget);
         this.debugLastSetVelocity = this.mob.getDeltaMovement();
+        if (com.stevesarmy.debug.DiagnosticLogManager.isCoverScoreLoggingEnabled()
+            && soldier.tickCount % 40 == 0) {
+            com.stevesarmy.StevesArmyMod.LOGGER.info("[DoorwayQueue] S{} holding at ({}, {}) t{}",
+                soldier.getId(), (int) this.mob.getX(), (int) this.mob.getZ(), soldier.tickCount);
+        }
         return true;
     }
 

@@ -55,7 +55,12 @@ public final class SquadMovementCoordinator {
 
     /** Called by the combat goal on every successful shot. */
     public static void noteShot(SoldierEntity shooter) {
-        SHOT_TICKS.put(shooter.getUUID(), (long) shooter.tickCount);
+        // Server-tick clock everywhere: soldier.tickCount is each entity's own
+        // age, and mixing the two breaks every comparison between soldiers
+        // spawned at different times (shot freshness, cover waits).
+        net.minecraft.server.MinecraftServer server = shooter.getServer();
+        if (server == null) return;
+        SHOT_TICKS.put(shooter.getUUID(), (long) server.getTickCount());
     }
 
     /** True while this soldier should hold overwatch for a teammate's bound. */
@@ -80,9 +85,12 @@ public final class SquadMovementCoordinator {
     public static boolean coveringFireActive(SoldierEntity bounder) {
         Bound bound = boundFor(bounder);
         if (bound == null || !bounder.getUUID().equals(bound.bounderId)) return false;
+        net.minecraft.server.MinecraftServer server = bounder.getServer();
+        if (server == null) return false;
+        long now = server.getTickCount();
         for (SoldierEntity mate : teammates(bounder, bound)) {
             Long lastShot = SHOT_TICKS.get(mate.getUUID());
-            if (lastShot != null && bounder.tickCount - lastShot
+            if (lastShot != null && now - lastShot
                     <= StevesArmyConfig.getSquadBoundCoverWindowTicks()) {
                 return true;
             }
@@ -100,7 +108,9 @@ public final class SquadMovementCoordinator {
         Bound bound = boundFor(soldier);
         if (bound == null || !soldier.getUUID().equals(bound.bounderId)) return false;
         if (coveringFireActive(soldier)) return false;
-        return soldier.tickCount - bound.startedTick
+        net.minecraft.server.MinecraftServer server = soldier.getServer();
+        if (server == null) return false;
+        return server.getTickCount() - bound.startedTick
             < StevesArmyConfig.getSquadBoundCoverWaitTicks();
     }
 
