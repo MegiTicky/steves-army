@@ -46,13 +46,12 @@ public final class SimManager {
     /**
      * Vertical spacing between scenario fixtures. Chunks are full columns, so
      * this only separates the fixtures in the air — the registry must fit
-     * under the y=320 build limit: Y_BASE + (registry size - 1) * spacing
-     * &lt; 320. At 36 scenarios that means 4Y (160 + 35*4 = 300, rim tops 302);
-     * fixtures are 4Y tall (floor + 3-high rim), so 4Y stacks them exactly
-     * edge to edge — no air gap, but nothing crosses the build limit and no
-     * fixture overlaps another.
+     * under the y=320 build limit: Y_BASE + (registry size - 1) * spacing + 2
+     * &lt;= 319 (rim top). At 3Y that allows 53 scenarios (160 + 52*3 + 2 = 318);
+     * fixtures are cleared between runs, so a 3Y stack never overlaps, and
+     * startup sweeps strays left by crashed sessions.
      */
-    private static final int Y_SEPARATION = 4;
+    private static final int Y_SEPARATION = 3;
     private static final List<SimDetector> DETECTORS = StandardDetectors.all();
 
     private enum Phase { IDLE, RUNNING, CLEANUP, DONE }

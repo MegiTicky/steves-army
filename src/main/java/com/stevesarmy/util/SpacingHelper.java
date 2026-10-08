@@ -19,7 +19,9 @@ public class SpacingHelper {
     private static final Map<UUID, SquadLaneAssignment> assignments = new HashMap<>();
 
     public static BlockPos applySpacing(BlockPos target, SoldierEntity soldier) {
-        if (soldier.isCQB()) return target;
+        // CQB formation keeps lane spacing: it is a mobility doctrine
+        // (caution steering, faster reassessment), not an exemption from
+        // squad separation. Close-quarters pile-ups need spacing MORE.
 
         SquadLaneAssignment assignment = getOrCreateAssignment(target, soldier);
         if (assignment == null) return target;

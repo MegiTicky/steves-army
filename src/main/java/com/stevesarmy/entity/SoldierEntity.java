@@ -287,11 +287,18 @@ public class SoldierEntity extends PathfinderMob implements Container {
     private boolean inventorySyncingFromEntity = false;
     private boolean cqbMode = false;
     private boolean cqbEngagementHold = false;
+    private long cqbHoldLatchedAtTick;
+    private long cqbHoldLastShotTick;
+    private long cqbHoldReleaseCooldownUntilTick;
+    private boolean closeCombatContext = false;
+    private long closeCombatContextRefreshedAtTick;
     private String lastSyncedCqbPath = null;
 
     public static final double CQB_RANGE = 5.0;
     /** Radius around the remaining path within which a known enemy triggers caution steering. */
     public static final double CQB_CAUTION_RADIUS = 10.0;
+    /** How long a close-combat context flag stays valid without a refresh from a threat-aware ticker. */
+    private static final long CLOSE_COMBAT_CONTEXT_STALE_TICKS = 40;
 
     public boolean isDispatchedBySend() {
         return dispatchedBySend;
@@ -332,12 +339,23 @@ public class SoldierEntity extends PathfinderMob implements Container {
     public void beginCqbEngagement() {
         if (cqbEngagementHold) return;
         cqbEngagementHold = true;
+        cqbHoldLatchedAtTick = tickCount;
+        cqbHoldLastShotTick = tickCount;
         // A full-cover peek return is the safety-critical movement here. Do not
         // clear it when close-range LOS is acquired during the duck-back.
         boolean returningToFullCover = getPeekController().isReturning()
             && getCoverBehaviorManager().getCurrentCover() != null
             && getCoverBehaviorManager().getCurrentCover().getType() == CoverType.FULL;
         if (returningToFullCover) return;
+
+        // An approach that is about to reach protection finishes first: the
+        // last step into cover beats engaging from the open. The hold flag is
+        // already set, so the controller freezes the soldier the moment the
+        // dock completes (or the threat closes inside the overrun range).
+        if (moveControl instanceof com.stevesarmy.entity.ai.CoverPositionController ctrl
+            && ctrl.shouldDeferCqbHold()) {
+            return;
+        }
 
         getNavigation().stop();
         cancelCoverMovement();
@@ -348,6 +366,54 @@ public class SoldierEntity extends PathfinderMob implements Container {
 
     public void endCqbEngagement() {
         cqbEngagementHold = false;
+    }
+
+    /** A burst started while the engagement hold is active — the hold is doing its job. */
+    public void markCqbHoldShot() {
+        cqbHoldLastShotTick = tickCount;
+    }
+
+    /** Ticks since the hold latched (or its last productive burst, whichever is newer). */
+    public long cqbHoldTicksWithoutShot() {
+        return tickCount - cqbHoldLastShotTick;
+    }
+
+    public void armCqbHoldReleaseCooldown() {
+        cqbHoldReleaseCooldownUntilTick = tickCount + StevesArmyConfig.getCqbHoldReleaseCooldownTicks();
+    }
+
+    public boolean isCqbHoldReleaseCooldown() {
+        return tickCount < cqbHoldReleaseCooldownUntilTick;
+    }
+
+    /**
+     * True when the engagement hold should actually pin the legs: a live
+     * point-blank threat (survival stop), or shot activity within the grace
+     * window (stand to shoot / through burst gaps). A hold that cannot
+     * produce fire past the grace never blocks movement - cover seeking
+     * outranks a frozen stance with no burst.
+     */
+    public boolean cqbHoldFreezeEffective() {
+        if (!cqbEngagementHold) return false;
+        LivingEntity threat = getTarget();
+        if (threat != null && threat.isAlive()
+            && distanceToSqr(threat) <= StevesArmyConfig.getCqbOverrunRange() * StevesArmyConfig.getCqbOverrunRange()) {
+            return true;
+        }
+        return tickCount - cqbHoldLastShotTick <= StevesArmyConfig.getCqbHoldFreezeGraceTicks();
+    }
+
+    /**
+     * Threat-aware tickers refresh the close-combat context each tick; the flag
+     * decays to false when no ticker runs (no combat goal, no threats).
+     */
+    public void refreshCloseCombatContext(boolean active) {
+        this.closeCombatContext = active;
+        this.closeCombatContextRefreshedAtTick = tickCount;
+    }
+
+    public boolean isInCloseCombatContext() {
+        return closeCombatContext && (tickCount - closeCombatContextRefreshedAtTick) <= CLOSE_COMBAT_CONTEXT_STALE_TICKS;
     }
 
     public String getSyncedCqbPath() {

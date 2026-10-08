@@ -72,7 +72,8 @@ public class CoverPositionController extends MoveControl {
 
     public void moveTo(Vec3 pos, double tolerance, double speed, String source, String reason) {
         this.coverAnchorTarget = null;
-        if (this.mob instanceof SoldierEntity soldier && soldier.isCqbEngagementHold()
+        if (this.mob instanceof SoldierEntity soldier && soldier.cqbHoldFreezeEffective()
+            && !shouldDeferCqbHold()
             && !"PeekController".equals(source)) {
             this.mob.getNavigation().stop();
             this.mob.setZza(0.0F);
@@ -103,6 +104,29 @@ public class CoverPositionController extends MoveControl {
 
     public void reassertControlledReturn() {
         this.controlledReturnToCover = true;
+    }
+
+    /**
+     * True while the emergency engagement hold should let movement run: an
+     * approach is in flight and either about to reach protection (dock finish)
+     * or the threat is not overrunning. A point-blank threat always outranks
+     * finishing the dock. Shared by the latch path (SoldierEntity), the
+     * per-tick freeze gate, and the moveTo veto so all three agree.
+     */
+    public boolean shouldDeferCqbHold() {
+        if (!(this.mob instanceof SoldierEntity soldier) || !soldier.isCqbEngagementHold()) {
+            return false;
+        }
+        net.minecraft.world.entity.LivingEntity threat = soldier.getTarget();
+        if (threat != null && threat.isAlive()
+            && soldier.distanceToSqr(threat) <= Mth.square(com.stevesarmy.StevesArmyConfig.getCqbOverrunRange())) {
+            return false;
+        }
+        if (this.lastResult != MovementResult.IN_PROGRESS) {
+            return false;
+        }
+        double finishSq = Mth.square(com.stevesarmy.StevesArmyConfig.getCqbDockFinishThreshold());
+        return this.mob.distanceToSqr(this.targetPos.x, this.targetPos.y, this.targetPos.z) <= finishSq;
     }
 
     private void beginMove(Vec3 pos, double tolerance, double speed, String source, String reason,
@@ -337,7 +361,8 @@ public class CoverPositionController extends MoveControl {
             return;
         }
 
-        if (this.mob instanceof SoldierEntity soldier && soldier.isCqbEngagementHold()
+        if (this.mob instanceof SoldierEntity soldier && soldier.cqbHoldFreezeEffective()
+            && !shouldDeferCqbHold()
             && !soldier.getPeekController().isMovingToPeek()
             && !soldier.getPeekController().isReturning()) {
             this.operation = Operation.WAIT;

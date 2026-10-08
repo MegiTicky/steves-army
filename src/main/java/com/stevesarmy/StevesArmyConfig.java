@@ -68,6 +68,17 @@ public class StevesArmyConfig {
     public static final ForgeConfigSpec.IntValue DANGER_TRAVEL_REROUTE_COOLDOWN_TICKS;
     public static final ForgeConfigSpec.DoubleValue DANGER_TRAVEL_SUPPRESSION_GAIN;
 
+    public static final ForgeConfigSpec.DoubleValue CLOSE_COMBAT_RANGE;
+    public static final ForgeConfigSpec.DoubleValue CLOSE_COMBAT_EXIT_RANGE;
+    public static final ForgeConfigSpec.DoubleValue CQB_EMERGENCY_RANGE;
+    public static final ForgeConfigSpec.DoubleValue CQB_OVERRUN_RANGE;
+    public static final ForgeConfigSpec.DoubleValue CQB_DOCK_FINISH_THRESHOLD;
+    public static final ForgeConfigSpec.IntValue CQB_HOLD_NO_SHOT_TIMEOUT_TICKS;
+    public static final ForgeConfigSpec.IntValue CQB_HOLD_RELEASE_COOLDOWN_TICKS;
+    public static final ForgeConfigSpec.IntValue CQB_HOLD_FREEZE_GRACE_TICKS;
+    public static final ForgeConfigSpec.DoubleValue CLOSE_COMBAT_SEEK_RADIUS;
+    public static final ForgeConfigSpec.IntValue CLOSE_COMBAT_REEVAL_INTERVAL_TICKS;
+
     public static final ForgeConfigSpec.DoubleValue SPACING_DISTANCE;
 
     public static final ForgeConfigSpec.DoubleValue EXPLOSION_SUPPRESSION_STRENGTH;
@@ -539,6 +550,81 @@ public class StevesArmyConfig {
         BUILDER.pop();
 
 BUILDER.pop();
+
+        BUILDER.push("close_combat");
+
+        CLOSE_COMBAT_RANGE = BUILDER
+            .comment("Radius (blocks) of the close-combat context: inside it soldiers reassess targets",
+                     "faster, keep cover-seek reasoning alive, and bound their movements to small",
+                     "adjustments. A wider hysteresis exit (closeCombatExitRange) stops behavior",
+                     "flapping at the boundary. 0 disables the context.",
+                     "Default: 16.0 blocks")
+            .defineInRange("closeCombatRange", 16.0, 0.0, 48.0);
+
+        CLOSE_COMBAT_EXIT_RANGE = BUILDER
+            .comment("Hysteresis exit for the close-combat context: the context stays on until the",
+                     "nearest known threat is farther than this. Must be >= closeCombatRange.",
+                     "Default: 20.0 blocks")
+            .defineInRange("closeCombatExitRange", 20.0, 4.0, 64.0);
+
+        CQB_EMERGENCY_RANGE = BUILDER
+            .comment("Emergency engagement range: a visible enemy inside this distance may latch the",
+                     "emergency engagement hold (stop and fight) when the soldier can actually shoot.",
+                     "Manual CQB formation no longer freeze-holds at any distance - it is a mobility",
+                     "doctrine (caution steering, faster reassessment) that keeps cover use and spacing.",
+                     "Default: 5.0 blocks")
+            .defineInRange("cqbEmergencyRange", 5.0, 1.0, 16.0);
+
+        CQB_OVERRUN_RANGE = BUILDER
+            .comment("Overrun range: a visible enemy inside this distance freezes movement immediately,",
+                     "even mid-approach - survival outranks finishing the dock.",
+                     "Default: 3.0 blocks")
+            .defineInRange("cqbOverrunRange", 3.0, 1.0, 16.0);
+
+        CQB_DOCK_FINISH_THRESHOLD = BUILDER
+            .comment("When the emergency hold latches while a cover approach is already this close to",
+                     "its slot, the approach finishes first: the last step into protection beats",
+                     "engaging from the open. Docking defers only while the threat is beyond",
+                     "cqbOverrunRange.",
+                     "Default: 2.5 blocks")
+            .defineInRange("cqbDockFinishThreshold", 2.5, 0.5, 8.0);
+
+        CQB_HOLD_NO_SHOT_TIMEOUT_TICKS = BUILDER
+            .comment("An engagement hold that produces no burst for this many ticks releases itself so",
+                     "the soldier can reposition (blocked lane, obstructed arc) instead of standing",
+                     "frozen while unable to shoot. Any started burst resets the clock.",
+                     "Default: 60 ticks (3 s)")
+            .defineInRange("cqbHoldNoShotTimeoutTicks", 60, 20, 400);
+
+        CQB_HOLD_RELEASE_COOLDOWN_TICKS = BUILDER
+            .comment("After a no-shot release the soldier waits this long before the emergency hold may",
+                     "latch again, so hold-release-relatch cannot oscillate in place.",
+                     "Default: 40 ticks (2 s)")
+            .defineInRange("cqbHoldReleaseCooldownTicks", 40, 0, 200);
+
+        CQB_HOLD_FREEZE_GRACE_TICKS = BUILDER
+            .comment("The engagement hold freezes movement only within this window of actual shot",
+                     "activity (latch or last burst). Past the grace, movement resumes while the hold",
+                     "flag stays latched, so a hold that cannot produce fire never blocks cover",
+                     "seeking; a started burst re-arms the freeze immediately.",
+                     "Default: 20 ticks (1 s)")
+            .defineInRange("cqbHoldFreezeGraceTicks", 20, 0, 100);
+
+        CLOSE_COMBAT_SEEK_RADIUS = BUILDER
+            .comment("Cover searches inside the close-combat context (or an emergency-range enemy)",
+                     "are bounded to this radius: close-range protection must be a short, useful",
+                     "movement, not a long relocation under fire.",
+                     "Default: 10.0 blocks")
+            .defineInRange("closeCombatSeekRadius", 10.0, 4.0, 24.0);
+
+        CLOSE_COMBAT_REEVAL_INTERVAL_TICKS = BUILDER
+            .comment("Target re-evaluation interval inside the close-combat context (ordinary play",
+                     "uses targeting.targetReevaluateInterval). Close quarters change faster than",
+                     "open field fights.",
+                     "Default: 10 ticks")
+            .defineInRange("closeCombatReevalIntervalTicks", 10, 4, 40);
+
+        BUILDER.pop();
 
         BUILDER.push("spacing");
 
@@ -1316,6 +1402,46 @@ BUILDER.pop();
 
     public static double getDangerTravelSuppressionGain() {
         return DANGER_TRAVEL_SUPPRESSION_GAIN.get();
+    }
+
+    public static double getCloseCombatRange() {
+        return CLOSE_COMBAT_RANGE.get();
+    }
+
+    public static double getCloseCombatExitRange() {
+        return CLOSE_COMBAT_EXIT_RANGE.get();
+    }
+
+    public static double getCqbEmergencyRange() {
+        return CQB_EMERGENCY_RANGE.get();
+    }
+
+    public static double getCqbOverrunRange() {
+        return CQB_OVERRUN_RANGE.get();
+    }
+
+    public static double getCqbDockFinishThreshold() {
+        return CQB_DOCK_FINISH_THRESHOLD.get();
+    }
+
+    public static int getCqbHoldNoShotTimeoutTicks() {
+        return CQB_HOLD_NO_SHOT_TIMEOUT_TICKS.get();
+    }
+
+    public static int getCqbHoldReleaseCooldownTicks() {
+        return CQB_HOLD_RELEASE_COOLDOWN_TICKS.get();
+    }
+
+    public static int getCqbHoldFreezeGraceTicks() {
+        return CQB_HOLD_FREEZE_GRACE_TICKS.get();
+    }
+
+    public static double getCloseCombatSeekRadius() {
+        return CLOSE_COMBAT_SEEK_RADIUS.get();
+    }
+
+    public static int getCloseCombatReevalIntervalTicks() {
+        return CLOSE_COMBAT_REEVAL_INTERVAL_TICKS.get();
     }
 
     public static double getMachineGunnerDetectionDistance() {

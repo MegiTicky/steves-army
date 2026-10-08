@@ -63,7 +63,14 @@ public final class SimRegistry {
             dangerDetourLive(),
             travelRerouteSuppressed(),
             travelCrawlSuppressed(),
-            coverApproachCrawlSuppressed());
+            coverApproachCrawlSuppressed(),
+            cqbFreezeBaseline(),
+            cqbReloadCloseProtect(),
+            cqbCloseFlankSeek(),
+            cqbHoldNoShotRelease(),
+            cqbFormationNoFreeze(),
+            cqbFormationFreezeBaseline(),
+            courseCqbHouseApproach());
     }
 
     public static SimScenario byName(String name) {
@@ -872,20 +879,20 @@ public final class SimRegistry {
     }
 
     /**
-     * Documents a live finding (2026-10-06, expected FAIL until fixed): when an
-     * enemy closes to CQB range while the soldier is still arriving, the CQB
-     * hold freezes the position controller mid-approach — the cover anchor
-     * starves, the soldier locks 0.3-0.8 blocks off its slot, and when the
-     * enemy keeps advancing past the cover block the soldier keeps claiming
-     * SUPPRESSED_IN_COVER/HIDING while fully visible (flank re-evaluation only
-     * lives in tickInCover, which never runs while suppressed).
+     * Combat positioning rework phase 1: the engagement hold defers to a dock
+     * that is about to finish, releases when it produces no burst, and manual
+     * CQB no longer freeze-holds on sight. The pre-fix failure (2026-10-06
+     * finding): the hold froze the position controller mid-approach, the
+     * anchor starved, the soldier locked 0.3-0.8 blocks off its slot, and kept
+     * claiming SUPPRESSED_IN_COVER/HIDING while fully visible. See
+     * cqb_freeze_baseline for the A/B twin that asserts the OLD behavior.
      */
     private static SimScenario dockCqbHoldFidelity() {
         return SimScenario.builder("dock_cqb_hold_fidelity")
-            .description("KNOWN FINDING (expected FAIL today): an enemy spawning point-blank beside the cover "
-                + "line latches the CQB hold during the cover approach; the controller freezes, the anchor "
-                + "starves, and the soldier ends 'hiding' off-slot while the close threat sees its whole "
-                + "body. Codifies the CQB-anchor starvation + flank-visibility finding for the dock suite.")
+            .description("CQB hold defers to docking (fixed 2026-10-08): an enemy closing during the "
+                + "cover approach must not starve the anchor - the last step into protection finishes, "
+                + "the soldier fights from the slot, and a flanked hiding soldier is not fully visible. "
+                + "A/B: cqb_freeze_baseline asserts the pre-fix starvation.")
             .duration(500)
             .terrain(t -> {
                 t.platform();
@@ -898,11 +905,224 @@ public final class SimRegistry {
             })
             .suppress("cqb1", 20, 460, 15)
             .assertThat("soldier claims cover", view -> claimedCoverBy(view, "cqb1", 300))
-            .assertThat("FINDING: soldier docks into its slot (offset <= 0.35) despite the CQB hold",
+            .assertThat("soldier docks into its slot (offset <= 0.35) despite the CQB hold",
                 view -> dockedAtEnd(view, "cqb1"))
-            .assertThat("FINDING: hiding soldier is not fully visible to the point-blank threat",
+            .assertThat("hiding soldier is not fully visible to the point-blank threat",
                 view -> !exposedWhileHidingEver(view, "cqb1", 120, 15))
             .build();
+    }
+
+    /**
+     * A/B baseline twin of dock_cqb_hold_fidelity: asserts the PRE-FIX
+     * pathology (hold starves the approach, soldier locks off-slot). Passes on
+     * pre-rework builds; expected FAIL once the docking deferral lands.
+     */
+    private static SimScenario cqbFreezeBaseline() {
+        return SimScenario.builder("cqb_freeze_baseline")
+            .description("BASELINE (expected FAIL after the positioning rework): documents the old "
+                + "visibility-triggered freeze - the CQB hold starves the cover approach mid-dock "
+                + "and the soldier ends off-slot 'hiding' while the close threat sees its body. "
+                + "Pair of dock_cqb_hold_fidelity; keep as the before/after record.")
+            .duration(500)
+            .terrain(t -> {
+                t.platform();
+                dockLane(t, 10);
+            })
+            .setup(ctx -> {
+                ctx.spawnAnchor(4, 0, 20);
+                ctx.spawnFriendly(ModEntities.SOLDIER.get(), "cqb1", 10, 0, 22, SquadMode.FOLLOW);
+                ctx.spawnEnemy(12, 0, 34);
+            })
+            .suppress("cqb1", 20, 460, 15)
+            .assertThat("BASELINE: approach starves - soldier locked off its slot (offset > 0.35) at end",
+                view -> !dockedAtEnd(view, "cqb1"))
+            .build();
+    }
+
+    /** Phase 1: a reload mid-approach plus a closing enemy must still end docked. */
+    private static SimScenario cqbReloadCloseProtect() {
+        return SimScenario.builder("cqb_reload_close_protect")
+            .description("Phase 1 positioning rework: a reload starting mid-approach while an enemy closes "
+                + "into emergency range must end docked - the hold may not latch while reloading, the "
+                + "dock finishes through the reload, and a latched hold defers to the finishing dock.")
+            .duration(500)
+            .armed()
+            .terrain(t -> {
+                t.platform();
+                dockLane(t, 10);
+            })
+            .setup(ctx -> {
+                ctx.spawnAnchor(4, 0, 20);
+                ctx.spawnFriendly(ModEntities.SOLDIER.get(), "reloader", 10, 0, 22, SquadMode.FOLLOW);
+                ctx.spawnEnemy(12, 0, 34); // closes into emergency range while the dock is in flight
+            })
+            .action(35, "burn one round, start reload mid-approach", ctx -> {
+                SoldierEntity s = ctx.soldier("reloader");
+                if (s != null && s.isAlive()) {
+                    com.stevesarmy.combat.GunIntegration.shootAtPosition(s, s.position().add(0.0, -1.0, 0.0));
+                    com.stevesarmy.combat.GunIntegration.reload(s);
+                }
+            })
+            .suppress("reloader", 20, 260, 15)
+            .assertThat("reload was engaged", view -> everReloading(view, "reloader"))
+            .assertThat("ends docked in the exact slot (hold never starved the dock)",
+                view -> dockedAtEnd(view, "reloader"))
+            .build();
+    }
+
+    /** Phase 1: close-range enemies re-enable cover seeking - the soldier claims a nearby pocket. */
+    private static SimScenario cqbCloseFlankSeek() {
+        return SimScenario.builder("cqb_close_flank_seek")
+            .description("Phase 1 positioning rework: a close target (4 blocks) used to DISABLE cover "
+                + "seeking entirely; now the soldier seeks bounded nearby protection while the "
+                + "engagement hold no-shot clock runs. The pocket 3 blocks west must be claimed.")
+            .duration(600)
+            .terrain(t -> {
+                t.platform();
+                t.coverRow(5, 18, 8, 18, 1); // peekable half-cover row, 3-4 blocks west of the soldier
+            })
+            .setup(ctx -> {
+                ctx.spawnAnchor(12, 0, 26); // SE of the row, clear of the enemy line
+                ctx.spawnFriendly(ModEntities.SOLDIER.get(), "scout", 10, 0, 20, SquadMode.FOLLOW);
+            })
+            .action(30, "close enemy appears 4 blocks east", ctx -> ctx.spawnEnemy(14, 0, 20))
+            .assertThat("claims close-range cover by t300 (seek not disabled at close range)",
+                view -> claimedCoverBy(view, "scout", 300))
+            .assertThat("docks into the pocket", view -> dockedAtEnd(view, "scout"))
+            .build();
+    }
+    /** Phase 1: a hold that can never produce a shot (friendly in the cone) must release and reposition. */
+    private static SimScenario cqbHoldNoShotRelease() {
+        return SimScenario.builder("cqb_hold_no_shot_release")
+            .description("Phase 1 positioning rework: the engagement hold latches on a visible enemy at "
+                + "emergency range, but a teammate stands dead-center in the fire cone (LoS is clear, "
+                + "FriendlyFireChecker blocks every shot). The no-shot timeout must release the hold so "
+                + "cover seeking acts - a permanently blocked shot is a stranded soldier, not a "
+                + "fighting position.")
+            .duration(500)
+            .armed()
+            .terrain(t -> {
+                t.platform();
+                // The proven claimable-protection layout of cqb_close_flank_seek
+                // (row north-west of the soldier) plus the FF obstruction below.
+                t.coverRow(5, 18, 8, 18, 1);
+            })
+            .setup(ctx -> {
+                // The squad anchor stands ON the eastward aim line 2 blocks
+                // ahead: the owner is a FriendlyFireChecker scan member, so
+                // every shot from the spawn position is blocked forever while
+                // LoS stays clear (vanilla clips ignore entities). Churn-free
+                // obstruction. The enemy is disarmed so no suppression noise
+                // muddies the no-shot clock.
+                ctx.spawnAnchor(12, 0, 20);
+                SoldierEntity shooter = ctx.spawnFriendly(ModEntities.SOLDIER.get(), "shooter", 10, 0, 20, SquadMode.FOLLOW);
+                ctx.harden("shooter");
+            })
+            .action(30, "disarmed enemy appears 4 blocks east and holds position", ctx -> {
+                EnemySoldierEntity threat = ctx.spawnEnemyLabeled("threat", 14, 0, 20);
+                ctx.disarmSoldier("threat");
+                // Disarmed soldiers close to melee, which invalidates the row
+                // mid-run; HOLD at spawn keeps the geometry steady.
+                threat.setSquadMode(SquadMode.HOLD);
+                threat.setHoldPosition(ctx.terrain.at(14, 0, 20));
+            })
+            .assertThat("hold releases and the soldier claims reachable cover by t350",
+                view -> claimedCoverBy(view, "shooter", 350))
+            .assertThat("fights from the claimed cover (peek exposure after claim)",
+                view -> exposedAfter(view, "shooter", 220))
+            .build();
+    }
+
+    /** True when the soldier was ever in the EXPOSED peek state after the given tick. */
+    private static boolean exposedAfter(SimScenario.SimRunResultView view, String label, int fromTick) {
+        for (SimSample s : view.timeline().series(label)) {
+            if (s.tick >= fromTick && "EXPOSED".equals(s.state.peekState)) return true;
+        }
+        return false;
+    }
+
+    /** Phase 1: CQB formation is a mobility doctrine - no freeze on sight at range, cover use retained. */
+    private static SimScenario cqbFormationNoFreeze() {
+        return SimScenario.builder("cqb_formation_no_freeze")
+            .description("Phase 1 CQB doctrine rework: the formation wheel's CQB toggle no longer "
+                + "freeze-holds on sight at any distance. A CQB soldier spotting an enemy at 8 blocks "
+                + "keeps using cover - claims the nearby row instead of standing frozen in the open. "
+                + "A/B: cqb_formation_freeze_baseline asserts the old freeze.")
+            .duration(500)
+            .terrain(t -> {
+                t.platform();
+                t.coverRow(6, 18, 8, 18, 1);
+            })
+            .setup(ctx -> {
+                var anchor = ctx.spawnAnchor(4, 0, 20);
+                SoldierEntity cqb = ctx.spawnFriendly(ModEntities.SOLDIER.get(), "cqb", 10, 0, 20, SquadMode.FOLLOW);
+                cqb.setCQB(true);
+                ctx.squadForAnchor(anchor).setCQB(true);
+                ctx.spawnEnemy(10, 0, 28); // 8 blocks: inside the OLD any-distance freeze, outside emergency range
+            })
+            .assertThat("CQB soldier claims cover by t300 (no sight-freeze, cover use retained)",
+                view -> claimedCoverBy(view, "cqb", 300))
+            .assertThat("docks into the row", view -> dockedAtEnd(view, "cqb"))
+            .build();
+    }
+
+    /** A/B baseline twin of cqb_formation_no_freeze: asserts the OLD freeze-any-distance doctrine. */
+    private static SimScenario cqbFormationFreezeBaseline() {
+        return SimScenario.builder("cqb_formation_freeze_baseline")
+            .description("BASELINE (expected FAIL after the positioning rework): documents the old CQB "
+                + "formation doctrine - freeze-and-engage on sight at ANY distance, cover seeking "
+                + "disabled. The soldier stands in the open the whole run. Pair of cqb_formation_no_freeze.")
+            .duration(500)
+            .terrain(t -> {
+                t.platform();
+                t.coverRow(6, 18, 8, 18, 1);
+            })
+            .setup(ctx -> {
+                var anchor = ctx.spawnAnchor(4, 0, 20);
+                SoldierEntity cqb = ctx.spawnFriendly(ModEntities.SOLDIER.get(), "cqb", 10, 0, 20, SquadMode.FOLLOW);
+                cqb.setCQB(true);
+                ctx.squadForAnchor(anchor).setCQB(true);
+                ctx.spawnEnemy(10, 0, 28);
+            })
+            .assertThat("BASELINE: CQB soldier freezes on sight - never claims cover",
+                view -> !claimedCoverBy(view, "cqb", 400))
+            .build();
+    }
+
+    /** Phase 1 course smoke test: a hold march through the two-room house course must not strand. */
+    private static SimScenario courseCqbHouseApproach() {
+        return SimScenario.builder("course_cqb_house_approach")
+            .description("Course scenario (two-room house + street): a soldier marching to a hold point "
+                + "inside the west room while an enemy loiters outside the east door. Under the current "
+                + "doctrine a detected enemy turns the march into a bounded firefight - the march must "
+                + "still make real progress toward the objective (no strand at spawn), claim sensible "
+                + "protection, and cycle peek/fire without deadlock detectors.")
+            .duration(900)
+            .armed()
+            .terrain(t -> t.cqbCourse())
+            .setup(ctx -> {
+                ctx.spawnAnchor(22, 0, 38);
+                SoldierEntity marcher = ctx.spawnFriendly(ModEntities.SOLDIER.get(), "marcher", 22, 0, 38, SquadMode.HOLD);
+                marcher.setHoldPosition(ctx.terrain.at(18, 0, 12)); // inside the west room
+                ctx.spawnEnemy(34, 0, 10); // outside the east door
+            })
+            .assertThat("march makes useful progress toward the house (>= 8 blocks closer than spawn)",
+                view -> advancedToward(view, "marcher", 18.5, 12.5, 8.0))
+            .assertThat("firefight produced tracers (enemy engaged or return fire seen)",
+                view -> !view.shots().isEmpty())
+            .build();
+    }
+
+    /** True when the soldier ends at least {@code minBlocks} closer to (x,z) than it started. */
+    private static boolean advancedToward(SimScenario.SimRunResultView view, String label,
+                                          double x, double z, double minBlocks) {
+        List<SimSample> series = view.timeline().series(label);
+        if (series.isEmpty()) return false;
+        SimSample first = series.get(0);
+        SimSample last = series.get(series.size() - 1);
+        double d0 = Math.hypot(first.state.position.x - x, first.state.position.z - z);
+        double d1 = Math.hypot(last.state.position.x - x, last.state.position.z - z);
+        return d0 - d1 >= minBlocks;
     }
 
     /** True when a docked hiding sample sustained {@code rays}+ exposed rays for 40t+ in the window. */

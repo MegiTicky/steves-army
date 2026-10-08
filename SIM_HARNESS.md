@@ -214,6 +214,23 @@ under the build limit).
 | `support_squad_fight` | Live-fire support + 2 riflemen vs 2 enemies: support must claim cover, dock unexposed, return after duty. KNOWN FINDINGS (expected FAIL): pre-intel searches type solid waist-high walls CONCEALMENT; the pose gate then leaves the misclassified soldier STANDING at a 1-high wall with head rays exposed the whole fight |
 | `support_rear_cover_pick` | Deterministic pick probe: pinned support picks between a protected waist-high row 6 blocks out and a 2-high block 11 blocks out; corrected distance term must claim the near row |
 
+### Combat positioning rework (2026-10-08, phase 1)
+
+| Scenario | What it verifies |
+|---|---|
+| `dock_cqb_hold_fidelity` | FLIPPED to expected PASS: the emergency hold defers to a finishing dock, the no-shot clock releases a hold that produces nothing, and suppressed flank checks escape compromised cover |
+| `cqb_freeze_baseline` | A/B twin (expected FAIL post-fix): asserts the OLD starvation — approach frozen mid-dock, soldier locked off-slot |
+| `cqb_reload_close_protect` | Reload mid-approach while an enemy closes: ends docked, hold never starves the dock |
+| `cqb_close_flank_seek` | A 4-block enemy re-enables cover seeking: the nearby pocket is claimed and docked |
+| `cqb_hold_no_shot_release` | LoS clear but every shot FF-blocked by a docked teammate: no-shot timeout releases the hold, soldier claims reachable cover |
+| `cqb_formation_no_freeze` | CQB formation = mobility doctrine: enemy at 8 blocks does NOT freeze the soldier; the nearby row is claimed |
+| `cqb_formation_freeze_baseline` | A/B twin (expected FAIL post-fix): asserts the old freeze-any-distance doctrine |
+| `course_cqb_house_approach` | Course scenario (two-room house + street, `SimTerrain.cqbCourse`): a hold march through the house completes while an enemy loiters outside the east door |
+
+Config: the `close_combat` section (closeCombatRange/exitRange hysteresis 16/20, emergency
+range 5, overrun range 3, dock finish 2.5, hold no-shot timeout 60t, release cooldown 40t,
+seek radius 10, re-eval 10t). Fixture spacing is 3Y (48 scenarios fit under the build limit).
+
 Every scenario except `open_field_baseline` (intentionally bare) places real
 cover: waist-high stone-brick rows (half cover, peekable) and 2-high stacks
 (full cover) between the actors and the shooter, spaced so each soldier has

@@ -1280,14 +1280,37 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
         boolean canSee = !vehicleCombat && TargetAcquisition.hasLineOfSight(soldier, target);
 
         if (!vehicleCombat) {
+            // Emergency engagement hold: stop and fight only when a visible
+            // threat is inside the emergency range AND the soldier can actually
+            // shoot (not mid reload) AND the hold was not just released for
+            // producing nothing. Manual CQB is a mobility doctrine - caution
+            // steering, faster reassessment, cover use and spacing - so it
+            // keeps only the point-blank survival stop, not a freeze on sight.
+            double holdRange = soldier.isCQB()
+                ? StevesArmyConfig.getCqbOverrunRange()
+                : StevesArmyConfig.getCqbEmergencyRange();
             boolean shouldHoldCqbEngagement = target != null && target.isAlive()
                 && canSee
-                && (soldier.isCQB()
-                    || soldier.distanceToSqr(target) <= SoldierEntity.CQB_RANGE * SoldierEntity.CQB_RANGE);
+                && GunIntegration.isAnyGunLoaded() && GunIntegration.hasGun(soldier)
+                && !soldier.isPreparingOrReloading()
+                && !soldier.isCqbHoldReleaseCooldown()
+                && !soldier.getCoverBehaviorManager().isSuppressed()
+                && soldier.distanceToSqr(target) <= holdRange * holdRange;
             if (shouldHoldCqbEngagement) {
                 soldier.beginCqbEngagement();
+                if (soldier.isCqbEngagementHold()
+                    && soldier.cqbHoldTicksWithoutShot() > StevesArmyConfig.getCqbHoldNoShotTimeoutTicks()) {
+                    // A hold that never produces a burst is a stranded soldier,
+                    // not a fighting position - release it so cover and movement
+                    // reasoning act, and rate-limit the next latch.
+                    soldier.armCqbHoldReleaseCooldown();
+                    soldier.endCqbEngagement();
+                }
             } else if (soldier.isCqbEngagementHold()) {
                 soldier.endCqbEngagement();
+            }
+            if (directBurstActive) {
+                soldier.markCqbHoldShot();
             }
 
             if (canSee) {
@@ -1567,6 +1590,11 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
         if (!directBurstActive && aimQuality < shotThreshold) {
             targetReevaluateCounter++;
             int reevaluateInterval = StevesArmyConfig.getTargetReevaluateInterval();
+            if (soldier.isInCloseCombatContext()) {
+                // Close quarters change faster than open-field fights.
+                reevaluateInterval = Math.min(reevaluateInterval,
+                    StevesArmyConfig.getCloseCombatReevalIntervalTicks());
+            }
             if (dynamicFiringEnabled() && ineffectiveBurstStreak >= 2) {
                 // Repeatedly ineffective against this target: look for a better
                 // answer twice as often instead of hammering the same shot.

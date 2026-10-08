@@ -1195,6 +1195,28 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
     }
 
     /**
+     * Refreshes the close-combat context from live threat intel plus the
+     * current combat target. Drives faster target re-evaluation and the
+     * bounded close-range cover seek. The entity's copy decays when this
+     * goal stops ticking, so a stale context never outlives the fight.
+     */
+    private void refreshCloseCombatContext() {
+        double nearestSq = Double.MAX_VALUE;
+        for (ThreatAwareness.ThreatInfo info : getThreats().getThreatInfos()) {
+            double d = soldier.distanceToSqr(Vec3.atCenterOf(info.position));
+            if (d < nearestSq) nearestSq = d;
+        }
+        LivingEntity target = soldier.getTarget();
+        if (target != null && target.isAlive()) {
+            double d = soldier.distanceToSqr(target);
+            if (d < nearestSq) nearestSq = d;
+        }
+        double exitRange = Math.max(StevesArmyConfig.getCloseCombatRange(),
+            StevesArmyConfig.getCloseCombatExitRange());
+        soldier.refreshCloseCombatContext(nearestSq <= exitRange * exitRange);
+    }
+
+    /**
      * Direction used to score cover candidates. Roles may aim cover selection
      * via SoldierEntity.getPreferredCoverEvaluationDirection(); the default is
      * the primary threat direction (rifleman behavior).
@@ -1470,7 +1492,8 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
     }
 
     private boolean isExposedToFlank() {
-        if (soldier.isCQB() || soldier.hasCloseRangeTarget()) return false;
+        // Close range no longer suppresses flank reasoning: a flank at 5 blocks
+        // is more dangerous than one at 50, so the ordinary evaluation runs.
         if (System.currentTimeMillis() - lastFlankRepositionTime < FLANK_REPOSITION_COOLDOWN_MS) {
             PerformanceMetrics.recordCoverSearchCooldownSkip();
             return false;
@@ -1568,6 +1591,18 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
             searchCenter = machineGunnerAnchor;
             if (soldier.hasValidAttackTarget()) {
                 searchRadius = ATTACK_CORRIDOR_SEARCH_RADIUS;
+            }
+        }
+
+        // Close-combat doctrine: protection near a close threat must be a
+        // short, useful movement, not a long relocation under fire. Bound the
+        // radius only when the search is centered near the soldier - an
+        // owner-anchored FOLLOW search 15 blocks out must keep its full span
+        // or nearby protection becomes undiscoverable.
+        if (soldier.isInCloseCombatContext() || soldier.hasCloseRangeTarget()) {
+            double bound = StevesArmyConfig.getCloseCombatSeekRadius();
+            if (searchCenter.distSqr(soldier.blockPosition()) <= Math.max(4.0, bound * bound)) {
+                searchRadius = Math.min(searchRadius, (int) bound);
             }
         }
 
@@ -1918,6 +1953,7 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
         PerformanceMetrics.recordCoverPopulation(state.name(), coverSearchPending, asyncPilotPending,
             getCoverManager().getTargetCover() != null);
         trackSuppressionEpisode();
+        refreshCloseCombatContext();
 
         if (soldier.isHealing()) {
             if (canContinueHealingInCover()) {
@@ -2957,9 +2993,14 @@ private void tickRepositioning() {
 
         maintainCoverAnchorIfHiding(currentCover);
 
-        // Flank detection is deferred while suppressed: the soldier will
-        // evaluate flank repositioning after recovery in tickInCover()
-        // (recovery transitions us from SUPPRESSED_IN_COVER back to IN_COVER)
+        // Compromised-cover check while suppressed: if the threat has crossed
+        // to the blocker's own side, this cover no longer shields and escape
+        // outranks recovery. isExposedToFlank's own cooldown bounds the check;
+        // the continuous-suppression channel may start relocation while
+        // suppressed, which is exactly the point.
+        if (currentCover != null && isExposedToFlank()) {
+            coverManager.requestContinuousSuppressionReposition();
+        }
 
         if (currentCover != null && tryStartHealing(currentCover)) {
             return;
@@ -3355,12 +3396,27 @@ private void tickRepositioning() {
         }
 
         if (soldier.isCQB() || soldier.hasCloseRangeTarget()) {
+            // Close combat keeps protection reasoning - the closer the threat,
+            // the more urgent cover becomes, not less. While the emergency
+            // engagement hold is latched it owns the decision: stand and try
+            // to produce fire first; cover seeking acts after the no-shot
+            // release, so seeks never race a hold that is about to freeze
+            // their moves.
+            if (soldier.isCqbEngagementHold()) {
+                lastWantCoverReason = "";
+                return false;
+            }
+            boolean hasValid = getCoverManager().getCurrentCover() != null && isCoverStillValid();
+            if (hasValid) {
+                lastWantCoverReason = "";
+                return false;
+            }
             if (DiagnosticLogManager.isCoverLoggingEnabled()) {
-                StevesArmyMod.LOGGER.info("[CoverGoal] shouldSeekCover=false (CQB mode={}, closeRangeTarget={})",
+                StevesArmyMod.LOGGER.info("[CoverGoal] shouldSeekCover=true (close combat, CQB mode={}, closeRangeTarget={})",
                     soldier.isCQB(), soldier.hasCloseRangeTarget());
             }
-            lastWantCoverReason = "";
-            return false;
+            lastWantCoverReason = "close-no-protection";
+            return true;
         }
 
         if (soldier.getSquadMode() == SquadMode.HOLD) {
@@ -3874,6 +3930,18 @@ private boolean shouldExitCoverForFollow() {
             if (soldier.hasValidAttackTarget()) {
                 searchRadius = ATTACK_CORRIDOR_SEARCH_RADIUS;
             }
+        }
+
+        // Close-combat doctrine: protection near a close threat must be a
+        // short, useful movement, not a long relocation under fire. Bound the
+        // radius only when the search is centered near the soldier - an
+        // owner-anchored FOLLOW search 15 blocks out must keep its full span
+        // or nearby protection becomes undiscoverable.
+        if (soldier.isInCloseCombatContext() || soldier.hasCloseRangeTarget()) {
+            double bound = StevesArmyConfig.getCloseCombatSeekRadius();
+            if (searchCenter.distSqr(soldier.blockPosition()) <= Math.max(4.0, bound * bound)) {
+                searchRadius = Math.min(searchRadius, (int) bound);
+            }
         } else if (seekEscalated) {
             // Stranded-seeker escalation: the normal radius from here holds no
             // cover, so reach back toward the squad (FOLLOW/ATTACK) or widen
@@ -4195,7 +4263,7 @@ private boolean shouldExitCoverForFollow() {
             final BlockPos selectedPos = cover.getPosition();
             CoverMoveResult outcome = tryReservePool(
                 java.util.List.of(new CoverFinder.ScoredCover(cover, Float.MAX_VALUE)),
-                currentCover, reserveAttemptsCap());
+                currentCover, reserveAttemptsCap(searchCenter));
             if (outcome == CoverMoveResult.COVER_STARTED) {
                 logCoverSearchPerformance(finder, searchStarted, CoverMoveResult.COVER_STARTED, "selected");
                 return CoverMoveResult.COVER_STARTED;
@@ -4204,7 +4272,7 @@ private boolean shouldExitCoverForFollow() {
                 ? List.of() : reusableScored.stream()
                     .filter(sc -> !sc.cover.getPosition().equals(selectedPos))
                     .toList();
-            outcome = tryReservePool(soldierPool, currentCover, reserveAttemptsCap());
+            outcome = tryReservePool(soldierPool, currentCover, reserveAttemptsCap(searchCenter));
             if (outcome == CoverMoveResult.COVER_STARTED) {
                 logCoverSearchPerformance(finder, searchStarted, CoverMoveResult.COVER_STARTED, "reserve-fallback");
                 return CoverMoveResult.COVER_STARTED;
@@ -4220,7 +4288,7 @@ private boolean shouldExitCoverForFollow() {
                 centerPool = centerPool.stream()
                     .filter(sc -> !sc.cover.getPosition().equals(selectedPos))
                     .toList();
-                outcome = tryReservePool(centerPool, currentCover, reserveAttemptsCap());
+                outcome = tryReservePool(centerPool, currentCover, reserveAttemptsCap(searchCenter));
                 if (outcome == CoverMoveResult.COVER_STARTED) {
                     logCoverSearchPerformance(finder, searchStarted, CoverMoveResult.COVER_STARTED, "center-reserve-fallback");
                     return CoverMoveResult.COVER_STARTED;
@@ -4294,7 +4362,14 @@ private boolean shouldExitCoverForFollow() {
         return CoverMoveResult.NO_COVER_FOUND;
     }
 
-    private int reserveAttemptsCap() {
+    private int reserveAttemptsCap(BlockPos searchCenter) {
+        // Close combat bounds the churn as well as the distance: a close-range
+        // seek that falls through many candidates in one round reads as cover
+        // hopping. Two attempts, then the seek lifecycle's cooldown applies.
+        if ((soldier.isInCloseCombatContext() || soldier.hasCloseRangeTarget())
+            && (searchCenter == null || searchCenter.distSqr(soldier.blockPosition()) <= 4)) {
+            return Math.min(2, MAX_RESERVE_CANDIDATE_ATTEMPTS);
+        }
         return MAX_RESERVE_CANDIDATE_ATTEMPTS;
     }
 

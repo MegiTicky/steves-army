@@ -73,6 +73,53 @@ public final class SimTerrain {
         wall(x, z, x, z, h, Blocks.STONE_BRICKS.defaultBlockState());
     }
 
+    /**
+     * Hollow building shell (the CQB course primitive): h-high walls on the
+     * rectangle's edge, each door a 1-wide 2-high gap at a wall cell. Door
+     * cells must lie on the rectangle's edge; interior doors are carved by
+     * leaving a gap between two partition segments. No roof: sim fighting is
+     * same-level, and the open top keeps fixtures under the build limit.
+     */
+    public void building(int x1, int z1, int x2, int z2, int h, int[][] doors) {
+        java.util.Set<Long> doorSet = new java.util.HashSet<>();
+        for (int[] d : doors) doorSet.add(encode(d[0], d[1]));
+        for (int x = x1; x <= x2; x++) {
+            for (int z = z1; z <= z2; z++) {
+                boolean edge = x == x1 || x == x2 || z == z1 || z == z2;
+                if (!edge || doorSet.contains(encode(x, z))) continue;
+                for (int y = 0; y < h; y++) block(x, y, z, Blocks.STONE_BRICKS.defaultBlockState());
+            }
+        }
+    }
+
+    private static long encode(int x, int z) {
+        return ((long) x << 32) ^ (z & 0xffffffffL);
+    }
+
+    /**
+     * The rework's CQB course: a two-room house with doorways on both ends
+     * and an interior partition door, plus a street corridor to its south
+     * with sparse rubble. Layout (fixture-local coords, platform ~48x48):
+     *   house x 14..30, z 6..18, walls h3, doors W(14,12) E(30,12), partition x=22 z7..17 with door (22,12)
+     *   street z 24..34 between the house row and the south rim, rubble rows at z=28 and z=31
+     * Scenarios spawn squads on the street's south edge and enemies in or
+     * beyond the house so approach, threshold, and crossing all matter.
+     */
+    public void cqbCourse() {
+        platform();
+        // House shell: 3-high walls, west + east doorways on the mid line.
+        building(14, 6, 30, 18, 3, new int[][]{{14, 12}, {30, 12}});
+        // Interior partition with its own door, carved as two segments.
+        wall(22, 7, 22, 11, 3, Blocks.STONE_BRICKS.defaultBlockState());
+        wall(22, 13, 22, 17, 3, Blocks.STONE_BRICKS.defaultBlockState());
+        // Street: sparse rubble rows between the house front and the south rim.
+        coverRow(8, 28, 12, 28, 1);
+        coverRow(20, 28, 24, 28, 1);
+        coverRow(32, 28, 36, 28, 1);
+        coverRow(10, 33, 14, 33, 1);
+        coverRow(28, 33, 32, 33, 1);
+    }
+
     public void block(int x, int y, int z, BlockState state) {
         BlockPos pos = origin.offset(x, y, z);
         // The world silently rejects blocks above the build limit; surface that
