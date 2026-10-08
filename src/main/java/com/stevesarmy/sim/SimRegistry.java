@@ -26,6 +26,7 @@ public final class SimRegistry {
             mgAnchorFreshness(),
             mgRiflemanSeekContrast(),
             mgSuppressionRoundRobin(),
+            mgDirectFireCadence(),
             pairSuppressionLanes(),
             openFieldBaseline(),
             dockArrivalRoles(),
@@ -272,6 +273,151 @@ public final class SimRegistry {
             .assertThat("MG actually fired a sustained engagement (>=20 tracer rounds)",
                 view -> view.shots().size() >= 20)
             .build();
+    }
+
+    // 4d. MG direct-fire cadence — active-target fire should not lag suppression fire
+
+    /**
+     * Cadence probe for the user-reported asymmetry: with an ACTIVE VISIBLE
+     * target the MG "slowly aims, fires slowly, and is inaccurate", while
+     * last-seen suppression fires long smooth bursts. A hardened (invulnerable,
+     * so damage reactions can't stop it) gunless enemy patrols a lane behind a
+     * 1-high wall at ~48 blocks — partial exposure and constant target motion
+     * are exactly the conditions where the aim-quality build rate loses to the
+     * decay terms. Gunner tracers are attributable by from-position (gunner
+     * spawns at x=6, z=32, behind the squadmates at x=10 so no tracer path
+     * passes near it).
+     */
+    private static SimScenario mgDirectFireCadence() {
+        return SimScenario.builder("mg_direct_fire_cadence")
+            .description("MG direct-fire cadence: armed machine gunner (+ two armed squadmates "
+                + "for acquisition insurance) vs a hardened GUNLESS enemy patrolling z 22-42 "
+                + "behind a 1-high wall at x=57 (~48 blocks from the gunner). The MG must open "
+                + "up on the moving, partially-exposed target and SUSTAIN fire: >=30 gunner "
+                + "tracers into the enemy lane, >=4 distinct bursts (gaps >20t), first tracer "
+                + "within 120t, and >=8 rounds landing on the wall plane (not overshooting). "
+                + "The 5-shot/10t-recovery profile with the 0.35 aim-quality gate is expected "
+                + "to fail these; the cadence fix must pass.")
+            .duration(800)
+            .armed()
+            .field(72, 64)
+            .terrain(t -> {
+                t.platform();
+                t.coverRow(57, 20, 57, 44, 1);   // low wall the enemy patrols behind
+            })
+            .setup(ctx -> {
+                ctx.spawnAnchor(2, 0, 32);
+                // Gunner sits BEHIND the squadmates: enemy return fire (and
+                // friendly tracer paths) must never pass near the gunner, or
+                // the pin system contaminates the cadence measurement.
+                ctx.spawnFriendly(ModEntities.MACHINE_GUNNER.get(), "gunner", 6, 0, 32, SquadMode.FOLLOW);
+                ctx.spawnFriendly(ModEntities.SOLDIER.get(), "left", 10, 0, 26, SquadMode.FOLLOW);
+                ctx.spawnFriendly(ModEntities.SOLDIER.get(), "right", 10, 0, 38, SquadMode.FOLLOW);
+                ctx.spawnEnemyLabeled("enemy", 59, 0, 32);
+                ctx.disarmSoldier("enemy");
+                ctx.harden("enemy");
+            })
+            .action(30, "strafe enemy", ctx -> ctx.strafeEnemy("enemy", 22, 42))
+            .action(50, "strafe enemy", ctx -> ctx.strafeEnemy("enemy", 22, 42))
+            .action(70, "strafe enemy", ctx -> ctx.strafeEnemy("enemy", 22, 42))
+            .action(90, "strafe enemy", ctx -> ctx.strafeEnemy("enemy", 22, 42))
+            .action(110, "strafe enemy", ctx -> ctx.strafeEnemy("enemy", 22, 42))
+            .action(130, "strafe enemy", ctx -> ctx.strafeEnemy("enemy", 22, 42))
+            .action(150, "strafe enemy", ctx -> ctx.strafeEnemy("enemy", 22, 42))
+            .action(170, "strafe enemy", ctx -> ctx.strafeEnemy("enemy", 22, 42))
+            .action(190, "strafe enemy", ctx -> ctx.strafeEnemy("enemy", 22, 42))
+            .action(210, "strafe enemy", ctx -> ctx.strafeEnemy("enemy", 22, 42))
+            .action(230, "strafe enemy", ctx -> ctx.strafeEnemy("enemy", 22, 42))
+            .action(250, "strafe enemy", ctx -> ctx.strafeEnemy("enemy", 22, 42))
+            .action(270, "strafe enemy", ctx -> ctx.strafeEnemy("enemy", 22, 42))
+            .action(290, "strafe enemy", ctx -> ctx.strafeEnemy("enemy", 22, 42))
+            .action(310, "strafe enemy", ctx -> ctx.strafeEnemy("enemy", 22, 42))
+            .action(330, "strafe enemy", ctx -> ctx.strafeEnemy("enemy", 22, 42))
+            .action(350, "strafe enemy", ctx -> ctx.strafeEnemy("enemy", 22, 42))
+            .action(370, "strafe enemy", ctx -> ctx.strafeEnemy("enemy", 22, 42))
+            .action(390, "strafe enemy", ctx -> ctx.strafeEnemy("enemy", 22, 42))
+            .action(410, "strafe enemy", ctx -> ctx.strafeEnemy("enemy", 22, 42))
+            .action(430, "strafe enemy", ctx -> ctx.strafeEnemy("enemy", 22, 42))
+            .action(450, "strafe enemy", ctx -> ctx.strafeEnemy("enemy", 22, 42))
+            .action(470, "strafe enemy", ctx -> ctx.strafeEnemy("enemy", 22, 42))
+            .action(490, "strafe enemy", ctx -> ctx.strafeEnemy("enemy", 22, 42))
+            .action(510, "strafe enemy", ctx -> ctx.strafeEnemy("enemy", 22, 42))
+            .action(530, "strafe enemy", ctx -> ctx.strafeEnemy("enemy", 22, 42))
+            .action(550, "strafe enemy", ctx -> ctx.strafeEnemy("enemy", 22, 42))
+            .action(570, "strafe enemy", ctx -> ctx.strafeEnemy("enemy", 22, 42))
+            .action(590, "strafe enemy", ctx -> ctx.strafeEnemy("enemy", 22, 42))
+            .action(610, "strafe enemy", ctx -> ctx.strafeEnemy("enemy", 22, 42))
+            .action(630, "strafe enemy", ctx -> ctx.strafeEnemy("enemy", 22, 42))
+            .action(650, "strafe enemy", ctx -> ctx.strafeEnemy("enemy", 22, 42))
+            .action(670, "strafe enemy", ctx -> ctx.strafeEnemy("enemy", 22, 42))
+            .action(690, "strafe enemy", ctx -> ctx.strafeEnemy("enemy", 22, 42))
+            .action(710, "strafe enemy", ctx -> ctx.strafeEnemy("enemy", 22, 42))
+            .action(730, "strafe enemy", ctx -> ctx.strafeEnemy("enemy", 22, 42))
+            .action(750, "strafe enemy", ctx -> ctx.strafeEnemy("enemy", 22, 42))
+            .action(770, "strafe enemy", ctx -> ctx.strafeEnemy("enemy", 22, 42))
+            .assertThat("MG opens up: >=30 gunner tracers into the enemy lane",
+                view -> countGunnerShotsNear(view, 6, 32, 56, 18, 64, 46) >= 30)
+            .assertThat("MG sustains bursts: >=4 distinct bursts (gaps >20t)",
+                view -> countGunnerBursts(view, 6, 32, 56, 18, 64, 46, 20) >= 4)
+            .assertThat("MG opens fire promptly: first gunner tracer within 120t",
+                view -> firstGunnerShotTick(view, 6, 32, 56, 18, 64, 46) <= 120)
+            .assertThat("MG fire lands on the wall plane: >=8 tracers within the tight lane",
+                view -> countGunnerShotsNear(view, 6, 32, 55.5, 20, 61.5, 44) >= 8)
+            .build();
+    }
+
+    /** Counts tracers fired FROM near (fromX, fromZ) whose endpoints land in the target box. */
+    private static int countGunnerShotsNear(SimScenario.SimRunResultView view,
+                                            double fromX, double fromZ,
+                                            double tx0, double tz0, double tx1, double tz1) {
+        int count = 0;
+        for (double[] shot : view.shots()) {
+            double dx = shot[0] - fromX;
+            double dz = shot[1] - fromZ;
+            if (dx * dx + dz * dz > 25.0) continue;   // shooter within 5 blocks
+            if (shot[2] >= tx0 && shot[2] <= tx1 && shot[3] >= tz0 && shot[3] <= tz1) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    /** Distinct bursts (>=1 shot each) among the shooter's in-box tracers, split at {@code gapTicks}. */
+    private static int countGunnerBursts(SimScenario.SimRunResultView view,
+                                         double fromX, double fromZ,
+                                         double tx0, double tz0, double tx1, double tz1,
+                                         int gapTicks) {
+        int bursts = 0;
+        long last = Long.MIN_VALUE;
+        java.util.List<Long> ticks = view.shotTicks();
+        java.util.List<double[]> shots = view.shots();
+        for (int i = 0; i < shots.size() && i < ticks.size(); i++) {
+            double[] shot = shots.get(i);
+            double dx = shot[0] - fromX, dz = shot[1] - fromZ;
+            if (dx * dx + dz * dz > 25.0) continue;
+            if (shot[2] < tx0 || shot[2] > tx1 || shot[3] < tz0 || shot[3] > tz1) continue;
+            long t = ticks.get(i);
+            if (last == Long.MIN_VALUE || t - last > gapTicks) bursts++;
+            last = t;
+        }
+        return bursts;
+    }
+
+    /** First tick at which the shooter landed a tracer in the box; Integer.MAX_VALUE when none. */
+    private static int firstGunnerShotTick(SimScenario.SimRunResultView view,
+                                           double fromX, double fromZ,
+                                           double tx0, double tz0, double tx1, double tz1) {
+        java.util.List<Long> ticks = view.shotTicks();
+        java.util.List<double[]> shots = view.shots();
+        int first = Integer.MAX_VALUE;
+        for (int i = 0; i < shots.size() && i < ticks.size(); i++) {
+            double[] shot = shots.get(i);
+            double dx = shot[0] - fromX, dz = shot[1] - fromZ;
+            if (dx * dx + dz * dz > 25.0) continue;
+            if (shot[2] < tx0 || shot[2] > tx1 || shot[3] < tz0 || shot[3] > tz1) continue;
+            first = (int) Math.min(first, ticks.get(i));
+        }
+        return first;
     }
 
     private static int countShotsNear(SimScenario.SimRunResultView view, double x, double z, double radius) {

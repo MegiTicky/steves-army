@@ -114,6 +114,17 @@ public final class SimContext {
             net.minecraft.world.item.ItemStack.EMPTY);
         soldier.setItemSlot(net.minecraft.world.entity.EquipmentSlot.MAINHAND,
             net.minecraft.world.item.ItemStack.EMPTY);
+        com.stevesarmy.sim.SimGunHandler.disarm(soldier);
+    }
+
+    /**
+     * Makes an entity ignore damage so scenario pressure (getting shot) cannot
+     * knock it off scripted movement — used for patrol targets whose motion is
+     * part of the measurement.
+     */
+    public void harden(String label) {
+        SoldierEntity soldier = byLabel.get(label);
+        if (soldier != null) soldier.setInvulnerable(true);
     }
 
     /** Deterministic pressure: repeated near-misses against the soldier's own tracker. */
@@ -180,6 +191,19 @@ public final class SimContext {
         old.discard();
         enemies.remove(old);
         return spawnEnemy(x, y, z);
+    }
+
+    /**
+     * Re-issues a walk order toward the farther of two lane endpoints on the
+     * enemy's current row, so calling it periodically keeps the enemy patrolling
+     * the lane between (currentX, zA) and (currentX, zB) without toggle state.
+     */
+    public void strafeEnemy(String label, double zA, double zB) {
+        SoldierEntity entity = byLabel.get(label);
+        if (!(entity instanceof EnemySoldierEntity enemy) || !enemy.isAlive()) return;
+        double z = enemy.getZ();
+        double target = Math.abs(z - zA) >= Math.abs(z - zB) ? zA : zB;
+        enemy.getNavigation().moveTo(entity.getX(), entity.blockPosition().getY(), target + 0.5D, 1.0D);
     }
 
     // --- danger-map verification seams ---------------------------------------

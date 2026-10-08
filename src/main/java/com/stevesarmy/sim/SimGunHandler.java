@@ -61,21 +61,34 @@ public final class SimGunHandler implements GunIntegration.GunHandler {
     /** Per-entity weapon state; cleared between scenarios by SimIsolation. */
     private static final Map<UUID, GunState> states = new HashMap<>();
 
+    /** Entities stripped via {@link #disarm}: the sim gun layer refuses them
+     *  even though the virtual magazine still exists. */
+    private static final java.util.Set<UUID> disarmed = new java.util.HashSet<>();
+
+    /** Scenario seam for {@code disarmSoldier}: strips the virtual gun outright. */
+    public static void disarm(LivingEntity entity) {
+        disarmed.add(entity.getUUID());
+        states.remove(entity.getUUID());
+    }
+
     public static void setArmed(boolean armed) {
         if (armed && installed == null) {
             installed = new SimGunHandler();
             states.clear();
+            disarmed.clear();
             GunIntegration.installSimGunHandler(installed);
         } else if (!armed && installed != null) {
             GunIntegration.uninstallSimGunHandler();
             installed = null;
             states.clear();
+            disarmed.clear();
         }
     }
 
     /** Scenario boundary: spawned entities must not inherit a previous run's magazine state. */
     public static void resetForSim() {
         states.clear();
+        disarmed.clear();
     }
 
     private static boolean isMg(LivingEntity entity) {
@@ -109,6 +122,7 @@ public final class SimGunHandler implements GunIntegration.GunHandler {
 
     private GunIntegration.ShootResult fire(LivingEntity shooter, Vec3 aimPosition,
                                             float pitchDeviation, float yawDeviation) {
+        if (disarmed.contains(shooter.getUUID())) return GunIntegration.ShootResult.NOT_GUN;
         if (!(shooter.level() instanceof ServerLevel level)) {
             return GunIntegration.ShootResult.UNKNOWN;
         }
@@ -154,7 +168,12 @@ public final class SimGunHandler implements GunIntegration.GunHandler {
         return GunIntegration.ShootResult.SUCCESS;
     }
 
-    @Override public boolean hasGun(LivingEntity entity) { return entity instanceof SoldierEntity; }
+    @Override public boolean hasGun(LivingEntity entity) {
+        return entity instanceof SoldierEntity && !disarmed.contains(entity.getUUID());
+    }
+
+    /** Mirrors the M249's TaCZ crawl_recoil_multiplier so crouch scenarios measure the real stance effect. */
+    @Override public float getCrawlRecoilMultiplier(LivingEntity entity) { return 0.1f; }
 
     @Override public GunIntegration.ShootResult shoot(LivingEntity shooter, LivingEntity target) {
         if (target == null || !target.isAlive()) return GunIntegration.ShootResult.NO_TARGET;

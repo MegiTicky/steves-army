@@ -31,6 +31,8 @@ public final class SimScenario {
         java.util.List<com.stevesarmy.sim.SimViolation> violations();
         /** Recorded tracer endpoints in fire order; each entry is {fromX, fromZ, toX, toZ}. */
         java.util.List<double[]> shots();
+        /** Fire-ordered shot ticks, parallel to {@link #shots()} (frame-aligned, ±1t). */
+        java.util.List<Long> shotTicks();
     }
 
     public final String name;

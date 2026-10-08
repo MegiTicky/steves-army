@@ -452,6 +452,7 @@ public final class SimManager {
             @Override public DangerOracle.Oracle dangerOracle() { return result.dangerOracle; }
             @Override public List<SimViolation> violations() { return result.violations; }
             @Override public List<double[]> shots() { return recorder.shotTracers(); }
+            @Override public List<Long> shotTicks() { return recorder.shotTicks(); }
         };
         for (SimScenario.Assertion assertion : scenario.assertions) {
             try {
