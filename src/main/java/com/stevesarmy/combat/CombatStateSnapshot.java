@@ -82,6 +82,8 @@ public final class CombatStateSnapshot {
     public final boolean travelCrawl;
     /** The ground underfoot currently reads "crawling hides" on the squad danger map. */
     public final boolean crawlHidesHere;
+    /** Head yaw in degrees at sampling time (aim orientation for CQB doctrine assertions). */
+    public final float headYaw;
     /** Served travel re-routes (near-miss-driven path recomputes) since spawn. */
     public final int travelReroutesServed;
 
@@ -126,7 +128,7 @@ public final class CombatStateSnapshot {
                                String posture, boolean lowCrouching, boolean emergencyPosture,
                                float currentCoverHeight,
                                boolean traveling, boolean travelCrawl, boolean crawlHidesHere,
-                               int travelReroutesServed) {
+                               int travelReroutesServed, float headYaw) {
         this.soldierId = soldierId;
         this.role = role;
         this.position = position;
@@ -173,6 +175,7 @@ public final class CombatStateSnapshot {
         this.traveling = traveling;
         this.travelCrawl = travelCrawl;
         this.crawlHidesHere = crawlHidesHere;
+        this.headYaw = headYaw;
         this.travelReroutesServed = travelReroutesServed;
     }
 }

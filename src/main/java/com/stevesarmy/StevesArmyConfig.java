@@ -91,6 +91,10 @@ public class StevesArmyConfig {
     public static final ForgeConfigSpec.IntValue SQUAD_BOUND_MAX_TICKS;
     public static final ForgeConfigSpec.DoubleValue SQUAD_BOUND_THREAT_RANGE;
     public static final ForgeConfigSpec.IntValue HOLD_MARCH_DWELL_TICKS;
+    public static final ForgeConfigSpec.BooleanValue CQB_DOORWAY_QUEUE_ENABLED;
+    public static final ForgeConfigSpec.DoubleValue CQB_DOORWAY_SPACING;
+    public static final ForgeConfigSpec.BooleanValue CQB_CORNER_WATCH_ENABLED;
+    public static final ForgeConfigSpec.IntValue CQB_LOST_CONTACT_WATCH_TICKS;
     public static final ForgeConfigSpec.DoubleValue CLOSE_COMBAT_SEEK_RADIUS;
     public static final ForgeConfigSpec.IntValue CLOSE_COMBAT_REEVAL_INTERVAL_TICKS;
 
@@ -639,6 +643,39 @@ BUILDER.pop();
                      "open field fights.",
                      "Default: 10 ticks")
             .defineInRange("closeCombatReevalIntervalTicks", 10, 4, 40);
+
+        BUILDER.pop();
+
+        BUILDER.push("cqb");
+
+        CQB_DOORWAY_QUEUE_ENABLED = BUILDER
+            .comment("Doorway queueing: a soldier moving under CQB caution pauses before a",
+                     "wall-narrow passage (door, breach) while a squadmate is still inside or",
+                     "just past it, so the stack crosses single-file instead of clumping in",
+                     "the fatal funnel.",
+                     "Default: true")
+            .define("cqbDoorwayQueueEnabled", true);
+
+        CQB_DOORWAY_SPACING = BUILDER
+            .comment("Distance from the doorway center at which a squadmate holds the passage",
+                     "occupied for queueing purposes. Must exceed one body length so the",
+                     "follower freezes his creep before the leader has cleared the frame.",
+                     "Default: 3.5 blocks")
+            .defineInRange("cqbDoorwaySpacing", 3.5, 1.0, 6.0);
+
+        CQB_CORNER_WATCH_ENABLED = BUILDER
+            .comment("Corner pie-slicing: while moving under CQB caution, a soldier whose path",
+                     "bends within a few blocks pre-aims the arc the corner opens into (toward",
+                     "the known threat side) instead of staring at the wall he is hugging.",
+                     "Default: true")
+            .define("cqbCornerWatchEnabled", true);
+
+        CQB_LOST_CONTACT_WATCH_TICKS = BUILDER
+            .comment("Lost-contact watch: after close-quarters contact breaks (target visible,",
+                     "then gone), the soldier holds position and keeps his aim on the last-known",
+                     "position for this long before resuming routine behavior.",
+                     "Default: 80 ticks (4 s)")
+            .defineInRange("cqbLostContactWatchTicks", 80, 20, 200);
 
         BUILDER.pop();
 
@@ -1597,6 +1634,22 @@ BUILDER.pop();
 
     public static int getHoldMarchDwellTicks() {
         return HOLD_MARCH_DWELL_TICKS.get();
+    }
+
+    public static boolean isCqbDoorwayQueueEnabled() {
+        return CQB_DOORWAY_QUEUE_ENABLED.get();
+    }
+
+    public static double getCqbDoorwaySpacing() {
+        return CQB_DOORWAY_SPACING.get();
+    }
+
+    public static boolean isCqbCornerWatchEnabled() {
+        return CQB_CORNER_WATCH_ENABLED.get();
+    }
+
+    public static int getCqbLostContactWatchTicks() {
+        return CQB_LOST_CONTACT_WATCH_TICKS.get();
     }
 
     public static double getCloseCombatSeekRadius() {

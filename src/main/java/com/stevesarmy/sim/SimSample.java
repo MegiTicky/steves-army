@@ -50,6 +50,8 @@ public final class SimSample {
     public final double dangerAtSoldier;
     /** Leg-height exposure bit behind {@link #dangerAtSoldier} (false when no data or a stub sampler). */
     public final boolean dangerLegExposed;
+    /** Head yaw in degrees at sampling time (aim orientation). */
+    public final float headYaw;
 
     public SimSample(int tick, String label, CombatStateSnapshot state,
                      float health, float maxHealth, boolean hasAttackTarget,
@@ -58,7 +60,7 @@ public final class SimSample {
                      double coverSlotOffset, int anchorPulls,
                      int exposedBodyRays, int exposedHeadRays, int probedBodyRays, boolean reloading,
                      String posture, boolean rising, float syncedCoverHeight,
-                     double dangerAtSoldier, boolean dangerLegExposed) {
+                     double dangerAtSoldier, boolean dangerLegExposed, float headYaw) {
         this.tick = tick;
         this.label = label;
         this.state = state;
@@ -83,5 +85,6 @@ public final class SimSample {
         this.syncedCoverHeight = syncedCoverHeight;
         this.dangerAtSoldier = dangerAtSoldier;
         this.dangerLegExposed = dangerLegExposed;
+        this.headYaw = headYaw;
     }
 }

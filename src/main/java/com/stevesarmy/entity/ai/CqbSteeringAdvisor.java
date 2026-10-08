@@ -146,6 +146,166 @@ public class CqbSteeringAdvisor {
     }
 
     /**
+     * Doorway queueing (phase-4 CQB doctrine): true when the next path node is
+     * a wall-narrow passage (solid on both lateral sides - a door, window
+     * breach, or rubble gap) and a squadmate is still inside or just past it.
+     * The move control holds the soldier back so the stack crosses single-file
+     * instead of clumping in the fatal funnel.
+     */
+    public boolean isDoorwayBlocked(SoldierEntity soldier) {
+        if (!com.stevesarmy.StevesArmyConfig.isCqbDoorwayQueueEnabled()) {
+            return false;
+        }
+        Path path = soldier.getNavigation().getPath();
+        if (path == null || path.isDone()) {
+            return false;
+        }
+        // Look two nodes ahead: by the time the doorway is the IMMEDIATE next
+        // node the soldier has often crossed half the final gap at full speed
+        // (the hold must engage before the funnel, not inside it).
+        int start = Math.max(0, path.getNextNodeIndex());
+        int end = Math.min(path.getNodeCount(), start + 4);
+        Vec3 soldierPos = soldier.position();
+        double spacing = com.stevesarmy.StevesArmyConfig.getCqbDoorwaySpacing();
+        for (int j = start; j < end; j++) {
+            Vec3 node = Vec3.atCenterOf(path.getNode(j).asBlockPos());
+            Vec3 travelDir = new Vec3(node.x - soldierPos.x, 0, node.z - soldierPos.z);
+            if (travelDir.lengthSqr() < 0.001) {
+                continue;
+            }
+            travelDir = travelDir.normalize();
+            if (!isDoorwayNode(soldier, node, travelDir)) {
+                continue;
+            }
+            for (SoldierEntity mate : soldier.level().getEntitiesOfClass(SoldierEntity.class,
+                soldier.getBoundingBox().inflate(8.0))) {
+                if (mate == soldier || !mate.isAlive() || !isSquadmate(soldier, mate)) {
+                    continue;
+                }
+                Vec3 rel = mate.position().subtract(soldierPos);
+                if (rel.dot(travelDir) <= 0.3) {
+                    continue; // not ahead of me on the approach
+                }
+                if (mate.position().distanceTo(node) <= spacing) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    /**
+     * A wall doorway in Minecraft places the frame blocks along the travel
+     * line (the wall is 1 thick, the opening 1 wide), so the passage
+     * signature is: solid immediately ahead AND behind the node on the travel
+     * axis, with open sides. A 1-wide trench reads the same, and queuing in
+     * one is correct doctrine anyway.
+     */
+    private boolean isDoorwayNode(SoldierEntity soldier, Vec3 node, Vec3 travelDir) {
+        if (!isSolidBeside(soldier, node.add(travelDir.scale(0.9)))
+            && !isSolidBeside(soldier, node.subtract(travelDir.scale(0.9)))) {
+            return false;
+        }
+        Vec3 lateral = new Vec3(-travelDir.z, 0.0, travelDir.x);
+        return !(isSolidBeside(soldier, node.add(lateral.scale(0.7)))
+            && isSolidBeside(soldier, node.subtract(lateral.scale(0.7))));
+    }
+
+    private boolean isSolidBeside(SoldierEntity soldier, Vec3 at) {
+        net.minecraft.core.BlockPos bp = net.minecraft.core.BlockPos.containing(
+            at.x, soldier.getY() + 0.6, at.z);
+        return !soldier.level().getBlockState(bp)
+            .getCollisionShape(soldier.level(), bp).isEmpty();
+    }
+
+    private boolean isSquadmate(SoldierEntity soldier, SoldierEntity other) {
+        return soldier.isFriendlyTo(other);
+    }
+
+    /**
+     * Corner pie-slicing (phase-4 CQB doctrine), consumed by the combat goal's
+     * scanning chain: while an enemy is near the remaining path, find the first
+     * bend in the next few nodes and return an eye-height point past the corner
+     * on the threat side - the arc the corner opens into. The soldier pre-aims
+     * that arc instead of staring at the wall he is hugging. Static and
+     * stateless (no debounce) so the aim layer can call it every tick.
+     */
+    public static Vec3 getCornerWatchPos(SoldierEntity soldier) {
+        if (!com.stevesarmy.StevesArmyConfig.isCqbCornerWatchEnabled()) {
+            return null;
+        }
+        Path path = soldier.getNavigation().getPath();
+        if (path == null || path.isDone()) {
+            return null;
+        }
+        int start = Math.max(0, path.getNextNodeIndex());
+        int end = Math.min(path.getNodeCount(), start + PATH_SAMPLE_NODE_COUNT);
+        if (end - start < 2) {
+            return null;
+        }
+        Vec3 prev = Vec3.atCenterOf(path.getNode(start).asBlockPos());
+        Vec3 prevDir = null;
+        Vec3 apex = null;
+        for (int i = start + 1; i < end; i++) {
+            Vec3 cur = Vec3.atCenterOf(path.getNode(i).asBlockPos());
+            Vec3 dir = new Vec3(cur.x - prev.x, 0, cur.z - prev.z);
+            if (dir.lengthSqr() >= 0.001) {
+                dir = dir.normalize();
+                if (prevDir != null && prevDir.dot(dir) < 0.707) {
+                    apex = prev;
+                    break;
+                }
+                prevDir = dir;
+            }
+            prev = cur;
+        }
+        if (apex == null) {
+            return null;
+        }
+        Vec3 enemy = null;
+        double bestDistSq = Double.MAX_VALUE;
+        for (Vec3 candidate : collectEnemyPositionsStatic(soldier)) {
+            double distSq = candidate.distanceToSqr(apex);
+            if (distSq < bestDistSq) {
+                bestDistSq = distSq;
+                enemy = candidate;
+            }
+        }
+        if (enemy == null) {
+            return null;
+        }
+        // Only worth pre-aiming when the threat actually sits near the bend.
+        if (bestDistSq > 12.0 * 12.0) {
+            return null;
+        }
+        Vec3 watchDir = new Vec3(enemy.x - apex.x, 0, enemy.z - apex.z);
+        if (watchDir.lengthSqr() < 0.001) {
+            return null;
+        }
+        return apex.add(watchDir.normalize().scale(4.0)).add(0.0, 1.2, 0.0);
+    }
+
+    private static List<Vec3> collectEnemyPositionsStatic(SoldierEntity soldier) {
+        List<Vec3> positions = new ArrayList<>();
+        ThreatAwareness awareness = soldier.getThreatAwareness();
+        for (ThreatAwareness.ThreatInfo info : awareness.getThreatInfos()) {
+            positions.add(Vec3.atCenterOf(info.position));
+        }
+        UUID squadId = soldier.getSquadId();
+        if (squadId != null && soldier.level() instanceof ServerLevel serverLevel) {
+            SquadData squad = SquadManager.get(serverLevel).getSquadById(squadId).orElse(null);
+            if (squad != null) {
+                for (SquadThreatIntel.ThreatKnowledge knowledge : squad.getThreatIntel().getAllThreats()) {
+                    if (knowledge.isAlive && knowledge.lastKnownPosition != null) {
+                        positions.add(Vec3.atCenterOf(knowledge.lastKnownPosition));
+                    }
+                }
+            }
+        }
+        return positions;
+    }
+
+    /**
      * Manual CQB retains its original cautious pace. Automatic path caution
      * keeps its lateral steering but travels at the normal sprint pace when
      * the CQB toggle is off.

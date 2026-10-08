@@ -1380,7 +1380,8 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
                 || com.stevesarmy.entity.ai.SoldierHoldPositionGoal.isTravelingToObjective(soldier),
             soldier.getTravelCrawlController().isCrawlActive(),
             soldier.getTravelCrawlController().isCrawlHidingHere(),
-            mgr.getTravelReroutesServed());
+            mgr.getTravelReroutesServed(),
+            soldier.getYHeadRot());
     }
 
     /**

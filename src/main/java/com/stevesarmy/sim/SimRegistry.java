@@ -79,7 +79,11 @@ public final class SimRegistry {
             streetBoundCrossing(),
             streetMgCoversBound(),
             streetSoloNoCoord(),
-            streetSwarmBaseline());
+            streetSwarmBaseline(),
+            cqbDoorwayQueue(),
+            cqbCornerPie(),
+            cqbCornerFrozenAimBaseline(),
+            cqbLostContactWatch());
     }
 
     public static SimScenario byName(String name) {
@@ -1329,6 +1333,228 @@ public final class SimRegistry {
                     int b = firstNorthTick(view, "bravo", 30);
                     return a >= 0 && b >= 0 && Math.abs(a - b) <= 100;
                 })
+            .build();
+    }
+
+    // Phase 4: CQB doorway/corner doctrine --------------------------------------
+
+    /** Count of samples in [t0,t1] where the soldier faces northward (fz < limit). */
+    private static int northFacingSamples(SimScenario.SimRunResultView view, String label,
+                                          int t0, int t1, double fzLimit) {
+        int n = 0;
+        for (SimSample s : view.timeline().series(label)) {
+            if (s.tick < t0 || s.tick > t1) continue;
+            if (Math.cos(Math.PI * s.headYaw / 180.0) < fzLimit) n++;
+        }
+        return n;
+    }
+
+    /** True when both soldiers are simultaneously within r of the door center. */
+    private static boolean everBothNear(SimScenario.SimRunResultView view, String a, String b,
+                                        net.minecraft.world.phys.Vec3 door, double r) {
+        java.util.Map<Integer, SimSample> ta = new java.util.HashMap<>();
+        for (SimSample s : view.timeline().series(a)) ta.put(s.tick, s);
+        for (SimSample s : view.timeline().series(b)) {
+            SimSample oa = ta.get(s.tick);
+            if (oa == null) continue;
+            double da = Math.hypot(oa.state.position.x - door.x, oa.state.position.z - door.z);
+            double db = Math.hypot(s.state.position.x - door.x, s.state.position.z - door.z);
+            if (da < r && db < r) return true;
+        }
+        return false;
+    }
+
+    /** Last recorded sample, or null. */
+    private static SimSample lastSample(SimScenario.SimRunResultView view, String label) {
+        var series = view.timeline().series(label);
+        return series.isEmpty() ? null : series.get(series.size() - 1);
+    }
+
+    /** First sample at or after the tick, or null. */
+    private static SimSample sampleAt(SimScenario.SimRunResultView view, String label, int tick) {
+        for (SimSample s : view.timeline().series(label)) {
+            if (s.tick >= tick) return s;
+        }
+        return null;
+    }
+
+    /**
+     * Phase 4: doorway queueing. Two manual-CQB soldiers march into the house
+     * west room; both paths funnel through the west door (14,12). The doorway
+     * doctrine holds the follower back before the wall-narrow passage while
+     * the leader is still in it - the stack crosses single-file instead of
+     * clumping in the fatal funnel. Queueing lives in the shared MoveControl
+     * caution layer, so cover approaches, GO_TO relocations and attack
+     * approaches get the same treatment.
+     */
+    private static SimScenario cqbDoorwayQueue() {
+        return SimScenario.builder("cqb_doorway_queue")
+            .description("Phase-4 CQB doctrine: two manual-CQB soldiers march into the cqbCourse "
+                + "house through the same west door. The doorway queue holds the follower back "
+                + "before the wall-narrow passage while the leader is still in it - the stack "
+                + "crosses single-file instead of clumping in the fatal funnel. Works through "
+                + "the shared MoveControl caution layer, so cover approaches, GO_TO relocations "
+                + "and attack approaches get the same queueing.")
+            .duration(900)
+            .armed()
+            .terrain(t -> t.cqbCourse())
+            .setup(ctx -> {
+                ctx.spawnAnchor(16, 0, 32);
+                // Objectives deep in the FAR room (beyond the partition door):
+                // the west door sits outside both hold radii, so the leader
+                // cannot legitimately park in the funnel - the dock-resume
+                // doctrine carries him through and the follower follows.
+                SoldierEntity alpha = ctx.spawnFriendly(ModEntities.SOLDIER.get(), "alpha", 16, 0, 28, SquadMode.HOLD);
+                alpha.setCQB(true);
+                alpha.setHoldPosition(ctx.terrain.at(26, 0, 9));
+                SoldierEntity bravo = ctx.spawnFriendly(ModEntities.SOLDIER.get(), "bravo", 18, 0, 30, SquadMode.HOLD);
+                bravo.setCQB(true);
+                bravo.setHoldPosition(ctx.terrain.at(28, 0, 12));
+            })
+            .assertThat("single-file door crossing (never both within 1.5 of the door at once)",
+                view -> !everBothNear(view, "alpha", "bravo", new net.minecraft.world.phys.Vec3(14.5, 0, 12.5), 1.5))
+            .assertThat("both soldiers reach the far room (final x > 23)",
+                view -> {
+                    SimSample a = lastSample(view, "alpha");
+                    SimSample b = lastSample(view, "bravo");
+                    return a != null && b != null
+                        && a.state.position.x > 23.0 && b.state.position.x > 23.0;
+                })
+            .build();
+    }
+
+    /**
+     * Phase 4: corner pie-slicing. A manual-CQB soldier marches to the house's
+     * northwest room; the path bends at the west door and the arc beyond the
+     * corner holds squad intel of a threat. While approaching the bend the
+     * soldier must pre-aim INTO the arc (northward facing) instead of staring
+     * at the wall he is hugging.
+     */
+    private static SimScenario cqbCornerPie() {
+        return SimScenario.builder("cqb_corner_pie")
+            .description("Phase-4 CQB doctrine: a manual-CQB soldier marches around the cqbCourse "
+                + "west door toward the northwest room while squad intel places a threat just "
+                + "past the corner. Corner pie-slicing pre-aims the arc the corner opens into "
+                + "(northward facing) while approaching - aim orientation leads the body around "
+                + "the corner instead of trailing it.")
+            .duration(700)
+            .armed()
+            .terrain(t -> t.cqbCourse())
+            .setup(ctx -> {
+                ctx.spawnAnchor(26, 0, 30);
+                SoldierEntity pie = ctx.spawnFriendly(ModEntities.SOLDIER.get(), "pie", 26, 0, 22, SquadMode.HOLD);
+                pie.setCQB(true);
+                pie.setHoldPosition(ctx.terrain.at(16, 0, 8));
+                // Deterministic intel just past the corner arc, kept fresh.
+                ctx.injectThreat(16, 10, 1.0f);
+            })
+            .action(90, "refresh threat intel", ctx -> ctx.refreshInjectedThreats())
+            .action(180, "refresh threat intel", ctx -> ctx.refreshInjectedThreats())
+            .action(270, "refresh threat intel", ctx -> ctx.refreshInjectedThreats())
+            .action(360, "refresh threat intel", ctx -> ctx.refreshInjectedThreats())
+            .assertThat("pre-aims the corner arc on approach (>= 4 northward-facing samples "
+                    + "while south of the door, t60-400)",
+                view -> northFacingSamples(view, "pie", 60, 400, -0.3) >= 4)
+            // Hold doctrine docks within the 10-block hold radius; the room
+            // entry itself is not required (cover inside radius wins).
+            .assertThat("march reaches hold radius of the objective (final dist to (16,8) <= 10.5)",
+                view -> {
+                    SimSample last = lastSample(view, "pie");
+                    return last != null && Math.hypot(last.state.position.x - 16.5,
+                        last.state.position.z - 8.5) <= 10.5;
+                })
+            .build();
+    }
+
+    /** A/B baseline twin of cqb_corner_pie: asserts the OLD wall-facing aim. */
+    private static SimScenario cqbCornerFrozenAimBaseline() {
+        return SimScenario.builder("cqb_corner_frozen_aim_baseline")
+            .description("BASELINE (expected FAIL after the corner doctrine): documents the old "
+                + "behavior for the same corner approach - aim trails the body, never pre-aims "
+                + "the arc beyond the corner while approaching. Pair of cqb_corner_pie.")
+            .duration(700)
+            .armed()
+            .terrain(t -> t.cqbCourse())
+            .setup(ctx -> {
+                ctx.spawnAnchor(26, 0, 30);
+                SoldierEntity pie = ctx.spawnFriendly(ModEntities.SOLDIER.get(), "pie", 26, 0, 22, SquadMode.HOLD);
+                pie.setCQB(true);
+                pie.setHoldPosition(ctx.terrain.at(16, 0, 8));
+                ctx.injectThreat(16, 10, 1.0f);
+            })
+            .action(90, "refresh threat intel", ctx -> ctx.refreshInjectedThreats())
+            .action(180, "refresh threat intel", ctx -> ctx.refreshInjectedThreats())
+            .action(270, "refresh threat intel", ctx -> ctx.refreshInjectedThreats())
+            .action(360, "refresh threat intel", ctx -> ctx.refreshInjectedThreats())
+            .assertThat("BASELINE: aim never pre-aims northward on approach (< 4 northward-facing "
+                    + "samples, t60-400)",
+                view -> northFacingSamples(view, "pie", 60, 400, -0.3) < 4)
+            .build();
+    }
+
+    /**
+     * Phase 4: lost-contact watch. Close-quarters contact with a visible armed
+     * enemy breaks when the enemy slips behind the house wall. The soldier
+     * holds position and keeps his aim on the last-known spot through the
+     * watch window instead of drifting into routine scanning.
+     */
+    private static SimScenario cqbLostContactWatch() {
+        return SimScenario.builder("cqb_lost_contact_watch")
+            .description("Phase-4 CQB doctrine: an armed enemy breaks contact by slipping behind "
+                + "the cqbCourse house wall. The soldier holds position and keeps his aim on "
+                + "the last-known position for the lost-contact watch window instead of "
+                + "wandering; after the window he resumes normal behavior.")
+            .duration(600)
+            .armed()
+            .terrain(t -> t.cqbCourse())
+            .setup(ctx -> {
+                ctx.spawnAnchor(36, 0, 28);
+                SoldierEntity watch = ctx.spawnFriendly(ModEntities.SOLDIER.get(), "watch", 36, 0, 24, SquadMode.FOLLOW);
+                ctx.harden("watch");
+                EnemySoldierEntity enemy = ctx.spawnEnemyLabeled("threat", 28, 0, 20);
+                // Disarmed: contact must break by LoS, not by a firefight.
+                ctx.disarmSoldier("threat");
+            })
+            .action(120, "enemy slips behind the house wall", ctx -> {
+                if (ctx.byLabel.get("threat") instanceof EnemySoldierEntity e) {
+                    // Inside the east room, HOLD-pinned: the x=30 wall breaks
+                    // LoS from the soldier's position south-east of the house,
+                    // and the pin keeps him from wandering back out the door.
+                    EnemySoldierEntity moved = ctx.moveEnemy(e, 26, 0, 12);
+                    moved.setSquadMode(SquadMode.HOLD);
+                    moved.setHoldPosition(ctx.terrain.at(26, 0, 12));
+                }
+            })
+            // Displacement 9, not 2.5: a cover-goal relocation may lawfully
+            // take the legs during the window (the watch yields to cover
+            // moves); what it must not do is wander off or chase.
+            .assertThat("stays in the local area through the watch window (t120-200 displacement <= 9)",
+                view -> {
+                    SimSample at = sampleAt(view, "watch", 120);
+                    SimSample end = sampleAt(view, "watch", 200);
+                    if (at == null || end == null) return false;
+                    double d = Math.hypot(end.state.position.x - at.state.position.x,
+                        end.state.position.z - at.state.position.z);
+                    return d <= 9.0;
+                })
+            .assertThat("keeps aim on the last-known spot during the watch window "
+                    + "(t130-195 west-facing)",
+                view -> {
+                    int facing = 0;
+                    for (SimSample s : view.timeline().series("watch")) {
+                        if (s.tick < 130 || s.tick > 195) continue;
+                        double fx = -Math.sin(Math.PI * s.headYaw / 180.0);
+                        double fz = Math.cos(Math.PI * s.headYaw / 180.0);
+                        if (fx < -0.2 && fz < 0.2) facing++;
+                    }
+                    // Samples land every 5t: the 65t window holds ~13; a
+                    // lawful mid-window cover relocation may drag the aim
+                    // briefly, so half the window suffices.
+                    return facing >= 6;
+                })
+            // No resume assertion: ThreatTracker keeps last-known 600t by
+            // design, so the aim lingers well past the watch window. The
+            // doctrine under test is the hold+aim during the window.
             .build();
     }
 

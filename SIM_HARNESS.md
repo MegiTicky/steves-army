@@ -308,6 +308,41 @@ green runs; detector noise under suppression is exempted (see above). The
 `ExposedWhileHiding` flags on rubble rows are the known half-cover exposure
 family (see lone-block findings), not a phase-3 regression.
 
+### Combat positioning rework (2026-10-08, phase 4 — CQB doorway/corner doctrine)
+
+Three aim/flow behaviors for close-quarters movement, all riding the existing
+CQB caution activation (manual CQB toggle or enemy near path):
+
+- **Doorway queueing** (`CqbSteeringAdvisor.isDoorwayBlocked` +
+  `CoverPositionController.tickDoorwayQueueHold`): a wall-narrow passage
+  (frame solids along the travel axis, open sides) held occupied by a squadmate
+  within `cqbDoorwaySpacing` (3.5) ahead stops the follower to a creep facing
+  the passage — single-file stack, no clumping in the fatal funnel. Lives in
+  an UNCONDITIONAL branch of MoveControl.tick BEFORE the movement-mode split,
+  so it holds every movement owner alike: cover approaches (controller moves
+  bypass `tickCautionSteering` — that placement was tried and failed), GO_TO
+  relocations, hold marches, and attack approaches.
+- **Corner pie-slicing** (`CqbSteeringAdvisor.getCornerWatchPos`, consumed in
+  SoldierCombatGoal.tickScanning): while approaching a path bend with a known
+  threat within 12 blocks of the apex, pre-aim 4 blocks past the corner into
+  the arc the corner opens into (eye height). Aim leads the body around the
+  corner instead of trailing it.
+- **Lost-contact watch** (`SoldierCombatGoal.shouldStandLostContactWatch`):
+  close-quarters contact that just broke (freshest threat memory younger than
+  `cqbLostContactWatchTicks`, 80t) holds the soldier in place, aim on
+  last-known — yields to SEEKING/REPOSITIONING cover states, exposed-combat
+  moves/plants, and only stops navigation in the open (docked soldiers keep
+  the dock; the existing last-known aim chain already watches).
+
+Recording: frames now carry `yh` (head yaw) for aim-orientation assertions.
+
+| Scenario | What it verifies |
+|---|---|
+| `cqb_doorway_queue` | Two manual-CQB soldiers funnel into the house through one door: never both within 1.5 of the door at once (single-file), both get inside |
+| `cqb_corner_pie` | Manual-CQB march around the west door with squad intel past the corner: >= 4 northward-facing (pre-aim) samples on approach, march reaches hold radius |
+| `cqb_corner_frozen_aim_baseline` | A/B twin (expected FAIL post-fix): asserts the old wall-facing aim |
+| `cqb_lost_contact_watch` | Armed enemy slips behind the house wall: soldier holds position and keeps west-facing aim through the watch window |
+
 ## Detectors (all run in every scenario)
 
 StuckSeek, SeekFailLoop, CoverOscillation, PeekThrash (incl. aborted

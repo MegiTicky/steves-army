@@ -1978,10 +1978,24 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
             return;
         }
         
+        // Corner pie-slicing: approaching a bend with the threat known to be
+        // near the remaining path - pre-aim the arc the corner opens into.
+        Vec3 cornerWatch = CqbSteeringAdvisor.getCornerWatchPos(soldier);
+        if (cornerWatch != null) {
+            soldier.getLookControl().setLookAt(cornerWatch.x, cornerWatch.y, cornerWatch.z, 30.0F, 30.0F);
+            return;
+        }
+
+        // Lost-contact watch (phase-4 CQB doctrine): close-quarters contact
+        // just broke - hold position and keep the aim on the last-known spot
+        // for the watch window instead of drifting into routine scanning.
         Optional<BlockPos> lastKnownPos = threatTracker.getLastKnownPosition();
         if (lastKnownPos.isPresent()) {
             BlockPos pos = lastKnownPos.get();
             soldier.getLookControl().setLookAt(pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5, 30.0F, 30.0F);
+            if (shouldStandLostContactWatch()) {
+                soldier.getNavigation().stop();
+            }
             return;
         }
         
@@ -1991,6 +2005,41 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
         if (nearestTarget.isPresent()) {
             soldier.getLookControl().setLookAt(nearestTarget.get(), 30.0F, 30.0F);
         }
+    }
+
+    /**
+     * True during the lost-contact watch window: close-quarters contact broke
+     * recently (the freshest threat memory is younger than the watch window)
+     * and the soldier is in the close-combat context. Stand and watch the
+     * last-known position; movement decisions owned by other doctrines
+     * (cover seek, repositioning, exposed-combat moves) are respected.
+     */
+    private boolean shouldStandLostContactWatch() {
+        if (!StevesArmyConfig.isExposedCombatEnabled()
+            || !StevesArmyConfig.isCqbCornerWatchEnabled()
+            || !soldier.isInCloseCombatContext()) {
+            return false;
+        }
+        ThreatTracker.ThreatInfo freshest = threatTracker.getFreshestThreatInfo();
+        if (freshest == null) {
+            return false;
+        }
+        long age = soldier.level().getGameTime() - freshest.lastSeenTime;
+        if (age > StevesArmyConfig.getCqbLostContactWatchTicks()) {
+            return false;
+        }
+        CoverBehaviorManager.CoverState coverState = soldier.getCoverBehaviorManager().getState();
+        if (coverState == CoverBehaviorManager.CoverState.SEEKING_COVER
+            || coverState == CoverBehaviorManager.CoverState.REPOSITIONING) {
+            return false;
+        }
+        if (ExposedCombatController.hasActiveMove(soldier)
+            || ExposedCombatController.plantHoldActive(soldier)) {
+            return false;
+        }
+        // Docked at cover already - the aim keeps watching the last-known spot
+        // (the scanning chain above), only the open-ground stand still applies.
+        return soldier.getCoverBehaviorManager().getCurrentCover() == null;
     }
 
     public List<LivingEntity> getPotentialTargets() {

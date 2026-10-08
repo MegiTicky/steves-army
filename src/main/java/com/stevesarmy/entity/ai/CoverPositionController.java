@@ -377,6 +377,18 @@ public class CoverPositionController extends MoveControl {
             return;
         }
 
+        // Doorway queueing runs BEFORE the movement-mode split: it must hold
+        // every movement owner alike - cover approaches (controller moves),
+        // GO_TO relocations, hold marches, and attack approaches. Caution
+        // gating (manual CQB or enemy near path) lives in the check.
+        if (this.mob instanceof SoldierEntity queueSoldier
+            && !StevesArmyMod.teleportOnlyMode
+            && tickDoorwayQueueHold(queueSoldier, anchorTarget)) {
+            this.debugMoveSource = "cqb-caution";
+            this.debugMoveReason = "doorway queue";
+            return;
+        }
+
         if (lastResult != MovementResult.IN_PROGRESS) {
             if (tickCautionSteering(anchorTarget)) {
                 return;
@@ -497,6 +509,36 @@ public class CoverPositionController extends MoveControl {
             soldier.traceRotationWrite("move-control:" + source, previousYaw, previousBodyYaw, previousHeadYaw,
                 "target=" + targetPos + ", speed=" + String.format("%.3f", this.speedModifier));
         }
+    }
+
+    /**
+     * Doorway queueing (phase-4 CQB doctrine): hold before a wall-narrow
+     * passage while a squadmate is still in it. Creep to a stop (never a hard
+     * freeze) facing the passage, gun up. Only under CQB caution (manual CQB
+     * toggle or an enemy near the remaining path). Returns true when it drove
+     * the tick.
+     */
+    private boolean tickDoorwayQueueHold(SoldierEntity soldier, Vec3 anchorTarget) {
+        if (!steeringAdvisor.isCautionActive(soldier)) {
+            return false;
+        }
+        if (soldier.getNavigation().isDone()
+            || !steeringAdvisor.isDoorwayBlocked(soldier)) {
+            return false;
+        }
+        net.minecraft.world.level.pathfinder.Path holdPath = soldier.getNavigation().getPath();
+        if (holdPath != null && !holdPath.isDone()) {
+            Vec3 node = holdPath.getNextEntityPos(soldier);
+            float faceYaw = (float) (Mth.atan2(node.z - this.mob.getZ(),
+                node.x - this.mob.getX()) * (180.0F / (float) Math.PI)) - 90.0F;
+            this.mob.setYRot(this.rotlerp(this.mob.getYRot(), faceYaw, 45.0F));
+        }
+        this.mob.setSpeed((float) (0.03 * this.mob.getAttributeValue(Attributes.MOVEMENT_SPEED)));
+        this.mob.setZza(1.0F);
+        this.mob.setXxa(0.0F);
+        applyCoverAnchorVelocity(anchorTarget);
+        this.debugLastSetVelocity = this.mob.getDeltaMovement();
+        return true;
     }
 
     /**

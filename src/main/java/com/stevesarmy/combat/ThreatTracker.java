@@ -74,6 +74,13 @@ public class ThreatTracker {
         return Optional.ofNullable(knownThreats.get(threatId));
     }
     
+    /** The most recently seen threat memory, or null when nothing is known. */
+    public ThreatInfo getFreshestThreatInfo() {
+        return knownThreats.values().stream()
+            .max(Comparator.comparingLong(info -> info.lastSeenTime))
+            .orElse(null);
+    }
+
     public Optional<BlockPos> getLastKnownPosition() {
         return knownThreats.values().stream()
             .max(Comparator.comparingLong(info -> info.lastSeenTime))

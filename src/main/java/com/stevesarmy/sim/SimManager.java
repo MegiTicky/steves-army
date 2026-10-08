@@ -320,7 +320,7 @@ public final class SimManager {
                 soldier.isPreparingOrReloading(),
                 soldier.getPose().name(), soldier.isHalfCoverRising(),
                 snap.currentCover != null ? soldier.getSyncedCoverCurrentHeight() : -1f,
-                dangerAtSoldier, dangerLegExposed));
+                dangerAtSoldier, dangerLegExposed, snap.headYaw));
             recorder.soldier(label, snap, los, nearestX, nearestZ,
                 shotCounts.getOrDefault(soldier.getUUID(), 0),
                 hasGun,

@@ -124,7 +124,8 @@ public final class SimRecorder {
             .append(",\"sk\":").append(s.seekingTicks)
             .append(",\"fs\":").append(s.failedSearches)
             .append(",\"st\":").append(s.stuckTicks)
-            .append(",\"los\":").append(quote(los == null ? "?" : los ? "y" : "n"));
+            .append(",\"los\":").append(quote(los == null ? "?" : los ? "y" : "n"))
+            .append(",\"yh\":").append(String.format("%.0f", s.headYaw));
         appendPos(current, "c", s.currentCover);
         appendPos(current, "t", s.targetCover);
         if (s.currentCoverType != null) {
