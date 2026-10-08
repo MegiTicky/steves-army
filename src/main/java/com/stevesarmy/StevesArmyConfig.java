@@ -76,6 +76,15 @@ public class StevesArmyConfig {
     public static final ForgeConfigSpec.IntValue CQB_HOLD_NO_SHOT_TIMEOUT_TICKS;
     public static final ForgeConfigSpec.IntValue CQB_HOLD_RELEASE_COOLDOWN_TICKS;
     public static final ForgeConfigSpec.IntValue CQB_HOLD_FREEZE_GRACE_TICKS;
+
+    public static final ForgeConfigSpec.BooleanValue EXPOSED_COMBAT_ENABLED;
+    public static final ForgeConfigSpec.IntValue EXPOSED_PLANT_MIN_TICKS;
+    public static final ForgeConfigSpec.IntValue EXPOSED_ADJUST_WINDOW_TICKS;
+    public static final ForgeConfigSpec.IntValue EXPOSED_ADJUST_MAX_ATTEMPTS;
+    public static final ForgeConfigSpec.IntValue EXPOSED_ADJUST_TIMEOUT_TICKS;
+    public static final ForgeConfigSpec.DoubleValue EXPOSED_SIDESTEP_BLOCKS;
+    public static final ForgeConfigSpec.DoubleValue EXPOSED_WITHDRAW_DISTANCE;
+    public static final ForgeConfigSpec.IntValue EXPOSED_WITHDRAW_TIMEOUT_TICKS;
     public static final ForgeConfigSpec.DoubleValue CLOSE_COMBAT_SEEK_RADIUS;
     public static final ForgeConfigSpec.IntValue CLOSE_COMBAT_REEVAL_INTERVAL_TICKS;
 
@@ -613,9 +622,10 @@ BUILDER.pop();
         CLOSE_COMBAT_SEEK_RADIUS = BUILDER
             .comment("Cover searches inside the close-combat context (or an emergency-range enemy)",
                      "are bounded to this radius: close-range protection must be a short, useful",
-                     "movement, not a long relocation under fire.",
-                     "Default: 10.0 blocks")
-            .defineInRange("closeCombatSeekRadius", 10.0, 4.0, 24.0);
+                     "movement, not a long relocation under fire. Wide enough to still see real",
+                     "protection near a squad position; small enough to exclude far-side pockets.",
+                     "Default: 14.0 blocks")
+            .defineInRange("closeCombatSeekRadius", 14.0, 4.0, 24.0);
 
         CLOSE_COMBAT_REEVAL_INTERVAL_TICKS = BUILDER
             .comment("Target re-evaluation interval inside the close-combat context (ordinary play",
@@ -623,6 +633,56 @@ BUILDER.pop();
                      "open field fights.",
                      "Default: 10 ticks")
             .defineInRange("closeCombatReevalIntervalTicks", 10, 4, 40);
+
+        BUILDER.pop();
+
+        BUILDER.push("exposed_combat");
+
+        EXPOSED_COMBAT_ENABLED = BUILDER
+            .comment("Deliberate no-cover combat doctrine: soldiers without usable cover plant and",
+                     "engage, make bounded sidesteps when their lane is blocked, withdraw from",
+                     "overrunning threats, and hold deliberately instead of standing frozen.",
+                     "false restores stand-in-place fallback.",
+                     "Default: true")
+            .define("exposedCombatEnabled", true);
+
+        EXPOSED_PLANT_MIN_TICKS = BUILDER
+            .comment("A chosen plant/hold action persists at least this long before re-deciding, so",
+                     "exposed soldiers act with purpose instead of strafing constantly.",
+                     "Default: 40 ticks (2 s)")
+            .defineInRange("exposedPlantMinTicks", 40, 10, 200);
+
+        EXPOSED_ADJUST_WINDOW_TICKS = BUILDER
+            .comment("How long a friendly-fire-blocked shot stays remembered as a blocked lane.",
+                     "Default: 40 ticks (2 s)")
+            .defineInRange("exposedAdjustWindowTicks", 40, 10, 200);
+
+        EXPOSED_ADJUST_MAX_ATTEMPTS = BUILDER
+            .comment("Bounded sidesteps per engagement: a failed adjustment never loops - after the",
+                     "cap the soldier plants, switches target, or holds.",
+                     "Default: 1")
+            .defineInRange("exposedAdjustMaxAttempts", 1, 0, 4);
+
+        EXPOSED_ADJUST_TIMEOUT_TICKS = BUILDER
+            .comment("A sidestep move that has not landed within this window is abandoned.",
+                     "Default: 30 ticks")
+            .defineInRange("exposedAdjustTimeoutTicks", 30, 10, 100);
+
+        EXPOSED_SIDESTEP_BLOCKS = BUILDER
+            .comment("Lateral reach of one bounded sidestep (blocks), perpendicular to the blocked",
+                     "aim direction, away from friendly bodies.",
+                     "Default: 2.5 blocks")
+            .defineInRange("exposedSidestepBlocks", 2.5, 0.5, 6.0);
+
+        EXPOSED_WITHDRAW_DISTANCE = BUILDER
+            .comment("Bounded retreat length when a threat overruns an exposed soldier (blocks).",
+                     "Default: 8.0 blocks")
+            .defineInRange("exposedWithdrawDistance", 8.0, 2.0, 24.0);
+
+        EXPOSED_WITHDRAW_TIMEOUT_TICKS = BUILDER
+            .comment("A withdrawal that has not ended within this window is abandoned.",
+                     "Default: 60 ticks (3 s)")
+            .defineInRange("exposedWithdrawTimeoutTicks", 60, 20, 200);
 
         BUILDER.pop();
 
@@ -1434,6 +1494,38 @@ BUILDER.pop();
 
     public static int getCqbHoldFreezeGraceTicks() {
         return CQB_HOLD_FREEZE_GRACE_TICKS.get();
+    }
+
+    public static boolean isExposedCombatEnabled() {
+        return EXPOSED_COMBAT_ENABLED.get();
+    }
+
+    public static int getExposedPlantMinTicks() {
+        return EXPOSED_PLANT_MIN_TICKS.get();
+    }
+
+    public static int getExposedAdjustWindowTicks() {
+        return EXPOSED_ADJUST_WINDOW_TICKS.get();
+    }
+
+    public static int getExposedAdjustMaxAttempts() {
+        return EXPOSED_ADJUST_MAX_ATTEMPTS.get();
+    }
+
+    public static int getExposedAdjustTimeoutTicks() {
+        return EXPOSED_ADJUST_TIMEOUT_TICKS.get();
+    }
+
+    public static double getExposedSidestepBlocks() {
+        return EXPOSED_SIDESTEP_BLOCKS.get();
+    }
+
+    public static double getExposedWithdrawDistance() {
+        return EXPOSED_WITHDRAW_DISTANCE.get();
+    }
+
+    public static int getExposedWithdrawTimeoutTicks() {
+        return EXPOSED_WITHDRAW_TIMEOUT_TICKS.get();
     }
 
     public static double getCloseCombatSeekRadius() {

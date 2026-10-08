@@ -3,6 +3,7 @@ package com.stevesarmy.entity.ai;
 import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.StevesArmyConfig;
 import com.stevesarmy.combat.CombatStateSnapshot;
+import com.stevesarmy.combat.GunIntegration;
 import com.stevesarmy.combat.TargetAcquisition;
 import com.stevesarmy.combat.ThreatAwareness;
 import com.stevesarmy.combat.VisibilityRay;
@@ -1609,8 +1610,11 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
         // Use squad-aware evaluation from the correct center, excluding other soldiers' reservations
         List<CoverFinder.ScoredCover> scored;
         if (!searchCenter.equals(soldier.blockPosition())) {
+            // The bounded searchRadius applies to center-based searches too -
+            // a hard-coded corridor span here ignored the close-combat bound
+            // and sent soldiers hunting "cover" beside the threat itself.
             scored = finder.evaluateAndScoreAllFromCenter(
-                searchCenter, soldier, threatDirection, threats, ATTACK_CORRIDOR_SEARCH_RADIUS, squadCtx);
+                searchCenter, soldier, threatDirection, threats, searchRadius, squadCtx);
         } else {
             scored = finder.evaluateAndScoreAll(
                 soldier, threatDirection, threats, searchRadius, false, squadCtx);
@@ -3382,6 +3386,26 @@ private void tickRepositioning() {
     private boolean shouldSeekCover() {
         ThreatAwareness threats = getThreats();
 
+        // An exposed-combat doctrine move (bounded sidestep, withdraw) owns the
+        // legs until it lands or times out; re-seeking mid-nudge is churn.
+        if (StevesArmyConfig.isExposedCombatEnabled()
+            && relocationType == RelocationType.NONE
+            && ExposedCombatController.hasActiveMove(soldier)) {
+            lastWantCoverReason = "exposed-move";
+            return false;
+        }
+
+        // After a failed seek round the exposed doctrine plant owns the soldier
+        // for a stability window - attack-driven seeks included, or a coverless
+        // fight churns seek rounds against terrain that has nothing to find.
+        // Each new failed round re-arms the window.
+        if (StevesArmyConfig.isExposedCombatEnabled()
+            && relocationType == RelocationType.NONE
+            && ExposedCombatController.plantHoldActive(soldier)) {
+            lastWantCoverReason = "planted-after-failed-seek";
+            return false;
+        }
+
         if (relocationType != RelocationType.NONE) {
             lastWantCoverReason = "reloc";
             return true;
@@ -3529,6 +3553,16 @@ private void tickRepositioning() {
     private void evaluateCoverState() {
         CoverPoint currentCover = getCoverManager().getCurrentCover();
         if (currentCover == null) {
+            // A doctrine-owned exposed fight (plant window, bounded sidestep,
+            // withdrawal) is deliberate exposed combat, not a seek: labelling
+            // it SEEKING_COVER stalls the follow gate and reads as a seek
+            // that never converges.
+            if (StevesArmyConfig.isExposedCombatEnabled()
+                && relocationType == RelocationType.NONE
+                && (ExposedCombatController.hasActiveMove(soldier)
+                    || ExposedCombatController.plantHoldActive(soldier))) {
+                return;
+            }
             getCoverManager().setState(CoverBehaviorManager.CoverState.SEEKING_COVER);
             return;
         }
@@ -4294,6 +4328,10 @@ private boolean shouldExitCoverForFollow() {
                     return CoverMoveResult.COVER_STARTED;
                 }
             }
+            // Every candidate was unusable (taken, unreachable, out of bound):
+            // same doctrine answer as a search that found nothing at all.
+            runExposedCombatFallback();
+            getCoverManager().setState(CoverBehaviorManager.CoverState.NO_COVER);
             logCoverSearchPerformance(finder, searchStarted, CoverMoveResult.NO_COVER_FOUND, "reservation");
             return CoverMoveResult.NO_COVER_FOUND;
         }
@@ -4317,6 +4355,12 @@ private boolean shouldExitCoverForFollow() {
             logCoverSearchPerformance(finder, searchStarted, CoverMoveResult.COVER_STARTED, "prone-no-cover");
             return CoverMoveResult.COVER_STARTED;
         }
+        // No cover is a supported combat situation: consult the exposed-combat
+        // doctrine for a deliberate action (plant and engage, bounded sidestep,
+        // withdraw, deliberate hold) instead of standing frozen at the search
+        // failure point. The seek lifecycle cooldown still applies, so a failed
+        // adjustment never loops.
+        runExposedCombatFallback();
         // Leave the active seeking state when this search found no route. The goal's
         // normal stop/cooldown lifecycle prevents a stationary soldier from rebuilding
         // the same failed candidate paths every tick.
@@ -4360,6 +4404,47 @@ private boolean shouldExitCoverForFollow() {
             return CoverMoveResult.COVER_STARTED;
         }
         return CoverMoveResult.NO_COVER_FOUND;
+    }
+
+    /**
+     * Runs the exposed-combat doctrine for a soldier whose search produced no
+     * usable cover: a deliberate action (plant and engage, bounded sidestep,
+     * withdraw, deliberate hold) instead of a frozen seek state.
+     */
+    private void runExposedCombatFallback() {
+        if (!StevesArmyConfig.isExposedCombatEnabled() || relocationType != RelocationType.NONE) {
+            return;
+        }
+        double nearestDistSq = Double.MAX_VALUE;
+        for (ThreatAwareness.ThreatInfo info : getThreats().getThreatInfos()) {
+            double d = soldier.distanceToSqr(Vec3.atCenterOf(info.position));
+            if (d < nearestDistSq) nearestDistSq = d;
+        }
+        boolean hasLoS = false;
+        LivingEntity combatTarget = soldier.getTarget();
+        if (combatTarget != null && combatTarget.isAlive()) {
+            hasLoS = TargetAcquisition.hasLineOfSight(soldier, combatTarget);
+        }
+        boolean gunReady = GunIntegration.isAnyGunLoaded() && GunIntegration.hasGun(soldier)
+            && !soldier.isPreparingOrReloading();
+        ExposedCombatController.Decision decision = ExposedCombatController.decide(
+            soldier, Math.sqrt(nearestDistSq), hasLoS, gunReady, getCoverManager().isSuppressed());
+        if (decision.moveTarget != null) {
+            Vec3 move = decision.moveTarget;
+            // Plain vanilla navigation: the controller's freeze gates must
+            // not apply to doctrine moves, and short nudges do not need
+            // the cover-path machinery.
+            soldier.getNavigation().moveTo(move.x, soldier.getY(), move.z, 1.0);
+        } else {
+            // Stationary doctrine action: hold the plant against immediate
+            // seek re-entry so a coverless fight doesn't churn position.
+            ExposedCombatController.armPlantHold(soldier);
+            soldier.getNavigation().stop();
+        }
+        if (DiagnosticLogManager.isCoverLoggingEnabled()) {
+            StevesArmyMod.LOGGER.info("[ExposedCombat] Soldier {} -> {} ({})",
+                soldier.getId(), decision.action, decision.reason);
+        }
     }
 
     private int reserveAttemptsCap(BlockPos searchCenter) {

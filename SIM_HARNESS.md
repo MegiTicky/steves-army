@@ -229,7 +229,37 @@ under the build limit).
 
 Config: the `close_combat` section (closeCombatRange/exitRange hysteresis 16/20, emergency
 range 5, overrun range 3, dock finish 2.5, hold no-shot timeout 60t, release cooldown 40t,
-seek radius 10, re-eval 10t). Fixture spacing is 3Y (48 scenarios fit under the build limit).
+seek radius 14, re-eval 10t). Fixture spacing is 3Y (53 scenarios fit under the build limit).
+
+### Combat positioning rework (2026-10-08, phase 2 — exposed combat)
+
+`ExposedCombatController` gives a soldier with NO usable cover a small dependable response
+set instead of a frozen seek state: PLANT_AND_ENGAGE (stability window), BOUNDED_ADJUST
+(one sidestep off an FF-blocked lane), WITHDRAW (checked distance, ends once not overrun +
+reaction window — no infinite kite), DELIBERATE_HOLD. The controller decides at the seek
+failure tails (`runExposedCombatFallback`, both the no-candidate tail and the
+reservation-exhausted tail); the plant window re-arms after every failed round and vetoes
+seek re-entry (attack-driven seeks included) so a coverless fight stops churning. During
+doctrine ownership `evaluateCoverState` keeps the cover state truthful (no false
+SEEKING_COVER). Fixtures: `SimManager.beginScenario` settles gun-handler armed mode BEFORE
+setup runs (a transitioning handler used to wipe setup-time disarms).
+
+| Scenario | What it verifies |
+|---|---|
+| `exposed_plant_engage` | Bare arena, stationary enemy 20 blocks: plants and fires promptly (TTFS ≤ 150t), damages the enemy |
+| `exposed_ff_sidestep` | Anchor on the aim line (every shot FF-blocked, LoS clear): ONE bounded sidestep reopens the lane; shots land after it |
+| `exposed_ff_frozen_baseline` | A/B twin (expected FAIL post-fix): asserts the old frozen-blocked-lane behavior |
+| `exposed_withdraw_overrun` | Disarmed rusher from 11 blocks: never overrun (min gap ≥ 2), withdraw ends once clear (no kite), shots land while disengaging |
+| `course_exposed_yard_fight` | Course scenario (street + house): fights from sparse rubble under real fire — tracers, damage, bounded roam |
+
+KNOWN FINDING on the three bare-arena scenarios (expected StuckSeek/FollowEscapeBlocked
+detector FAILs + wide roam): featureless platforms expose the pre-existing **far-side cover
+lure** — the legacy scorer claims far rim/far-side junk cover and the walk out reads as a
+seek. The doctrine assertions are the pass criteria; the lure penalty term is tracked
+separately (see cover-scoring findings, 2026-10-07).
+
+Config: the `exposed_combat` section (exposedCombatEnabled, plant min 40t, adjust window
+40t / max attempts 1 / timeout 30t / sidestep 2.5 blocks, withdraw distance 8 / timeout 60t).
 
 Every scenario except `open_field_baseline` (intentionally bare) places real
 cover: waist-high stone-brick rows (half cover, peekable) and 2-high stacks

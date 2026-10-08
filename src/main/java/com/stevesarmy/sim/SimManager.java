@@ -211,6 +211,10 @@ public final class SimManager {
             recorder.shot(shooter.getX(), shooter.getZ(), aim.x, aim.z);
             shotCounts.merge(shooter.getUUID(), 1, Integer::sum);
         };
+        // Armed mode must be settled BEFORE setup runs: transitioning the gun
+        // handler clears its per-entity state, which would silently undo any
+        // disarmSoldier() the setup performed.
+        SimGunHandler.setArmed(scenario.armed);
         scenario.setup.accept(context);
         enemyHealthStart = totalEnemyHealth();
         sortedActions.clear();
@@ -224,9 +228,6 @@ public final class SimManager {
         level.setThunderLevel(0.0f);
         level.getGameRules().getRule(GameRules.RULE_DAYLIGHT).set(false, level.getServer());
         level.getGameRules().getRule(GameRules.RULE_DOMOBSPAWNING).set(false, level.getServer());
-        // Armed scenarios fight with real sim guns (organic suppression both
-        // ways); unarmed ones keep the deterministic scripted-pressure model.
-        SimGunHandler.setArmed(scenario.armed);
         phase = Phase.RUNNING;
     }
 

@@ -1624,6 +1624,12 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
                 StevesArmyMod.LOGGER.info("[FriendlyFire] Soldier {} blocked shot - friendly in cone",
                     soldier.getId());
             }
+            // "My shot is obstructed" feeds the positioning doctrine: a
+            // permanently blocked lane is a repositioning problem, not just a
+            // skipped burst.
+            if (StevesArmyConfig.isExposedCombatEnabled()) {
+                ExposedCombatController.noteShotBlocked(soldier, aimPoint.position);
+            }
             resetDirectFireBurst();
             return;
         }

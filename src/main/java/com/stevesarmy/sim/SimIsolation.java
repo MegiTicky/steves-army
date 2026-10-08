@@ -30,5 +30,7 @@ public final class SimIsolation {
         // stale raytrace caches from the previous fixture's geometry must not
         // leak into the next scenario's LoS results
         com.stevesarmy.combat.VisibilityRay.invalidateCache(level);
+        // per-soldier exposed-combat action state must not leak between scenarios
+        com.stevesarmy.entity.ai.ExposedCombatController.resetAll();
     }
 }

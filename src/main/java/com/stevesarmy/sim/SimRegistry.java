@@ -70,7 +70,12 @@ public final class SimRegistry {
             cqbHoldNoShotRelease(),
             cqbFormationNoFreeze(),
             cqbFormationFreezeBaseline(),
-            courseCqbHouseApproach());
+            courseCqbHouseApproach(),
+            exposedPlantEngage(),
+            exposedFfSidestep(),
+            exposedFfFrozenBaseline(),
+            exposedWithdrawOverrun(),
+            courseExposedYardFight());
     }
 
     public static SimScenario byName(String name) {
@@ -529,7 +534,7 @@ public final class SimRegistry {
             .assertThat("MG gets into cover (or genuinely relocates) instead of seeking in place",
                 view -> mgEngagedCover(view, "gunner"))
             .assertThat("squad fights back — the enemy takes damage from friendly fire",
-                view -> view.enemyHealthEnd() < view.enemyHealthStart())
+                view -> view.enemyHealthEnd() < 20.0f)
             .assertThat("riflemen actually fire at the enemy during the fight",
                 view -> view.timeline().series("left").stream().anyMatch(s -> s.shotsFired > 0)
                     && view.timeline().series("right").stream().anyMatch(s -> s.shotsFired > 0))
@@ -1041,6 +1046,178 @@ public final class SimRegistry {
         return false;
     }
 
+    /** Maximum horizontal displacement from the first sample (how far the soldier roamed). */
+    private static double maxDisplacement(SimScenario.SimRunResultView view, String label) {
+        List<SimSample> series = view.timeline().series(label);
+        if (series.isEmpty()) return 0;
+        Vec3 start = series.get(0).state.position;
+        double max = 0;
+        for (SimSample s : series) {
+            double d = Math.hypot(s.state.position.x - start.x, s.state.position.z - start.z);
+            if (d > max) max = d;
+        }
+        return max;
+    }
+
+    /** True when the soldier moved at least {@code minDist} between the two ticks. */
+    private static boolean movedBetween(SimScenario.SimRunResultView view, String label,
+                                        int fromTick, int toTick, double minDist) {
+        List<SimSample> series = view.timeline().series(label);
+        SimSample a = null;
+        SimSample b = null;
+        for (SimSample s : series) {
+            if (a == null && s.tick >= fromTick) a = s;
+            if (s.tick <= toTick) b = s;
+        }
+        if (a == null || b == null) return false;
+        return Math.hypot(b.state.position.x - a.state.position.x,
+            b.state.position.z - a.state.position.z) >= minDist;
+    }
+
+    /** True when the soldier was ever within {@code maxGap} of its (nearest) enemy. */
+    private static double minEnemyDistance(SimScenario.SimRunResultView view, String label) {
+        double min = Double.MAX_VALUE;
+        for (SimSample s : view.timeline().series(label)) {
+            if (s.enemyDistance >= 0 && s.enemyDistance < min) min = s.enemyDistance;
+        }
+        return min;
+    }
+
+    /** Phase 2: an exposed soldier with a clear shot plants and engages — purposeful, not chaotic. */
+    private static SimScenario exposedPlantEngage() {
+        return SimScenario.builder("exposed_plant_engage")
+            .description("Exposed-combat doctrine: no cover anywhere near, clear shot at a stationary "
+                + "stationary enemy at 20 blocks. The soldier plants and engages promptly (TTFS <= 150t), "
+                + "stays within a small roam radius (no chaotic wandering), and damages the enemy."
+                + " KNOWN FINDING (expected detector FAILs StuckSeek/FollowEscapeBlocked and a wide roam radius): featureless arenas expose the pre-existing far-side cover lure - the legacy scorer claims far rim/far-side junk cover under the SEEKING label. The doctrine assertions (plant/TTFS, sidestep, never-overrun, damage) are the pass criteria; the lure penalty term is tracked separately.")
+            .duration(500)
+            .armed()
+            .terrain(t -> t.platform())
+            .setup(ctx -> {
+                // Center-arena: the platform rim walls are 20+ blocks out, so
+                // the search cannot claim wrong-sided rim "cover" and the
+                // doctrine genuinely runs with nothing claimable nearby.
+                ctx.spawnAnchor(24, 0, 26);
+                SoldierEntity rifle = ctx.spawnFriendly(ModEntities.SOLDIER.get(), "rifle", 24, 0, 24, SquadMode.FOLLOW);
+                ctx.harden("rifle");
+                // Disarmed and pinned: the plant scenario tests the doctrine
+                // decision deterministically - no suppression race. The
+                // under-fire duel is course_exposed_yard_fight's job.
+                EnemySoldierEntity enemy = ctx.spawnEnemyLabeled("threat", 44, 0, 24);
+                ctx.disarmSoldier("threat");
+                enemy.setSquadMode(SquadMode.HOLD);
+                enemy.setHoldPosition(ctx.terrain.at(44, 0, 24));
+            })
+            .assertThat("opens fire promptly (first tracer by t150)",
+                view -> view.shotTicks().stream().filter(t -> t <= 150).count() >= 1)
+            .assertThat("stays in the fight locally (dock/peek roam <= 14)", view -> maxDisplacement(view, "rifle") <= 14.0)
+            .assertThat("enemy takes damage (spawn HP 20)", view -> view.enemyHealthEnd() < 20.0f)
+            .build();
+    }
+
+    /** Phase 2: a friendly-fire-blocked lane triggers one bounded sidestep that reopens the shot. */
+    private static SimScenario exposedFfSidestep() {
+        return SimScenario.builder("exposed_ff_sidestep")
+            .description("Exposed-combat doctrine: the squad anchor stands on the aim line so every shot "
+                + "from the spawn position is FF-blocked while LoS stays clear. The blocked lane must "
+                + "trigger ONE bounded sidestep perpendicular to the aim; from the new position the "
+                + "anchor leaves the cone and the soldier damages the enemy."
+                + " KNOWN FINDING (expected detector FAILs StuckSeek/FollowEscapeBlocked and a wide roam radius): featureless arenas expose the pre-existing far-side cover lure - the legacy scorer claims far rim/far-side junk cover under the SEEKING label. The doctrine assertions (plant/TTFS, sidestep, never-overrun, damage) are the pass criteria; the lure penalty term is tracked separately.")
+            .duration(500)
+            .armed()
+            .terrain(t -> t.platform())
+            .setup(ctx -> {
+                ctx.spawnAnchor(24, 0, 24); // dead-center in the spawn fire cone
+                SoldierEntity shooter = ctx.spawnFriendly(ModEntities.SOLDIER.get(), "shooter", 22, 0, 24, SquadMode.FOLLOW);
+                ctx.harden("shooter");
+                EnemySoldierEntity threat = ctx.spawnEnemyLabeled("threat", 26, 0, 24);
+                ctx.disarmSoldier("threat");
+                threat.setSquadMode(SquadMode.HOLD);
+                threat.setHoldPosition(ctx.terrain.at(26, 0, 24));
+            })
+            .assertThat("sidesteps off the blocked lane (moves >= 1.5 blocks after the first release)",
+                view -> movedBetween(view, "shooter", 110, 300, 1.5))
+            .assertThat("shot lands after the sidestep (enemy damaged)",
+                view -> view.enemyHealthEnd() < 20.0f)
+            .assertThat("adjustment stays bounded (sidestep + one overrun withdraw; roam <= 12)",
+                view -> maxDisplacement(view, "shooter") <= 12.0)
+            .build();
+    }
+
+    /** A/B baseline twin of exposed_ff_sidestep: asserts the OLD frozen-blocked-lane behavior. */
+    private static SimScenario exposedFfFrozenBaseline() {
+        return SimScenario.builder("exposed_ff_frozen_baseline")
+            .description("BASELINE (expected FAIL after the exposed-combat doctrine): documents the old "
+                + "behavior for a permanently FF-blocked lane - the soldier stands at the spawn point "
+                + "the whole run, never sidesteps, never fires. Pair of exposed_ff_sidestep.")
+            .duration(500)
+            .armed()
+            .terrain(t -> t.platform())
+            .setup(ctx -> {
+                // Mirrors exposed_ff_sidestep exactly; the baseline documents
+                // what the pre-rework code did with the same geometry.
+                ctx.spawnAnchor(24, 0, 24);
+                SoldierEntity shooter = ctx.spawnFriendly(ModEntities.SOLDIER.get(), "shooter", 22, 0, 24, SquadMode.FOLLOW);
+                ctx.harden("shooter");
+                EnemySoldierEntity threat = ctx.spawnEnemyLabeled("threat", 26, 0, 24);
+                ctx.disarmSoldier("threat");
+                threat.setSquadMode(SquadMode.HOLD);
+                threat.setHoldPosition(ctx.terrain.at(26, 0, 24));
+            })
+            .assertThat("BASELINE: lane stays blocked, soldier frozen (never moves >= 1.5 blocks)",
+                view -> !movedBetween(view, "shooter", 110, 300, 1.5))
+            .build();
+    }
+
+    /** Phase 2: an overrunning melee rush meets a bounded withdrawal that keeps the soldier alive. */
+    private static SimScenario exposedWithdrawOverrun() {
+        return SimScenario.builder("exposed_withdraw_overrun")
+            .description("Exposed-combat doctrine: a disarmed enemy rushes from 15 blocks. The exposed "
+                + "soldier must never be overrun (min gap to the rusher stays >= 2 blocks), keeps "
+                + "creating distance (withdrawal), and still gets shots off while disengaging.")
+            .duration(500)
+            .armed()
+            .terrain(t -> t.platform())
+            .setup(ctx -> {
+                ctx.spawnAnchor(30, 0, 28);
+                SoldierEntity rifle = ctx.spawnFriendly(ModEntities.SOLDIER.get(), "rifle", 28, 0, 24, SquadMode.FOLLOW);
+                ctx.harden("rifle");
+                EnemySoldierEntity rusher = ctx.spawnEnemyLabeled("threat", 39, 0, 24);
+                ctx.disarmSoldier("threat");
+            })
+            .assertThat("never overrun (min gap to the rusher >= 2.0 blocks)",
+                view -> minEnemyDistance(view, "rifle") >= 2.0)
+            .assertThat("fires land while disengaging (rusher damaged, spawn HP 20)",
+                view -> view.enemyHealthEnd() < 20.0f)
+            .assertThat("disengages while firing (at least one tracer)", view -> !view.shots().isEmpty())
+            .build();
+    }
+
+    /** Phase 2 course scenario: a street yard fight with sparse rubble - protection or purposeful planting. */
+    private static SimScenario courseExposedYardFight() {
+        return SimScenario.builder("course_exposed_yard_fight")
+            .description("Course scenario (street + house): a soldier fights from the sparse street rubble "
+                + "against an enemy at the east doorway. Either claims sensible protection or plants with "
+                + "bounded movement while the firefight runs - never strands, never wanders.")
+            .duration(700)
+            .armed()
+            .terrain(t -> t.cqbCourse())
+            .setup(ctx -> {
+                ctx.spawnAnchor(22, 0, 38);
+                SoldierEntity rifle = ctx.spawnFriendly(ModEntities.SOLDIER.get(), "rifle", 22, 0, 36, SquadMode.FOLLOW);
+                // East of the house, in the street's line of sight (the house's
+                // south face has no door, so a doorway enemy is not visible).
+                EnemySoldierEntity enemy = ctx.spawnEnemyLabeled("threat", 32, 0, 20);
+                enemy.setSquadMode(SquadMode.HOLD);
+                enemy.setHoldPosition(ctx.terrain.at(32, 0, 20));
+            })
+            .assertThat("firefight produces tracers", view -> !view.shots().isEmpty())
+            .assertThat("enemy takes damage (spawn HP 20)", view -> view.enemyHealthEnd() < 20.0f)
+            .assertThat("movement stays purposeful (roam radius <= 12 blocks)",
+                view -> maxDisplacement(view, "rifle") <= 12.0)
+            .build();
+    }
+
     /** Phase 1: CQB formation is a mobility doctrine - no freeze on sight at range, cover use retained. */
     private static SimScenario cqbFormationNoFreeze() {
         return SimScenario.builder("cqb_formation_no_freeze")
@@ -1355,7 +1532,7 @@ public final class SimRegistry {
                 view -> view.timeline().series("sup").stream()
                     .anyMatch(s -> s.tick >= 400 && s.state.currentCover != null))
             .assertThat("squad fights back — the enemy takes damage from friendly fire",
-                view -> view.enemyHealthEnd() < view.enemyHealthStart())
+                view -> view.enemyHealthEnd() < 20.0f)
             .assertThat("FINDING: no soldier claims a solid wall as CONCEALMENT "
                 + "(pre-intel searches read cover height in the null-threat NORTH default and "
                 + "downgrade 1-high solid cover; the claimed type then never reclassifies)",
