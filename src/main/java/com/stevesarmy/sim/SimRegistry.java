@@ -1364,6 +1364,11 @@ public final class SimRegistry {
         return false;
     }
 
+    /** True when the point lies inside the cqbCourse house shell. */
+    private static boolean inHouse(double x, double z) {
+        return x >= 15.0 && x <= 29.0 && z >= 7.0 && z <= 17.0;
+    }
+
     /** Last recorded sample, or null. */
     private static SimSample lastSample(SimScenario.SimRunResultView view, String label) {
         var series = view.timeline().series(label);
@@ -1406,19 +1411,24 @@ public final class SimRegistry {
                 // doctrine carries him through and the follower follows.
                 SoldierEntity alpha = ctx.spawnFriendly(ModEntities.SOLDIER.get(), "alpha", 16, 0, 28, SquadMode.HOLD);
                 alpha.setCQB(true);
-                alpha.setHoldPosition(ctx.terrain.at(26, 0, 9));
+                alpha.setHoldPosition(ctx.terrain.at(18, 0, 8));
                 SoldierEntity bravo = ctx.spawnFriendly(ModEntities.SOLDIER.get(), "bravo", 18, 0, 30, SquadMode.HOLD);
                 bravo.setCQB(true);
-                bravo.setHoldPosition(ctx.terrain.at(28, 0, 12));
+                bravo.setHoldPosition(ctx.terrain.at(20, 0, 9));
             })
             .assertThat("single-file door crossing (never both within 1.5 of the door at once)",
                 view -> !everBothNear(view, "alpha", "bravo", new net.minecraft.world.phys.Vec3(14.5, 0, 12.5), 1.5))
-            .assertThat("both soldiers reach the far room (final x > 23)",
+            // "Reached" = inside the house shell: both objectives sit in the
+            // west room, so an outside route cannot satisfy this - the funnel
+            // crossing is mandatory.
+            .assertThat("both soldiers reach their objectives inside the house "
+                    + "(final within x 15-29, z 7-17)",
                 view -> {
                     SimSample a = lastSample(view, "alpha");
                     SimSample b = lastSample(view, "bravo");
-                    return a != null && b != null
-                        && a.state.position.x > 23.0 && b.state.position.x > 23.0;
+                    if (a == null || b == null) return false;
+                    return inHouse(a.state.position.x, a.state.position.z)
+                        && inHouse(b.state.position.x, b.state.position.z);
                 })
             .build();
     }
@@ -2460,18 +2470,21 @@ public final class SimRegistry {
         return SimScenario.builder("danger_multi_squad_budget")
             .description("DANGER MAP: two independent squads (own anchors, soldiers, threats) share the "
                 + "global per-tick ray budget; both maps must bake hot cells around their own soldiers "
-                + "and neither may overshoot the budget (DangerBudgetExceeded is automatic).")
+                + "and neither may overshoot the budget (DangerBudgetExceeded is automatic). The squads "
+                + "sit beyond each other's detection range so the only intel is the injected sighting - "
+                + "cross-squad entity sightings would churn the threat view and wipe the bake.")
             .duration(400)
+            .field(48, 150)
             .action(0, "refresh injected threats", ctx -> ctx.refreshInjectedThreats())
             .action(150, "refresh injected threats", ctx -> ctx.refreshInjectedThreats())
             .action(300, "refresh injected threats", ctx -> ctx.refreshInjectedThreats())
             .setup(ctx -> {
                 com.stevesarmy.entity.TargetEntity alphaAnchor = ctx.spawnAnchor(6, 0, 12);
                 ctx.spawnFriendly(ModEntities.SOLDIER.get(), "alpha", 12, 0, 12, SquadMode.HOLD);
-                com.stevesarmy.entity.TargetEntity bravoAnchor = ctx.spawnAnchor(6, 0, 36);
-                ctx.spawnFriendly(ModEntities.SOLDIER.get(), "bravo", 12, 0, 36, SquadMode.HOLD);
+                com.stevesarmy.entity.TargetEntity bravoAnchor = ctx.spawnAnchor(6, 0, 130);
+                ctx.spawnFriendly(ModEntities.SOLDIER.get(), "bravo", 12, 0, 130, SquadMode.HOLD);
                 ctx.injectThreat(ctx.squadForAnchor(alphaAnchor), 40, 12);
-                ctx.injectThreat(ctx.squadForAnchor(bravoAnchor), 40, 36);
+                ctx.injectThreat(ctx.squadForAnchor(bravoAnchor), 40, 130);
             })
             .assertThat("alpha's cell bakes hot (>=80 by t100)",
                 view -> view.timeline().series("alpha").stream()

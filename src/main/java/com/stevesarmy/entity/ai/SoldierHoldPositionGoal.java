@@ -14,6 +14,11 @@ import java.util.EnumSet;
 
 public class SoldierHoldPositionGoal extends Goal {
     private static final float HOLD_RADIUS_SQ = 100.0f;
+    /** A dock only yields to the march when the hold is this far past the hold
+     * radius; a dock within the margin is the terminus, not a pause - yielding
+     * there just marches the soldier across the radius line and straight back
+     * to the same cover (the dock/re-dock pendulum). */
+    private static final float MARCH_RESUME_DIST_SQ = HOLD_RADIUS_SQ + 50.0f;
     private static final float RETURN_TO_COVER_DISTANCE_SQ = 9.0f;
     /** Retry interval for a request whose path never closed meaningful distance (failed, unreachable, or stale-cancelled). */
     private static final int HOLD_REPATH_FAILURE_INTERVAL_TICKS = 100;
@@ -64,6 +69,16 @@ public class SoldierHoldPositionGoal extends Goal {
         return dwelling;
     }
 
+    /** True when the hold objective is far enough past the hold radius that
+     * resuming the march moves the soldier meaningfully (street-crossing and
+     * GO_TO marches clear this easily; a dock a block outside the radius
+     * does not - see {@link #MARCH_RESUME_DIST_SQ}). */
+    private static boolean marchWorthwhile(SoldierEntity soldier) {
+        BlockPos hold = soldier.getHoldPosition();
+        if (hold == null || hold.equals(BlockPos.ZERO)) return false;
+        return soldier.distanceToSqr(hold.getX(), hold.getY(), hold.getZ()) > MARCH_RESUME_DIST_SQ;
+    }
+
     /**
      * Street-crossing doctrine: true when a docked soldier must yield the legs
      * and resume the march - hold objective still beyond the hold radius, quiet
@@ -88,7 +103,7 @@ public class SoldierHoldPositionGoal extends Goal {
         if (why == null && coverManager.isSuppressed()) why = "pressured";
         BlockPos hold = why == null ? soldier.getHoldPosition() : null;
         if (why == null && (hold == null || hold.equals(BlockPos.ZERO))) why = "no-hold";
-        if (why == null && soldier.distanceToSqr(hold.getX(), hold.getY(), hold.getZ()) <= HOLD_RADIUS_SQ) why = "arrived";
+        if (why == null && soldier.distanceToSqr(hold.getX(), hold.getY(), hold.getZ()) <= MARCH_RESUME_DIST_SQ) why = "arrived";
         if (com.stevesarmy.debug.DiagnosticLogManager.isCoverScoreLoggingEnabled()
             && soldier.tickCount % 100 == 0) {
             StevesArmyMod.LOGGER.info("[MarchDwell] S{} resume? t{}: why={}", soldier.getId(), soldier.tickCount, why != null ? why : "dwell-pending-or-go");
@@ -150,6 +165,11 @@ public class SoldierHoldPositionGoal extends Goal {
                     // the overwatcher anchors his lane while the bounder crosses
                     return false;
                 } else if (dockDwellActive(soldier, coverManager)) {
+                    return false;
+                } else if (!marchWorthwhile(soldier)) {
+                    // dwell sat out but the hold is just past the radius - the
+                    // "march" would cross the radius line and re-dock on the
+                    // same cover; this dock is the terminus
                     return false;
                 }
             } else {
@@ -262,6 +282,10 @@ public class SoldierHoldPositionGoal extends Goal {
                 }
                 if (coverManager.isSuppressed()) {
                     DOCK_SINCE.put(soldier.getUUID(), (long) soldier.tickCount);
+                    soldier.getNavigation().stop();
+                    return;
+                }
+                if (!marchWorthwhile(soldier)) {
                     soldier.getNavigation().stop();
                     return;
                 }

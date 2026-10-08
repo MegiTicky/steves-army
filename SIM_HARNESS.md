@@ -281,13 +281,20 @@ terminus. `SoldierHoldPositionGoal.DOCK_SINCE` clocks each docked soldier;
 `CoverTacticalGoal.canContinueToUse` yields the legs once the quiet dwell
 (`holdMarchDwellTicks`, 80t) has sat out — but only when there is NO attack
 target (a live fight keeps the dock), not suppressed, not the bounder (crosses
-through), not the overwatch anchor, and the hold objective is still beyond the
-hold radius. The cover goal's stop releases the cover; the HOLD-mode seek veto
-(`isTravelingToObjective`) keeps quiet seek rounds from re-docking mid-march;
-arrival (within hold radius) stops the clock and the soldier takes a final
-cover normally. The close-combat context latch (16/20 hysteresis) deliberately
-does NOT reset the dwell — a live threat merely within 20 blocks must not
-re-freeze the march (that was the stall this phase removed).
+through), not the overwatch anchor, and the hold objective is beyond the
+RESUME MARGIN (`MARCH_RESUME_DIST_SQ` = hold radius + 50, i.e. the hold sits
+> ~12 blocks out). The margin matters: a dock a block outside the plain hold
+radius (distSq 112 vs 100) used to yield, march ~1.5 blocks across the radius
+line, arrive, and walk straight back to the same cover — a perpetual
+dock/re-dock pendulum (caught by `danger_multi_squad_budget`'s bake assert,
+whose churn also starved the second squad's shared ray budget). A dock inside
+the margin is the terminus and never yields. The cover goal's stop releases
+the cover; the HOLD-mode seek veto (`isTravelingToObjective`) keeps quiet seek
+rounds from re-docking mid-march; arrival (within hold radius) stops the clock
+and the soldier takes a final cover normally. The close-combat context latch
+(16/20 hysteresis) deliberately does NOT reset the dwell — a live threat
+merely within 20 blocks must not re-freeze the march (that was the stall this
+phase removed).
 
 Detector note: `CoverOscillation` ignores samples with suppression >= 0.3
 (under-fire pin/dive/re-dive is the suppressed-traveler doctrine working) and

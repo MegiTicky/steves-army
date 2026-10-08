@@ -34,6 +34,10 @@ public final class SimContext {
     public final List<EnemySoldierEntity> enemies = new ArrayList<>();
     public final Map<String, SoldierEntity> byLabel = new LinkedHashMap<>();
     public TargetEntity anchor;
+    /** Every anchor this scenario spawned — discardAll must remove all of them,
+     * not just the last (a leaked anchor persists in run/world and pollutes
+     * later runs that spawn at the same coordinates). */
+    public final List<TargetEntity> anchors = new ArrayList<>();
 
     /** Synthetic threat sighting written straight into a squad's shared intel (deterministic, no entity). */
     public record InjectedThreat(UUID threatId, Vec3 eye, float accuracy, BlockPos surface, UUID owningSquadId) {}
@@ -58,6 +62,7 @@ public final class SimContext {
             terrain.at(x, y, z).getZ() + 0.5, 0, 0);
         anchor.setPersistenceRequired();
         level.addFreshEntity(anchor);
+        anchors.add(anchor);
         return anchor;
     }
 
@@ -386,10 +391,11 @@ public final class SimContext {
     public void discardAll() {
         for (SoldierEntity s : friendlies) s.discard();
         for (LivingEntity e : enemies) e.discard();
-        if (anchor != null) anchor.discard();
+        for (TargetEntity a : anchors) a.discard();
         friendlies.clear();
         enemies.clear();
         byLabel.clear();
+        anchors.clear();
         anchor = null;
     }
 

@@ -202,6 +202,10 @@ public final class SimManager {
         recorder = new SimRecorder(scenario.width, scenario.depth);
         recorder.captureTerrain(terrain);
         forceChunks();
+        // The session-start sweep misses actors leaked into unloaded chunks of
+        // the saved world; now that this scenario's chunks are forced, sweep
+        // again so a leaked soldier/anchor cannot join the live run.
+        discardLeftoverSimEntities();
         context = new SimContext(level, terrain);
         timeline = new SimTimeline();
         enemyHealthStart = 0f;
