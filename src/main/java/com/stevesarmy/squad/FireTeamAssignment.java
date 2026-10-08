@@ -2,14 +2,13 @@ package com.stevesarmy.squad;
 
 import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.entity.SoldierEntity;
+import com.stevesarmy.entity.SoldierRole;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.StringTag;
-import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.level.saveddata.SavedData;
-import net.minecraftforge.registries.ForgeRegistries;
 
 import java.util.*;
 
@@ -107,26 +106,40 @@ public class FireTeamAssignment extends SavedData {
     }
 
     /**
-     * Evenly distributes each exact main-hand item type, then uses soldier positions to
-     * keep the members assigned to each team close together wherever those quotas allow.
+     * Evenly distributes each soldier ROLE, then uses soldier positions to
+     * keep the members assigned to each team close together wherever those
+     * quotas allow. Buckets are keyed by role, not held weapon: entity type is
+     * the authoritative role signal (an unequipped command spawn or a machine
+     * gunner holding its sidearm must still count as a machine gunner), and
+     * item-keyed buckets let spatially clustered roles land whole in one team.
      */
     public void rebalance(List<SoldierEntity> soldiers, Vec3 leaderPosition) {
+        // Soldiers in unloaded chunks are absent from the rebalance list but
+        // keep their roster slot: silently migrating them to the first active
+        // team would reshuffle offline squads behind the player's back.
+        Map<UUID, FireTeam> notRebalanced = new HashMap<>();
+        for (Map.Entry<FireTeam, List<UUID>> entry : teams.entrySet()) {
+            for (UUID id : entry.getValue()) {
+                notRebalanced.put(id, entry.getKey());
+            }
+        }
         for (List<UUID> list : teams.values()) {
             list.clear();
         }
         List<FireTeam> active = getActiveTeams();
         if (active.isEmpty()) return;
 
-        Map<String, List<SoldierEntity>> byWeapon = new TreeMap<>();
+        Map<SoldierRole, List<SoldierEntity>> byRole = new EnumMap<>(SoldierRole.class);
         for (SoldierEntity soldier : soldiers) {
-            byWeapon.computeIfAbsent(getWeaponId(soldier), ignored -> new ArrayList<>()).add(soldier);
+            notRebalanced.remove(soldier.getUUID());
+            byRole.computeIfAbsent(soldier.getRole(), ignored -> new ArrayList<>()).add(soldier);
         }
 
-        List<Map.Entry<String, List<SoldierEntity>>> weaponGroups = new ArrayList<>(byWeapon.entrySet());
-        weaponGroups.sort(Comparator
-            .<Map.Entry<String, List<SoldierEntity>>>comparingInt(entry -> entry.getValue().size())
+        List<Map.Entry<SoldierRole, List<SoldierEntity>>> roleGroups = new ArrayList<>(byRole.entrySet());
+        roleGroups.sort(Comparator
+            .<Map.Entry<SoldierRole, List<SoldierEntity>>>comparingInt(entry -> entry.getValue().size())
             .reversed()
-            .thenComparing(Map.Entry::getKey));
+            .thenComparing(entry -> entry.getKey().name()));
 
         Map<FireTeam, List<SoldierEntity>> assigned = new EnumMap<>(FireTeam.class);
         Map<FireTeam, Integer> teamSizes = new EnumMap<>(FireTeam.class);
@@ -135,8 +148,8 @@ public class FireTeamAssignment extends SavedData {
             teamSizes.put(team, 0);
         }
 
-        for (Map.Entry<String, List<SoldierEntity>> weaponGroup : weaponGroups) {
-            List<SoldierEntity> pending = new ArrayList<>(weaponGroup.getValue());
+        for (Map.Entry<SoldierRole, List<SoldierEntity>> roleGroup : roleGroups) {
+            List<SoldierEntity> pending = new ArrayList<>(roleGroup.getValue());
             pending.sort(Comparator.comparing(SoldierEntity::getUUID));
 
             Map<FireTeam, Integer> quotas = createWeaponQuotas(pending.size(), active, teamSizes);
@@ -148,7 +161,7 @@ public class FireTeamAssignment extends SavedData {
                 } else {
                     AssignmentCandidate candidate = selectClosestAssignment(pending, active, quotas, assigned, teamSizes);
                     if (candidate == null) {
-                        throw new IllegalStateException("No eligible fire team while rebalancing weapon group " + weaponGroup.getKey());
+                        throw new IllegalStateException("No eligible fire team while rebalancing role group " + roleGroup.getKey());
                     }
                     team = candidate.team();
                     soldier = candidate.soldier();
@@ -161,12 +174,12 @@ public class FireTeamAssignment extends SavedData {
                 pending.remove(soldier);
             }
         }
-        setDirty();
-    }
 
-    private static String getWeaponId(SoldierEntity soldier) {
-        ResourceLocation weaponId = ForgeRegistries.ITEMS.getKey(soldier.getMainHandItem().getItem());
-        return weaponId == null ? "minecraft:air" : weaponId.toString();
+        for (Map.Entry<UUID, FireTeam> entry : notRebalanced.entrySet()) {
+            FireTeam team = isActive(entry.getValue()) ? entry.getValue() : getActiveTeams().get(0);
+            teams.get(team).add(entry.getKey());
+        }
+        setDirty();
     }
 
     private static Map<FireTeam, Integer> createWeaponQuotas(

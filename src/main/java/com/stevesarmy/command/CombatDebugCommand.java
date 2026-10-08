@@ -54,6 +54,7 @@ import net.minecraft.core.Direction;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.phys.Vec3;
@@ -968,22 +969,46 @@ public class CombatDebugCommand {
 
     private static int showReservations(CommandContext<CommandSourceStack> context) {
         CommandSourceStack source = context.getSource();
-        var reservations = CoverReservationManager.getAllReservationCounts();
+        var reservations = CoverReservationManager.getReservationOwners();
+        var proneLanes = CoverReservationManager.getProneLaneOwners();
 
-        if (reservations.isEmpty()) {
+        if (reservations.isEmpty() && proneLanes.isEmpty()) {
             source.sendSuccess(() -> Component.literal("No cover reservations"), false);
             return 0;
         }
 
         source.sendSuccess(() -> Component.literal("=== COVER RESERVATIONS ==="), false);
-        source.sendSuccess(() -> Component.literal("Total: " + reservations.size()), false);
+        source.sendSuccess(() -> Component.literal(
+            "Standing covers: " + reservations.size() + " | Prone lanes: " + proneLanes.size()), false);
         for (var entry : reservations.entrySet()) {
             BlockPos pos = entry.getKey();
+            StringBuilder holders = new StringBuilder();
+            for (java.util.UUID uuid : entry.getValue()) {
+                if (holders.length() > 0) holders.append(", ");
+                holders.append(describeReservationHolder(source.getLevel(), uuid));
+            }
             source.sendSuccess(() -> Component.literal(
-                "  " + pos.getX() + "," + pos.getY() + "," + pos.getZ() + " | Soldiers: " + entry.getValue()
-            ), false);
+                "  " + pos.getX() + "," + pos.getY() + "," + pos.getZ() + " | " + holders), false);
+        }
+        for (var entry : proneLanes.entrySet()) {
+            BlockPos pos = entry.getValue();
+            String holder = describeReservationHolder(source.getLevel(), entry.getKey());
+            source.sendSuccess(() -> Component.literal(
+                "  prone " + pos.getX() + "," + pos.getY() + "," + pos.getZ() + " | " + holder), false);
         }
         return 1;
+    }
+
+    /** Owner name + role for a reservation dump; unresolvable UUIDs stay visible as unloaded. */
+    private static String describeReservationHolder(ServerLevel level, java.util.UUID uuid) {
+        Entity entity = level.getEntity(uuid);
+        if (entity instanceof com.stevesarmy.entity.SoldierEntity soldier) {
+            return soldier.getName().getString() + " (" + soldier.getRole().name().toLowerCase() + ")";
+        }
+        if (entity instanceof Player player) {
+            return player.getName().getString() + " (player)";
+        }
+        return entity != null ? entity.getName().getString() : "<unloaded " + uuid + ">";
     }
 
     private static int showSuppression(CommandContext<CommandSourceStack> context) {

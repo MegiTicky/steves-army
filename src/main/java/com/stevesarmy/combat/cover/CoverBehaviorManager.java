@@ -26,6 +26,8 @@ public class CoverBehaviorManager {
     
     private static final int PEEK_COUNT_PENALTY_THRESHOLD = 4;
     private static final float MAX_COVER_PENALTY = 0.60f;
+    /** "Physically in this cover" radius for keeping the reservation on clearCover (matches the manager's sweep). */
+    private static final double OCCUPIED_COVER_RADIUS_SQ = 6.25;
     
     private SoldierEntity soldier;
     private CoverState state = CoverState.NO_COVER;
@@ -287,19 +289,27 @@ public class CoverBehaviorManager {
     
     public void clearCover() {
         if (debugLog()) {
-            StevesArmyMod.LOGGER.info("[CoverBehaviorManager] Soldier {} clearCover: current={}, state={}->NO_COVER", 
+            StevesArmyMod.LOGGER.info("[CoverBehaviorManager] Soldier {} clearCover: current={}, state={}->NO_COVER",
                 soldier.getId(),
                 currentCover != null ? currentCover.getPosition().toString() : "null",
                 state);
         }
 
+        // Releasing the claim of a soldier still physically standing at the
+        // spot lets the next searcher (any role) reserve it and walk in. Keep
+        // the claim instead: the reservation manager's occupancy sweep keeps
+        // it alive while they stand there and frees it once they leave.
         if (currentCover != null) {
-            CoverReservationManager.release(currentCover.getPosition(), soldier);
+            if (!isPhysicallyOccupying(currentCover)) {
+                CoverReservationManager.release(currentCover.getPosition(), soldier);
+            }
             this.lastCover = currentCover;
             syncLastCover();
         }
         if (targetCover != null) {
-            CoverReservationManager.release(targetCover.getPosition(), soldier);
+            if (!isPhysicallyOccupying(targetCover)) {
+                CoverReservationManager.release(targetCover.getPosition(), soldier);
+            }
             this.targetCover = null;
             syncTargetCover();
         }
@@ -330,6 +340,12 @@ public class CoverBehaviorManager {
         soldier.refreshDimensions();
     }
     
+    private boolean isPhysicallyOccupying(CoverPoint cover) {
+        return soldier != null && cover != null
+            && soldier.position().distanceToSqr(net.minecraft.world.phys.Vec3.atCenterOf(cover.getPosition()))
+                <= OCCUPIED_COVER_RADIUS_SQ;
+    }
+
     public void clearTargetCover() {
         if (debugLog()) {
             StevesArmyMod.LOGGER.info("[CoverBehaviorManager] Soldier {} clearTargetCover: target={}", 

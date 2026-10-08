@@ -1,11 +1,14 @@
 package com.stevesarmy.sim;
 
+import com.stevesarmy.combat.cover.CoverFinder;
+import com.stevesarmy.combat.cover.CoverReservationManager;
 import com.stevesarmy.entity.EnemySoldierEntity;
 import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.registry.ModEntities;
 import com.stevesarmy.sim.scenario.SimContext;
 import com.stevesarmy.sim.scenario.SimScenario;
 import com.stevesarmy.squad.SquadMode;
+import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.phys.Vec3;
 
 import java.util.List;
@@ -27,6 +30,9 @@ public final class SimRegistry {
             mgRiflemanSeekContrast(),
             mgSuppressionRoundRobin(),
             mgDirectFireCadence(),
+            fireTeamRoleBalance(),
+            coverCrossRoleReservation(),
+            coverReservationKeepalive(),
             pairSuppressionLanes(),
             openFieldBaseline(),
             dockArrivalRoles(),
@@ -2082,5 +2088,223 @@ public final class SimRegistry {
             }
         }
         return null;
+    }
+
+    // 12. cross-role systems — fire team balance + reservation exclusivity ------
+
+    /**
+     * User report: the fire team balancer "sometimes puts all machine gunners
+     * into one group and riflemen into another instead of evenly distributing
+     * them". Recreation: eight EMPTY-HANDED soldiers (the command-spawn /
+     * sidearm-swapped state) spawned in two role clusters. Rebalance buckets
+     * by main-hand item, so all eight land in one minecraft:air bucket and
+     * proximity seeding pulls each spatial cluster whole into a single team.
+     * Role-keyed buckets must split both roles across the two teams instead.
+     */
+    private static SimScenario fireTeamRoleBalance() {
+        int[] mgPerTeam = new int[2];
+        int[] riflePerTeam = new int[2];
+        int[] assigned = new int[1];
+        return SimScenario.builder("fireteam_role_balance")
+            .description("Fire team rebalance with 4 MGs + 4 riflemen spawned in two role "
+                + "clusters, all empty-handed. Rebalance must bucket by ROLE: each team "
+                + "gets <=2 of each role instead of whole clusters, and no soldier is "
+                + "dropped from the rosters.")
+            .field(64, 64)
+            .duration(120)
+            .terrain(t -> t.platform())
+            .setup(ctx -> {
+                ctx.spawnAnchor(32, 0, 32);
+                ctx.spawnFriendly(ModEntities.MACHINE_GUNNER.get(), "mg1", 12, 0, 20, SquadMode.FOLLOW);
+                ctx.spawnFriendly(ModEntities.MACHINE_GUNNER.get(), "mg2", 14, 0, 22, SquadMode.FOLLOW);
+                ctx.spawnFriendly(ModEntities.MACHINE_GUNNER.get(), "mg3", 12, 0, 24, SquadMode.FOLLOW);
+                ctx.spawnFriendly(ModEntities.MACHINE_GUNNER.get(), "mg4", 14, 0, 26, SquadMode.FOLLOW);
+                ctx.spawnFriendly(ModEntities.SOLDIER.get(), "r1", 44, 0, 40, SquadMode.FOLLOW);
+                ctx.spawnFriendly(ModEntities.SOLDIER.get(), "r2", 46, 0, 42, SquadMode.FOLLOW);
+                ctx.spawnFriendly(ModEntities.SOLDIER.get(), "r3", 44, 0, 44, SquadMode.FOLLOW);
+                ctx.spawnFriendly(ModEntities.SOLDIER.get(), "r4", 46, 0, 46, SquadMode.FOLLOW);
+                for (String label : java.util.List.of("mg1", "mg2", "mg3", "mg4", "r1", "r2", "r3", "r4")) {
+                    ctx.disarmSoldier(label);
+                }
+            })
+            .action(10, "rebalance fire teams", ctx -> {
+                com.stevesarmy.squad.FireTeamAssignment fta =
+                    com.stevesarmy.squad.FireTeamAssignment.get(ctx.level, ctx.anchor.getUUID());
+                fta.rebalance(new java.util.ArrayList<>(ctx.friendlies), ctx.anchor.position());
+                java.util.Map<java.util.UUID, SoldierEntity> byId = new java.util.HashMap<>();
+                ctx.friendlies.forEach(s -> byId.put(s.getUUID(), s));
+                java.util.List<com.stevesarmy.squad.FireTeam> active = fta.getActiveTeams();
+                for (int i = 0; i < 2 && i < active.size(); i++) {
+                    for (java.util.UUID id : fta.getSoldiersInTeam(active.get(i))) {
+                        SoldierEntity s = byId.get(id);
+                        if (s == null) continue;
+                        assigned[0]++;
+                        if (s.getRole() == com.stevesarmy.entity.SoldierRole.MACHINE_GUNNER) {
+                            mgPerTeam[i]++;
+                        } else if (s.getRole() == com.stevesarmy.entity.SoldierRole.RIFLEMAN) {
+                            riflePerTeam[i]++;
+                        }
+                    }
+                }
+            })
+            .assertThat("no team receives more than 2 of the 4 machine gunners",
+                view -> mgPerTeam[0] <= 2 && mgPerTeam[1] <= 2)
+            .assertThat("no team receives more than 2 of the 4 riflemen",
+                view -> riflePerTeam[0] <= 2 && riflePerTeam[1] <= 2)
+            .assertThat("all 8 soldiers land in a team (none dropped)",
+                view -> assigned[0] == 8)
+            .build();
+    }
+
+    /**
+     * User report: "the occupied cover thing doesn't work well cross-role".
+     * The reservation manager keeps TWO maps that never check each other:
+     * standing-cover reservations (riflemen/AT) and MG prone-lane
+     * reservations. A rifleman's cover and an MG's prone lane can therefore
+     * occupy the same spot cross-role, while same-role pairs are excluded.
+     * Both directions and both write+query paths must respect a 3-block
+     * cross separation, and a real CoverFinder search must skip the
+     * prone-reserved spot.
+     */
+    private static SimScenario coverCrossRoleReservation() {
+        boolean[] proneRejectedAtReservedCover = new boolean[1];
+        boolean[] proneFreeAwayFromCover = new boolean[1];
+        boolean[] standRejectedAtProneLane = new boolean[1];
+        boolean[] standFreeAwayFromProne = new boolean[1];
+        double[] chosenCoverDistSqr = new double[1];
+        return SimScenario.builder("cover_cross_role_reservation")
+            .description("Standing-cover reservation and MG prone-lane reservation must "
+                + "exclude each other (3-block separation) in both directions, on both "
+                + "the write and query paths, and CoverFinder must not return the "
+                + "prone-reserved spot to a rifleman.")
+            .field(64, 64)
+            .duration(120)
+            .terrain(t -> {
+                t.platform();
+                t.coverRow(20, 20, 20, 40, 1);
+            })
+            .setup(ctx -> {
+                // No anchor: pure reservation/finder probe without squad AI noise.
+                ctx.spawnFriendly(ModEntities.SOLDIER.get(), "rifle", 24, 0, 30, SquadMode.FOLLOW);
+                ctx.spawnFriendly(ModEntities.MACHINE_GUNNER.get(), "mg", 16, 0, 26, SquadMode.FOLLOW);
+                ctx.spawnEnemyLabeled("threat", 40, 0, 30);
+                ctx.disarmSoldier("rifle");
+                ctx.disarmSoldier("mg");
+                ctx.disarmSoldier("threat");
+                ctx.harden("rifle");
+                ctx.harden("mg");
+                ctx.harden("threat");
+            })
+            .action(10, "rifleman reserves standing cover P; probe prone availability", ctx -> {
+                net.minecraft.core.BlockPos p = ctx.terrain.at(20, 0, 30).immutable();
+                CoverReservationManager.reserve(p, ctx.soldier("rifle"));
+                proneRejectedAtReservedCover[0] =
+                    !CoverReservationManager.isProneAvailableFor(p, ctx.soldier("mg"));
+                proneFreeAwayFromCover[0] =
+                    CoverReservationManager.isProneAvailableFor(ctx.terrain.at(20, 0, 38).immutable(), ctx.soldier("mg"));
+            })
+            .action(20, "swap: MG reserves prone lane at P; probe standing availability", ctx -> {
+                net.minecraft.core.BlockPos p = ctx.terrain.at(20, 0, 30).immutable();
+                CoverReservationManager.release(p, ctx.soldier("rifle"));
+                CoverReservationManager.reserveProne(p, ctx.soldier("mg"));
+                standRejectedAtProneLane[0] =
+                    !CoverReservationManager.isAvailableFor(p, ctx.soldier("rifle"));
+                standFreeAwayFromProne[0] =
+                    CoverReservationManager.isAvailableFor(ctx.terrain.at(20, 0, 38).immutable(), ctx.soldier("rifle"));
+            })
+            .action(30, "rifleman cover search with the prone lane reserved", ctx -> {
+                net.minecraft.core.BlockPos p = ctx.terrain.at(20, 0, 30).immutable();
+                SoldierEntity rifle = ctx.soldier("rifle");
+                LivingEntity threat = ctx.enemies.get(0);
+                Vec3 threatDir = threat.position().subtract(rifle.position()).normalize();
+                CoverFinder finder = new CoverFinder(ctx.level);
+                CoverFinder.ScoredCover choice = finder
+                    .findTopCovers(rifle, threatDir, java.util.List.of(threat), 8, 1, false)
+                    .stream().findFirst().orElse(null);
+                chosenCoverDistSqr[0] = choice == null
+                    ? Double.MAX_VALUE
+                    : choice.cover.getPosition().distSqr(p);
+            })
+            .assertThat("prone lane at a standing-reserved cover is rejected",
+                view -> proneRejectedAtReservedCover[0])
+            .assertThat("prone lanes stay open away from standing reservations",
+                view -> proneFreeAwayFromCover[0])
+            .assertThat("standing cover at a prone-reserved lane is rejected",
+                view -> standRejectedAtProneLane[0])
+            .assertThat("standing cover stays open away from prone lanes",
+                view -> standFreeAwayFromProne[0])
+            .assertThat("cover search does not return a spot within the cross separation of the prone lane",
+                view -> chosenCoverDistSqr[0] >= 9.0)
+            .build();
+    }
+
+    /**
+     * The lifecycle hole behind "two soldiers stack in one cover": a goal
+     * interruption calls clearCover(), which releases the reservation while
+     * the soldier is still physically standing at the spot, so the next
+     * searcher (any role) claims it and walks in. A reservation held by a
+     * live soldier physically occupying the spot must not age out, and must
+     * free once the holder actually leaves.
+     */
+    private static SimScenario coverReservationKeepalive() {
+        boolean[] aliveWhilePresent = new boolean[1];
+        boolean[] freedAfterLeave = new boolean[1];
+        return SimScenario.builder("cover_reservation_keepalive")
+            .description("A reservation whose holder physically occupies the spot survives "
+                + "its 30s timeout (occupancy keep-alive sweep); once the holder leaves, "
+                + "the same backdated reservation expires normally.")
+            .field(64, 64)
+            .duration(160)
+            .terrain(t -> {
+                t.platform();
+                t.coverRow(20, 20, 20, 40, 1);
+            })
+            .setup(ctx -> {
+                // The anchor is a static LivingEntity: a reservation holder that
+                // never wanders, so occupancy distance stays deterministic.
+                ctx.spawnAnchor(21, 0, 30);
+                ctx.spawnFriendly(ModEntities.SOLDIER.get(), "seeker", 30, 0, 34, SquadMode.FOLLOW);
+                ctx.disarmSoldier("seeker");
+                ctx.harden("seeker");
+            })
+            .action(10, "holder reserves cover P", ctx -> {
+                net.minecraft.core.BlockPos p = ctx.terrain.at(20, 0, 30).immutable();
+                CoverReservationManager.releaseAll(ctx.anchor);
+                CoverReservationManager.reserve(p, ctx.anchor);
+            })
+            .action(20, "backdate the reservation past its timeout while the holder stands at it", ctx ->
+                backdateReservation(ctx.anchor, ctx.terrain.at(20, 0, 30).immutable(), 31_000L))
+            .action(40, "sample: still reserved while physically occupied", ctx ->
+                aliveWhilePresent[0] = !CoverReservationManager.isAvailable(ctx.terrain.at(20, 0, 30).immutable()))
+            .action(60, "holder leaves; backdate again", ctx -> {
+                net.minecraft.core.BlockPos far = ctx.terrain.at(44, 0, 50);
+                ctx.anchor.moveTo(far.getX() + 0.5, far.getY(), far.getZ() + 0.5, 0, 0);
+                backdateReservation(ctx.anchor, ctx.terrain.at(20, 0, 30).immutable(), 31_000L);
+            })
+            .action(90, "sample: freed after the holder left", ctx ->
+                freedAfterLeave[0] = CoverReservationManager.isAvailable(ctx.terrain.at(20, 0, 30).immutable()))
+            .assertThat("reservation survives its timeout while the holder physically occupies the spot",
+                view -> aliveWhilePresent[0])
+            .assertThat("reservation frees once the holder walks away",
+                view -> freedAfterLeave[0])
+            .build();
+    }
+
+    /** Backdates a live reservation's wall-clock stamp (test seam for timeout behavior). */
+    @SuppressWarnings("unchecked")
+    private static void backdateReservation(net.minecraft.world.entity.LivingEntity holder,
+                                            net.minecraft.core.BlockPos pos, long backMillis) {
+        try {
+            java.lang.reflect.Field field = CoverReservationManager.class.getDeclaredField("reservationTimestamps");
+            field.setAccessible(true);
+            java.util.Map<java.util.UUID, java.util.Map<net.minecraft.core.BlockPos, Long>> stamps =
+                (java.util.Map<java.util.UUID, java.util.Map<net.minecraft.core.BlockPos, Long>>) field.get(null);
+            java.util.Map<net.minecraft.core.BlockPos, Long> perSoldier = stamps.get(holder.getUUID());
+            if (perSoldier != null && perSoldier.containsKey(pos)) {
+                perSoldier.put(pos, System.currentTimeMillis() - backMillis);
+            }
+        } catch (ReflectiveOperationException ignored) {
+            // Leave the stamp alone; the keep-alive assert will fail loudly instead.
+        }
     }
 }

@@ -7,42 +7,54 @@ import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
 public class CoverReservationManager {
-    
+
     private static final Map<BlockPos, Set<UUID>> coverReservations = new ConcurrentHashMap<>();
     private static final int MAX_RESERVATIONS_PER_COVER = 1;
     private static final long RESERVATION_TIMEOUT_MS = 30000;
     private static final Map<UUID, Map<BlockPos, Long>> reservationTimestamps = new ConcurrentHashMap<>();
+    /** Holder references so the tick sweep can keep physically-occupied spots reserved. */
+    private static final Map<UUID, java.lang.ref.WeakReference<LivingEntity>> reservationHolders = new ConcurrentHashMap<>();
     private static final double PRONE_RESERVATION_SEPARATION_SQ = 9.0;
     private static final Map<UUID, ProneReservation> proneReservations = new ConcurrentHashMap<>();
+    private static final Map<UUID, java.lang.ref.WeakReference<LivingEntity>> proneHolders = new ConcurrentHashMap<>();
+    /** A reservation whose holder stands this close to the spot does not age out. */
+    private static final double RESERVATION_OCCUPANCY_RADIUS_SQ = 6.25;
 
     private record ProneReservation(BlockPos position, long timestamp) {}
-    
+
     public static boolean reserve(BlockPos coverPos, LivingEntity soldier) {
         if (coverPos == null || soldier == null) {
             return false;
         }
-        
+
         UUID soldierUUID = soldier.getUUID();
         BlockPos key = coverPos.immutable();
-        
+
         synchronized (coverReservations) {
             Set<UUID> reservations = coverReservations.computeIfAbsent(key, k -> ConcurrentHashMap.newKeySet());
-            
+
             if (reservations.contains(soldierUUID)) {
-                setTimestamp(soldierUUID, key, System.currentTimeMillis());
+                setTimestamp(soldierUUID, key, System.currentTimeMillis(), soldier);
                 return true;
             }
-            
+
             if (reservations.size() >= MAX_RESERVATIONS_PER_COVER) {
                 cleanupExpiredReservations(key, reservations);
                 if (reservations.size() >= MAX_RESERVATIONS_PER_COVER) {
                     return false;
                 }
             }
-            
+
+            // Standing cover and prone lanes live in separate maps; without a
+            // cross-check a rifleman's cover and an MG's prone lane could
+            // claim the same spot cross-role.
+            if (blockedByProneLaneNear(key, soldierUUID)) {
+                return false;
+            }
+
             boolean added = reservations.add(soldierUUID);
             if (added) {
-                setTimestamp(soldierUUID, key, System.currentTimeMillis());
+                setTimestamp(soldierUUID, key, System.currentTimeMillis(), soldier);
             }
             return added;
         }
@@ -85,9 +97,10 @@ public class CoverReservationManager {
         if (soldier == null) {
             return;
         }
-        
+
         UUID soldierUUID = soldier.getUUID();
         proneReservations.remove(soldierUUID);
+        proneHolders.remove(soldierUUID);
         
         synchronized (coverReservations) {
             Iterator<Map.Entry<BlockPos, Set<UUID>>> iterator = coverReservations.entrySet().iterator();
@@ -114,24 +127,31 @@ public class CoverReservationManager {
         if (coverPos == null) {
             return false;
         }
-        
+
         BlockPos key = coverPos.immutable();
+        UUID exempt = soldier != null ? soldier.getUUID() : null;
         Set<UUID> reservations = coverReservations.get(key);
-        
+
         if (reservations == null || reservations.isEmpty()) {
-            return true;
+            return !blockedByProneLaneNear(key, exempt);
         }
-        
+
         cleanupExpiredReservations(key, reservations);
-        
-        if (reservations.size() < MAX_RESERVATIONS_PER_COVER) {
-            return true;
+
+        if (reservations.isEmpty()) {
+            return !blockedByProneLaneNear(key, exempt);
         }
-        
+
+        // Own claim never blocks re-validation (and a nearby own prone lane is
+        // exempted in the cross-check below) — only other soldiers' claims do.
         if (soldier != null && reservations.contains(soldier.getUUID())) {
             return true;
         }
-        
+
+        if (reservations.size() < MAX_RESERVATIONS_PER_COVER) {
+            return !blockedByProneLaneNear(key, exempt);
+        }
+
         return false;
     }
     
@@ -190,7 +210,13 @@ public class CoverReservationManager {
             ProneReservation current = proneReservations.get(soldierUUID);
             if (current != null && current.position().equals(key)) {
                 proneReservations.put(soldierUUID, new ProneReservation(key, System.currentTimeMillis()));
+                proneHolders.put(soldierUUID, new java.lang.ref.WeakReference<>(soldier));
                 return true;
+            }
+            // Reverse cross-check: a prone lane cannot claim ground next to a
+            // reserved standing-cover spot (see reserve()).
+            if (blockedByCoverReservationNear(key, soldierUUID)) {
+                return false;
             }
             for (Map.Entry<UUID, ProneReservation> entry : proneReservations.entrySet()) {
                 if (!entry.getKey().equals(soldierUUID)
@@ -199,14 +225,20 @@ public class CoverReservationManager {
                 }
             }
             proneReservations.put(soldierUUID, new ProneReservation(key, System.currentTimeMillis()));
+            proneHolders.put(soldierUUID, new java.lang.ref.WeakReference<>(soldier));
             return true;
         }
     }
 
     public static boolean isProneAvailableFor(BlockPos position, LivingEntity soldier) {
         if (position == null) return false;
+        BlockPos key = position.immutable();
+        UUID exempt = soldier != null ? soldier.getUUID() : null;
         synchronized (coverReservations) {
             cleanupProneReservations(System.currentTimeMillis());
+            if (blockedByCoverReservationNear(key, exempt)) {
+                return false;
+            }
             for (Map.Entry<UUID, ProneReservation> entry : proneReservations.entrySet()) {
                 if (soldier != null && entry.getKey().equals(soldier.getUUID())) continue;
                 if (entry.getValue().position().distSqr(position) <= PRONE_RESERVATION_SEPARATION_SQ) {
@@ -218,7 +250,36 @@ public class CoverReservationManager {
     }
 
     public static void releaseProne(LivingEntity soldier) {
-        if (soldier != null) proneReservations.remove(soldier.getUUID());
+        if (soldier != null) {
+            proneReservations.remove(soldier.getUUID());
+            proneHolders.remove(soldier.getUUID());
+        }
+    }
+
+    /** Reservation owners for debug display: standing cover pos -> claiming soldier UUIDs. */
+    public static Map<BlockPos, List<UUID>> getReservationOwners() {
+        Map<BlockPos, List<UUID>> result = new HashMap<>();
+        synchronized (coverReservations) {
+            for (Map.Entry<BlockPos, Set<UUID>> entry : coverReservations.entrySet()) {
+                cleanupExpiredReservations(entry.getKey(), entry.getValue());
+                if (!entry.getValue().isEmpty()) {
+                    result.put(entry.getKey(), new ArrayList<>(entry.getValue()));
+                }
+            }
+        }
+        return result;
+    }
+
+    /** Prone-lane owners for debug display: soldier UUID -> lane position. */
+    public static Map<UUID, BlockPos> getProneLaneOwners() {
+        Map<UUID, BlockPos> result = new HashMap<>();
+        synchronized (coverReservations) {
+            cleanupProneReservations(System.currentTimeMillis());
+            for (Map.Entry<UUID, ProneReservation> entry : proneReservations.entrySet()) {
+                result.put(entry.getKey(), entry.getValue().position());
+            }
+        }
+        return result;
     }
     
     public static Map<BlockPos, Integer> getAllReservationCounts() {
@@ -234,20 +295,45 @@ public class CoverReservationManager {
         return result;
     }
     
-    private static void setTimestamp(UUID soldierUUID, BlockPos coverPos, long time) {
+    private static void setTimestamp(UUID soldierUUID, BlockPos coverPos, long time, LivingEntity holder) {
         reservationTimestamps
             .computeIfAbsent(soldierUUID, k -> new ConcurrentHashMap<>())
             .put(coverPos, time);
+        if (holder != null) {
+            reservationHolders.put(soldierUUID, new java.lang.ref.WeakReference<>(holder));
+        }
     }
-    
+
     private static void removeTimestamp(UUID soldierUUID, BlockPos coverPos) {
         Map<BlockPos, Long> perSoldier = reservationTimestamps.get(soldierUUID);
         if (perSoldier != null) {
             perSoldier.remove(coverPos);
             if (perSoldier.isEmpty()) {
                 reservationTimestamps.remove(soldierUUID);
+                reservationHolders.remove(soldierUUID);
             }
         }
+    }
+
+    /** True when another soldier's prone lane sits within the cross separation of {@code key}. */
+    private static boolean blockedByProneLaneNear(BlockPos key, UUID exempt) {
+        for (Map.Entry<UUID, ProneReservation> entry : proneReservations.entrySet()) {
+            if (exempt != null && entry.getKey().equals(exempt)) continue;
+            if (entry.getValue().position().distSqr(key) <= PRONE_RESERVATION_SEPARATION_SQ) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** True when another soldier's standing-cover reservation sits within the cross separation of {@code key}. */
+    private static boolean blockedByCoverReservationNear(BlockPos key, UUID exempt) {
+        for (Map.Entry<BlockPos, Set<UUID>> entry : coverReservations.entrySet()) {
+            if (entry.getKey().distSqr(key) > PRONE_RESERVATION_SEPARATION_SQ) continue;
+            if (exempt != null && entry.getValue().contains(exempt)) continue;
+            return true;
+        }
+        return false;
     }
     
     private static void cleanupExpiredReservations(BlockPos coverPos, Set<UUID> reservations) {
@@ -275,20 +361,40 @@ public class CoverReservationManager {
         synchronized (coverReservations) {
             coverReservations.clear();
             reservationTimestamps.clear();
+            reservationHolders.clear();
             proneReservations.clear();
+            proneHolders.clear();
         }
     }
     
     public static void tick() {
         synchronized (coverReservations) {
             long currentTime = System.currentTimeMillis();
+
+            // Occupancy keep-alive: a reservation whose holder still physically
+            // occupies the spot does not age out. Goal interruptions clear the
+            // cover bookkeeping but leave the soldier standing there; without
+            // this the next searcher stacks into an occupied spot. Once the
+            // holder walks away the stamp stops refreshing and the reservation
+            // expires normally.
+            for (Map.Entry<BlockPos, Set<UUID>> entry : coverReservations.entrySet()) {
+                for (UUID uuid : entry.getValue()) {
+                    refreshIfPhysicallyOccupied(uuid, entry.getKey(), currentTime, reservationHolders,
+                        (u, t) -> refreshTimestamp(u, entry.getKey(), t));
+                }
+            }
+            for (Map.Entry<UUID, ProneReservation> entry : proneReservations.entrySet()) {
+                refreshIfPhysicallyOccupied(entry.getKey(), entry.getValue().position(), currentTime, proneHolders,
+                    (u, t) -> proneReservations.put(u, new ProneReservation(entry.getValue().position(), t)));
+            }
+
             cleanupProneReservations(currentTime);
-            
+
             Iterator<Map.Entry<BlockPos, Set<UUID>>> iterator = coverReservations.entrySet().iterator();
             while (iterator.hasNext()) {
                 Map.Entry<BlockPos, Set<UUID>> entry = iterator.next();
                 Set<UUID> reservations = entry.getValue();
-                
+
                 reservations.removeIf(uuid -> {
                     Map<BlockPos, Long> perSoldier = reservationTimestamps.get(uuid);
                     if (perSoldier == null) return true;
@@ -299,11 +405,31 @@ public class CoverReservationManager {
                     }
                     return false;
                 });
-                
+
                 if (reservations.isEmpty()) {
                     iterator.remove();
                 }
             }
+        }
+    }
+
+    /** Refreshes only the wall-clock stamp; holder registration stays in {@link #setTimestamp}. */
+    private static void refreshTimestamp(UUID soldierUUID, BlockPos coverPos, long time) {
+        Map<BlockPos, Long> perSoldier = reservationTimestamps.get(soldierUUID);
+        if (perSoldier != null) {
+            perSoldier.put(coverPos, time);
+        }
+    }
+
+    private static void refreshIfPhysicallyOccupied(UUID holderUuid, BlockPos pos, long now,
+                                                    Map<UUID, java.lang.ref.WeakReference<LivingEntity>> holders,
+                                                    java.util.function.BiConsumer<UUID, Long> refresh) {
+        java.lang.ref.WeakReference<LivingEntity> ref = holders.get(holderUuid);
+        LivingEntity holder = ref != null ? ref.get() : null;
+        if (holder != null && holder.isAlive()
+            && holder.position().distanceToSqr(net.minecraft.world.phys.Vec3.atCenterOf(pos))
+                <= RESERVATION_OCCUPANCY_RADIUS_SQ) {
+            refresh.accept(holderUuid, now);
         }
     }
 
