@@ -5646,6 +5646,12 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
     /**
      * CLEAR-stage job target: the coordinator-assigned blind spot while it is
      * still unchecked, falling through to the nearest unclaimed unchecked one.
+     * The nearest-unchecked tie is deliberately sticky: a soldier standing
+     * between two unchecked clusters is near-equidistant to both, and re-
+     * resolving the pick every tick dithers his advance (target flapping east
+     * and west, search centers churning, short back-and-forth fallback walks).
+     * The held target is only given up when it gets checked, an assigned
+     * claim replaces it, or a candidate is at most half the distance.
      * null means advance the plain way (approach corridor or area reposition).
      */
     private BlockPos resolveClearingPoi(ClearingCoordinator.ClearingView view) {
@@ -5655,6 +5661,18 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
         BlockPos mine = view.assignedPoi();
         if (mine != null && !view.assignedPoiChecked()) {
             return mine;
+        }
+        // No live claim (or the claim was just consumed): hold the previous
+        // open target rather than free-picking nearest every tick.
+        if (clearingPoiTarget != null
+            && ClearingCoordinator.isTargetStillOpen(soldier, clearingPoiTarget)) {
+            BlockPos next = view.nextPoi();
+            if (next == null || next.equals(clearingPoiTarget)) {
+                return clearingPoiTarget;
+            }
+            double keep = clearingPoiTarget.distSqr(soldier.blockPosition());
+            double candidate = next.distSqr(soldier.blockPosition());
+            return candidate < keep * 0.5 ? next : clearingPoiTarget;
         }
         return view.nextPoi();
     }

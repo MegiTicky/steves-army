@@ -146,12 +146,17 @@ public final class ClearingCoordinator {
 
             long gameTime = state.level.getGameTime();
             refreshObjectiveClocks(squad);
-            if (gameTime % HEAVY_INTERVAL_TICKS == 0) {
+            boolean heavy = gameTime % HEAVY_INTERVAL_TICKS == 0;
+            if (heavy) {
                 observe(state, squad);
                 updateContactPoints(state, squad);
                 updateStageAndCompletion(server, state, activity, squad);
             }
-            if (gameTime % CLAIM_REFRESH_TICKS == 0) {
+            // Claims reassign on the observe cadence, not their own: consuming a
+            // claim frees its owner, and a claim-less soldier falls back to a
+            // per-tick nearest-unchecked pick that dithers when he stands near
+            // the midpoint of two unchecked clusters.
+            if (heavy || gameTime % CLAIM_REFRESH_TICKS == 0) {
                 assignClaims(state, squad);
             }
         }
@@ -730,6 +735,24 @@ public final class ClearingCoordinator {
     public static boolean isInsideClearingArea(SoldierEntity soldier, BlockPos pos) {
         ClearingState state = stateForSoldier(soldier);
         return state != null && state.areaCells.contains(pos.asLong());
+    }
+
+    /**
+     * True when target is still a live, unchecked check target of this
+     * soldier's order. CoverTacticalGoal holds its chosen clearing target
+     * while this stays true — a soldier standing between two unchecked
+     * clusters is near-equidistant to both, and re-resolving "nearest" every
+     * tick dithers his advance between them instead of walking either down.
+     */
+    public static boolean isTargetStillOpen(SoldierEntity soldier, BlockPos target) {
+        ClearingState state = stateForSoldier(soldier);
+        if (state == null || target == null) {
+            return false;
+        }
+        if (state.checkedTick.containsKey(target.asLong())) {
+            return false;
+        }
+        return state.pois.contains(target) || state.contactPoints.containsValue(target);
     }
 
     /**
