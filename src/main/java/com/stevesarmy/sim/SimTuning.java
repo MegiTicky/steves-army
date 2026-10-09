@@ -53,6 +53,24 @@ public final class SimTuning {
     /** A hiding soldier with body rays visible to the threat this long has failed physically. */
     public static final int EXPOSED_HIDING_TICKS = 40;
 
+    // --- wave A engagement/strand detectors ----------------------------------
+
+    /** Visible + ready + fire-gated this long is a dead fire-decision strand: the
+     *  gate refuses what it could fire. Same reference scale as FIRE_STARVATION_TICKS. */
+    public static final int FIRE_DEADLOCK_TICKS = 100;
+    /** Faced this far off an in-range threat this long means the aim never settled
+     *  on a live contact (body never driven to the bearing). */
+    public static final int FACING_AWAY_TICKS = 40;
+    /** "Facing away" threshold: more than a right angle off the threat's bearing. */
+    public static final double FACING_AWAY_ERROR_DEG = 90.0;
+    /** Body-yaw direction flips inside one window that count as rotation thrash. */
+    public static final int ROTATION_OSCILLATION_FLIPS = 4;
+    /** Window (ticks) over which yaw direction flips are counted. */
+    public static final int ROTATION_OSCILLATION_WINDOW_TICKS = 60;
+    /** Stationary this long with the objective still far and no blocking excuse is
+     *  a dead advance strand (the machine's own escalation budgets sit at 60-200t). */
+    public static final int INTERIOR_STRAND_TICKS = 200;
+
     /** Follow-blocker strings that mean "cover machine owns the legs right now". */
     public static final String BLOCKED_SEEKING = "SEEKING_COVER";
     public static final String BLOCKED_REPOSITIONING = "REPOSITIONING";

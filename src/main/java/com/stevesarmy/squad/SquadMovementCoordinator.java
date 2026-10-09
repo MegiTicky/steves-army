@@ -63,6 +63,16 @@ public final class SquadMovementCoordinator {
         SHOT_TICKS.put(shooter.getUUID(), (long) server.getTickCount());
     }
 
+    /**
+     * Tick of this soldier's most recent successful shot, or null when it has
+     * never fired. Contact-plan base-of-fire support reads this directly: a
+     * soldier who fired recently is producing covering fire regardless of
+     * whether a formal bound is active.
+     */
+    public static Long lastSuccessfulShotTick(SoldierEntity soldier) {
+        return SHOT_TICKS.get(soldier.getUUID());
+    }
+
     /** True while this soldier should hold overwatch for a teammate's bound. */
     public static boolean isOverwatching(SoldierEntity soldier) {
         if (!StevesArmyConfig.isSquadBoundingEnabled()) return false;
@@ -174,6 +184,14 @@ public final class SquadMovementCoordinator {
     }
 
     private static boolean bounderIsAdvancing(SoldierEntity soldier) {
+        // ATTACK: bounding stays alive under a clearing order even inside
+        // close combat — the objective is the attack target, and the contact
+        // plan (not the close-combat bypass) now owns whether advancing is
+        // safe. Without this, the coordinator silently stood down in exactly
+        // the fights it exists for.
+        if (soldier.hasValidAttackTarget()) {
+            return soldier.blockPosition().distSqr(soldier.getAttackTargetPos()) > 100;
+        }
         if (soldier.isInCloseCombatContext()) return false;
         if (soldier.getSquadMode() == SquadMode.HOLD) {
             net.minecraft.core.BlockPos hold = soldier.getHoldPosition();
@@ -230,6 +248,10 @@ public final class SquadMovementCoordinator {
     }
 
     private static double objectiveDistanceSqr(SoldierEntity soldier) {
+        // Same ATTACK objective rule as bounderIsAdvancing.
+        if (soldier.hasValidAttackTarget()) {
+            return soldier.blockPosition().distSqr(soldier.getAttackTargetPos());
+        }
         if (soldier.getSquadMode() == SquadMode.HOLD) {
             net.minecraft.core.BlockPos hold = soldier.getHoldPosition();
             if (hold != null && !hold.equals(net.minecraft.core.BlockPos.ZERO)) {

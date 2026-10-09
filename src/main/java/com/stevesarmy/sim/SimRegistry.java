@@ -90,7 +90,10 @@ public final class SimRegistry {
             clearContactRevisit(),
             clearTrainingCourse(),
             clearBenchmarkNorthDoorFunnel(),
-            clearDeepObjectiveSequence());
+            clearDeepObjectiveSequence(),
+            clearHouseExit(),
+            cqbDoorContact(),
+            clearCheckerDeath());
     }
 
     public static SimScenario byName(String name) {
@@ -3662,6 +3665,396 @@ public final class SimRegistry {
             .assertThat("completion stayed blocked until obligations resolved, then SECURED followed",
                 view -> probe.securedSeen && probe.armedAtTick > 0
                     && probe.securedAtTick > probe.armedAtTick)
+            .build();
+    }
+
+    /**
+     * ACCEPTANCE (contact-plan strand): an assault squad spawns INSIDE house A
+     * of streetBlock with the attack ping planted in house B's back room. The
+     * order must carry the squad out A's single east door, across the 8-block
+     * open street, through B's west door, and into the partitioned back room —
+     * reaching the far house is not completing: the back-room checks must run
+     * before the order reads SECURED. Unarmed like its clear_divided_rooms
+     * twin (house B is empty on purpose: the acceptance is route + checks,
+     * not a fight).
+     */
+    private static SimScenario clearHouseExit() {
+        ClearingProbe probe = new ClearingProbe();
+        SimScenario.Builder builder = SimScenario.builder("clear_house_exit")
+            .description("ATTACK clearing across an open street: the squad starts inside house A "
+                + "(one east door) with the ping in house B's partitioned back room. The order "
+                + "must walk them out the door, across the exposed street, through B's door, "
+                + "and run the back-room checks before the order reads SECURED — entering the "
+                + "far house is not completion.")
+            // 3600: two structures plus an exposed crossing; the SECURE
+            // assemble walk has to bring every soldier physically inside
+            // before the settle window can even start (same tail that starved
+            // the deep sequence at 3000).
+            .duration(3600)
+            // The clearing flow's check-dock walk registers each successive
+            // check position as a cover claim — CoverOscillation reads that
+            // progression as churn. Suppressed for the clearing family until
+            // the detector learns to ignore dock ADVANCES (wave-B scope).
+            .suppressDetectors("CoverOscillation")
+            .terrain(t -> t.streetBlock());
+        addClearingProbe(builder, 40, 3580, 20, probe,
+            // House B interior including both door thresholds.
+            (x, z) -> x > 25.5 && x < 36.5 && z > 10.5 && z < 19.5);
+        return builder
+            .setup(ctx -> {
+                ctx.spawnAnchor(11, 0, 15); // inside house A, with the squad
+                ctx.spawnFriendly(ModEntities.SOLDIER.get(), "alpha", 9, 0, 12, SquadMode.HOLD);
+                ctx.spawnFriendly(ModEntities.SOLDIER.get(), "bravo", 13, 0, 17, SquadMode.HOLD);
+                ctx.spawnFriendly(ModEntities.SOLDIER.get(), "charlie", 12, 0, 13, SquadMode.HOLD);
+                ctx.issueAttackOrder(35, 15); // house B back room, past the partition door
+            })
+            .assertThat("squad reached house B", view -> probe.enteredZone)
+            .assertThat("every check-target was observed (fraction 1.0 — the back room was checked)",
+                view -> probe.maxCheckedFraction >= 0.999)
+            .assertThat("order completed as SECURED (entered, checked, settled)",
+                view -> probe.securedSeen)
+            .assertThat("attack targets released after completion",
+                view -> probe.targetsCleared)
+            .assertThat("every soldier ends inside house B or within 6 of the back-room ping",
+                view -> {
+                    for (String label : new String[] {"alpha", "bravo", "charlie"}) {
+                        SimSample last = null;
+                        java.util.List<SimSample> series = view.timeline().series(label);
+                        if (!series.isEmpty()) {
+                            last = series.get(series.size() - 1);
+                        }
+                        if (last == null) return false;
+                        boolean inB = last.state.position.x > 25.5 && last.state.position.x < 36.5
+                            && last.state.position.z > 10.5 && last.state.position.z < 19.5;
+                        double d = Math.hypot(last.state.position.x - 35.5,
+                            last.state.position.z - 15.5);
+                        if (!inB && d > 6.0) return false;
+                    }
+                    return true;
+                })
+            .build();
+    }
+
+    /**
+     * ACCEPTANCE (contact-plan strand, covering fire before the threshold):
+     * the clear_blocked_door east-room geometry with the east door OPEN — a
+     * single guarded entrance — and one armed defender HOLD-pinned just
+     * inside it. The ping sits in the room. The gate this scenario pins:
+     * nobody crosses the danger band (4.5 blocks around the defender's
+     * last-known, which the pin turns into a fixture constant) until one of
+     * the doctrine's gate conditions holds — a successful covering shot, the
+     * order latching STALLED, or a suppressed mate (the bypass the hard gate
+     * deliberately keeps open); once the gate opens, the checker crosses and
+     * the order completes. Guns armed on both sides — the exchange is organic.
+     */
+    private static SimScenario cqbDoorContact() {
+        ClearingProbe probe = new ClearingProbe();
+        // The guard is HOLD-pinned beside the door, so its last-known is a
+        // fixture constant: the center of the pinned spawn cell.
+        final double guardX = 28.5;
+        final double guardZ = 12.5;
+        // The gated band around the threat equals the overrun range (3.0):
+        // standing at the door threshold is bypass-legal, and the ungated
+        // initial approach legitimately docks soldiers just outside it —
+        // crossing INTO the band is what the gate polices.
+        final double dangerBand = 3.0;
+        // Live gate-state holders the probe actions fill. Min-seen, because
+        // lastSuccessfulShotTick reports the LAST successful shot — the
+        // earliest value we ever observe is the first one.
+        final long[] firstCoverShot = {Long.MAX_VALUE};
+        final long[] firstStallTick = {Long.MAX_VALUE};
+        // Earliest observed contact-open (ContactPlan.contactOpenTick): feeds
+        // the bloodless-standoff leg of the gate — open + attackClearStallTicks.
+        final long[] firstOpenTick = {Long.MAX_VALUE};
+        SimScenario.Builder builder = SimScenario.builder("cqb_door_contact")
+            .description("ATTACK clearing onto a guarded door: one armed defender holds the east "
+                + "room's single entrance from just inside. The contact gate must hold the "
+                + "squad out of the room until a mate registers a successful covering shot, "
+                + "the order reports STALLED, a mate is suppressed, or the contact sits "
+                + "bloodless for a full stall window (the doctrine's bypasses) - after the "
+                + "gate opens the squad closes on the contact, the fight resolves, and the "
+                + "order completes.")
+            // 4800: the training-course clock — an armed 2v1 through one
+            // doorway can take the whole exchange, and the SECURE settle
+            // needs the quiet tail. The 4200 clock armed SECURED at ~t4190,
+            // one probe sample past the last poll at 4180.
+            .duration(4800)
+            .armed()
+            // Expected FAIL until WP3/WP4 — this run measures three known
+            // gaps it exposed: (1) squad intel only receives sighting-grade
+            // writes (head-ray LoS), so through a doorway the contact opens
+            // only when the assemble walk closes to point-blank — the hard
+            // gate has nothing to gate with during the check-dock walks, and
+            // they enter the danger space ungated; (2) the fire chain's
+            // burst-cooldown strand holds visible+ready soldiers shotless for
+            // the whole clock (no deadlock watchdog yet); (3) the assemble
+            // walk is coordinator movement, not a ContactPlan-gated advance.
+            .expectedFail(
+                "contact opens late (intel feed gap, WP3/4), fire-chain burst_cd strand (WP4), "
+                    + "ungated assemble entry")
+            .terrain(t -> {
+                t.cqbCourse();
+                // Seal the partition door: the east room keeps ONE entrance —
+                // the guarded east door — so every entry is a contact crossing.
+                for (int y = 0; y < 3; y++) {
+                    t.block(22, y, 12, net.minecraft.world.level.block.Blocks.STONE_BRICKS.defaultBlockState());
+                }
+            });
+        addClearingProbe(builder, 40, 4780, 20, probe,
+            // East room interior of the course house (walls at x22/x30, z6/z18).
+            (x, z) -> x > 22.5 && x < 29.5 && z > 6.5 && z < 17.5);
+        // Gate-state polling: the poll cadence is the tick resolution of this
+        // evidence (ScheduledAction hands the tick to the probe helper).
+        for (int t = 60; t <= 4140; t += 60) {
+            final int at = t;
+            builder.action(at, "contact-gate probe",
+                ctx -> recordGateState(ctx, at, "cover", firstCoverShot, firstStallTick));
+            builder.action(at, "contact-open probe", ctx -> {
+                for (String label : new String[] {"cover", "checker"}) {
+                    SoldierEntity s = ctx.soldier(label);
+                    if (s != null && s.isAlive()) {
+                        long open = com.stevesarmy.squad.ContactPlan.contactOpenTick(s);
+                        if (open < firstOpenTick[0]) {
+                            firstOpenTick[0] = open;
+                        }
+                    }
+                }
+            });
+        }
+        return builder
+            .setup(ctx -> {
+                ctx.spawnAnchor(40, 0, 18);
+                // North-east of the door row: no spawn line of sight (the
+                // east wall blocks), so the fight develops as the squad
+                // closes instead of starting as an instant mutual stare.
+                ctx.spawnFriendly(ModEntities.SOLDIER.get(), "cover", 38, 0, 16, SquadMode.HOLD);
+                // South-east, farther out and off the fire ray: the checker
+                // approaches last, out of his mate's lane.
+                ctx.spawnFriendly(ModEntities.SOLDIER.get(), "checker", 36, 0, 22, SquadMode.HOLD);
+                EnemySoldierEntity guard = ctx.spawnEnemyLabeled("guard", 28, 0, 12);
+                guard.setSquadMode(SquadMode.HOLD);
+                guard.setHoldPosition(ctx.terrain.at(28, 0, 12));
+                ctx.issueAttackOrder(26, 12); // east room center, past the guarded door
+            })
+            .assertThat("firefight happened (tracers recorded)", view -> !view.shots().isEmpty())
+            .assertThat("nobody entered the room's danger space before covering fire, STALLED, a suppressed mate, or bloodless standoff",
+                view -> {
+                    double gate = gateOpenTick(view, firstCoverShot[0], firstStallTick[0],
+                        firstOpenTick[0]);
+                    for (String label : new String[] {"cover", "checker"}) {
+                        for (SimSample s : view.timeline().series(label)) {
+                            // Band proximity counts only INSIDE the room
+                            // footprint: a cover dock one block from the
+                            // doorway is 2.9 from the guard through a solid
+                            // wall — Euclidean distance alone reads the
+                            // staging dock as a breach.
+                            boolean inRoom = s.state.position.x > 22.5
+                                && s.state.position.x < 29.5
+                                && s.state.position.z > 6.5 && s.state.position.z < 17.5;
+                            double d = Math.hypot(s.state.position.x - guardX,
+                                s.state.position.z - guardZ);
+                            if (inRoom && d <= dangerBand && s.tick < gate) return false;
+                        }
+                    }
+                    return true;
+                })
+            .assertThat("covering fire registered (the gate's shot leg actually armed)",
+                view -> firstCoverShot[0] < Long.MAX_VALUE)
+            .assertThat("the squad closed on the contact only AFTER the gate opened (approach follows support)",
+                view -> {
+                    double gate = gateOpenTick(view, firstCoverShot[0], firstStallTick[0],
+                        firstOpenTick[0]);
+                    if (gate >= Long.MAX_VALUE - 1 || gate <= 0) return false;
+                    boolean anyAdvanced = false;
+                    for (String label : new String[] {"cover", "checker"}) {
+                        java.util.List<SimSample> series = view.timeline().series(label);
+                        if (series.isEmpty()) continue;
+                        SimSample firstAfter = null;
+                        for (SimSample s : series) {
+                            if (s.tick >= gate) { firstAfter = s; break; }
+                        }
+                        if (firstAfter == null) continue;
+                        double dBefore = Math.hypot(firstAfter.state.position.x - guardX,
+                            firstAfter.state.position.z - guardZ);
+                        SimSample last = series.get(series.size() - 1);
+                        double dAfter = Math.hypot(last.state.position.x - guardX,
+                            last.state.position.z - guardZ);
+                        if (dAfter < dBefore - 0.5) anyAdvanced = true;
+                        // Any room entry that DID happen must postdate the gate.
+                        if (last.state.position.x > 22.5 && last.state.position.x < 29.5
+                            && last.state.position.z > 6.5 && last.state.position.z < 17.5
+                            && last.tick < gate) return false;
+                    }
+                    return anyAdvanced;
+                })
+            .assertThat("order completed as SECURED after the contact opened",
+                view -> probe.securedSeen && firstOpenTick[0] < Long.MAX_VALUE
+                    && probe.securedAtTick > firstOpenTick[0])
+            .assertThat("the door defender fell before the order completed",
+                view -> probe.zoneEnemiesDownAtTick >= 0
+                    && (probe.securedAtTick < 0
+                        || probe.zoneEnemiesDownAtTick < probe.securedAtTick))
+            // TEMP wave-A validation: pins the probe internals so a failed
+            // ordering assert names its failing leg instead of a guess.
+            .action(4700, "TEMP diag — probe internals", ctx -> {
+                com.stevesarmy.StevesArmyMod.LOGGER.info(
+                    "[Sim][diag] door_contact probe securedSeen={} securedAtTick={} firstOpen={} "
+                        + "firstShot={} firstStall={} zoneDown={} enteredZone={}",
+                    probe.securedSeen, probe.securedAtTick, firstOpenTick[0],
+                    firstCoverShot[0], firstStallTick[0], probe.zoneEnemiesDownAtTick,
+                    probe.enteredZone);
+            })
+            .build();
+    }
+
+    /**
+     * The tick the contact gate was first allowed to open: the earliest of the
+     * covering shot, the STALLED latch, the "mate suppressed" bypass, and the
+     * bloodless-standoff escape (contact open + attackClearStallTicks) — the
+     * conditions the doctrine lets a soldier advance under.
+     */
+    private static double gateOpenTick(SimScenario.SimRunResultView view, long firstShot,
+                                       long firstStall, long firstOpen) {
+        double gate = Math.min(firstShot, firstStall);
+        if (firstOpen < Long.MAX_VALUE) {
+            gate = Math.min(gate,
+                firstOpen + com.stevesarmy.StevesArmyConfig.getAttackClearStallTicks());
+        }
+        for (String label : new String[] {"cover", "checker"}) {
+            for (SimSample s : view.timeline().series(label)) {
+                if (s.state.suppressionLevel >= 0.4) {
+                    gate = Math.min(gate, s.tick);
+                    break;
+                }
+            }
+        }
+        return gate;
+    }
+
+    /**
+     * Polls the contact-plan gate inputs into the caller's min-tracking
+     * holders: the earliest successful shot the cover soldier registers
+     * (SquadMovementCoordinator.lastSuccessfulShotTick) and the earliest tick
+     * the clearing order latched STALLED (ClearingCoordinator.isStalledLatched).
+     * Called on the scenario's action cadence; {@code at} is the poll tick and
+     * bounds the evidence's resolution.
+     */
+    private static void recordGateState(SimContext ctx, int at, String coverLabel,
+                                        long[] firstShotOut, long[] firstStallOut) {
+        SoldierEntity cover = ctx.soldier(coverLabel);
+        if (cover != null && cover.isAlive()) {
+            Long shot = com.stevesarmy.squad.SquadMovementCoordinator.lastSuccessfulShotTick(cover);
+            if (shot != null && shot < firstShotOut[0]) {
+                firstShotOut[0] = shot;
+            }
+            if (firstStallOut[0] == Long.MAX_VALUE
+                && com.stevesarmy.squad.ClearingCoordinator.isStalledLatched(cover)) {
+                firstStallOut[0] = at;
+            }
+        }
+    }
+
+    /**
+     * ACCEPTANCE (checker-loss handoff): the divided-rooms geometry, NO
+     * enemies. Mid-clear the harness kills the soldier holding a check claim
+     * — damageSoldier with a
+     * lethal amount is the harness's only death primitive, and the 20-HP body
+     * makes 1000f deterministic. The order may neither complete short of the
+     * dead checker's claim nor strand: a survivor re-claims the POI, the full
+     * check fraction reaches 1.0, and SECURED still lands inside the clock —
+     * after the death, so the dead soldier cannot be the one who did the work.
+     *
+     * <p>Deliberately EMPTY of enemies: the contact-gate behavior is
+     * cqb_door_contact's acceptance. A live contact here destabilizes the
+     * docks through the known threat-aware cover families (concealment /
+     * exposed-hiding) and roulettes the run; the claim machinery this
+     * scenario exists to pin is deterministic only unarmed.
+     */
+    private static SimScenario clearCheckerDeath() {
+        ClearingProbe probe = new ClearingProbe();
+        // The kill target's claim, last-captured before the kill
+        // (ClearingView.assignedPoi): evidence he HELD a job the survivors
+        // must finish. Null means nobody held a claim — the order never
+        // handed out checks.
+        final net.minecraft.core.BlockPos[] deadClaim = {null};
+        final String[] deadHolder = {null};
+        final boolean[] killLanded = {false};
+        /** Server tick the conditional kill fired (ordering assert anchor). */
+        final int[] killTick = {0};
+        SimScenario.Builder builder = SimScenario.builder("clear_checker_death")
+            .description("ATTACK clearing with the soldier holding a check claim killed mid-run: "
+                + "the order may not complete short of his claim and may not strand - a "
+                + "survivor re-claims the dead soldier's POI, the full check fraction reaches "
+                + "1.0, and the order still reads SECURED inside the clock, strictly after "
+                + "the death.")
+            // 3600: the divided-rooms clock (2200) plus the death, the
+            // re-claim walk, and the settle tail — the 3000 clock hit SECURE
+            // with the completion still arming at the wire.
+            .duration(3600)
+            .terrain(t -> t.dividedRooms());
+        addClearingProbe(builder, 40, 3580, 20, probe,
+            // East room interior + the partition opening — the zone
+            // clear_divided_rooms already uses for its far-room asserts.
+            (x, z) -> x > 15.5 && x < 23.5 && z > 6.5 && z < 19.5);
+        // Claim capture + conditional kill. Claims live ~10t (stripped one
+        // heavy cycle after the check lands), so the poll must run at the same
+        // cadence; and the holder can be ANY member — claims are
+        // nearest-unchecked, so which soldier holds one at a given tick is
+        // squad-order dependent. The kill fires the FIRST poll a claim is held
+        // while check-targets remain unchecked: a fixed death tick completed
+        // the order at ~t870 and the t900 kill came after SECURED, breaking
+        // the "strictly after the death" ordering by construction.
+        final int killSearchEnd = 1500;
+        for (int t = 300; t <= killSearchEnd; t += 10) {
+            final int at = t;
+            builder.action(at, "kill the claim holder once a claim exists mid-clear", ctx -> {
+                if (killLanded[0]) {
+                    return;
+                }
+                boolean midClear = com.stevesarmy.squad.ClearingCoordinator.checkedFraction(
+                    ctx.anchor.getUUID(), com.stevesarmy.squad.FireTeam.ALL) < 0.999;
+                for (String label : new String[] {"checker", "alpha", "bravo"}) {
+                    SoldierEntity s = ctx.soldier(label);
+                    if (s == null || !s.isAlive()) {
+                        continue;
+                    }
+                    com.stevesarmy.squad.ClearingCoordinator.ClearingView v =
+                        com.stevesarmy.squad.ClearingCoordinator.viewFor(s);
+                    if (v == null || v.assignedPoi() == null) {
+                        continue;
+                    }
+                    deadClaim[0] = v.assignedPoi();
+                    deadHolder[0] = label;
+                    if (!midClear) {
+                        return; // capture only — killing after fraction 1.0 tests nothing
+                    }
+                    ctx.damageSoldier(label, 1000.0f);
+                    killLanded[0] = !s.isAlive();
+                    if (killLanded[0]) {
+                        killTick[0] = at;
+                    }
+                    return;
+                }
+            });
+        }
+        return builder
+            .setup(ctx -> {
+                ctx.spawnAnchor(12, 0, 38);
+                ctx.spawnFriendly(ModEntities.SOLDIER.get(), "alpha", 12, 0, 38, SquadMode.HOLD);
+                ctx.spawnFriendly(ModEntities.SOLDIER.get(), "bravo", 10, 0, 36, SquadMode.HOLD);
+                ctx.spawnFriendly(ModEntities.SOLDIER.get(), "checker", 14, 0, 36, SquadMode.HOLD);
+                ctx.issueAttackOrder(12, 10); // west room, north half — clear_divided_rooms's ping
+            })
+            .assertThat("a check claim was assigned before the kill",
+                view -> deadClaim[0] != null)
+            .assertThat("the kill landed mid-run (a claim was held while checks remained)",
+                view -> killLanded[0] && killTick[0] > 0)
+            .assertThat("every check-target was observed (fraction 1.0 — the dead claim was re-checked)",
+                view -> probe.maxCheckedFraction >= 0.999)
+            .assertThat("order completed as SECURED strictly after the death (survivors finished it)",
+                view -> probe.securedSeen && probe.securedAtTick > killTick[0])
+            .assertThat("squad reached the objective space",
+                view -> probe.enteredZone)
             .build();
     }
 }

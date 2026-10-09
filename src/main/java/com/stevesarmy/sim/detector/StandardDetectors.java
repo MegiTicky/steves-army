@@ -36,7 +36,16 @@ public final class StandardDetectors {
             new FireStarvation(),
             new ReservationDrift(),
             new CoverDockDrift(),
-            new ExposedWhileHiding()));
+            new ExposedWhileHiding(),
+            // The four wave-A TELEMETRY detectors below are diagnostics, not
+            // gates: each one fires on a known fire-chain/movement family
+            // that wave B (WP4 engagement arbitration, WP5 threat-facing
+            // movement) exists to fix, so they report WARN until their fix
+            // lands — then promote them to FAIL as that wave's acceptance.
+            new FireDeadlock(),
+            new FacingAwayDuringContact(),
+            new RotationOscillation(),
+            new InteriorStrand()));
         detectors.addAll(DangerMapDetectors.all());
         return detectors;
     }
@@ -702,6 +711,255 @@ public final class StandardDetectors {
                         .with("currentCover", end.state.currentCover)
                         .with("coverType", end.state.currentCoverType)
                         .with("slotOffset", String.format("%.2f", end.coverSlotOffset));
+                    out.add(v);
+                }
+            }
+            return out;
+        }
+    }
+
+    // 13. visible + ready but the fire gate refuses, continuously ----------------------------
+    //
+    // FireStarvation catches the run where no shot ever LANDS; this one catches the subtler
+    // strand where the gate itself is the block: the soldier sees the target, the weapon
+    // reports ready, and still nothing is authorised for 100t+. Each gated tick names its
+    // reason, so the histogram says WHICH link is stuck: a sustained RELOADING is a reload
+    // machine bug, a sustained BULLET_PATH_BLOCKED is a lane/cover bug, an AIM_QUALITY that
+    // never settles is an aim-metric bug. WEAPON_HOLD is excluded: an AT gun deliberately
+    // holding on infantry is doctrine, not a stuck strand.
+
+    static final class FireDeadlock implements SimDetector {
+        @Override public String name() { return "FireDeadlock"; }
+
+        @Override
+        public List<SimViolation> evaluate(SimRunResult run) {
+            List<SimViolation> out = new ArrayList<>();
+            for (String label : run.timeline.soldierLabels()) {
+                List<SimSample> series = run.timeline.series(label);
+                // One report per soldier, on the longest qualifying run; fireGate is never
+                // null on a real snapshot, but the null guard keeps hand-built samples
+                // from fabricating a FAIL.
+                Run longest = null;
+                for (Run r : runs(series, s -> s.state.targetVisible
+                        && s.state.weaponReady
+                        && s.state.fireGate != null
+                        && !"none".equals(s.state.fireGate)
+                        && !"weapon_hold".equals(s.state.fireGate))) {
+                    if (longest == null || spanTicks(series, r) > spanTicks(series, longest)) {
+                        longest = r;
+                    }
+                }
+                if (longest == null) continue;
+                int span = spanTicks(series, longest);
+                if (span < SimTuning.FIRE_DEADLOCK_TICKS) continue;
+                // Reason histogram over the run: the report must name WHICH gate reason
+                // ate the run, not just that a gate did.
+                java.util.LinkedHashMap<String, Integer> histogram = new java.util.LinkedHashMap<>();
+                for (int i = longest.fromIdx; i <= longest.toIdx; i++) {
+                    histogram.merge(series.get(i).state.fireGate, 1, Integer::sum);
+                }
+                StringBuilder reasons = new StringBuilder();
+                histogram.forEach((reason, count) -> {
+                    if (reasons.length() > 0) reasons.append(", ");
+                    reasons.append(reason).append(':').append(count);
+                });
+                SimSample end = series.get(longest.toIdx);
+                SimViolation v = new SimViolation(SimViolation.Severity.WARN, name(), end.tick, label,
+                    "target visible + weapon ready but the fire gate refused for " + span
+                        + "t (" + reasons + ") - fire decision strand dead");
+                v.with("windowStart", series.get(longest.fromIdx).tick)
+                    .with("firstTick", series.get(longest.fromIdx).tick)
+                    .with("lastTick", end.tick)
+                    .with("reasonHistogram", reasons.toString())
+                    .with("fireGateTicks", end.state.fireGateTicks)
+                    .with("ticksSinceLastShot", end.state.ticksSinceLastShot)
+                    .with("targetVisible", end.state.targetVisible)
+                    .with("weaponReady", end.state.weaponReady);
+                out.add(v);
+            }
+            return out;
+        }
+    }
+
+    // 14. live contact in range but the body never faces it ----------------------------------
+    //
+    // Facing error is the angle between where the BODY points (yBodyRot) and the bearing to
+    // an in-range threat. A soldier can hold targetVisible through the eye ray while the
+    // torso points elsewhere - the gate then starves on ADS/aim-quality. More than a right
+    // angle off for 40t+ means aim acquisition never drove the body at all: the orientation
+    // chain, not the fire chain, is the dead link.
+
+    static final class FacingAwayDuringContact implements SimDetector {
+        @Override public String name() { return "FacingAwayDuringContact"; }
+
+        @Override
+        public List<SimViolation> evaluate(SimRunResult run) {
+            List<SimViolation> out = new ArrayList<>();
+            for (String label : run.timeline.soldierLabels()) {
+                List<SimSample> series = run.timeline.series(label);
+                for (Run r : runs(series, s -> s.state.threatInRange
+                        && s.state.facingErrorDeg > SimTuning.FACING_AWAY_ERROR_DEG)) {
+                    int span = spanTicks(series, r);
+                    if (span < SimTuning.FACING_AWAY_TICKS) continue;
+                    float maxError = 0;
+                    float minRange = -1;
+                    float maxRange = -1;
+                    for (int i = r.fromIdx; i <= r.toIdx; i++) {
+                        SimSample s = series.get(i);
+                        maxError = Math.max(maxError, s.state.facingErrorDeg);
+                        if (s.enemyDistance >= 0) {
+                            minRange = minRange < 0 ? s.enemyDistance : Math.min(minRange, s.enemyDistance);
+                            maxRange = Math.max(maxRange, s.enemyDistance);
+                        }
+                    }
+                    SimSample end = series.get(r.toIdx);
+                    SimViolation v = new SimViolation(SimViolation.Severity.WARN, name(), end.tick, label,
+                        "faced " + String.format("%.0f", maxError) + " degrees off an in-range threat for "
+                            + span + "t - body never settled on the contact");
+                    v.with("maxFacingErrorDeg", String.format("%.1f", maxError))
+                        .with("firstTick", series.get(r.fromIdx).tick)
+                        .with("lastTick", end.tick)
+                        .with("threatRangeBand", minRange < 0 ? "n/a"
+                            : String.format("%.1f..%.1f", minRange, maxRange))
+                        .with("enemyDistance", String.format("%.1f", end.enemyDistance))
+                        .with("yBodyRot", String.format("%.1f", end.state.bodyYaw));
+                    out.add(v);
+                }
+            }
+            return out;
+        }
+    }
+
+    // 15. body yaw flip-flops while the soldier stands still ---------------------------------
+    //
+    // A servo loop with sign-flipping error (or two controllers fighting over the same
+    // torso) shows up as yaw direction reversals: +, -, +, - ... The stationary gate
+    // matters - a walking soldier legitimately weaves. Four-plus direction flips inside
+    // 60t with no locomotion is rotation thrash: the aim never converges even though the
+    // target may be dead ahead.
+
+    static final class RotationOscillation implements SimDetector {
+        /** Deltas below this are aim-settle noise, not a directed move: only a real sign
+         *  change between DIRECTED moves counts as a flip. A filter constant, not a
+         *  scenario threshold - hence local instead of SimTuning. */
+        private static final double FLIP_MIN_DELTA_DEG = 0.5;
+
+        @Override public String name() { return "RotationOscillation"; }
+
+        @Override
+        public List<SimViolation> evaluate(SimRunResult run) {
+            List<SimViolation> out = new ArrayList<>();
+            for (String label : run.timeline.soldierLabels()) {
+                List<SimSample> series = run.timeline.series(label);
+                // Chronological flip events. A flip is a reversal of the yaw delta's sign
+                // between two directed moves; zero deltas neither flip nor reset the chain.
+                // Both samples spanning a delta must be stationary - locomotion restarts
+                // the chain.
+                List<Integer> flipTicks = new ArrayList<>();
+                List<String> yaws = new ArrayList<>();
+                int prevSign = 0;
+                for (int i = 1; i < series.size(); i++) {
+                    SimSample s = series.get(i);
+                    SimSample prev = series.get(i - 1);
+                    if (s.state.stationaryTicks <= 0 || prev.state.stationaryTicks <= 0) {
+                        prevSign = 0;
+                        continue;
+                    }
+                    // Yaw wraps at +-180: fold the raw delta back into [-180, 180] or a
+                    // rotation through the seam reads as a 359-degree reversal.
+                    double delta = s.state.bodyYaw - prev.state.bodyYaw;
+                    if (delta > 180.0) delta -= 360.0;
+                    if (delta < -180.0) delta += 360.0;
+                    int sign = delta > FLIP_MIN_DELTA_DEG ? 1 : (delta < -FLIP_MIN_DELTA_DEG ? -1 : 0);
+                    if (sign != 0) {
+                        if (prevSign != 0 && sign != prevSign) {
+                            flipTicks.add(s.tick);
+                            yaws.add(String.format("%.1f->%.1f", prev.state.bodyYaw, s.state.bodyYaw));
+                        }
+                        prevSign = sign;
+                    }
+                }
+                // Densest window: two-pointer sweep over the chronological flip ticks; any
+                // window of WINDOW_TICKS span holding >= FLIPS flips fires.
+                int bestA = -1;
+                int bestB = -1;
+                int bestCount = 0;
+                int a = 0;
+                for (int b = 0; b < flipTicks.size(); b++) {
+                    while (flipTicks.get(b) - flipTicks.get(a) > SimTuning.ROTATION_OSCILLATION_WINDOW_TICKS) a++;
+                    int count = b - a + 1;
+                    if (count > bestCount) {
+                        bestCount = count;
+                        bestA = a;
+                        bestB = b;
+                    }
+                }
+                if (bestCount < SimTuning.ROTATION_OSCILLATION_FLIPS) continue;
+                SimSample last = series.get(series.size() - 1);
+                StringBuilder ticks = new StringBuilder();
+                StringBuilder yawList = new StringBuilder();
+                for (int i = bestA; i <= bestB; i++) {
+                    if (ticks.length() > 0) {
+                        ticks.append(',');
+                        yawList.append(',');
+                    }
+                    ticks.append(flipTicks.get(i));
+                    yawList.append(yaws.get(i));
+                }
+                SimViolation v = new SimViolation(SimViolation.Severity.WARN, name(), last.tick, label,
+                    bestCount + " body-yaw direction flips within " + SimTuning.ROTATION_OSCILLATION_WINDOW_TICKS
+                        + "t while stationary (window " + flipTicks.get(bestA) + "t.." + flipTicks.get(bestB)
+                        + "t) - rotation thrash");
+                v.with("flipsInWindow", bestCount)
+                    .with("windowStart", flipTicks.get(bestA))
+                    .with("flipTicks", ticks.toString())
+                    .with("yawAtFlips", yawList.toString())
+                    .with("stationaryTicks", last.state.stationaryTicks);
+                out.add(v);
+            }
+            return out;
+        }
+    }
+
+    // 16. stuck still with a far objective and no excuse -------------------------------------
+    //
+    // PositionDeadlock covers soldiers inside the cover machine's should-be-moving states
+    // (SEEKING_COVER / REPOSITIONING); this one covers the strand past it: the machine
+    // reports none of those states, the soldier stands still, the objective is still far,
+    // and the sample carries NO blocking excuse. Anything that would legitimately hold the
+    // legs - a follow gate, a suppression pin, a contact-plan denial, a path wait - must
+    // surface as blockedExcuse; silence plus stillness plus distance means the advance
+    // strand died without admitting it.
+
+    static final class InteriorStrand implements SimDetector {
+        @Override public String name() { return "InteriorStrand"; }
+
+        @Override
+        public List<SimViolation> evaluate(SimRunResult run) {
+            List<SimViolation> out = new ArrayList<>();
+            for (String label : run.timeline.soldierLabels()) {
+                List<SimSample> series = run.timeline.series(label);
+                // The counter itself must exceed the threshold on every sample AND the run
+                // must span the threshold in ticks: a counter that keeps resetting (brief
+                // shuffles) never accumulates a run, which is exactly the progress this
+                // detector must not condemn.
+                for (Run r : runs(series, s -> s.state.stationaryTicks > SimTuning.INTERIOR_STRAND_TICKS
+                        && s.state.objectiveFar
+                        && (s.state.blockedExcuse == null || s.state.blockedExcuse.isEmpty()))) {
+                    int span = spanTicks(series, r);
+                    if (span < SimTuning.INTERIOR_STRAND_TICKS) continue;
+                    SimSample end = series.get(r.toIdx);
+                    SimViolation v = new SimViolation(SimViolation.Severity.WARN, name(), end.tick, label,
+                        "stationary " + span + "t with the objective still far and no blocking excuse"
+                            + " reported - advance strand dead");
+                    v.with("position", end.state.position == null ? "n/a"
+                            : String.format("%.1f,%.1f,%.1f",
+                                end.state.position.x, end.state.position.y, end.state.position.z))
+                        .with("stationaryTicks", end.state.stationaryTicks)
+                        .with("objectiveFar", end.state.objectiveFar)
+                        .with("blockedExcuse", end.state.blockedExcuse == null ? "" : end.state.blockedExcuse)
+                        .with("squadMode", end.state.squadMode)
+                        .with("coverState", end.state.coverState);
                     out.add(v);
                 }
             }

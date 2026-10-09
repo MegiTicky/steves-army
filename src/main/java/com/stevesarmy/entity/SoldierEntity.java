@@ -294,6 +294,9 @@ public class SoldierEntity extends PathfinderMob implements Container {
     private boolean closeCombatContext = false;
     private long closeCombatContextRefreshedAtTick;
     private String lastSyncedCqbPath = null;
+    /** Fire-pipeline gate/shot state; lazily created (see getter) because
+     * registerGoals runs inside the superclass constructor. */
+    private com.stevesarmy.combat.EngagementTelemetry engagementTelemetry;
 
     public static final double CQB_RANGE = 5.0;
     /** Radius around the remaining path within which a known enemy triggers caution steering. */
@@ -415,6 +418,13 @@ public class SoldierEntity extends PathfinderMob implements Container {
 
     public boolean isInCloseCombatContext() {
         return closeCombatContext && (tickCount - closeCombatContextRefreshedAtTick) <= CLOSE_COMBAT_CONTEXT_STALE_TICKS;
+    }
+
+    public com.stevesarmy.combat.EngagementTelemetry getEngagementTelemetry() {
+        if (engagementTelemetry == null) {
+            engagementTelemetry = new com.stevesarmy.combat.EngagementTelemetry();
+        }
+        return engagementTelemetry;
     }
 
     public String getSyncedCqbPath() {

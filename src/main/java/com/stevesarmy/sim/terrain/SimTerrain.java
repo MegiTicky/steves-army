@@ -176,6 +176,31 @@ public final class SimTerrain {
         wall(16, 16, 16, 19, 3, Blocks.STONE_BRICKS.defaultBlockState());
     }
 
+    /**
+     * Two single-story houses facing each other across an open street for the
+     * contact-plan strand (clear_house_exit): an exposed lane crossing into a
+     * structure whose back room still has to be checked. Layout (fixture-local
+     * coords, standard 48x48 field):
+     *   House A (west)  shell x 6..16,  z 10..20, walls h3, ONE door (16,15)
+     *                   on its east wall — the only way in or out.
+     *   House B (east)  shell x 25..37, z 10..20, walls h3, ONE door (25,15)
+     *                   on its west wall, interior partition x=32 with its own
+     *                   door (32,15) carving the small back room x 33..36 —
+     *                   clearing B means entering AND checking.
+     *   Street          x 17..24 (8 open blocks, no rubble by design): the
+     *                   exposed crossing is the leg this fixture exists for.
+     */
+    public void streetBlock() {
+        platform();
+        // House A: sealed box, single east door.
+        building(6, 10, 16, 20, 3, new int[][]{{16, 15}});
+        // House B: single west door; the partition is carved as two segments
+        // so the door cell (32,15) stays open — same technique as dividedRooms.
+        building(25, 10, 37, 20, 3, new int[][]{{25, 15}});
+        wall(32, 11, 32, 14, 3, Blocks.STONE_BRICKS.defaultBlockState());
+        wall(32, 16, 32, 19, 3, Blocks.STONE_BRICKS.defaultBlockState());
+    }
+
     public void block(int x, int y, int z, BlockState state) {
         BlockPos pos = origin.offset(x, y, z);
         // The world silently rejects blocks above the build limit; surface that

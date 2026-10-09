@@ -128,6 +128,10 @@ public final class CoverStateDebugRenderer {
             billboard(font, poseStack, cameraPos, base,
                 mgLine(snapshot), GRAY, buffers, -1.0);
         }
+        if (!snapshot.fireGate().isEmpty()) {
+            billboard(font, poseStack, cameraPos, base,
+                "FIRE " + snapshot.fireGate(), YELLOW, buffers, -1.5);
+        }
     }
 
     private static String stateLine(CoverStateDebugPacket snapshot) {

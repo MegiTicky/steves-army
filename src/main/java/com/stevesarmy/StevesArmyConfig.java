@@ -77,6 +77,10 @@ public class StevesArmyConfig {
     public static final ForgeConfigSpec.IntValue CQB_HOLD_RELEASE_COOLDOWN_TICKS;
     public static final ForgeConfigSpec.IntValue CQB_HOLD_FREEZE_GRACE_TICKS;
 
+    public static final ForgeConfigSpec.BooleanValue SQUAD_CONTACT_PLAN_ENABLED;
+    public static final ForgeConfigSpec.DoubleValue CONTACT_COORDINATION_RANGE;
+    public static final ForgeConfigSpec.DoubleValue CONTACT_DANGER_ARC_DEGREES;
+
     public static final ForgeConfigSpec.BooleanValue EXPOSED_COMBAT_ENABLED;
     public static final ForgeConfigSpec.IntValue EXPOSED_PLANT_MIN_TICKS;
     public static final ForgeConfigSpec.IntValue EXPOSED_ADJUST_WINDOW_TICKS;
@@ -634,6 +638,26 @@ BUILDER.pop();
                      "seeking; a started burst re-arms the freeze immediately.",
                      "Default: 20 ticks (1 s)")
             .defineInRange("cqbHoldFreezeGraceTicks", 20, 0, 100);
+
+        SQUAD_CONTACT_PLAN_ENABLED = BUILDER
+            .comment("Contact plan (INC 2): one close contact per squad with an assigned base of fire",
+                     "and checker; soldiers may not advance across the contact's danger arc without",
+                     "support (LoS onto the threat or a recent squad shot) unless an emergency bypass",
+                     "applies (point-blank overrun, suppressed/downed mate, STALLED latch).",
+                     "Default: true")
+            .define("squadContactPlanEnabled", true);
+
+        CONTACT_COORDINATION_RANGE = BUILDER
+            .comment("A threat within this band of the squad opens/keeps the close contact plan;",
+                     "beyond it the legacy soft-wait street doctrine applies.",
+                     "Default: 16.0 blocks")
+            .defineInRange("contactCoordinationRange", 16.0, 6.0, 48.0);
+
+        CONTACT_DANGER_ARC_DEGREES = BUILDER
+            .comment("Half-angle of the threat's danger apex cone. An advance whose segment crosses",
+                     "the cone is denied unless base-of-fire support or an emergency bypass covers it.",
+                     "Default: 35.0 degrees")
+            .defineInRange("contactDangerArcDegrees", 35.0, 10.0, 90.0);
 
         CLOSE_COMBAT_SEEK_RADIUS = BUILDER
             .comment("Cover searches inside the close-combat context (or an emergency-range enemy)",
@@ -1627,6 +1651,18 @@ BUILDER.pop();
 
     public static int getCqbHoldFreezeGraceTicks() {
         return CQB_HOLD_FREEZE_GRACE_TICKS.get();
+    }
+
+    public static boolean isSquadContactPlanEnabled() {
+        return SQUAD_CONTACT_PLAN_ENABLED.get();
+    }
+
+    public static double getContactCoordinationRange() {
+        return CONTACT_COORDINATION_RANGE.get();
+    }
+
+    public static double getContactDangerArcDegrees() {
+        return CONTACT_DANGER_ARC_DEGREES.get();
     }
 
     public static boolean isExposedCombatEnabled() {

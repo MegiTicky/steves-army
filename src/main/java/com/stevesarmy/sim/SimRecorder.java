@@ -126,6 +126,20 @@ public final class SimRecorder {
             .append(",\"st\":").append(s.stuckTicks)
             .append(",\"los\":").append(quote(los == null ? "?" : los ? "y" : "n"))
             .append(",\"yh\":").append(String.format("%.0f", s.headYaw));
+        if (!"none".equals(s.fireGate)) {
+            current.append(",\"fg\":").append(quote(s.fireGate))
+                .append(",\"fgt\":").append(s.fireGateTicks);
+        }
+        if (s.ticksSinceLastShot >= 0) {
+            current.append(",\"tsl\":").append(s.ticksSinceLastShot);
+        }
+        if (s.facingErrorDeg >= 0.0f) {
+            current.append(",\"fe\":").append(String.format("%.0f", s.facingErrorDeg));
+        }
+        if (!s.movingSupported) {
+            current.append(",\"mv\":").append(quote(
+                s.movementBlockReason.isEmpty() ? "blocked" : s.movementBlockReason));
+        }
         appendPos(current, "c", s.currentCover);
         appendPos(current, "t", s.targetCover);
         if (s.currentCoverType != null) {

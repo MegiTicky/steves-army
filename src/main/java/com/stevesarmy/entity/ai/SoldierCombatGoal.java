@@ -7,6 +7,7 @@ import com.stevesarmy.combat.ArmorRoleManager;
 import com.stevesarmy.combat.ArmorThreatScanner;
 import com.stevesarmy.combat.CombatTargetQueryCache;
 import com.stevesarmy.combat.DetectionSystem;
+import com.stevesarmy.combat.EngagementGateReason;
 import com.stevesarmy.combat.EnemyContactTracker;
 import com.stevesarmy.combat.ExposureCalculator;
 import com.stevesarmy.combat.FireControl;
@@ -1396,6 +1397,21 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
         resetBurstState();
     }
 
+    /**
+     * Records why the direct-fire pipeline did not produce a shot this tick.
+     * Every silent exit in {@link #tickGunCombat} tags itself so the engagement
+     * telemetry (state snapshot, debug card, sim detectors) can tell a
+     * legitimate hold from a visible-target deadlock.
+     */
+    private void noteEngagementGate(EngagementGateReason reason) {
+        com.stevesarmy.combat.EngagementTelemetry telemetry = soldier.getEngagementTelemetry();
+        telemetry.noteGate(reason, soldier.tickCount);
+        telemetry.setWeaponReady(!GunIntegration.isReloading(soldier)
+            && !GunIntegration.isDrawing(soldier)
+            && !GunIntegration.isBolting(soldier));
+        telemetry.setTargetVisible(target != null && target.isAlive());
+    }
+
     private void tickGunCombat(@javax.annotation.Nullable ArmorThreatScanner.ArmorContact vehicleTarget) {
         boolean vehicleCombat = vehicleTarget != null;
         // Doctrine: the launcher only ever fires at a vehicle. If entity combat
@@ -1403,6 +1419,7 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
         // launcher is the soldier's only gun), hold fire rather than rocket
         // infantry.
         if (!vehicleCombat && ArmorRoleManager.isAtGunStack(soldier.getMainHandItem())) {
+            noteEngagementGate(EngagementGateReason.WEAPON_HOLD);
             resetDirectFireBurst();
             return;
         }
@@ -1410,6 +1427,7 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
         Vec3 vehicleSolution = vehicleCombat
             ? ArmorThreatScanner.findFiringSolution(soldier, vehicleTarget) : null;
         if (vehicleCombat && vehicleSolution == null) {
+            noteEngagementGate(EngagementGateReason.WEAPON_HOLD);
             resetDirectFireBurst();
             return;
         }
@@ -1424,6 +1442,7 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
                 GunIntegration.aim(soldier, true);
                 wasAiming = true;
             }
+            noteEngagementGate(EngagementGateReason.PREPARE_FAILED);
             resetDirectFireBurst();
             return;
         }
@@ -1431,7 +1450,7 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
         boolean isDrawing = GunIntegration.isDrawing(soldier);
         boolean isBolting = GunIntegration.isBolting(soldier);
         boolean isReloading = GunIntegration.isReloading(soldier);
-        
+
         if (isDamageDebugLogging()) {
             StevesArmyMod.LOGGER.info("[DAMAGE_DEBUG] tickGunCombat: soldier={}({}) target={}({}) isDrawing={} isBolting={} isReloading={}",
                 soldier.getName().getString(), soldier.getId(),
@@ -1439,14 +1458,16 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
                 target != null ? target.getClass().getSimpleName() : "null",
                 isDrawing, isBolting, isReloading);
         }
-        
+
         if (isReloading) {
             wasReloading = true;
+            noteEngagementGate(EngagementGateReason.RELOADING);
             resetDirectFireBurst();
             return;
         }
-        
+
         if (isDrawing || isBolting) {
+            noteEngagementGate(isDrawing ? EngagementGateReason.DRAWING : EngagementGateReason.BOLTING);
             resetDirectFireBurst();
             return;
         }
@@ -1459,15 +1480,18 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
             if (isDamageDebugLogging()) {
                 StevesArmyMod.LOGGER.info("[DAMAGE_DEBUG] tickGunCombat: aimPoint is null, can't shoot");
             }
+            noteEngagementGate(EngagementGateReason.NO_AIM_POINT);
             resetDirectFireBurst();
             return;
         }
-        
+
         if (!aimPoint.canShoot()) {
             if (isDamageDebugLogging()) {
-                StevesArmyMod.LOGGER.info("[DAMAGE_DEBUG] tickGunCombat: canShoot=false (pointVisible={} bulletPathClear={}) aimType={}", 
+                StevesArmyMod.LOGGER.info("[DAMAGE_DEBUG] tickGunCombat: canShoot=false (pointVisible={} bulletPathClear={}) aimType={}",
                     aimPoint.pointVisible, aimPoint.bulletPathClear, aimPoint.type.displayName);
             }
+            noteEngagementGate(aimPoint.pointVisible
+                ? EngagementGateReason.BULLET_PATH_BLOCKED : EngagementGateReason.NOT_VISIBLE);
             if (!vehicleCombat && isSuppressing) {
                 resetDirectFireBurst();
                 trySuppressireFire(null);
@@ -1496,20 +1520,22 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
         }
 
         if (!prepareToFire(aimPoint.position, true)) {
+            noteEngagementGate(EngagementGateReason.PREPARE_FAILED);
             resetDirectFireBurst();
             return;
         }
 
         pathBlockedCounter = 0;
-        
+
         GunIntegration.aim(soldier, true);
         wasAiming = true;
-        
+
         float adsProgress = GunIntegration.getAimProgress(soldier);
         boolean mobileFire = !vehicleCombat && isMobileSuppressiveFireAllowed();
         float adsThreshold = mobileFire || soldier.getFireDiscipline() == FireDiscipline.SUPPRESSIVE
             ? MOBILE_FIRE_ADS_THRESHOLD : ADS_THRESHOLD;
         if (adsProgress < adsThreshold) {
+            noteEngagementGate(EngagementGateReason.ADS_LOW);
             return;
         }
         
@@ -1564,6 +1590,7 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
                 StevesArmyMod.LOGGER.info("[DirectBurst] soldier={} recovery_remaining={}",
                     soldier.getId(), directBurstCooldownTicks);
             }
+            noteEngagementGate(EngagementGateReason.BURST_COOLDOWN);
             return;
         }
 
@@ -1584,11 +1611,13 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
             ? directBurstContinuationThreshold
             : getDirectBurstContinuationThreshold(shotThreshold);
         if (directBurstActive && aimQuality < continuationThreshold) {
+            noteEngagementGate(EngagementGateReason.AIM_QUALITY);
             finishDirectFireBurst("aim_quality");
             return;
         }
 
         if (!directBurstActive && aimQuality < shotThreshold) {
+            noteEngagementGate(EngagementGateReason.AIM_QUALITY);
             targetReevaluateCounter++;
             int reevaluateInterval = StevesArmyConfig.getTargetReevaluateInterval();
             if (soldier.isInCloseCombatContext()) {
@@ -1631,6 +1660,7 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
             if (StevesArmyConfig.isExposedCombatEnabled()) {
                 ExposedCombatController.noteShotBlocked(soldier, aimPoint.position);
             }
+            noteEngagementGate(EngagementGateReason.FF_BLOCK);
             resetDirectFireBurst();
             return;
         }
@@ -1640,6 +1670,7 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
         if (vehicleCombat) {
             Vec3 refreshedSolution = ArmorThreatScanner.findFiringSolution(soldier, vehicleTarget);
             if (refreshedSolution == null) {
+                noteEngagementGate(EngagementGateReason.PREPARE_FAILED);
                 resetDirectFireBurst();
                 return;
             }
@@ -1650,6 +1681,7 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
             if (!VisibilityRay.traceFresh(soldier.level(), soldier.getEyePosition(), aimPoint.position, soldier,
                     coverBlock, coverBlock == null ? null : coverBlock.above())
                 .hasContact()) {
+                noteEngagementGate(EngagementGateReason.BULLET_PATH_BLOCKED);
                 resetDirectFireBurst();
                 return;
             }
@@ -1698,6 +1730,8 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
         
         if (result == GunIntegration.ShootResult.SUCCESS) {
             com.stevesarmy.squad.SquadMovementCoordinator.noteShot(soldier);
+            noteEngagementGate(EngagementGateReason.NONE);
+            soldier.getEngagementTelemetry().noteShot(soldier.tickCount);
             if (!directBurstActive) {
                 beginDirectFireBurst(directProfile, requestedBurstShotLimit, mobileFire, continuationThreshold);
             }
@@ -1748,17 +1782,25 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
             case SUCCESS -> lastShotNeededBolt = false;
             case NEED_BOLT -> {
                 GunIntegration.bolt(soldier);
+                noteEngagementGate(EngagementGateReason.BOLTING);
                 lastShotNeededBolt = true;
                 resetDirectFireBurst();
             }
             case NO_AMMO -> {
+                noteEngagementGate(EngagementGateReason.RELOADING);
                 resetDirectFireBurst();
                 requestReload(false);
             }
-            case COOLDOWN -> {}
-            case IS_BOLTING, IS_RELOADING, IS_DRAWING -> {}
-            case NOT_DRAWN -> GunIntegration.draw(soldier);
+            case COOLDOWN -> noteEngagementGate(EngagementGateReason.BURST_COOLDOWN);
+            case IS_BOLTING -> noteEngagementGate(EngagementGateReason.BOLTING);
+            case IS_RELOADING -> noteEngagementGate(EngagementGateReason.RELOADING);
+            case IS_DRAWING -> noteEngagementGate(EngagementGateReason.DRAWING);
+            case NOT_DRAWN -> {
+                noteEngagementGate(EngagementGateReason.DRAWING);
+                GunIntegration.draw(soldier);
+            }
             case PATH_BLOCKED -> {
+                noteEngagementGate(EngagementGateReason.BULLET_PATH_BLOCKED);
                 resetDirectFireBurst();
                 pathBlockedCounter++;
                 if (pathBlockedCounter >= PATH_BLOCKED_SWITCH_TICKS) {

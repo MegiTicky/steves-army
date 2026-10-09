@@ -89,6 +89,34 @@ public final class CombatStateSnapshot {
     /** Served travel re-routes (near-miss-driven path recomputes) since spawn. */
     public final int travelReroutesServed;
 
+    /** Fire-pipeline gate wire name at sampling time ("none" = shot fired / lane clear). */
+    public final String fireGate;
+    /** Ticks the current gate reason has held continuously. */
+    public final int fireGateTicks;
+    /** Ticks since the last direct-fire shot; -1 when none was ever fired. */
+    public final int ticksSinceLastShot;
+    /** A live target is selected (LoS is sampled separately as losToEnemy). */
+    public final boolean targetVisible;
+    /** Gun functional: not reloading, drawing or bolting. */
+    public final boolean weaponReady;
+    /** Body-yaw error vs the known threat in degrees; -1 when no threat known. */
+    public final float facingErrorDeg;
+    /** Body yaw in degrees at sampling time (rotation-oscillation checks). */
+    public final float bodyYaw;
+    /** Contact-plan movement permission (INC 2 WP2); true until the plan denies. */
+    public final boolean movingSupported;
+    public final String movementBlockReason;
+    public final String movementOwner;
+
+    /** A known threat sits inside engagement range (24 blocks). */
+    public final boolean threatInRange;
+    /** Continuous standing-still counter sampled by the state machine. */
+    public final int stationaryTicks;
+    /** The current movement objective is still far away (>12 blocks). */
+    public final boolean objectiveFar;
+    /** Why the legs are legitimately held (follow gate, pin, contact plan); "" = no excuse. */
+    public final String blockedExcuse;
+
     /** Telemetry for one executed cover search — where it looked and what came back. */
     public static final class LastSearch {
         public final String mode;
@@ -130,7 +158,13 @@ public final class CombatStateSnapshot {
                                String posture, boolean lowCrouching, boolean emergencyPosture,
                                float currentCoverHeight,
                                boolean traveling, boolean attacking, boolean travelCrawl, boolean crawlHidesHere,
-                               int travelReroutesServed, float headYaw) {
+                               int travelReroutesServed, float headYaw,
+                               String fireGate, int fireGateTicks, int ticksSinceLastShot,
+                               boolean targetVisible, boolean weaponReady, float facingErrorDeg,
+                               float bodyYaw,
+                               boolean movingSupported, String movementBlockReason, String movementOwner,
+                               boolean threatInRange, int stationaryTicks,
+                               boolean objectiveFar, String blockedExcuse) {
         this.soldierId = soldierId;
         this.role = role;
         this.position = position;
@@ -180,5 +214,19 @@ public final class CombatStateSnapshot {
         this.crawlHidesHere = crawlHidesHere;
         this.headYaw = headYaw;
         this.travelReroutesServed = travelReroutesServed;
+        this.fireGate = fireGate;
+        this.fireGateTicks = fireGateTicks;
+        this.ticksSinceLastShot = ticksSinceLastShot;
+        this.targetVisible = targetVisible;
+        this.weaponReady = weaponReady;
+        this.facingErrorDeg = facingErrorDeg;
+        this.bodyYaw = bodyYaw;
+        this.movingSupported = movingSupported;
+        this.movementBlockReason = movementBlockReason;
+        this.movementOwner = movementOwner;
+        this.threatInRange = threatInRange;
+        this.stationaryTicks = stationaryTicks;
+        this.objectiveFar = objectiveFar;
+        this.blockedExcuse = blockedExcuse;
     }
 }

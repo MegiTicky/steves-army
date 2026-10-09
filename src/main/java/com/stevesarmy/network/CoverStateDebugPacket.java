@@ -74,6 +74,10 @@ public class CoverStateDebugPacket {
     private final boolean crawlHidesHere;
     private final int travelReroutesServed;
 
+    /** Pre-formatted fire-pipeline segment (gate reason, age, shot age, facing
+     * error, movement block); empty when nothing worth showing. */
+    private final String fireGate;
+
     public CoverStateDebugPacket(boolean renderEnabled, UUID soldierId, String role, Vec3 soldierPos,
                                  String coverState, String peekState, String squadMode,
                                  float suppressionLevel, boolean pinned,
@@ -89,7 +93,7 @@ public class CoverStateDebugPacket {
                                  String posture, boolean lowCrouching, boolean emergencyPosture,
                                  float currentCoverHeight, String currentCoverType,
                                  boolean traveling, boolean travelCrawl, boolean crawlHidesHere,
-                                 int travelReroutesServed) {
+                                 int travelReroutesServed, String fireGate) {
         this.renderEnabled = renderEnabled;
         this.soldierId = soldierId;
         this.role = role;
@@ -134,10 +138,28 @@ public class CoverStateDebugPacket {
         this.travelCrawl = travelCrawl;
         this.crawlHidesHere = crawlHidesHere;
         this.travelReroutesServed = travelReroutesServed;
+        this.fireGate = fireGate;
     }
 
     /** Wire view of a shared {@code CombatStateSnapshot}; fields map 1:1. */
     public static CoverStateDebugPacket fromSnapshot(com.stevesarmy.combat.CombatStateSnapshot s) {
+        StringBuilder fg = new StringBuilder();
+        if (!"none".equals(s.fireGate)) {
+            fg.append(s.fireGate).append(' ').append(s.fireGateTicks).append('t');
+        }
+        if (s.ticksSinceLastShot >= 0) {
+            if (fg.length() > 0) fg.append(' ');
+            fg.append("shot").append(s.ticksSinceLastShot).append('t');
+        }
+        if (s.facingErrorDeg >= 0.0f) {
+            if (fg.length() > 0) fg.append(' ');
+            fg.append(String.format("fe%.0f", s.facingErrorDeg));
+        }
+        if (!s.movingSupported) {
+            if (fg.length() > 0) fg.append(' ');
+            fg.append("move:").append(
+                s.movementBlockReason.isEmpty() ? "blocked" : s.movementBlockReason);
+        }
         return new CoverStateDebugPacket(
             true,
             s.soldierId,
@@ -182,7 +204,8 @@ public class CoverStateDebugPacket {
             s.traveling,
             s.travelCrawl,
             s.crawlHidesHere,
-            s.travelReroutesServed);
+            s.travelReroutesServed,
+            fg.toString());
     }
 
     public CoverStateDebugPacket(FriendlyByteBuf buf) {        this.renderEnabled = buf.readBoolean();
@@ -229,6 +252,7 @@ public class CoverStateDebugPacket {
         this.travelCrawl = buf.readBoolean();
         this.crawlHidesHere = buf.readBoolean();
         this.travelReroutesServed = buf.readVarInt();
+        this.fireGate = buf.readUtf();
     }
 
     private static Vec3 readVec(FriendlyByteBuf buf) {
@@ -290,6 +314,7 @@ public class CoverStateDebugPacket {
         buf.writeBoolean(msg.travelCrawl);
         buf.writeBoolean(msg.crawlHidesHere);
         buf.writeVarInt(msg.travelReroutesServed);
+        buf.writeUtf(msg.fireGate == null ? "" : msg.fireGate);
     }
 
     public static void handle(CoverStateDebugPacket msg, Supplier<NetworkEvent.Context> ctx) {
@@ -348,4 +373,5 @@ public class CoverStateDebugPacket {
     public boolean travelCrawl() { return travelCrawl; }
     public boolean crawlHidesHere() { return crawlHidesHere; }
     public int travelReroutesServed() { return travelReroutesServed; }
+    public String fireGate() { return fireGate; }
 }
