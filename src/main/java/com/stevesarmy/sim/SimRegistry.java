@@ -90,7 +90,8 @@ public final class SimRegistry {
             clearBlockedDoor(),
             clearSparseOutdoor(),
             clearLegacyProximityTwin(),
-            clearTrainingCourse());
+            clearTrainingCourse(),
+            clearDeepObjectiveSequence());
     }
 
     public static SimScenario byName(String name) {
@@ -3452,6 +3453,51 @@ public final class SimRegistry {
             .assertThat("both room defenders were killed", view -> probe.enemyDown)
             .assertThat("squad entered the complex interior", view -> probe.enteredZone)
             .assertThat("order completed as SECURED after the contacts resolved",
+                view -> probe.securedSeen)
+            .build();
+    }
+
+    /** The deep SE-E room of the training complex (the far end of the building). */
+    private static final java.util.function.BiPredicate<Double, Double> DEEP_ROOM =
+        (x, z) -> x > 36.5 && x < 45.5 && z > 22.5 && z < 35.5;
+
+    /**
+     * DEEP-OBJECTIVE sequence: defenders staggered along the route (hall,
+     * SE-W, and the deepest room), attack ping planted at the back of the far
+     * room. The clearing area bounds around the ping, so the squad must fight
+     * through each space on the way — contact room by room — and only then
+     * run the deep room's checks and secure. Pins that a far ping neither
+     * strands the advance nor completes before the squad physically reaches
+     * and clears the deep space.
+     */
+    private static SimScenario clearDeepObjectiveSequence() {
+        ClearingProbe probe = new ClearingProbe();
+        SimScenario.Builder builder = SimScenario.builder("clear_deep_objective_sequence")
+            .description("ATTACK clearing with the ping at the back of the far room: defenders in "
+                + "the hall, the SE-W room, and the deep SE-E room. The squad fights through each "
+                + "space en route, arrives in the deep room, resolves the last contact, checks the "
+                + "deep blind spots, and secures there - the order cannot complete early and the "
+                + "advance cannot strand short of the far ping.")
+            .field(64, 64)
+            .duration(3000)
+            .armed()
+            .terrain(t -> t.trainingCourse());
+        addClearingProbe(builder, 40, 2980, 20, probe, DEEP_ROOM);
+        return builder
+            .setup(ctx -> {
+                ctx.spawnAnchor(20, 0, 6);
+                ctx.spawnFriendly(ModEntities.SOLDIER.get(), "alpha", 14, 0, 5, SquadMode.HOLD);
+                ctx.spawnFriendly(ModEntities.SOLDIER.get(), "bravo", 20, 0, 6, SquadMode.HOLD);
+                ctx.spawnFriendly(ModEntities.SOLDIER.get(), "charlie", 26, 0, 5, SquadMode.HOLD);
+                ctx.spawnEnemyLabeled("hall", 33, 0, 12);
+                ctx.spawnEnemyLabeled("sew", 28, 0, 28);
+                ctx.spawnEnemyLabeled("deep", 42, 0, 30);
+                ctx.issueAttackOrder(41, 29);
+            })
+            .assertThat("firefight happened (tracers recorded)", view -> !view.shots().isEmpty())
+            .assertThat("all three defenders were killed", view -> probe.enemyDown)
+            .assertThat("squad reached the deep room", view -> probe.enteredZone)
+            .assertThat("order completed as SECURED in the deep room",
                 view -> probe.securedSeen)
             .build();
     }
