@@ -240,6 +240,8 @@ public class CombatDebugCommand {
                     .executes(CombatDebugCommand::togglePeekCandidates))
                 .then(Commands.literal("rays")
                     .executes(CombatDebugCommand::toggleRayVisualization))
+                .then(Commands.literal("fov")
+                    .executes(CombatDebugCommand::toggleFovCones))
                 .then(Commands.literal("solid")
                     .executes(CombatDebugCommand::toggleSolidVisualization))
                 .then(Commands.literal("coverpoints")
@@ -340,6 +342,10 @@ public class CombatDebugCommand {
                 .executes(CombatDebugCommand::listSkins)
                 .then(Commands.literal("reload")
                     .executes(CombatDebugCommand::reloadSkins)))
+
+            // === CQB TRAINING COURSE ===
+            .then(Commands.literal("course")
+                .executes(CombatDebugCommand::buildCqbCourse))
 
             // === STATUS (show all toggle states) ===
             .then(Commands.literal("status")
@@ -729,6 +735,26 @@ public class CombatDebugCommand {
         context.getSource().sendSuccess(() -> Component.literal(
             "Raycast visualization: " + (enabled ? "ON" : "OFF")
         ), true);
+        return 1;
+    }
+
+    private static int toggleFovCones(CommandContext<CommandSourceStack> context) {
+        boolean enabled = !com.stevesarmy.client.FovConeDebugRenderer.isEnabled();
+        com.stevesarmy.client.FovConeDebugRenderer.setEnabled(enabled);
+        context.getSource().sendSuccess(() -> Component.literal(
+            "Soldier FOV cone visualization (90\u00b0 detection arc): " + (enabled ? "ON" : "OFF")
+        ), true);
+        return 1;
+    }
+
+    private static int buildCqbCourse(CommandContext<CommandSourceStack> context) {
+        ServerPlayer player = context.getSource().getPlayer();
+        if (player == null) {
+            context.getSource().sendFailure(Component.literal("The course builder needs a player."));
+            return 0;
+        }
+        com.stevesarmy.client.FovConeDebugRenderer.setEnabled(true);
+        CqbCourseBuilder.build(context.getSource().getLevel(), player);
         return 1;
     }
 

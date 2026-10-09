@@ -117,7 +117,8 @@ public class EnemySoldierSpawnEggItem extends ForgeSpawnEggItem {
         }
     }
 
-    private void equipAk47(EnemySoldierEntity enemy) {
+    /** Shared with tooling that spawns enemies programmatically (e.g. the CQB course builder). */
+    public static void equipAk47(EnemySoldierEntity enemy) {
         if (!GunIntegration.isTaczLoaded()) {
             StevesArmyMod.LOGGER.warn("[EnemySpawnEgg] TaCZ not loaded, cannot equip AK47");
             return;

@@ -120,6 +120,45 @@ public final class SimTerrain {
         coverRow(28, 33, 32, 33, 1);
     }
 
+    /**
+     * Multi-room training complex: five rooms off a central hall, interior
+     * cover in each — the sim-scale twin of the in-game /stevesarmy_debug
+     * course. The main doors sit on the NORTH wall (z=8), facing the assault
+     * strip, exactly as the in-game course faces the player. Layout
+     * (fixture-local, needs a 64x64 field):
+     *   NW room x 11..23, z 9..21;  SW room x 11..23, z 23..35
+     *   HALL    x 25..45, z 9..21
+     *   SE-W    x 25..35, z 23..35; SE-E x 37..45, z 23..35
+     * Doors: north main (20,8)+(21,8), west (10,22), east (46,28),
+     * south (40,36), wall A x=24 doors (24,14)/(24,29), wall B z=22 doors
+     * (16,22)/(30,22), wall D x=36 door (36,29).
+     */
+    public void trainingCourse() {
+        platform();
+        building(10, 8, 46, 36, 3, new int[][]{
+            {20, 8}, {21, 8}, {10, 22}, {46, 28}, {40, 36}});
+        // Wall A: x=24 (west rooms vs hall/SE), doors at z=14 and z=29.
+        wall(24, 9, 24, 13, 3, Blocks.STONE_BRICKS.defaultBlockState());
+        wall(24, 15, 24, 21, 3, Blocks.STONE_BRICKS.defaultBlockState());
+        wall(24, 23, 24, 28, 3, Blocks.STONE_BRICKS.defaultBlockState());
+        wall(24, 30, 24, 35, 3, Blocks.STONE_BRICKS.defaultBlockState());
+        // Wall B: z=22 (north rooms vs south rooms), doors at x=16 and x=30.
+        wall(10, 22, 15, 22, 3, Blocks.STONE_BRICKS.defaultBlockState());
+        wall(17, 22, 29, 22, 3, Blocks.STONE_BRICKS.defaultBlockState());
+        wall(31, 22, 45, 22, 3, Blocks.STONE_BRICKS.defaultBlockState());
+        // Wall D: x=36 (SE-W vs SE-E), door at z=29.
+        wall(36, 23, 36, 28, 3, Blocks.STONE_BRICKS.defaultBlockState());
+        wall(36, 30, 36, 35, 3, Blocks.STONE_BRICKS.defaultBlockState());
+        // Interior cover: hall crate pocket + rubble row, one fixture per side room.
+        coverBlock(30, 13, 1);
+        coverBlock(31, 13, 1);
+        coverRow(38, 17, 40, 17, 1);
+        coverBlock(14, 16, 1);
+        coverBlock(13, 29, 1);
+        coverBlock(28, 31, 1);
+        coverBlock(41, 26, 1);
+    }
+
     public void block(int x, int y, int z, BlockState state) {
         BlockPos pos = origin.offset(x, y, z);
         // The world silently rejects blocks above the build limit; surface that

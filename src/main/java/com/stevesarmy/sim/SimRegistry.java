@@ -89,7 +89,8 @@ public final class SimRegistry {
             clearBreakContact(),
             clearBlockedDoor(),
             clearSparseOutdoor(),
-            clearLegacyProximityTwin());
+            clearLegacyProximityTwin(),
+            clearTrainingCourse());
     }
 
     public static SimScenario byName(String name) {
@@ -3413,6 +3414,45 @@ public final class SimRegistry {
                 view -> probe.maxStage == -1)
             .assertThat("legacy proximity completion released the targets",
                 view -> probe.targetsCleared)
+            .build();
+    }
+
+    /**
+     * ACCEPTANCE: the multi-room training complex (SimTerrain.trainingCourse,
+     * the sim twin of the in-game /stevesarmy_debug course). Two defenders in
+     * different rooms behind interior cover: the squad fights through the main
+     * doors, resolves both contacts, and the order secures only after the
+     * reachable blind spots are observed. The multi-space route-clearing
+     * expansion of the area is increment 3; this pins the five-room geometry.
+     */
+    private static SimScenario clearTrainingCourse() {
+        ClearingProbe probe = new ClearingProbe();
+        SimScenario.Builder builder = SimScenario.builder("clear_training_course")
+            .description("ATTACK clearing on the five-room training complex: defenders in the hall "
+                + "and the NW room. The squad assaults the main doors from the north strip, fights "
+                + "both contacts down, and secures - the course geometry (interior walls, multiple "
+                + "doorways, per-room cover) must not break the coordinator.")
+            .field(64, 64)
+            .duration(2000)
+            .armed()
+            .terrain(t -> t.trainingCourse());
+        addClearingProbe(builder, 40, 1980, 20, probe,
+            (x, z) -> x > 10.5 && x < 45.5 && z > 8.5 && z < 21.5);
+        return builder
+            .setup(ctx -> {
+                ctx.spawnAnchor(20, 0, 6);
+                ctx.spawnFriendly(ModEntities.SOLDIER.get(), "alpha", 14, 0, 5, SquadMode.HOLD);
+                ctx.spawnFriendly(ModEntities.SOLDIER.get(), "bravo", 20, 0, 6, SquadMode.HOLD);
+                ctx.spawnFriendly(ModEntities.SOLDIER.get(), "charlie", 26, 0, 5, SquadMode.HOLD);
+                ctx.spawnEnemyLabeled("hall", 33, 0, 12);
+                ctx.spawnEnemyLabeled("northwest", 14, 0, 12);
+                ctx.issueAttackOrder(20, 9);
+            })
+            .assertThat("firefight happened (tracers recorded)", view -> !view.shots().isEmpty())
+            .assertThat("both room defenders were killed", view -> probe.enemyDown)
+            .assertThat("squad entered the complex interior", view -> probe.enteredZone)
+            .assertThat("order completed as SECURED after the contacts resolved",
+                view -> probe.securedSeen)
             .build();
     }
 }

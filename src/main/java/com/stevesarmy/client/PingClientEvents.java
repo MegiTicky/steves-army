@@ -321,6 +321,7 @@ public class PingClientEvents {
             SuppressPingDebugRenderer.render(event.getPoseStack(), event.getCamera());
             SidearmDebugRenderer.render(event.getPoseStack(), event.getCamera());
             com.stevesarmy.client.DangerMapDebugRenderer.render(event.getPoseStack(), event.getCamera());
+            FovConeDebugRenderer.render(event.getPoseStack(), event.getCamera());
             CommandStickRenderer.render(event.getPoseStack(), event.getCamera(), event.getPartialTick());
         }
     }
