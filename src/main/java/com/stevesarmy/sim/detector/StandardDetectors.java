@@ -162,7 +162,11 @@ public final class StandardDetectors {
             for (String label : run.timeline.soldierLabels()) {
                 List<SimSample> series = run.timeline.series(label);
                 for (int i = 0; i < series.size(); i++) {
-                    Set<BlockPos> distinct = new HashSet<>();
+                    // Position -> "role@firstTick" evidence: after the verdict,
+                    // the report names WHICH covers churned and in what role
+                    // (current = a dock, target = an in-flight move goal).
+                    java.util.LinkedHashMap<BlockPos, String> distinct =
+                        new java.util.LinkedHashMap<>();
                     int windowStart = series.get(i).tick;
                     // Long + explicit flag: an Integer.MIN_VALUE sentinel would
                     // overflow the refractory subtraction (tick - MIN_VALUE
@@ -174,27 +178,34 @@ public final class StandardDetectors {
                     // hops while the clearing order is making observations or
                     // actively fighting are doctrine, but flapping with NO
                     // fresh observation and NO firing is churn even mid-order
-                    // (the post-kill dither). The grace horizon (2x window)
-                    // bridges a long bound + dock + dwell between legitimate
-                    // checks without covering an endless dither.
-                    int lastProgressTickSeen = Integer.MIN_VALUE;
+                    // (the post-kill dither). Progress is tracked as CHRONOLOGICAL
+                    // events (each sample whose check count or shot count rose
+                    // over the previous sample); a window sample is exempt only
+                    // if an event happened at or before it within the grace
+                    // horizon. One shared stamp over the window would exempt
+                    // churn that happened BEFORE the progress it cites.
+                    long[] lastProgressBefore = new long[series.size()];
                     {
+                        long lastEvent = Long.MIN_VALUE;
                         int prevChecked = Integer.MIN_VALUE;
-                        int shotsAtStart = Integer.MIN_VALUE;
-                        for (int j = i; j < series.size(); j++) {
+                        int prevShots = Integer.MIN_VALUE;
+                        for (int j = 0; j < series.size(); j++) {
                             SimSample s = series.get(j);
-                            if (s.tick - windowStart > 2 * SimTuning.COVER_OSCILLATION_WINDOW_TICKS) break;
+                            boolean event = false;
                             if (s.clearingChecked >= 0) {
                                 if (prevChecked != Integer.MIN_VALUE && s.clearingChecked > prevChecked) {
-                                    lastProgressTickSeen = s.tick;
+                                    event = true;
                                 }
                                 prevChecked = s.clearingChecked;
                             }
-                            if (shotsAtStart == Integer.MIN_VALUE) {
-                                shotsAtStart = s.shotsFired;
-                            } else if (s.shotsFired > shotsAtStart) {
-                                lastProgressTickSeen = Math.max(lastProgressTickSeen, s.tick);
+                            if (prevShots != Integer.MIN_VALUE && s.shotsFired > prevShots) {
+                                event = true;
                             }
+                            prevShots = s.shotsFired;
+                            if (event) {
+                                lastEvent = s.tick;
+                            }
+                            lastProgressBefore[j] = lastEvent;
                         }
                     }
                     for (int j = i; j < series.size(); j++) {
@@ -216,16 +227,35 @@ public final class StandardDetectors {
                         }
                         if (sawSuppression && s.tick - lastSuppressedTick <= 60) continue;
                         if (s.state.traveling) continue;
-                        if (s.state.attacking && s.tick - lastProgressTickSeen <= 2 * SimTuning.COVER_OSCILLATION_WINDOW_TICKS) continue;
-                        if (s.state.targetCover != null) distinct.add(s.state.targetCover);
-                        if (s.state.currentCover != null) distinct.add(s.state.currentCover);
+                        // A claim change while the soldier is executing a
+                        // coordinator-driven advance (investigate walk or
+                        // SECURE assemble) is the ordered move itself — the
+                        // coordinator sent him there; counting it as churn
+                        // condemns exactly the progress the order demands.
+                        if (s.clearingAdvancing) continue;
+                        long lastEvent = lastProgressBefore[j];
+                        if (s.state.attacking && lastEvent != Long.MIN_VALUE
+                            && s.tick - lastEvent <= 2 * SimTuning.COVER_OSCILLATION_WINDOW_TICKS) continue;
+                        // Churn is measured in DOCKS: positions where the
+                        // soldier actually held cover. Transient targetCover
+                        // re-picks inside one long repositioning (mid-travel
+                        // re-paths) are travel, not claims — counting them
+                        // condemned legitimate slow approaches.
+                        if (s.state.currentCover != null
+                            && ("IN_COVER".equals(s.state.coverState)
+                                || "SUPPRESSED_IN_COVER".equals(s.state.coverState))
+                            && !distinct.containsKey(s.state.currentCover)) {
+                            distinct.put(s.state.currentCover,
+                                "dock" + s.state.currentCover.toShortString() + "@" + s.tick);
+                        }
                     }
                     if (distinct.size() >= SimTuning.COVER_OSCILLATION_COUNT) {
                         SimSample at = series.get(Math.min(i + 1, series.size() - 1));
                         SimViolation v = new SimViolation(SimViolation.Severity.FAIL, name(), at.tick, label,
                             distinct.size() + " distinct cover positions claimed within "
                                 + SimTuning.COVER_OSCILLATION_WINDOW_TICKS + "t — cover churn");
-                        v.with("distinctCovers", distinct.size()).with("windowStart", windowStart);
+                        v.with("distinctCovers", distinct.size()).with("windowStart", windowStart)
+                            .with("positions", String.join(" ", distinct.values()));
                         out.add(v);
                         i = series.size(); // one report per soldier is enough
                     }

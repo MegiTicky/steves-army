@@ -56,6 +56,10 @@ public final class SimSample {
     public final int clearingStage;
     /** Squad-level count of checked check-targets at sample time; -1 when no clearing order. */
     public final int clearingChecked;
+    /** Completion armed (every obligation resolved, order not yet complete); false when no clearing order. */
+    public final boolean clearingAssembleArmed;
+    /** True while executing a coordinator-driven advance (investigate walk or SECURE assemble). */
+    public final boolean clearingAdvancing;
 
     public SimSample(int tick, String label, CombatStateSnapshot state,
                      float health, float maxHealth, boolean hasAttackTarget,
@@ -65,7 +69,8 @@ public final class SimSample {
                      int exposedBodyRays, int exposedHeadRays, int probedBodyRays, boolean reloading,
                      String posture, boolean rising, float syncedCoverHeight,
                      double dangerAtSoldier, boolean dangerLegExposed, float headYaw,
-                     int clearingStage, int clearingChecked) {
+                     int clearingStage, int clearingChecked, boolean clearingAssembleArmed,
+                     boolean clearingAdvancing) {
         this.tick = tick;
         this.label = label;
         this.state = state;
@@ -93,5 +98,7 @@ public final class SimSample {
         this.headYaw = headYaw;
         this.clearingStage = clearingStage;
         this.clearingChecked = clearingChecked;
+        this.clearingAssembleArmed = clearingAssembleArmed;
+        this.clearingAdvancing = clearingAdvancing;
     }
 }

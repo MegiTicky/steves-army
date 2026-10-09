@@ -111,6 +111,9 @@ public final class SimManager {
         // Optional combat-goal decision traces: -Dsim.ailog=true
         com.stevesarmy.debug.DiagnosticLogManager.setAttackLoggingEnabled(
             Boolean.getBoolean("sim.ailog"));
+        // Optional cover-state transition + clearCover traces: -Dsim.statedlog=true
+        com.stevesarmy.debug.DiagnosticLogManager.setCoverLoggingEnabled(
+            Boolean.getBoolean("sim.statedlog"));
         // Optional per-shot gate traces: -Dsim.dmglog=true
         com.stevesarmy.debug.DiagnosticLogManager.setDamageLoggingEnabled(
             Boolean.getBoolean("sim.dmglog"));
@@ -394,7 +397,9 @@ public final class SimManager {
                 snap.currentCover != null ? soldier.getSyncedCoverCurrentHeight() : -1f,
                 dangerAtSoldier, dangerLegExposed, snap.headYaw,
                 clearingView == null ? -1 : clearingView.stage().ordinal(),
-                clearingView == null ? -1 : clearingView.checkedCount()));
+                clearingView == null ? -1 : clearingView.checkedCount(),
+                clearingView != null && clearingView.secureAssemble(),
+                soldier.getCoverTacticalGoal().isClearingAdvancing()));
             recorder.soldier(label, snap, los, nearestX, nearestZ,
                 shotCounts.getOrDefault(soldier.getUUID(), 0),
                 hasGun,
@@ -569,6 +574,15 @@ public final class SimManager {
 
         SimReportWriter.write(result, simTick);
         SimRecordingWriter.write(result, recorder);
+        // Clearing-order post-mortem: one line naming whatever still blocked
+        // completion (open check targets, unresolved contacts, stage) so a
+        // starved scenario is diagnosable straight from the run log.
+        if (context.anchor != null) {
+            StevesArmyMod.LOGGER.info("[AttackClear] final {}: {}",
+                scenario.name,
+                com.stevesarmy.squad.ClearingCoordinator.debugDump(
+                    context.anchor.getUUID(), com.stevesarmy.squad.FireTeam.ALL));
+        }
 
         // cleanup
         for (SoldierEntity soldier : new ArrayList<>(context.friendlies)) {

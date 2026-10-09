@@ -94,8 +94,8 @@ minecraft {
             // headless at startup, write reports to run/sim_reports/, then halt.
             // -Psim.scenario=<name> narrows the autorun (comma-separated list ok).
             // -Psim.coverlog=true enables per-candidate [CoverScore] traces.
-            // -Psim.suplog / -Psim.ailog / -Psim.dmglog enable [Suppression] /
-            // combat-goal / per-shot gate traces.
+            // -Psim.suplog / -Psim.ailog / -Psim.dmglog / -Psim.statedlog enable
+            // [Suppression] / combat-goal / per-shot gate / cover-state traces.
             // -Psim.fastticks=true/false overrides the default 'auto' (= on iff
             // sim.autorun): unthrottled ticking via MinecraftServerFastTickMixin
             // so scenarios run at CPU speed instead of real-time 20 TPS.
@@ -104,6 +104,7 @@ minecraft {
             property 'sim.coverlog', (project.findProperty('sim.coverlog') ?: 'false').toString()
             property 'sim.suplog', (project.findProperty('sim.suplog') ?: 'false').toString()
             property 'sim.ailog', (project.findProperty('sim.ailog') ?: 'false').toString()
+            property 'sim.statedlog', (project.findProperty('sim.statedlog') ?: 'false').toString()
             property 'sim.dmglog', (project.findProperty('sim.dmglog') ?: 'false').toString()
             property 'sim.fastticks', (project.findProperty('sim.fastticks') ?: 'auto').toString()
         }

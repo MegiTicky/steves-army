@@ -82,4 +82,14 @@ public interface CoverGoalController {
     default int getRecentRepositionCount() {
         return 0;
     }
+
+    /**
+     * True while the soldier is executing a coordinator-driven advance (an
+     * investigate walk to an assigned check target or the SECURE assemble).
+     * Sim churn detection treats a claim change during such a walk as the
+     * ordered move it is, not as cover oscillation.
+     */
+    default boolean isClearingAdvancing() {
+        return false;
+    }
 }

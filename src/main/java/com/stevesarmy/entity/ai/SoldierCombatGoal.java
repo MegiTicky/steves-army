@@ -1574,7 +1574,8 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
             StevesArmyMod.LOGGER.info(
                 "[HiddenCoverFire] soldier={} peek={} target={} aim={} canShoot={}",
                 soldier.getId(), soldier.getPeekController().getState(),
-                vehicleCombat ? "vehicle" : target.getId(), aimPoint.type.displayName, aimPoint.canShoot());
+                vehicleCombat || target == null ? "vehicle" : target.getId(),
+                aimPoint.type.displayName, aimPoint.canShoot());
         }
 
         // Starting a burst requires a solid firing solution. The lower
@@ -1714,7 +1715,11 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
             if (hiddenCoverFire && isDebugLogging()) {
                 StevesArmyMod.LOGGER.info(
                     "[HiddenCoverFire] soldier={} shot target={} aim={}",
-                    soldier.getId(), vehicleCombat ? "vehicle" : target.getId(), aimPoint.type.displayName);
+                    // The shot pipeline can clear this.target (kill events,
+                    // stale drops) between firing and this log; a debug line
+                    // must never NPE the server tick.
+                    soldier.getId(), vehicleCombat || target == null ? "vehicle" : target.getId(),
+                    aimPoint.type.displayName);
             }
 
             if (GunIntegration.isAnyGunLoaded() && GunIntegration.hasGun(soldier)) {

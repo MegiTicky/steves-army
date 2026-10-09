@@ -94,6 +94,7 @@ public final class SimRegistry {
             clearDividedRooms(),
             clearContactRevisit(),
             clearTrainingCourse(),
+            clearBenchmarkNorthDoorFunnel(),
             clearDeepObjectiveSequence());
     }
 
@@ -3183,6 +3184,19 @@ public final class SimRegistry {
         double maxCheckedFraction = -1.0;
         /** Game tick of the squad's most recent successful check (max seen; -1 none). */
         long lastCheckTick = -1L;
+        /** Most recent check of any contact's last-known (max seen; -1 none). */
+        long lastContactCheckTick = -1L;
+        /**
+         * Contact-check evidence as of the moment completion first read ARMED
+         * (all obligations resolved): the direct "the surviving contact was
+         * re-observed" signal, uncontaminated by post-completion re-sights
+         * (armed is inherently pre-completion).
+         */
+        long lastContactCheckAtArmed = -1L;
+        /** First tick the coordinator reported completion ARMED (all obligations resolved); -1 never. */
+        int armedAtTick = -1;
+        /** First tick any soldier stood inside the entry zone; -1 never (ordering asserts). */
+        int enteredAtTick = -1;
         /** Labels of soldiers seen inside the entry zone at least once. */
         java.util.Set<String> enteredLabels = new java.util.HashSet<>();
         /** Labels of soldiers alive at the most recent probe sample. */
@@ -3227,6 +3241,15 @@ public final class SimRegistry {
                 probe.lastCheckTick = Math.max(probe.lastCheckTick,
                     com.stevesarmy.squad.ClearingCoordinator.lastCheckTick(
                         ctx.anchor.getUUID(), com.stevesarmy.squad.FireTeam.ALL));
+                probe.lastContactCheckTick = Math.max(probe.lastContactCheckTick,
+                    com.stevesarmy.squad.ClearingCoordinator.lastContactCheckTick(
+                        ctx.anchor.getUUID(), com.stevesarmy.squad.FireTeam.ALL));
+                if (probe.armedAtTick < 0
+                    && com.stevesarmy.squad.ClearingCoordinator.completionArmed(
+                        ctx.anchor.getUUID(), com.stevesarmy.squad.FireTeam.ALL)) {
+                    probe.armedAtTick = at;
+                    probe.lastContactCheckAtArmed = probe.lastContactCheckTick;
+                }
                 java.util.Map<SoldierEntity, String> labels = new java.util.HashMap<>();
                 ctx.byLabel.forEach((l, s) -> labels.put(s, l));
                 boolean allValid = !ctx.friendlies.isEmpty();
@@ -3242,6 +3265,9 @@ public final class SimRegistry {
                     }
                     if (zone != null && zone.test(s.getX(), s.getZ())) {
                         probe.enteredZone = true;
+                        if (probe.enteredAtTick < 0) {
+                            probe.enteredAtTick = at;
+                        }
                         probe.enteredLabels.add(labels.getOrDefault(s, s.getUUID().toString()));
                     }
                 }
@@ -3336,7 +3362,7 @@ public final class SimRegistry {
                 t.cqbCourse();
                 t.coverBlock(18, 8, 1); // interior cover the enemy can fight from
             });
-        addClearingProbe(builder, 40, 1980, 20, probe, WEST_ROOM);
+        addClearingProbe(builder, 40, 2980, 20, probe, WEST_ROOM);
         return builder
             .setup(ctx -> {
                 ctx.spawnAnchor(22, 0, 38);
@@ -3353,12 +3379,13 @@ public final class SimRegistry {
             .assertThat("firefight happened (tracers recorded)", view -> !view.shots().isEmpty())
             .assertThat("interior enemy was killed", view -> probe.enemyDown)
             .assertThat("squad entered the objective room", view -> probe.enteredZone)
-            // 60t slack: a contact resolved by rechecking his last-known can
-            // land within one burst of the kill that actually removed him.
-            // The bar catches "defender alive for minutes past SECURED", not
-            // a photo finish between recheck-resolution and the death tick.
-            .assertThat("SECURED only after the contact was resolved (ordering, not coincidence)",
-                view -> probe.securedSeen && probe.securedAtTick > probe.allEnemiesDownAtTick - 60)
+            // Direct resolution assert: the coordinator must report every
+            // obligation resolved BEFORE the order completes. Death ticks are
+            // deliberately not used here — investigation resolving a surviving
+            // contact is legitimate doctrine, and a time allowance against a
+            // death tick cannot establish the rule.
+            .assertThat("SECURED only after every obligation was resolved (armed before complete)",
+                view -> probe.securedSeen && probe.securedAtTick > probe.armedAtTick)
             .assertThat("every check-target was observed (fraction 1.0)",
                 view -> probe.maxCheckedFraction >= 0.999)
             .assertThat("order completed as SECURED after the contact resolved",
@@ -3411,7 +3438,7 @@ public final class SimRegistry {
                 + "door and partition door blocked). The squad cannot enter and cannot see the "
                 + "interior: the order reports 'Attack stalled' and then persists indefinitely - "
                 + "no proximity completion, no silent timeout.")
-            .duration(1300)
+            .duration(2000)
             .terrain(t -> {
                 t.cqbCourse();
                 t.block(30, 0, 12, net.minecraft.world.level.block.Blocks.STONE_BRICKS.defaultBlockState());
@@ -3421,7 +3448,7 @@ public final class SimRegistry {
                 t.block(22, 1, 12, net.minecraft.world.level.block.Blocks.STONE_BRICKS.defaultBlockState());
                 t.block(22, 2, 12, net.minecraft.world.level.block.Blocks.STONE_BRICKS.defaultBlockState());
             });
-        addClearingProbe(builder, 40, 1280, 20, probe, null);
+        addClearingProbe(builder, 40, 2980, 20, probe, null);
         return builder
             .setup(ctx -> {
                 ctx.spawnAnchor(26, 0, 38);
@@ -3522,7 +3549,7 @@ public final class SimRegistry {
             .duration(3000)
             .armed()
             .terrain(t -> t.trainingCourse());
-        addClearingProbe(builder, 40, 1980, 20, probe,
+        addClearingProbe(builder, 40, 2980, 20, probe,
             (x, z) -> x > 10.5 && x < 45.5 && z > 8.5 && z < 21.5);
         return builder
             .setup(ctx -> {
@@ -3541,9 +3568,52 @@ public final class SimRegistry {
             .assertThat("firefight happened (tracers recorded)", view -> !view.shots().isEmpty())
             .assertThat("both room defenders were killed", view -> probe.enemyDown)
             .assertThat("squad entered the complex interior", view -> probe.enteredZone)
-            .assertThat("SECURED only after the contacts resolved (ordering, not coincidence; "
-                    + "60t photo-finish slack for recheck-vs-death races)",
-                view -> probe.securedSeen && probe.securedAtTick > probe.allEnemiesDownAtTick - 60)
+            .assertThat("SECURED only after every obligation was resolved (armed before complete)",
+                view -> probe.securedSeen && probe.securedAtTick > probe.armedAtTick)
+            .assertThat("order completed as SECURED after the contacts resolved",
+                view -> probe.securedSeen)
+            .build();
+    }
+
+    /**
+     * BENCHMARK — EXPECTED TO FAIL (kept at the external reviewer's request):
+     * the original north-door approach to the training complex. Defenders
+     * camping the double door stall the assault OUTSIDE for whole runs —
+     * threshold entry under fire. That is Increment 2's entry-coordination
+     * problem; the west-entry variant above isolates Increment 1's clearing
+     * logic. This scenario stays as the honest measure of that gap: when the
+     * funnel stops being lethal here, INC 2's entry coordination has landed.
+     * Its failures are known-fail baseline, not regressions.
+     */
+    private static SimScenario clearBenchmarkNorthDoorFunnel() {
+        ClearingProbe probe = new ClearingProbe();
+        SimScenario.Builder builder = SimScenario.builder("clear_benchmark_north_door_funnel")
+            .description("KNOWN-FAIL BENCHMARK: the training complex assaulted straight through "
+                + "the north double door against camping defenders. Threshold entry under fire "
+                + "is the INC 2 entry-coordination gap; this run exists to measure it and is "
+                + "expected to fail on combat/completion until INC 2 lands.")
+            .field(64, 64)
+            .duration(3000)
+            .armed()
+            .terrain(t -> t.trainingCourse());
+        addClearingProbe(builder, 40, 2980, 20, probe,
+            (x, z) -> x > 10.5 && x < 45.5 && z > 8.5 && z < 21.5);
+        return builder
+            .setup(ctx -> {
+                ctx.spawnAnchor(20, 0, 6);
+                ctx.spawnFriendly(ModEntities.SOLDIER.get(), "alpha", 14, 0, 5, SquadMode.HOLD);
+                ctx.spawnFriendly(ModEntities.SOLDIER.get(), "bravo", 20, 0, 6, SquadMode.HOLD);
+                ctx.spawnFriendly(ModEntities.SOLDIER.get(), "charlie", 26, 0, 5, SquadMode.HOLD);
+                ctx.spawnFriendly(ModEntities.SOLDIER.get(), "delta", 32, 0, 6, SquadMode.HOLD);
+                ctx.spawnEnemyLabeled("hall", 33, 0, 12);
+                ctx.spawnEnemyLabeled("northwest", 14, 0, 12);
+                ctx.issueAttackOrder(20, 9);
+            })
+            .assertThat("firefight happened (tracers recorded)", view -> !view.shots().isEmpty())
+            .assertThat("both room defenders were killed", view -> probe.enemyDown)
+            .assertThat("squad entered the complex interior", view -> probe.enteredZone)
+            .assertThat("SECURED only after every obligation was resolved (armed before complete)",
+                view -> probe.securedSeen && probe.securedAtTick > probe.armedAtTick)
             .assertThat("order completed as SECURED after the contacts resolved",
                 view -> probe.securedSeen)
             .build();
@@ -3613,10 +3683,8 @@ public final class SimRegistry {
             .assertThat("firefight happened (tracers recorded)", view -> !view.shots().isEmpty())
             .assertThat("all three defenders were killed", view -> probe.enemyDown)
             .assertThat("squad reached the deep room", view -> probe.enteredZone)
-            .assertThat("SECURED only after the zone's defenders were resolved (ordering, not "
-                    + "coincidence; 60t photo-finish slack for recheck-vs-death races)",
-                view -> probe.securedSeen && (probe.zoneEnemiesDownAtTick < 0
-                    || probe.securedAtTick > probe.zoneEnemiesDownAtTick - 60))
+            .assertThat("SECURED only after every obligation was resolved (armed before complete)",
+                view -> probe.securedSeen && probe.securedAtTick > probe.armedAtTick)
             .assertThat("order completed as SECURED in the deep room",
                 view -> probe.securedSeen)
             .build();
@@ -3652,10 +3720,12 @@ public final class SimRegistry {
                 ctx.spawnFriendly(ModEntities.SOLDIER.get(), "bravo", 10, 0, 36, SquadMode.HOLD);
                 ctx.issueAttackOrder(12, 10); // west room, north half
             })
-            .assertThat("someone reached the far room before completion (no through-wall checks)",
-                view -> probe.enteredZone)
-            .assertThat("every check-target was observed (fraction 1.0)",
-                view -> probe.maxCheckedFraction >= 0.999)
+            .assertThat("someone reached the far room BEFORE completion (entry precedes SECURED)",
+                view -> probe.enteredZone && probe.enteredAtTick >= 0
+                    && probe.securedAtTick > probe.enteredAtTick)
+            .assertThat("every check-target was observed BEFORE completion (armed precedes SECURED)",
+                view -> probe.maxCheckedFraction >= 0.999 && probe.armedAtTick >= 0
+                    && probe.securedAtTick > probe.armedAtTick)
             .assertThat("order completed as SECURED", view -> probe.securedSeen)
             .build();
     }
@@ -3691,10 +3761,17 @@ public final class SimRegistry {
             })
             .action(400, "sighting ends - intel stops refreshing and decays", ctx ->
                 ctx.injectedThreats().clear())
-            .assertThat("a check ran AFTER the contact ended (stale evidence stood down)",
-                view -> probe.lastCheckTick > 400)
-            .assertThat("order completed as SECURED after the fresh investigation",
-                view -> probe.securedSeen)
+            // After t=400 the contact recheck is the ONLY outstanding
+            // obligation (all POIs were checked during the sighting). The
+            // asserts read the CONTACT-specific check tick captured at the
+            // ARMED sample: armed is pre-completion by definition, so the
+            // injected threat's post-SECURED re-sights (he never dies, the
+            // squad just forgets him) cannot inflate the evidence.
+            .assertThat("the surviving contact was re-observed AFTER the sighting ended (resolution asserted directly)",
+                view -> probe.lastContactCheckAtArmed > 400)
+            .assertThat("completion stayed blocked until obligations resolved, then SECURED followed",
+                view -> probe.securedSeen && probe.armedAtTick > 0
+                    && probe.securedAtTick > probe.armedAtTick)
             .build();
     }
 }

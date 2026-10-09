@@ -109,8 +109,8 @@ public final class ClearingCoordinator {
         List<BlockPos> pois = List.of();
         /** check-target key (packed position) -> game tick it was checked. */
         Map<Long, Long> checkedTick = new HashMap<>();
-        /** check-target key -> game tick of first verified line of sight. */
-        Map<Long, Long> seenTick = new HashMap<>();
+        /** check-target key -> {first verified-sight tick, last verified-sight tick} while dwelling. */
+        Map<Long, long[]> dwellTick = new HashMap<>();
         /** Game tick of the most recent successful check (sim/report seam). */
         long lastCheckTick = -1;
 
@@ -129,6 +129,9 @@ public final class ClearingCoordinator {
         boolean stalled;
         long settledSinceTick = -1;
         long stallAnnouncedTick = Long.MIN_VALUE;
+        /** Stall approach-anchor: centroid distance to the objective at anchor time (-1 unanchored). */
+        long stallAnchorTick = -1;
+        double stallAnchorDist = 0;
         long completedAtTick = Long.MIN_VALUE;
         boolean completeRequested;
     }
@@ -243,7 +246,7 @@ public final class ClearingCoordinator {
         state.objective = activity.objective();
         state.dimension = activity.dimension();
         state.checkedTick.clear();
-        state.seenTick.clear();
+        state.dwellTick.clear();
         state.contactPoints.clear();
         state.contactLastSeen.clear();
         state.claims.clear();
@@ -251,6 +254,8 @@ public final class ClearingCoordinator {
         state.stalled = false;
         state.settledSinceTick = -1;
         state.stallAnnouncedTick = Long.MIN_VALUE;
+        state.stallAnchorTick = -1;
+        state.stallAnchorDist = 0;
         state.completeRequested = false;
         state.completedAtTick = Long.MIN_VALUE;
         state.level = findLevel(server, state);
@@ -476,13 +481,28 @@ public final class ClearingCoordinator {
         return VisibilityRay.trace(state.level, soldier.getEyePosition(), to, soldier).clear();
     }
 
-    /** Records a verified sighting; the target checks once it has been seen long enough. */
+    /**
+     * Records one verified sighting pass. The dwell measures TIME SPENT
+     * OBSERVING, not elapsed time between glimpses: an occlusion gap longer
+     * than the dwell length itself restarts the accumulation, so glimpse,
+     * long occlusion, glimpse does not complete a check. Interruptions
+     * shorter than the dwell length accumulate (a soldier re-tensing on a
+     * peek is still watching the same corner).
+     */
     private static void noteSight(ClearingState state, BlockPos target, long now, boolean clearLoS) {
         if (!clearLoS) {
             return;
         }
-        Long firstSeen = state.seenTick.putIfAbsent(target.asLong(), now);
-        if (now - (firstSeen == null ? now : firstSeen) >= CHECK_DWELL_TICKS) {
+        long key = target.asLong();
+        long[] dwell = state.dwellTick.get(key);
+        if (dwell == null || now - dwell[1] > CHECK_DWELL_TICKS) {
+            dwell = new long[]{now, now};
+        } else {
+            dwell[1] = now;
+        }
+        state.dwellTick.put(key, dwell);
+        if (now - dwell[0] >= CHECK_DWELL_TICKS) {
+            state.dwellTick.remove(key);
             check(state, target, now);
         }
     }
@@ -552,23 +572,37 @@ public final class ClearingCoordinator {
                     }
                     BlockPos known = threat.lastKnownPosition.immutable();
                     BlockPos existing = state.contactPoints.get(threat.threatEntityId);
+                    // The obligation lives at the STORED last-known; small
+                    // moves inside the hysteresis do not migrate it. Evidence
+                    // (check / partial dwell) is only meaningful at the same
+                    // position it was gathered — invalidate it there.
+                    BlockPos obligation = existing != null ? existing : known;
                     if (existing == null || existing.distSqr(known) > 16) {
                         state.contactPoints.put(threat.threatEntityId, known);
+                        // A migrated obligation is a new investigation target:
+                        // evidence gathered at the old corner says nothing
+                        // about the new one, and any check that predates this
+                        // sighting at the new position says even less.
+                        state.checkedTick.remove(known.asLong());
+                        state.dwellTick.remove(known.asLong());
                     }
                     Long prevSeen = state.contactLastSeen.get(threat.threatEntityId);
                     state.contactLastSeen.put(threat.threatEntityId,
                         prevSeen == null ? threat.lastSeenTime : Math.max(prevSeen, threat.lastSeenTime));
-                    // A fresh sighting invalidates older evidence: a check made
-                    // before the squad saw him again says nothing about where he
-                    // is now, so the obligation re-arms. The sighting is itself
-                    // verified observation of the spot, so the dwell clock
-                    // restarts from it — while he stays visibly there the check
-                    // never lands (a live sighting blocks completion through
-                    // recentContact anyway), and once sightings stop, the dwell
-                    // completes and the squad's held observation counts.
-                    if (prevSeen != null && threat.lastSeenTime > prevSeen) {
-                        state.checkedTick.remove(known.asLong());
-                        state.seenTick.put(known.asLong(), now);
+                    // A fresh sighting invalidates older evidence — INCLUDING
+                    // the first registration: a contact discovered at a spot
+                    // the squad already checked must re-arm that check, or the
+                    // obligation can never resolve (observation skips
+                    // already-checked positions, and resolution demands a
+                    // check newer than the sighting). A check made before the
+                    // squad saw him again says nothing about where he is now.
+                    // While he stays visibly there the check never lands (a
+                    // live sighting blocks completion through recentContact
+                    // anyway), and once sightings stop, a fresh sustained
+                    // observation completes it.
+                    if (prevSeen == null || threat.lastSeenTime > prevSeen) {
+                        state.checkedTick.remove(obligation.asLong());
+                        state.dwellTick.remove(obligation.asLong());
                     }
                 }
             });
@@ -718,9 +752,14 @@ public final class ClearingCoordinator {
                 allInside = false;
             }
             CoverBehaviorManager.CoverState coverState = soldier.getCoverBehaviorManager().getState();
+            // Plain navigation counts as movement too: the cover states and
+            // ExposedCombatController do not own every leg (fallback advances,
+            // the SECURE assemble walk ride raw navigation), and a soldier
+            // mid-walk is not settled however calm his cover state reads.
             if (coverState == CoverBehaviorManager.CoverState.SEEKING_COVER
                 || coverState == CoverBehaviorManager.CoverState.REPOSITIONING
-                || ExposedCombatController.hasActiveMove(soldier)) {
+                || ExposedCombatController.hasActiveMove(soldier)
+                || !soldier.getNavigation().isDone()) {
                 allSettled = false;
             }
             cx += at.getX();
@@ -759,30 +798,57 @@ public final class ClearingCoordinator {
         // job is still CLEAR (advance) even when nothing is left to check.
         state.stage = areaHealth && allInside ? ClearingStage.SECURE : ClearingStage.CLEAR;
 
-        // Stall: a full stall window with neither a new observation nor live
-        // contact. Moving without observing is not progress — a squad pacing
-        // the perimeter of a sealed room learns nothing, while a squad under
-        // fire is fighting, not stuck. Reported once; the order persists
-        // until replaced. STALLED is a report, not a hold: the squad keeps
-        // pursuing its jobs so a change (a door opens, suppression lifts)
-        // finds them already trying.
+        // Stall: quiet for a full stall window (no new observation, no live
+        // contact) AND no net approach toward the objective across a second
+        // such window. The two kinds of quiet are different: a squad under
+        // fire is fighting, not stuck; and a squad MARCHING toward a distant
+        // objective is making progress even before any new room check becomes
+        // possible — only a squad that is neither observing, engaging, nor
+        // closing on the objective is actually blocked. Reported once per
+        // blockage: a renewed CHECK un-latches the report (and re-arms the
+        // announcement, so a later stall can be reported again), and so does
+        // measurable approach — but renewed contact does not, because firing
+        // at the thing that blocked the order is not progress on the order.
+        // STALLED is a report, not a hold: the squad keeps pursuing its jobs
+        // so a change (a door opens, suppression lifts) finds them already
+        // trying.
         long lastContactActivity = 0;
         for (Long seen : state.contactLastSeen.values()) {
             lastContactActivity = Math.max(lastContactActivity, seen);
         }
-        if (state.stage == ClearingStage.CLEAR
-            && now - state.lastCheckTick >= StevesArmyConfig.getAttackClearStallTicks()
-            && now - lastContactActivity >= StevesArmyConfig.getAttackClearStallTicks()) {
-            state.stalled = true;
-            if (state.stallAnnouncedTick == Long.MIN_VALUE) {
-                state.stallAnnouncedTick = now;
-                ServerPlayer owner = server.getPlayerList().getPlayer(activity.ownerId());
-                if (owner != null) {
-                    owner.sendSystemMessage(Component.literal(
-                        "[Squad] Attack stalled - no safe progress into the objective area."));
+        long quietFor = Math.min(now - state.lastCheckTick, now - lastContactActivity);
+        boolean stallEligible = state.stage == ClearingStage.CLEAR
+            && quietFor >= StevesArmyConfig.getAttackClearStallTicks();
+        if (!stallEligible) {
+            // Engagement or a fresh observation only invalidates the approach
+            // anchor; an already-latched STALLED report stays latched (the
+            // check path clears it when an observation actually lands).
+            state.stallAnchorTick = -1;
+        } else {
+            BlockPos obj = activity.objective();
+            double distNow = Math.sqrt((cx - obj.getX() - 0.5) * (cx - obj.getX() - 0.5)
+                + (cz - obj.getZ() - 0.5) * (cz - obj.getZ() - 0.5));
+            if (state.stallAnchorTick < 0) {
+                state.stallAnchorTick = now;
+                state.stallAnchorDist = distNow;
+            } else if (now - state.stallAnchorTick >= StevesArmyConfig.getAttackClearStallTicks()) {
+                if (state.stallAnchorDist - distNow > 1.5) {
+                    // Closing on the objective — progress; re-anchor.
+                    state.stallAnchorTick = now;
+                    state.stallAnchorDist = distNow;
+                    state.stalled = false;
+                    state.stallAnnouncedTick = Long.MIN_VALUE;
+                } else if (!state.stalled) {
+                    state.stalled = true;
+                    state.stallAnnouncedTick = now;
+                    ServerPlayer owner = server.getPlayerList().getPlayer(activity.ownerId());
+                    if (owner != null) {
+                        owner.sendSystemMessage(Component.literal(
+                            "[Squad] Attack stalled - no safe progress into the objective area."));
+                    }
+                    StevesArmyMod.LOGGER.info("[AttackClear] order {} {} STALLED at {}",
+                        activity.ownerId(), activity.fireTeam(), activity.objective());
                 }
-                StevesArmyMod.LOGGER.info("[AttackClear] order {} {} STALLED at {}",
-                    activity.ownerId(), activity.fireTeam(), activity.objective());
             }
         }
     }
@@ -1016,6 +1082,68 @@ public final class ClearingCoordinator {
     public static long lastCheckTick(UUID ownerId, FireTeam team) {
         ClearingState state = stateFor(ownerId, team);
         return state == null ? -1L : state.lastCheckTick;
+    }
+
+    /**
+     * Sim/report seam: game tick of the most recent check of a contact's
+     * last-known position (-1 when no contact was ever checked). This is the
+     * direct "a surviving contact was re-observed" signal — lastCheckTick
+     * also moves on blind-spot checks that never touched the contact.
+     */
+    public static long lastContactCheckTick(UUID ownerId, FireTeam team) {
+        ClearingState state = stateFor(ownerId, team);
+        if (state == null) {
+            return -1L;
+        }
+        long latest = -1L;
+        for (BlockPos contact : state.contactPoints.values()) {
+            Long checked = state.checkedTick.get(contact.asLong());
+            if (checked != null) {
+                latest = Math.max(latest, checked);
+            }
+        }
+        return latest;
+    }
+
+    /**
+     * Sim/report seam: completion is ARMED — every check ran and every contact
+     * resolved, only physical completion (all-inside settle) remains. This is
+     * the direct "all obligations resolved" signal ordering asserts use; the
+     * same predicate drives the executor's SECURE assemble pull.
+     */
+    public static boolean completionArmed(UUID ownerId, FireTeam team) {
+        ClearingState state = stateFor(ownerId, team);
+        return state != null && !state.completeRequested && state.level != null
+            && squadAreaHealth(state, state.level.getGameTime());
+    }
+
+    /**
+     * Sim/report seam: compact one-line diagnostic — stage, open check
+     * targets, and per-contact resolution state. The sim harness prints it
+     * at scenario end so a starved completion can be diagnosed from the
+     * report run without attaching a debugger.
+     */
+    public static String debugDump(UUID ownerId, FireTeam team) {
+        ClearingState state = stateFor(ownerId, team);
+        if (state == null) {
+            return "no-state";
+        }
+        long now = state.level.getGameTime();
+        StringBuilder sb = new StringBuilder();
+        sb.append("stage=").append(state.stage).append(" stalled=").append(state.stalled)
+            .append(" lastCheck=").append(now - state.lastCheckTick).append("t ago");
+        for (BlockPos poi : state.pois) {
+            if (!state.checkedTick.containsKey(poi.asLong())) {
+                sb.append(" openPoi=").append(poi.toShortString());
+            }
+        }
+        for (Map.Entry<UUID, BlockPos> contact : state.contactPoints.entrySet()) {
+            Long checked = state.checkedTick.get(contact.getValue().asLong());
+            sb.append(" contact=").append(contact.getValue().toShortString())
+                .append(" checked=").append(checked != null)
+                .append(" lastSeen=").append(now - lastSeen(state, contact.getKey())).append("t ago");
+        }
+        return sb.toString();
     }
 
     public static void clearAll() {

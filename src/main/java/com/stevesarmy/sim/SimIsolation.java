@@ -33,5 +33,9 @@ public final class SimIsolation {
         // per-soldier exposed-combat action state must not leak between scenarios
         com.stevesarmy.entity.ai.ExposedCombatController.resetAll();
         com.stevesarmy.squad.SquadMovementCoordinator.resetAll();
+        // orders of record are per-scenario: a leaked CLEARING state keyed by
+        // the previous scenario's anchor would report phantom stages (STALLED
+        // / SECURED) into the next scenario's probe and executor gates
+        com.stevesarmy.squad.ClearingCoordinator.clearAll();
     }
 }
