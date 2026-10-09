@@ -45,6 +45,13 @@ public final class SimScenario {
     public final java.util.function.Consumer<SimContext> setup;
     public final List<ScheduledAction> actions;
     public final List<Assertion> assertions;
+    /** Non-null when a FAIL from this scenario is the expected outcome (negative tests, A/B archives). */
+    @Nullable
+    public final String expectedFailReason;
+    /** Generic detectors that are known-noisy for this scenario's geometry and are skipped. */
+    public final java.util.Set<String> suppressedDetectors;
+    /** Core tier: runs in the default autorun suite; unmarked scenarios are full-only. */
+    public final boolean coreTier;
 
     private SimScenario(Builder b) {
         this.name = b.name;
@@ -57,6 +64,9 @@ public final class SimScenario {
         this.setup = b.setup;
         this.actions = List.copyOf(b.actions);
         this.assertions = List.copyOf(b.assertions);
+        this.expectedFailReason = b.expectedFailReason;
+        this.suppressedDetectors = java.util.Set.copyOf(b.suppressedDetectors);
+        this.coreTier = b.coreTier;
     }
 
     public static Builder builder(String name) {
@@ -74,6 +84,9 @@ public final class SimScenario {
         private java.util.function.Consumer<SimContext> setup = c -> {};
         private final List<ScheduledAction> actions = new ArrayList<>();
         private final List<Assertion> assertions = new ArrayList<>();
+        private String expectedFailReason = null;
+        private final java.util.Set<String> suppressedDetectors = new java.util.HashSet<>();
+        private boolean coreTier = false;
 
         private Builder(String name) {
             this.name = name;
@@ -107,6 +120,22 @@ public final class SimScenario {
             assertions.add(new Assertion(description, predicate));
             return this;
         }
+
+        /**
+         * A FAIL from this scenario is the expected outcome (negative rig tests,
+         * old-behavior A/B records). Reported as XFAIL and counted green; a
+         * surprise PASS is reported XPASS and counted a real failure.
+         */
+        public Builder expectedFail(String reason) { this.expectedFailReason = reason; return this; }
+
+        /** Skips these named generic detectors for this scenario only (known-noisy geometry). */
+        public Builder suppressDetectors(String... detectorNames) {
+            for (String n : detectorNames) this.suppressedDetectors.add(n);
+            return this;
+        }
+
+        /** Runs in the default (core) autorun suite; unmarked scenarios only run in the full suite. */
+        public Builder core() { this.coreTier = true; return this; }
 
         public SimScenario build() {
             return new SimScenario(this);

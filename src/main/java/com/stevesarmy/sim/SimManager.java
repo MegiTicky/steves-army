@@ -86,6 +86,11 @@ public final class SimManager {
     private static SimScenario scenario;
     private static SimTerrain terrain;
     private static SimContext context;
+    // per-run outcome tally for the SIM COMPLETE line (XPASS counts as a fail:
+    // an expected-fail scenario passing means the old behavior came back)
+    private static int tallyPass;
+    private static int tallyXfail;
+    private static final List<String> tallyFails = new ArrayList<>();
     private static SimTimeline timeline;
     private static SimRecorder recorder;
     private static int simTick = 0;
@@ -132,8 +137,17 @@ public final class SimManager {
                 StevesArmyMod.LOGGER.error("[Sim] sim.scenario='{}' matches no registered scenario", only);
                 return;
             }
+        } else {
+            // Suite tiers: core (default) runs the stable per-family guards;
+            // -Dsim.suite=full runs every registered scenario.
+            String suite = System.getProperty("sim.suite", "core");
+            if (!"full".equalsIgnoreCase(suite)) {
+                scenarios = scenarios.stream().filter(s -> s.coreTier).toList();
+            }
         }
-        StevesArmyMod.LOGGER.info("[Sim] sim.autorun detected — running {} scenario(s) headless; fastTicks={}", scenarios.size(), FAST_TICKS);
+        StevesArmyMod.LOGGER.info("[Sim] sim.autorun detected — running {} scenario(s) headless ({}); fastTicks={}",
+            scenarios.size(), only.isEmpty() ? System.getProperty("sim.suite", "core") + " suite" : "explicit list",
+            FAST_TICKS);
         // Throwaway world: skip mid-run autosaves. Under fast ticks they would
         // otherwise fire far more often in wall time; strays are swept at
         // startup and every fixture is rebuilt per scenario, so nothing reads
@@ -156,6 +170,9 @@ public final class SimManager {
         level = serverLevel;
         queue = new ArrayList<>(scenarios);
         queueIndex = 0;
+        tallyPass = 0;
+        tallyXfail = 0;
+        tallyFails.clear();
         yLevel = Y_BASE;
         autorun = isAutorun;
         discardLeftoverSimEntities();
@@ -519,6 +536,7 @@ public final class SimManager {
         }
 
         for (SimDetector detector : DETECTORS) {
+            if (scenario.suppressedDetectors.contains(detector.name())) continue;
             try {
                 result.violations.addAll(detector.evaluate(result));
             } catch (Exception e) {
@@ -572,6 +590,15 @@ public final class SimManager {
                     + " — baking overspent the shared per-tick budget"));
         }
 
+        if (result.failed()) {
+            if (scenario.expectedFailReason != null) tallyXfail++;
+            else tallyFails.add(scenario.name);
+        } else if (scenario.expectedFailReason != null) {
+            tallyFails.add(scenario.name + " (XPASS)");
+        } else {
+            tallyPass++;
+        }
+
         SimReportWriter.write(result, simTick);
         SimRecordingWriter.write(result, recorder);
         // Clearing-order post-mortem: one line naming whatever still blocked
@@ -601,7 +628,10 @@ public final class SimManager {
             beginScenario();
         } else {
             phase = Phase.DONE;
-            StevesArmyMod.LOGGER.info("[Sim] SIM COMPLETE — reports in {}", SimReportWriter.reportDir());
+            StevesArmyMod.LOGGER.info("[Sim] SIM COMPLETE — {} pass, {} xfail, {} fail{} — reports in {}",
+                tallyPass, tallyXfail, tallyFails.size(),
+                tallyFails.isEmpty() ? "" : " (FAIL: " + String.join(", ", tallyFails) + ")",
+                SimReportWriter.reportDir());
             if (autorun) {
                 StevesArmyMod.LOGGER.info("[Sim] autorun finished — halting server");
                 level.getServer().halt(false);

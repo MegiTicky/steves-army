@@ -37,15 +37,28 @@ public final class SimReportWriter {
         }
     }
 
+    /**
+     * Outcome with expected-failure semantics: a failing scenario marked
+     * {@code expectedFail} reports XFAIL (counted green by the suite tally);
+     * a passing one reports XPASS — that alarm means the old behavior came
+     * back and the record deserves a look, not a quiet green.
+     */
+    public static String outcomeLabel(SimRunResult result) {
+        boolean failed = result.failed();
+        String reason = result.scenario.expectedFailReason;
+        if (reason == null) return failed ? "FAIL" : "PASS";
+        if (failed) return "XFAIL (expected: " + reason + ")";
+        return "XPASS — expected-fail scenario passed; investigate";
+    }
+
     private static String renderText(SimRunResult result, int simTick) {
         StringBuilder sb = new StringBuilder();
-        sb.append("SIM SCENARIO REPORT\n");
-        sb.append("===================\n");
+        sb.append("SIM SCENARIO REPORT\n");        sb.append("===================\n");
         sb.append("scenario : ").append(result.scenario.name).append('\n');
         sb.append("desc     : ").append(result.scenario.description).append('\n');
         sb.append("duration : ").append(result.durationTicks).append(" ticks (").append(simTick).append(" simulated)\n");
         sb.append("guns     : ").append(result.gunsLoaded ? "LOADED (armed scenario)" : "ABSENT — firing assertions skipped").append('\n');
-        sb.append("outcome  : ").append(result.failed() ? "FAIL" : "PASS").append('\n');
+        sb.append("outcome  : ").append(outcomeLabel(result)).append('\n');
         sb.append("samples  : ").append(result.timeline.sampleCount()).append('\n');
         sb.append('\n');
 
@@ -159,6 +172,8 @@ public final class SimReportWriter {
         sb.append("  \"simulatedTicks\": ").append(simTick).append(",\n");
         sb.append("  \"gunsLoaded\": ").append(result.gunsLoaded).append(",\n");
         sb.append("  \"passed\": ").append(!result.failed()).append(",\n");
+        sb.append("  \"expectedFail\": ").append(result.scenario.expectedFailReason != null).append(",\n");
+        sb.append("  \"outcome\": \"").append(escape(outcomeLabel(result))).append("\",\n");
         sb.append("  \"enemyHealthStart\": ").append(result.enemyHealthStart).append(",\n");
         sb.append("  \"enemyHealthEnd\": ").append(result.enemyHealthEnd).append(",\n");
         sb.append("  \"assertionFailures\": [");

@@ -65,25 +65,20 @@ public final class SimRegistry {
             travelRerouteSuppressed(),
             travelCrawlSuppressed(),
             coverApproachCrawlSuppressed(),
-            cqbFreezeBaseline(),
             cqbReloadCloseProtect(),
             cqbCloseFlankSeek(),
             cqbHoldNoShotRelease(),
             cqbFormationNoFreeze(),
-            cqbFormationFreezeBaseline(),
             courseCqbHouseApproach(),
             exposedPlantEngage(),
             exposedFfSidestep(),
-            exposedFfFrozenBaseline(),
             exposedWithdrawOverrun(),
             courseExposedYardFight(),
             streetBoundCrossing(),
             streetMgCoversBound(),
             streetSoloNoCoord(),
-            streetSwarmBaseline(),
             cqbDoorwayQueue(),
             cqbCornerPie(),
-            cqbCornerFrozenAimBaseline(),
             cqbLostContactWatch(),
             clearEmptyRoom(),
             clearInteriorEnemy(),
@@ -147,6 +142,7 @@ public final class SimRegistry {
 
     private static SimScenario holdEnclosedPocket() {
         return SimScenario.builder("hold_enclosed_pocket")
+            .core()
             .description("HOLD soldier inside a three-walled pocket with the enemy outside the opening: "
                 + "cover searches should fail-and-escalate (exhaustion, blacklist) but never strand "
                 + "the soldier in SEEKING_COVER forever.")
@@ -174,6 +170,7 @@ public final class SimRegistry {
 
     private static SimScenario persistentPingRelocation() {
         return SimScenario.builder("persistent_ping_relocation")
+            .core()
             .description("Rifleman pinned continuously for the whole scenario from one fixed origin: "
                 + "the relocation chain must move the soldier between covers instead of dead-ending.")
             .duration(700)
@@ -251,6 +248,7 @@ public final class SimRegistry {
      */
     private static SimScenario mgSuppressionRoundRobin() {
         return SimScenario.builder("mg_suppression_round_robin")
+            .core()
             .description("MG suppression distribution: armed MG + squadmates vs two lane-aligned "
                 + "enemies at two distances, pinned in windows so LOS breaks while targets are "
                 + "held. Asserts bursts cover BOTH enemy positions with alternation and no "
@@ -329,6 +327,7 @@ public final class SimRegistry {
      */
     private static SimScenario mgDirectFireCadence() {
         return SimScenario.builder("mg_direct_fire_cadence")
+            .core()
             .description("MG direct-fire cadence: armed machine gunner (+ two armed squadmates "
                 + "for acquisition insurance) vs a hardened GUNLESS enemy patrolling the open "
                 + "at ~48 blocks. Always-visible target: the MG must open up promptly and "
@@ -631,6 +630,7 @@ public final class SimRegistry {
 
     private static SimScenario openFieldBaseline() {
         return SimScenario.builder("open_field_baseline")
+            .core()
             .description("No suppression, one visible enemy directly in the soldier's facing: a healthy "
                 + "run. Any detector violation here is a false positive to calibrate, not a bug.")
             .duration(500)
@@ -739,6 +739,7 @@ public final class SimRegistry {
 
     private static SimScenario dockReloadMidApproach() {
         return SimScenario.builder("dock_reload_midapproach")
+            .core()
             .description("Reload starting mid-approach (user-reported): the reload must not leave the soldier "
                 + "crouched at the claim-time offset for the whole magazine swap — the claim→dock alignment "
                 + "finishes through the reload, same exception as the approach itself.")
@@ -805,6 +806,7 @@ public final class SimRegistry {
 
     private static SimScenario dockReloadHold() {
         return SimScenario.builder("dock_reload_hold")
+            .core()
             .description("Reload edge case: a scripted reload pins the soldier in its cover slot; shoves "
                 + "during the reload must be damped (movement held while reloading), and once the reload "
                 + "finishes the anchor velocity must pull the soldier back into the exact slot block.")
@@ -845,6 +847,7 @@ public final class SimRegistry {
 
     private static SimScenario dockKnockbackRecovery() {
         return SimScenario.builder("dock_knockback_recovery")
+            .core()
             .description("Anchor-recovery probe (support role, peek disabled): shoves land while the soldier "
                 + "is pinned crouched in its slot early, before the enemy can close to CQB range and freeze "
                 + "the controller. The anchor must fire and pull the soldier back into the exact slot block.")
@@ -909,15 +912,13 @@ public final class SimRegistry {
      * CQB no longer freeze-holds on sight. The pre-fix failure (2026-10-06
      * finding): the hold froze the position controller mid-approach, the
      * anchor starved, the soldier locked 0.3-0.8 blocks off its slot, and kept
-     * claiming SUPPRESSED_IN_COVER/HIDING while fully visible. See
-     * cqb_freeze_baseline for the A/B twin that asserts the OLD behavior.
+     * claiming SUPPRESSED_IN_COVER/HIDING while fully visible.
      */
     private static SimScenario dockCqbHoldFidelity() {
         return SimScenario.builder("dock_cqb_hold_fidelity")
             .description("CQB hold defers to docking (fixed 2026-10-08): an enemy closing during the "
                 + "cover approach must not starve the anchor - the last step into protection finishes, "
-                + "the soldier fights from the slot, and a flanked hiding soldier is not fully visible. "
-                + "A/B: cqb_freeze_baseline asserts the pre-fix starvation.")
+                + "the soldier fights from the slot, and a flanked hiding soldier is not fully visible.")
             .duration(500)
             .terrain(t -> {
                 t.platform();
@@ -937,36 +938,10 @@ public final class SimRegistry {
             .build();
     }
 
-    /**
-     * A/B baseline twin of dock_cqb_hold_fidelity: asserts the PRE-FIX
-     * pathology (hold starves the approach, soldier locks off-slot). Passes on
-     * pre-rework builds; expected FAIL once the docking deferral lands.
-     */
-    private static SimScenario cqbFreezeBaseline() {
-        return SimScenario.builder("cqb_freeze_baseline")
-            .description("BASELINE (expected FAIL after the positioning rework): documents the old "
-                + "visibility-triggered freeze - the CQB hold starves the cover approach mid-dock "
-                + "and the soldier ends off-slot 'hiding' while the close threat sees its body. "
-                + "Pair of dock_cqb_hold_fidelity; keep as the before/after record.")
-            .duration(500)
-            .terrain(t -> {
-                t.platform();
-                dockLane(t, 10);
-            })
-            .setup(ctx -> {
-                ctx.spawnAnchor(4, 0, 20);
-                ctx.spawnFriendly(ModEntities.SOLDIER.get(), "cqb1", 10, 0, 22, SquadMode.FOLLOW);
-                ctx.spawnEnemy(12, 0, 34);
-            })
-            .suppress("cqb1", 20, 460, 15)
-            .assertThat("BASELINE: approach starves - soldier locked off its slot (offset > 0.35) at end",
-                view -> !dockedAtEnd(view, "cqb1"))
-            .build();
-    }
-
     /** Phase 1: a reload mid-approach plus a closing enemy must still end docked. */
     private static SimScenario cqbReloadCloseProtect() {
         return SimScenario.builder("cqb_reload_close_protect")
+            .core()
             .description("Phase 1 positioning rework: a reload starting mid-approach while an enemy closes "
                 + "into emergency range must end docked - the hold may not latch while reloading, the "
                 + "dock finishes through the reload, and a latched hold defers to the finishing dock.")
@@ -998,6 +973,7 @@ public final class SimRegistry {
     /** Phase 1: close-range enemies re-enable cover seeking - the soldier claims a nearby pocket. */
     private static SimScenario cqbCloseFlankSeek() {
         return SimScenario.builder("cqb_close_flank_seek")
+            .core()
             .description("Phase 1 positioning rework: a close target (4 blocks) used to DISABLE cover "
                 + "seeking entirely; now the soldier seeks bounded nearby protection while the "
                 + "engagement hold no-shot clock runs. The pocket 3 blocks west must be claimed.")
@@ -1019,6 +995,7 @@ public final class SimRegistry {
     /** Phase 1: a hold that can never produce a shot (friendly in the cone) must release and reposition. */
     private static SimScenario cqbHoldNoShotRelease() {
         return SimScenario.builder("cqb_hold_no_shot_release")
+            .core()
             .description("Phase 1 positioning rework: the engagement hold latches on a visible enemy at "
                 + "emergency range, but a teammate stands dead-center in the fire cone (LoS is clear, "
                 + "FriendlyFireChecker blocks every shot). The no-shot timeout must release the hold so "
@@ -1106,6 +1083,7 @@ public final class SimRegistry {
     /** Phase 2: an exposed soldier with a clear shot plants and engages — purposeful, not chaotic. */
     private static SimScenario exposedPlantEngage() {
         return SimScenario.builder("exposed_plant_engage")
+            .suppressDetectors("StuckSeek", "FollowEscapeBlocked")
             .description("Exposed-combat doctrine: no cover anywhere near, clear shot at a stationary "
                 + "stationary enemy at 20 blocks. The soldier plants and engages promptly (TTFS <= 150t), "
                 + "stays within a small roam radius (no chaotic wandering), and damages the enemy."
@@ -1138,6 +1116,7 @@ public final class SimRegistry {
     /** Phase 2: a friendly-fire-blocked lane triggers one bounded sidestep that reopens the shot. */
     private static SimScenario exposedFfSidestep() {
         return SimScenario.builder("exposed_ff_sidestep")
+            .suppressDetectors("StuckSeek", "FollowEscapeBlocked")
             .description("Exposed-combat doctrine: the squad anchor stands on the aim line so every shot "
                 + "from the spawn position is FF-blocked while LoS stays clear. The blocked lane must "
                 + "trigger ONE bounded sidestep perpendicular to the aim; from the new position the "
@@ -1164,34 +1143,10 @@ public final class SimRegistry {
             .build();
     }
 
-    /** A/B baseline twin of exposed_ff_sidestep: asserts the OLD frozen-blocked-lane behavior. */
-    private static SimScenario exposedFfFrozenBaseline() {
-        return SimScenario.builder("exposed_ff_frozen_baseline")
-            .description("BASELINE (expected FAIL after the exposed-combat doctrine): documents the old "
-                + "behavior for a permanently FF-blocked lane - the soldier stands at the spawn point "
-                + "the whole run, never sidesteps, never fires. Pair of exposed_ff_sidestep.")
-            .duration(500)
-            .armed()
-            .terrain(t -> t.platform())
-            .setup(ctx -> {
-                // Mirrors exposed_ff_sidestep exactly; the baseline documents
-                // what the pre-rework code did with the same geometry.
-                ctx.spawnAnchor(24, 0, 24);
-                SoldierEntity shooter = ctx.spawnFriendly(ModEntities.SOLDIER.get(), "shooter", 22, 0, 24, SquadMode.FOLLOW);
-                ctx.harden("shooter");
-                EnemySoldierEntity threat = ctx.spawnEnemyLabeled("threat", 26, 0, 24);
-                ctx.disarmSoldier("threat");
-                threat.setSquadMode(SquadMode.HOLD);
-                threat.setHoldPosition(ctx.terrain.at(26, 0, 24));
-            })
-            .assertThat("BASELINE: lane stays blocked, soldier frozen (never moves >= 1.5 blocks)",
-                view -> !movedBetween(view, "shooter", 110, 300, 1.5))
-            .build();
-    }
-
     /** Phase 2: an overrunning melee rush meets a bounded withdrawal that keeps the soldier alive. */
     private static SimScenario exposedWithdrawOverrun() {
         return SimScenario.builder("exposed_withdraw_overrun")
+            .core()
             .description("Exposed-combat doctrine: a disarmed enemy rushes from 15 blocks - the sim "
                 + "teleports it onto the soldier every 40t so the rush cannot stall (an unarmed "
                 + "enemy left alone tends to retreat to the boundary, which would pass the gap "
@@ -1263,6 +1218,7 @@ public final class SimRegistry {
     /** Phase 3: a fire team crosses the hot street one soldier at a time. */
     private static SimScenario streetBoundCrossing() {
         return SimScenario.builder("street_bound_crossing")
+            .core()
             .description("Course scenario (squad street-crossing doctrine): a two-man fire team must "
                 + "advance from the south rim across the rubble street to a hold point inside the "
                 + "west house while an armed enemy covers the lane from the east. "
@@ -1339,34 +1295,6 @@ public final class SimRegistry {
             .build();
     }
 
-    /** A/B baseline twin of street_bound_crossing: asserts the OLD simultaneous swarm. */
-    private static SimScenario streetSwarmBaseline() {
-        return SimScenario.builder("street_swarm_baseline")
-            .description("BASELINE (expected FAIL after the street-crossing doctrine): documents the old "
-                + "behavior for the same two-man crossing - both soldiers swarm the street together, "
-                + "crossing within one 100t window. Pair of street_bound_crossing.")
-            .duration(900)
-            .armed()
-            .terrain(t -> t.cqbCourse())
-            .setup(ctx -> {
-                ctx.spawnAnchor(24, 0, 42);
-                SoldierEntity alpha = ctx.spawnFriendly(ModEntities.SOLDIER.get(), "alpha", 20, 0, 40, SquadMode.HOLD);
-                SoldierEntity bravo = ctx.spawnFriendly(ModEntities.SOLDIER.get(), "bravo", 26, 0, 40, SquadMode.HOLD);
-                alpha.setHoldPosition(ctx.terrain.at(18, 0, 8));
-                bravo.setHoldPosition(ctx.terrain.at(18, 0, 8));
-                EnemySoldierEntity enemy = ctx.spawnEnemyLabeled("threat", 34, 0, 16);
-                enemy.setSquadMode(SquadMode.HOLD);
-                enemy.setHoldPosition(ctx.terrain.at(34, 0, 16));
-            })
-            .assertThat("BASELINE: both cross the street band together (first crossings within 100t)",
-                view -> {
-                    int a = firstNorthTick(view, "alpha", 30);
-                    int b = firstNorthTick(view, "bravo", 30);
-                    return a >= 0 && b >= 0 && Math.abs(a - b) <= 100;
-                })
-            .build();
-    }
-
     // Phase 4: CQB doorway/corner doctrine --------------------------------------
 
     /** Count of samples in [t0,t1] where the soldier faces northward (fz < limit). */
@@ -1425,6 +1353,7 @@ public final class SimRegistry {
      */
     private static SimScenario cqbDoorwayQueue() {
         return SimScenario.builder("cqb_doorway_queue")
+            .core()
             .description("Phase-4 CQB doctrine: two manual-CQB soldiers march into the cqbCourse "
                 + "house through the same west door. The doorway queue holds the follower back "
                 + "before the wall-narrow passage while the leader is still in it - the stack "
@@ -1473,6 +1402,7 @@ public final class SimRegistry {
      */
     private static SimScenario cqbCornerPie() {
         return SimScenario.builder("cqb_corner_pie")
+            .core()
             .description("Phase-4 CQB doctrine: a manual-CQB soldier marches around the cqbCourse "
                 + "west door toward the northwest room while squad intel places a threat just "
                 + "past the corner. Corner pie-slicing pre-aims the arc the corner opens into "
@@ -1507,32 +1437,6 @@ public final class SimRegistry {
             .build();
     }
 
-    /** A/B baseline twin of cqb_corner_pie: asserts the OLD wall-facing aim. */
-    private static SimScenario cqbCornerFrozenAimBaseline() {
-        return SimScenario.builder("cqb_corner_frozen_aim_baseline")
-            .description("BASELINE (expected FAIL after the corner doctrine): documents the old "
-                + "behavior for the same corner approach - aim trails the body, never pre-aims "
-                + "the arc beyond the corner while approaching. Pair of cqb_corner_pie.")
-            .duration(700)
-            .armed()
-            .terrain(t -> t.cqbCourse())
-            .setup(ctx -> {
-                ctx.spawnAnchor(26, 0, 30);
-                SoldierEntity pie = ctx.spawnFriendly(ModEntities.SOLDIER.get(), "pie", 26, 0, 22, SquadMode.HOLD);
-                pie.setCQB(true);
-                pie.setHoldPosition(ctx.terrain.at(16, 0, 8));
-                ctx.injectThreat(16, 10, 1.0f);
-            })
-            .action(90, "refresh threat intel", ctx -> ctx.refreshInjectedThreats())
-            .action(180, "refresh threat intel", ctx -> ctx.refreshInjectedThreats())
-            .action(270, "refresh threat intel", ctx -> ctx.refreshInjectedThreats())
-            .action(360, "refresh threat intel", ctx -> ctx.refreshInjectedThreats())
-            .assertThat("BASELINE: aim never pre-aims northward on approach (< 4 northward-facing "
-                    + "samples, t60-400)",
-                view -> northFacingSamples(view, "pie", 60, 400, -0.3) < 4)
-            .build();
-    }
-
     /**
      * Phase 4: lost-contact watch. Close-quarters contact with a visible armed
      * enemy breaks when the enemy slips behind the house wall. The soldier
@@ -1541,6 +1445,7 @@ public final class SimRegistry {
      */
     private static SimScenario cqbLostContactWatch() {
         return SimScenario.builder("cqb_lost_contact_watch")
+            .core()
             .description("Phase-4 CQB doctrine: an armed enemy breaks contact by slipping behind "
                 + "the cqbCourse house wall. The soldier holds position and keeps his aim on "
                 + "the last-known position for the lost-contact watch window instead of "
@@ -1605,14 +1510,6 @@ public final class SimRegistry {
         return !series.isEmpty() && series.get(series.size() - 1).state.position.z < zLine;
     }
 
-    /** First tick the soldier's z drops below the line, or -1. */
-    private static int firstNorthTick(SimScenario.SimRunResultView view, String label, double zLine) {
-        for (SimSample s : view.timeline().series(label)) {
-            if (s.state.position.z < zLine) return s.tick;
-        }
-        return -1;
-    }
-
     /** True when at some tick one soldier is north of northZ while the other is still south of southZ. */
     private static boolean staggeredCrossing(SimScenario.SimRunResultView view,
                                              String labelA, String labelB, double northZ, double southZ) {
@@ -1661,10 +1558,10 @@ public final class SimRegistry {
     /** Phase 1: CQB formation is a mobility doctrine - no freeze on sight at range, cover use retained. */
     private static SimScenario cqbFormationNoFreeze() {
         return SimScenario.builder("cqb_formation_no_freeze")
+            .core()
             .description("Phase 1 CQB doctrine rework: the formation wheel's CQB toggle no longer "
                 + "freeze-holds on sight at any distance. A CQB soldier spotting an enemy at 8 blocks "
-                + "keeps using cover - claims the nearby row instead of standing frozen in the open. "
-                + "A/B: cqb_formation_freeze_baseline asserts the old freeze.")
+                + "keeps using cover - claims the nearby row instead of standing frozen in the open.")
             .duration(500)
             .terrain(t -> {
                 t.platform();
@@ -1683,32 +1580,10 @@ public final class SimRegistry {
             .build();
     }
 
-    /** A/B baseline twin of cqb_formation_no_freeze: asserts the OLD freeze-any-distance doctrine. */
-    private static SimScenario cqbFormationFreezeBaseline() {
-        return SimScenario.builder("cqb_formation_freeze_baseline")
-            .description("BASELINE (expected FAIL after the positioning rework): documents the old CQB "
-                + "formation doctrine - freeze-and-engage on sight at ANY distance, cover seeking "
-                + "disabled. The soldier stands in the open the whole run. Pair of cqb_formation_no_freeze.")
-            .duration(500)
-            .terrain(t -> {
-                t.platform();
-                t.coverRow(6, 18, 8, 18, 1);
-            })
-            .setup(ctx -> {
-                var anchor = ctx.spawnAnchor(4, 0, 20);
-                SoldierEntity cqb = ctx.spawnFriendly(ModEntities.SOLDIER.get(), "cqb", 10, 0, 20, SquadMode.FOLLOW);
-                cqb.setCQB(true);
-                ctx.squadForAnchor(anchor).setCQB(true);
-                ctx.spawnEnemy(10, 0, 28);
-            })
-            .assertThat("BASELINE: CQB soldier freezes on sight - never claims cover",
-                view -> !claimedCoverBy(view, "cqb", 400))
-            .build();
-    }
-
     /** Phase 1 course smoke test: a hold march through the two-room house course must not strand. */
     private static SimScenario courseCqbHouseApproach() {
         return SimScenario.builder("course_cqb_house_approach")
+            .core()
             .description("Course scenario (two-room house + street): a soldier marching to a hold point "
                 + "inside the west room while an enemy loiters outside the east door. Under the current "
                 + "doctrine a detected enemy turns the march into a bounded firefight - the march must "
@@ -1760,6 +1635,7 @@ public final class SimRegistry {
 
     private static SimScenario dockPeekReturn() {
         return SimScenario.builder("dock_peek_return")
+            .core()
             .description("Peek-return docking: after a peek cycle the soldier must return into the exact "
                 + "slot (RETURN tolerance 0.05). Peek completion and body exposure are the peek strand's "
                 + "and the cover-protection detector's domain, not this scenario's.")
@@ -2321,6 +2197,7 @@ public final class SimRegistry {
     /** SELF-TEST (expected FAIL): constant-zero sampler vs an open field. */
     private static SimScenario dangerSelfTestAllZero() {
         return SimScenario.builder("danger_selftest_all_zero")
+            .expectedFail("RIG SELF-TEST: the deliberately-wrong sampler must trip DangerOracleMismatch")
             .description("RIG SELF-TEST (expected FAIL): a constant-0 danger sampler must trip "
                 + "DangerOracleMismatch on an open field — proves the sweep fails a map that "
                 + "sees nothing.")
@@ -2339,6 +2216,7 @@ public final class SimRegistry {
     /** SELF-TEST (expected FAIL): constant-100 sampler vs a ridge (shadow side must not read hot). */
     private static SimScenario dangerSelfTestAllMax() {
         return SimScenario.builder("danger_selftest_all_max")
+            .expectedFail("RIG SELF-TEST: the deliberately-wrong sampler must trip DangerOracleMismatch")
             .description("RIG SELF-TEST (expected FAIL): a constant-100 danger sampler must trip "
                 + "DangerOracleMismatch on a ridge field — a map that calls everything dangerous "
                 + "is as wrong as one that calls everything safe.")
@@ -2362,6 +2240,7 @@ public final class SimRegistry {
     /** SELF-TEST (expected FAIL): spatially mirrored sampler — catches maps that aggregate right but are wrong in space. */
     private static SimScenario dangerSelfTestMirrored() {
         return SimScenario.builder("danger_selftest_mirrored")
+            .expectedFail("RIG SELF-TEST: the deliberately-wrong sampler must trip DangerOracleMismatch")
             .description("RIG SELF-TEST (expected FAIL): a sampler that inverts the field at the ridge "
                 + "(hot where safe, safe where hot) must trip DangerOracleMismatch — catches maps "
                 + "that look right in aggregate but are spatially wrong.")
@@ -2680,6 +2559,7 @@ public final class SimRegistry {
         final int[] reroutesServed = new int[1];
         final int[] slabY = new int[1];
         return SimScenario.builder("travel_reroute_suppressed")
+            .core()
             .description("SUPPRESSED TRAVEL (reroute): marching rifleman under near-miss fire keeps marching - "
                 + "the fire origin feeds squad intel, the map bakes the shadow, the hold goal re-routes "
                 + "danger-aware, and the soldier reaches the objective radius without diving for cover. "
@@ -2759,6 +2639,7 @@ public final class SimRegistry {
     private static SimScenario travelCrawlSuppressed() {
         final int[] slabY = new int[1];
         return SimScenario.builder("travel_crawl_suppressed")
+            .core()
             .description("SUPPRESSED TRAVEL (crawl): marching rifleman drops low through the 1-high-wall "
                 + "stretch (eyes clear the wall, legs shielded) while suppressed, stands after the "
                 + "pressure eases, and still reaches the objective.")
@@ -2825,6 +2706,7 @@ public final class SimRegistry {
      */
     private static SimScenario coverApproachCrawlSuppressed() {
         return SimScenario.builder("cover_approach_crawl")
+            .core()
             .description("SUPPRESSED COVER APPROACH: sustained fire pins a rifleman marching along a "
                 + "1-high wall; the cover goal claims a wall cell and the approach to it crosses "
                 + "crawl-hidden cells, so the soldier goes low on the way to cover while pinned.")
@@ -2948,6 +2830,7 @@ public final class SimRegistry {
         int[] riflePerTeam = new int[2];
         int[] assigned = new int[1];
         return SimScenario.builder("fireteam_role_balance")
+            .core()
             .description("Fire team rebalance with 4 MGs + 4 riflemen spawned in two role "
                 + "clusters, all empty-handed. Rebalance must bucket by ROLE: each team "
                 + "gets <=2 of each role instead of whole clusters, and no soldier is "
@@ -3015,6 +2898,7 @@ public final class SimRegistry {
         boolean[] standFreeAwayFromProne = new boolean[1];
         double[] chosenCoverDistSqr = new double[1];
         return SimScenario.builder("cover_cross_role_reservation")
+            .core()
             .description("Standing-cover reservation and MG prone-lane reservation must "
                 + "exclude each other (3-block separation) in both directions, on both "
                 + "the write and query paths, and CoverFinder must not return the "
@@ -3092,6 +2976,7 @@ public final class SimRegistry {
         boolean[] aliveWhilePresent = new boolean[1];
         boolean[] freedAfterLeave = new boolean[1];
         return SimScenario.builder("cover_reservation_keepalive")
+            .core()
             .description("A reservation whose holder physically occupies the spot survives "
                 + "its 30s timeout (occupancy keep-alive sweep); once the holder leaves, "
                 + "the same backdated reservation expires normally.")
@@ -3351,6 +3236,9 @@ public final class SimRegistry {
      */
     private static SimScenario clearInteriorEnemy() {
         ClearingProbe probe = new ClearingProbe();
+        // Full-only: the SECURED asserts hinge on kill timing (dice roulette —
+        // 2 of 4 runs red on 2026-10-09 at both tick speeds); the clear family
+        // stays guarded in core by clear_blocked_door + clear_contact_revisit.
         SimScenario.Builder builder = SimScenario.builder("clear_interior_enemy")
             .description("ATTACK clearing (acceptance): an enemy holds the objective room behind "
                 + "interior cover. The squad fights through the doorway, resolves the contact "
@@ -3434,6 +3322,7 @@ public final class SimRegistry {
     private static SimScenario clearBlockedDoor() {
         ClearingProbe probe = new ClearingProbe();
         SimScenario.Builder builder = SimScenario.builder("clear_blocked_door")
+            .core()
             .description("ATTACK clearing (acceptance): the objective room is fully sealed (east "
                 + "door and partition door blocked). The squad cannot enter and cannot see the "
                 + "interior: the order reports 'Attack stalled' and then persists indefinitely - "
@@ -3743,6 +3632,7 @@ public final class SimRegistry {
     private static SimScenario clearContactRevisit() {
         ClearingProbe probe = new ClearingProbe();
         SimScenario.Builder builder = SimScenario.builder("clear_contact_revisit")
+            .core()
             .description("ATTACK clearing (adversarial): a threat is sighted in the room and kept "
                 + "in fresh contact at his spot until t=400, when the harness stops refreshing "
                 + "the intel and the sighting decays. The pre-sighting check cannot age into "

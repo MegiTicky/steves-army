@@ -18,8 +18,11 @@ signals.
 ## Running
 
 ```powershell
-# headless: run every scenario, write reports, halt the server
+# headless: run the CORE suite (27 stable per-family guards; the default), halt
 .\gradlew runServer -Psim.autorun=true
+
+# headless: run EVERY registered scenario (~67, incl. roulette probes and open-bug reproducers)
+.\gradlew runServer -Psim.autorun=true -Psim.suite=full
 
 # headless: run a single scenario (fast iteration)
 .\gradlew runServer -Psim.autorun=true -Psim.scenario=mg_rifleman_seek_contrast
@@ -32,6 +35,33 @@ signals.
 /stevesarmy_sim run hold_enclosed_pocket
 /stevesarmy_sim list
 ```
+
+**Suite tiers:** scenarios marked `.core()` in `SimRegistry` run by default
+(one-or-more stable guards per behavior family); everything else is full-only
+(roulette-prone combat probes, open-bug reproducers, danger-map rigs, long
+benchmark clears). `-Psim.suite=full` overrides; an explicit
+`-Psim.scenario=<name>` list overrides both. Deleted-by-design content: the
+old A/B archive baselines (`cqb_freeze_baseline`,
+`cqb_formation_freeze_baseline`, `cqb_corner_frozen_aim_baseline`,
+`exposed_ff_frozen_baseline`, `street_swarm_baseline`) were removed
+2026-10-09 — their evidence lives in git history.
+
+**XFAIL (expected failures):** scenarios marked `.expectedFail(<reason>)` are
+negative tests whose FAIL *is* the pass condition — currently the three
+`danger_selftest_*` rigs that inject deliberately-wrong samplers and require
+`DangerOracleMismatch` to trip. Their reports show
+`outcome : XFAIL (expected: ...)` and the final `SIM COMPLETE` tally counts
+them separately (`N pass, M xfail, K fail`). If an expected-fail scenario ever
+**passes**, it renders `XPASS — expected-fail scenario passed; investigate`
+and counts as a real failure — that alarm means the thing it guards against
+stopped happening.
+
+**Detector suppression:** scenarios may skip specific generic detectors with
+`.suppressDetectors("StuckSeek", ...)` (exact detector names) when the
+detector is known-noisy for that geometry while the scenario's own doctrine
+assertions stay live. Used by `exposed_plant_engage`/`exposed_ff_sidestep`
+whose featureless arenas trip StuckSeek/FollowEscapeBlocked by design (the
+far-side cover lure finding).
 
 Reports land in `run/sim_reports/<scenario>_<timestamp>.txt` (+ `.json`).
 The txt report contains the outcome, every detector violation with its full
@@ -46,7 +76,8 @@ autorun log line `SIM COMPLETE` is the CI-style grep anchor; per-scenario
 By default, autorun suites are **unthrottled**: `SimManager.onFastTickClock`
 pins `MinecraftServer.nextTickTime` (the vanilla 50 ms/tick pacing anchor)
 ~100 ms into the past every tick, so the server ticks at CPU speed instead of
-real time. A full 69-scenario suite drops from ~38 minutes to a few minutes.
+real time. A full 67-scenario suite drops from ~38 minutes to ~90 seconds
+(the core 27 run in well under a minute).
 Two pieces keep behavior identical to production 20 TPS:
 
 - Gameplay millisecond timers (peek cadence, cover entry, suppression memory,
