@@ -378,6 +378,8 @@ public final class SimManager {
                 dangerAtSoldier = sampler.dangerScoreAt(soldier.getX(), soldier.getZ());
             }
 
+            com.stevesarmy.squad.ClearingCoordinator.ClearingView clearingView =
+                com.stevesarmy.squad.ClearingCoordinator.viewFor(soldier);
             timeline.add(new SimSample(simTick, label, snap,
                 soldier.getHealth(), soldier.getMaxHealth(),
                 combatTarget != null && combatTarget.isAlive(), los,
@@ -390,7 +392,9 @@ public final class SimManager {
                 soldier.isPreparingOrReloading(),
                 soldier.getPose().name(), soldier.isHalfCoverRising(),
                 snap.currentCover != null ? soldier.getSyncedCoverCurrentHeight() : -1f,
-                dangerAtSoldier, dangerLegExposed, snap.headYaw));
+                dangerAtSoldier, dangerLegExposed, snap.headYaw,
+                clearingView == null ? -1 : clearingView.stage().ordinal(),
+                clearingView == null ? -1 : clearingView.checkedCount()));
             recorder.soldier(label, snap, los, nearestX, nearestZ,
                 shotCounts.getOrDefault(soldier.getUUID(), 0),
                 hasGun,

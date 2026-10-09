@@ -91,6 +91,8 @@ public final class SimRegistry {
             clearBlockedDoor(),
             clearSparseOutdoor(),
             clearLegacyProximityTwin(),
+            clearDividedRooms(),
+            clearContactRevisit(),
             clearTrainingCourse(),
             clearDeepObjectiveSequence());
     }
@@ -3158,12 +3160,37 @@ public final class SimRegistry {
     private static final class ClearingProbe {
         int maxStage = -1;
         int lastStage = -1;
+        int prevStage = -1;
         boolean enteredZone = false;
         boolean targetsCleared = false;
         boolean lastAllTargetsValid = false;
         boolean securedSeen = false;
         boolean stalledSeen = false;
         boolean enemyDown = false;
+        /** First tick the order read SECURED; -1 never. Ordering asserts use this. */
+        int securedAtTick = -1;
+        /** First tick every spawned enemy was down; -1 while any is up. */
+        int allEnemiesDownAtTick = -1;
+        /** Enemies seen alive inside the entry zone at least once (they must fall before SECURED). */
+        java.util.Set<java.util.UUID> zoneEnemies = new java.util.HashSet<>();
+        /** First tick every zone enemy was down; -1 while any is up or none ever entered. */
+        int zoneEnemiesDownAtTick = -1;
+        /** Distinct STALLED episodes observed (entering the stage from another). */
+        int stallEpisodes = 0;
+        /** Fraction of check-targets observed at the last probe sample; -1 no order. */
+        double lastCheckedFraction = -1.0;
+        /** Best fraction seen all run — reads -1 again once a completed order prunes. */
+        double maxCheckedFraction = -1.0;
+        /** Game tick of the squad's most recent successful check (max seen; -1 none). */
+        long lastCheckTick = -1L;
+        /** Labels of soldiers seen inside the entry zone at least once. */
+        java.util.Set<String> enteredLabels = new java.util.HashSet<>();
+        /** Labels of soldiers alive at the most recent probe sample. */
+        java.util.Set<String> aliveLabels = new java.util.HashSet<>();
+
+        boolean allSurvivorsEntered() {
+            return !aliveLabels.isEmpty() && enteredLabels.containsAll(aliveLabels);
+        }
     }
 
     /**
@@ -3183,14 +3210,31 @@ public final class SimRegistry {
                 probe.maxStage = Math.max(probe.maxStage, probe.lastStage);
                 if (probe.lastStage == com.stevesarmy.squad.ClearingCoordinator.ClearingStage.SECURED.ordinal()) {
                     probe.securedSeen = true;
+                    if (probe.securedAtTick < 0) {
+                        probe.securedAtTick = at;
+                    }
                 }
                 if (probe.lastStage == com.stevesarmy.squad.ClearingCoordinator.ClearingStage.STALLED.ordinal()) {
                     probe.stalledSeen = true;
+                    if (probe.prevStage != probe.lastStage) {
+                        probe.stallEpisodes++;
+                    }
                 }
+                probe.prevStage = probe.lastStage;
+                probe.lastCheckedFraction = com.stevesarmy.squad.ClearingCoordinator.checkedFraction(
+                    ctx.anchor.getUUID(), com.stevesarmy.squad.FireTeam.ALL);
+                probe.maxCheckedFraction = Math.max(probe.maxCheckedFraction, probe.lastCheckedFraction);
+                probe.lastCheckTick = Math.max(probe.lastCheckTick,
+                    com.stevesarmy.squad.ClearingCoordinator.lastCheckTick(
+                        ctx.anchor.getUUID(), com.stevesarmy.squad.FireTeam.ALL));
+                java.util.Map<SoldierEntity, String> labels = new java.util.HashMap<>();
+                ctx.byLabel.forEach((l, s) -> labels.put(s, l));
                 boolean allValid = !ctx.friendlies.isEmpty();
                 boolean allCleared = !ctx.friendlies.isEmpty();
+                probe.aliveLabels.clear();
                 for (SoldierEntity s : ctx.friendlies) {
                     if (!s.isAlive()) continue;
+                    probe.aliveLabels.add(labels.getOrDefault(s, s.getUUID().toString()));
                     if (s.hasValidAttackTarget()) {
                         allCleared = false;
                     } else {
@@ -3198,6 +3242,7 @@ public final class SimRegistry {
                     }
                     if (zone != null && zone.test(s.getX(), s.getZ())) {
                         probe.enteredZone = true;
+                        probe.enteredLabels.add(labels.getOrDefault(s, s.getUUID().toString()));
                     }
                 }
                 probe.lastAllTargetsValid = allValid;
@@ -3206,14 +3251,30 @@ public final class SimRegistry {
                 }
                 boolean anyEnemy = false;
                 boolean allEnemiesDown = true;
+                boolean zoneEnemiesDown = true;
                 for (EnemySoldierEntity e : ctx.enemies) {
                     anyEnemy = true;
-                    if (e.isAlive() && !e.isRemoved()) {
-                        allEnemiesDown = false;
+                    boolean alive = e.isAlive() && !e.isRemoved();
+                    if (!alive) {
+                        continue;
+                    }
+                    allEnemiesDown = false;
+                    if (zone != null && zone.test(e.getX(), e.getZ())) {
+                        probe.zoneEnemies.add(e.getUUID());
+                    }
+                    if (probe.zoneEnemies.contains(e.getUUID())) {
+                        zoneEnemiesDown = false;
                     }
                 }
-                if (anyEnemy && allEnemiesDown) {
+                if (anyEnemy && allEnemiesDown && probe.allEnemiesDownAtTick < 0) {
+                    probe.allEnemiesDownAtTick = at;
                     probe.enemyDown = true;
+                }
+                // Enemies that operated inside the objective zone must be down
+                // before SECURED; a defender who stayed outside the area (and
+                // was never a contact) does not block the order by doctrine.
+                if (!probe.zoneEnemies.isEmpty() && zoneEnemiesDown && probe.zoneEnemiesDownAtTick < 0) {
+                    probe.zoneEnemiesDownAtTick = at;
                 }
             });
         }
@@ -3246,6 +3307,10 @@ public final class SimRegistry {
                 ctx.issueAttackOrder(18, 12); // west room center
             })
             .assertThat("squad entered the objective room", view -> probe.enteredZone)
+            .assertThat("every survivor physically entered the room (no outside-the-wall completion)",
+                view -> probe.allSurvivorsEntered())
+            .assertThat("every check-target was observed (fraction 1.0)",
+                view -> probe.maxCheckedFraction >= 0.999)
             .assertThat("order completed as SECURED (entered, corners observed, settled)",
                 view -> probe.securedSeen)
             .assertThat("attack targets released after completion",
@@ -3278,12 +3343,24 @@ public final class SimRegistry {
                 ctx.spawnFriendly(ModEntities.SOLDIER.get(), "alpha", 22, 0, 38, SquadMode.HOLD);
                 ctx.spawnFriendly(ModEntities.SOLDIER.get(), "bravo", 20, 0, 36, SquadMode.HOLD);
                 ctx.spawnFriendly(ModEntities.SOLDIER.get(), "charlie", 24, 0, 38, SquadMode.HOLD);
+                // Fourth rifleman: 3v1 through one doorway was combat
+                // roulette — a bad suppression roll let the defender pin the
+                // squad (sup 0.97) and outlive the clock.
+                ctx.spawnFriendly(ModEntities.SOLDIER.get(), "delta", 26, 0, 36, SquadMode.HOLD);
                 ctx.spawnEnemyLabeled("raider", 18, 0, 9);
                 ctx.issueAttackOrder(18, 12);
             })
             .assertThat("firefight happened (tracers recorded)", view -> !view.shots().isEmpty())
             .assertThat("interior enemy was killed", view -> probe.enemyDown)
             .assertThat("squad entered the objective room", view -> probe.enteredZone)
+            // 60t slack: a contact resolved by rechecking his last-known can
+            // land within one burst of the kill that actually removed him.
+            // The bar catches "defender alive for minutes past SECURED", not
+            // a photo finish between recheck-resolution and the death tick.
+            .assertThat("SECURED only after the contact was resolved (ordering, not coincidence)",
+                view -> probe.securedSeen && probe.securedAtTick > probe.allEnemiesDownAtTick - 60)
+            .assertThat("every check-target was observed (fraction 1.0)",
+                view -> probe.maxCheckedFraction >= 0.999)
             .assertThat("order completed as SECURED after the contact resolved",
                 view -> probe.securedSeen)
             .build();
@@ -3313,6 +3390,8 @@ public final class SimRegistry {
                 ctx.issueAttackOrder(18, 12);
             })
             .assertThat("squad entered the objective room", view -> probe.enteredZone)
+            .assertThat("the stale contact's last-known was observed like any check target (fraction 1.0)",
+                view -> probe.maxCheckedFraction >= 0.999)
             .assertThat("order completed as SECURED after the stale contact was observed",
                 view -> probe.securedSeen)
             .assertThat("attack targets released after completion",
@@ -3351,6 +3430,8 @@ public final class SimRegistry {
             })
             .assertThat("attack reported STALLED (no safe progress into the area)",
                 view -> probe.stalledSeen)
+            .assertThat("stalled was reported EXACTLY once (a report, not a repeating nag)",
+                view -> probe.stallEpisodes == 1)
             .assertThat("order persists - targets still held at the end of the run",
                 view -> probe.lastAllTargetsValid)
             .assertThat("order never completed", view -> !probe.securedSeen)
@@ -3431,21 +3512,28 @@ public final class SimRegistry {
         ClearingProbe probe = new ClearingProbe();
         SimScenario.Builder builder = SimScenario.builder("clear_training_course")
             .description("ATTACK clearing on the five-room training complex: defenders in the hall "
-                + "and the NW room. The squad assaults the main doors from the north strip, fights "
-                + "both contacts down, and secures - the course geometry (interior walls, multiple "
-                + "doorways, per-room cover) must not break the coordinator.")
+                + "and the NW room. The squad enters through the west door into the SW room and "
+                + "works north then east - room by room, fighting both contacts down, and secures. "
+                + "The north doors were a death-funnel: defenders camping them stalled the assault "
+                + "outside for whole runs (threshold entry under fire is INC 2 entry coordination, "
+                + "not what this scenario is here to test), so the approach gives the coordinator "
+                + "a fair, sequential clearing problem instead.")
             .field(64, 64)
-            .duration(2000)
+            .duration(3000)
             .armed()
             .terrain(t -> t.trainingCourse());
         addClearingProbe(builder, 40, 1980, 20, probe,
             (x, z) -> x > 10.5 && x < 45.5 && z > 8.5 && z < 21.5);
         return builder
             .setup(ctx -> {
-                ctx.spawnAnchor(20, 0, 6);
-                ctx.spawnFriendly(ModEntities.SOLDIER.get(), "alpha", 14, 0, 5, SquadMode.HOLD);
-                ctx.spawnFriendly(ModEntities.SOLDIER.get(), "bravo", 20, 0, 6, SquadMode.HOLD);
-                ctx.spawnFriendly(ModEntities.SOLDIER.get(), "charlie", 26, 0, 5, SquadMode.HOLD);
+                ctx.spawnAnchor(7, 0, 22);
+                ctx.spawnFriendly(ModEntities.SOLDIER.get(), "alpha", 6, 0, 20, SquadMode.HOLD);
+                ctx.spawnFriendly(ModEntities.SOLDIER.get(), "bravo", 7, 0, 25, SquadMode.HOLD);
+                ctx.spawnFriendly(ModEntities.SOLDIER.get(), "charlie", 5, 0, 22, SquadMode.HOLD);
+                // Fourth rifleman: the 3v2 room fights were combat roulette
+                // (run-to-run a soldier could die in a doorway and the squad
+                // could fail to finish both defenders inside 3000t).
+                ctx.spawnFriendly(ModEntities.SOLDIER.get(), "delta", 8, 0, 22, SquadMode.HOLD);
                 ctx.spawnEnemyLabeled("hall", 33, 0, 12);
                 ctx.spawnEnemyLabeled("northwest", 14, 0, 12);
                 ctx.issueAttackOrder(20, 9);
@@ -3453,6 +3541,9 @@ public final class SimRegistry {
             .assertThat("firefight happened (tracers recorded)", view -> !view.shots().isEmpty())
             .assertThat("both room defenders were killed", view -> probe.enemyDown)
             .assertThat("squad entered the complex interior", view -> probe.enteredZone)
+            .assertThat("SECURED only after the contacts resolved (ordering, not coincidence; "
+                    + "60t photo-finish slack for recheck-vs-death races)",
+                view -> probe.securedSeen && probe.securedAtTick > probe.allEnemiesDownAtTick - 60)
             .assertThat("order completed as SECURED after the contacts resolved",
                 view -> probe.securedSeen)
             .build();
@@ -3480,16 +3571,40 @@ public final class SimRegistry {
                 + "deep blind spots, and secures there - the order cannot complete early and the "
                 + "advance cannot strand short of the far ping.")
             .field(64, 64)
-            .duration(3000)
+            // 4200: a mauled squad (this is a real 4v3 staggered fight) can
+            // finish its checks late; the SECURE assemble walk then has to
+            // bring stragglers physically inside before the settle window can
+            // even start. 3000 starved that tail.
+            .duration(4200)
             .armed()
-            .terrain(t -> t.trainingCourse());
-        addClearingProbe(builder, 40, 2980, 20, probe, DEEP_ROOM);
+            .terrain(t -> {
+                t.trainingCourse();
+                // The deep SE-E room otherwise has one waist-high fixture,
+                // and the deep defender spawns right beside it — assaulting
+                // soldiers then had no real dock and claimed wall-adjacent
+                // spots facing away from the threats (ExposedWhileHiding).
+                // A rubble row south-mid gives them hard cover from the west
+                // door and waist cover from the deep room.
+                t.coverRow(38, 33, 40, 33, 1);
+                // Seal the far-west perimeter door: with it open the
+                // pathfinder sometimes takes the long SW loop and bypasses the
+                // hall defender entirely, which turns this into a two-contact
+                // run by pathfinding luck. The hall corridor is the route.
+                for (int y = 0; y < 3; y++) {
+                    t.block(10, y, 22, net.minecraft.world.level.block.Blocks.STONE_BRICKS.defaultBlockState());
+                }
+            });
+        addClearingProbe(builder, 40, 4180, 20, probe, DEEP_ROOM);
         return builder
             .setup(ctx -> {
                 ctx.spawnAnchor(20, 0, 6);
                 ctx.spawnFriendly(ModEntities.SOLDIER.get(), "alpha", 14, 0, 5, SquadMode.HOLD);
                 ctx.spawnFriendly(ModEntities.SOLDIER.get(), "bravo", 20, 0, 6, SquadMode.HOLD);
                 ctx.spawnFriendly(ModEntities.SOLDIER.get(), "charlie", 26, 0, 5, SquadMode.HOLD);
+                // Fourth rifleman: the 3v3 staggered-defense fight was combat
+                // roulette (run-to-run the squad could lose two soldiers and
+                // let the last defender escape the building past the clock).
+                ctx.spawnFriendly(ModEntities.SOLDIER.get(), "delta", 32, 0, 6, SquadMode.HOLD);
                 ctx.spawnEnemyLabeled("hall", 33, 0, 12);
                 ctx.spawnEnemyLabeled("sew", 28, 0, 28);
                 ctx.spawnEnemyLabeled("deep", 42, 0, 30);
@@ -3498,7 +3613,87 @@ public final class SimRegistry {
             .assertThat("firefight happened (tracers recorded)", view -> !view.shots().isEmpty())
             .assertThat("all three defenders were killed", view -> probe.enemyDown)
             .assertThat("squad reached the deep room", view -> probe.enteredZone)
+            .assertThat("SECURED only after the zone's defenders were resolved (ordering, not "
+                    + "coincidence; 60t photo-finish slack for recheck-vs-death races)",
+                view -> probe.securedSeen && (probe.zoneEnemiesDownAtTick < 0
+                    || probe.securedAtTick > probe.zoneEnemiesDownAtTick - 60))
             .assertThat("order completed as SECURED in the deep room",
+                view -> probe.securedSeen)
+            .build();
+    }
+
+    /**
+     * ACCEPTANCE (adversarial, GPT review #1+#4): two rooms under one roof,
+     * connected only through an opening at the FAR end of the partition. The
+     * east room's blind spots sit directly across the partition wall from the
+     * west room's floor: proximity there is 2 blocks, but the wall is between.
+     * No blind spot may be checked through that wall, and the order cannot
+     * complete until someone has physically projected presence into the far
+     * room (through its opening) — checking across the wall or completing
+     * from the near side both fail here.
+     */
+    private static SimScenario clearDividedRooms() {
+        ClearingProbe probe = new ClearingProbe();
+        SimScenario.Builder builder = SimScenario.builder("clear_divided_rooms")
+            .description("ATTACK clearing (adversarial): two connected rooms whose partition "
+                + "opening is at the far end. The east room's corners face the west room across "
+                + "the partition wall — 2 blocks away but hidden. Checks require real line of "
+                + "sight around via the far opening, and completion requires someone to have "
+                + "entered the east room: proximity through the dividing wall checks nothing.")
+            .duration(2200)
+            .terrain(t -> t.dividedRooms());
+        addClearingProbe(builder, 40, 2180, 20, probe,
+            // East room interior + the partition opening (x16 z17-18) counts as reaching it.
+            (x, z) -> x > 15.5 && x < 23.5 && z > 6.5 && z < 19.5);
+        return builder
+            .setup(ctx -> {
+                ctx.spawnAnchor(12, 0, 38);
+                ctx.spawnFriendly(ModEntities.SOLDIER.get(), "alpha", 12, 0, 38, SquadMode.HOLD);
+                ctx.spawnFriendly(ModEntities.SOLDIER.get(), "bravo", 10, 0, 36, SquadMode.HOLD);
+                ctx.issueAttackOrder(12, 10); // west room, north half
+            })
+            .assertThat("someone reached the far room before completion (no through-wall checks)",
+                view -> probe.enteredZone)
+            .assertThat("every check-target was observed (fraction 1.0)",
+                view -> probe.maxCheckedFraction >= 0.999)
+            .assertThat("order completed as SECURED", view -> probe.securedSeen)
+            .build();
+    }
+
+    /**
+     * ACCEPTANCE (adversarial, GPT review #2): a contact continuously sighted
+     * at a spot the squad already checked, whose sighting then ends (the
+     * harness stops refreshing the intel at t=400 and the entry decays).
+     * Checks made before the last sighting do not count — the squad must look
+     * again AFTER it, so the check recorded last must postdate the sighting
+     * that ended. The keep-alive stop (not a teleport) is the doctrine path:
+     * forgetting a threat leaves the last-known obligation standing until a
+     * fresh observation resolves it.
+     */
+    private static SimScenario clearContactRevisit() {
+        ClearingProbe probe = new ClearingProbe();
+        SimScenario.Builder builder = SimScenario.builder("clear_contact_revisit")
+            .description("ATTACK clearing (adversarial): a threat is sighted in the room and kept "
+                + "in fresh contact at his spot until t=400, when the harness stops refreshing "
+                + "the intel and the sighting decays. The pre-sighting check cannot age into "
+                + "resolution: the squad must observe the last-known again AFTER the sighting "
+                + "ended, and only then can the order secure.")
+            .duration(1800)
+            .terrain(t -> t.cqbCourse());
+        addClearingProbe(builder, 40, 1780, 20, probe, WEST_ROOM);
+        return builder
+            .setup(ctx -> {
+                ctx.spawnAnchor(22, 0, 38);
+                ctx.spawnFriendly(ModEntities.SOLDIER.get(), "alpha", 22, 0, 38, SquadMode.HOLD);
+                ctx.spawnFriendly(ModEntities.SOLDIER.get(), "bravo", 20, 0, 36, SquadMode.HOLD);
+                ctx.injectThreat(18, 10); // sighted in the room, kept fresh by the harness
+                ctx.issueAttackOrder(18, 12);
+            })
+            .action(400, "sighting ends - intel stops refreshing and decays", ctx ->
+                ctx.injectedThreats().clear())
+            .assertThat("a check ran AFTER the contact ended (stale evidence stood down)",
+                view -> probe.lastCheckTick > 400)
+            .assertThat("order completed as SECURED after the fresh investigation",
                 view -> probe.securedSeen)
             .build();
     }

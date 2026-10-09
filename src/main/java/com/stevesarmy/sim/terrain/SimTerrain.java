@@ -159,6 +159,23 @@ public final class SimTerrain {
         coverBlock(41, 26, 1);
     }
 
+    /**
+     * Two rooms under one roof for the divided-rooms acceptance. The interior
+     * partition (x=16) is solid except for an opening at z=14..15 — inside
+     * the order's radius-8 circle of the west-room ping, so the east room is
+     * genuinely part of the order — while the east room's north corners face
+     * the west room's floor directly across the wall: two blocks away as the
+     * crow flies, reachable only by walking around through the opening.
+     *   shell x 8..24, z 6..20, walls h3, single south door (12,20)
+     *   partition x=16: z7..13 solid, z14..15 open, z16..19 solid
+     */
+    public void dividedRooms() {
+        platform();
+        building(8, 6, 24, 20, 3, new int[][]{{12, 20}});
+        wall(16, 7, 16, 13, 3, Blocks.STONE_BRICKS.defaultBlockState());
+        wall(16, 16, 16, 19, 3, Blocks.STONE_BRICKS.defaultBlockState());
+    }
+
     public void block(int x, int y, int z, BlockState state) {
         BlockPos pos = origin.offset(x, y, z);
         // The world silently rejects blocks above the build limit; surface that

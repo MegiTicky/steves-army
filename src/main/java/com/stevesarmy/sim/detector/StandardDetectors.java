@@ -170,6 +170,33 @@ public final class StandardDetectors {
                     // before the first suppressed one.
                     long lastSuppressedTick = Long.MIN_VALUE;
                     boolean sawSuppression = false;
+                    // The ordered-attack exemption is progress-aware: cover
+                    // hops while the clearing order is making observations or
+                    // actively fighting are doctrine, but flapping with NO
+                    // fresh observation and NO firing is churn even mid-order
+                    // (the post-kill dither). The grace horizon (2x window)
+                    // bridges a long bound + dock + dwell between legitimate
+                    // checks without covering an endless dither.
+                    int lastProgressTickSeen = Integer.MIN_VALUE;
+                    {
+                        int prevChecked = Integer.MIN_VALUE;
+                        int shotsAtStart = Integer.MIN_VALUE;
+                        for (int j = i; j < series.size(); j++) {
+                            SimSample s = series.get(j);
+                            if (s.tick - windowStart > 2 * SimTuning.COVER_OSCILLATION_WINDOW_TICKS) break;
+                            if (s.clearingChecked >= 0) {
+                                if (prevChecked != Integer.MIN_VALUE && s.clearingChecked > prevChecked) {
+                                    lastProgressTickSeen = s.tick;
+                                }
+                                prevChecked = s.clearingChecked;
+                            }
+                            if (shotsAtStart == Integer.MIN_VALUE) {
+                                shotsAtStart = s.shotsFired;
+                            } else if (s.shotsFired > shotsAtStart) {
+                                lastProgressTickSeen = Math.max(lastProgressTickSeen, s.tick);
+                            }
+                        }
+                    }
                     for (int j = i; j < series.size(); j++) {
                         SimSample s = series.get(j);
                         if (s.tick - windowStart > SimTuning.COVER_OSCILLATION_WINDOW_TICKS) break;
@@ -179,11 +206,9 @@ public final class StandardDetectors {
                         // a soldier traveling to a hold objective: en-route cover
                         // claims are transient dives by design (street-crossing
                         // doctrine), and dive-release-march cycles re-claim as
-                        // they advance. A refractory tail after the last
-                        // suppressed sample covers the post-fire recovery claim.
-                        // Ordered ATTACK advances are the same class: clearing
-                        // doctrine hops cover toward the next unchecked spot on
-                        // purpose, so a short claim chain is the order working.
+                        // they advance. Ordered ATTACK advances are the same
+                        // class ONLY while the order is checking new space;
+                        // with no observation progress they count as churn.
                         if (s.state.suppressionLevel >= 0.30f) {
                             sawSuppression = true;
                             lastSuppressedTick = s.tick;
@@ -191,7 +216,7 @@ public final class StandardDetectors {
                         }
                         if (sawSuppression && s.tick - lastSuppressedTick <= 60) continue;
                         if (s.state.traveling) continue;
-                        if (s.state.attacking) continue;
+                        if (s.state.attacking && s.tick - lastProgressTickSeen <= 2 * SimTuning.COVER_OSCILLATION_WINDOW_TICKS) continue;
                         if (s.state.targetCover != null) distinct.add(s.state.targetCover);
                         if (s.state.currentCover != null) distinct.add(s.state.currentCover);
                     }
