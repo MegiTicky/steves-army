@@ -1,5 +1,6 @@
 package com.stevesarmy.ping;
 
+import com.stevesarmy.GameClock;
 import com.stevesarmy.util.ScreenPos;
 import net.minecraft.world.phys.Vec3;
 
@@ -32,7 +33,7 @@ public class Ping {
         this.position = position;
         this.dimension = dimension;
         this.teamColor = teamColor;
-        this.timestamp = System.currentTimeMillis();
+        this.timestamp = GameClock.nowMs();
         this.scopeLabel = scopeLabel;
     }
     
@@ -57,6 +58,6 @@ public class Ping {
     }
     
     public boolean isExpired(long durationMs) {
-        return System.currentTimeMillis() - timestamp > durationMs;
+        return GameClock.nowMs() - timestamp > durationMs;
     }
 }

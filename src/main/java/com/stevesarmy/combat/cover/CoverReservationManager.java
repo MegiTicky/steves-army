@@ -1,5 +1,6 @@
 package com.stevesarmy.combat.cover;
 
+import com.stevesarmy.GameClock;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.entity.LivingEntity;
 
@@ -34,7 +35,7 @@ public class CoverReservationManager {
             Set<UUID> reservations = coverReservations.computeIfAbsent(key, k -> ConcurrentHashMap.newKeySet());
 
             if (reservations.contains(soldierUUID)) {
-                setTimestamp(soldierUUID, key, System.currentTimeMillis(), soldier);
+                setTimestamp(soldierUUID, key, GameClock.nowMs(), soldier);
                 return true;
             }
 
@@ -54,7 +55,7 @@ public class CoverReservationManager {
 
             boolean added = reservations.add(soldierUUID);
             if (added) {
-                setTimestamp(soldierUUID, key, System.currentTimeMillis(), soldier);
+                setTimestamp(soldierUUID, key, GameClock.nowMs(), soldier);
             }
             return added;
         }
@@ -187,7 +188,7 @@ public class CoverReservationManager {
         if (!reservations.contains(soldierUUID)) {
             return false;
         }
-        if (isReservationExpired(soldierUUID, key, System.currentTimeMillis())) {
+        if (isReservationExpired(soldierUUID, key, GameClock.nowMs())) {
             release(key, soldier);
             return false;
         }
@@ -206,10 +207,10 @@ public class CoverReservationManager {
         UUID soldierUUID = soldier.getUUID();
         BlockPos key = position.immutable();
         synchronized (coverReservations) {
-            cleanupProneReservations(System.currentTimeMillis());
+            cleanupProneReservations(GameClock.nowMs());
             ProneReservation current = proneReservations.get(soldierUUID);
             if (current != null && current.position().equals(key)) {
-                proneReservations.put(soldierUUID, new ProneReservation(key, System.currentTimeMillis()));
+                proneReservations.put(soldierUUID, new ProneReservation(key, GameClock.nowMs()));
                 proneHolders.put(soldierUUID, new java.lang.ref.WeakReference<>(soldier));
                 return true;
             }
@@ -224,7 +225,7 @@ public class CoverReservationManager {
                     return false;
                 }
             }
-            proneReservations.put(soldierUUID, new ProneReservation(key, System.currentTimeMillis()));
+            proneReservations.put(soldierUUID, new ProneReservation(key, GameClock.nowMs()));
             proneHolders.put(soldierUUID, new java.lang.ref.WeakReference<>(soldier));
             return true;
         }
@@ -235,7 +236,7 @@ public class CoverReservationManager {
         BlockPos key = position.immutable();
         UUID exempt = soldier != null ? soldier.getUUID() : null;
         synchronized (coverReservations) {
-            cleanupProneReservations(System.currentTimeMillis());
+            cleanupProneReservations(GameClock.nowMs());
             if (blockedByCoverReservationNear(key, exempt)) {
                 return false;
             }
@@ -274,7 +275,7 @@ public class CoverReservationManager {
     public static Map<UUID, BlockPos> getProneLaneOwners() {
         Map<UUID, BlockPos> result = new HashMap<>();
         synchronized (coverReservations) {
-            cleanupProneReservations(System.currentTimeMillis());
+            cleanupProneReservations(GameClock.nowMs());
             for (Map.Entry<UUID, ProneReservation> entry : proneReservations.entrySet()) {
                 result.put(entry.getKey(), entry.getValue().position());
             }
@@ -337,7 +338,7 @@ public class CoverReservationManager {
     }
     
     private static void cleanupExpiredReservations(BlockPos coverPos, Set<UUID> reservations) {
-        long currentTime = System.currentTimeMillis();
+        long currentTime = GameClock.nowMs();
         reservations.removeIf(uuid -> {
             Map<BlockPos, Long> perSoldier = reservationTimestamps.get(uuid);
             if (perSoldier == null) return true;
@@ -369,7 +370,7 @@ public class CoverReservationManager {
     
     public static void tick() {
         synchronized (coverReservations) {
-            long currentTime = System.currentTimeMillis();
+            long currentTime = GameClock.nowMs();
 
             // Occupancy keep-alive: a reservation whose holder still physically
             // occupies the spot does not age out. Goal interruptions clear the

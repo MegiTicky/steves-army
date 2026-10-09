@@ -1,5 +1,6 @@
 package com.stevesarmy.combat.cover;
 
+import com.stevesarmy.GameClock;
 import com.stevesarmy.StevesArmyConfig;
 import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.combat.GunIntegration;
@@ -169,7 +170,7 @@ public class CoverBehaviorManager {
         }
         
         if (state == CoverState.SEEKING_COVER || state == CoverState.REPOSITIONING) {
-            this.seekingStartTime = System.currentTimeMillis();
+            this.seekingStartTime = GameClock.nowMs();
         }
         
         // Only set coverEntryTime when entering a cover state from a non-cover state.
@@ -177,7 +178,7 @@ public class CoverBehaviorManager {
         // cover-entry time so suppression/recovery cycles don't reset the dwell clock.
         if ((state == CoverState.IN_COVER || state == CoverState.SUPPRESSED_IN_COVER)) {
             if (oldState != CoverState.IN_COVER && oldState != CoverState.SUPPRESSED_IN_COVER) {
-                this.coverEntryTime = System.currentTimeMillis();
+                this.coverEntryTime = GameClock.nowMs();
             }
             if (currentCover != null) {
                 this.lastCoverQuality = currentCover.getQuality();
@@ -205,7 +206,7 @@ public class CoverBehaviorManager {
                 cover != null ? cover.getPosition() + " type=" + cover.getType() + " combatScore=" + String.format("%.2f", cover.getCombatScore()) + " quality=" + String.format("%.2f", cover.getQuality()) : "null");
         }
         if (cover != null) {
-            this.coverEntryTime = System.currentTimeMillis();
+            this.coverEntryTime = GameClock.nowMs();
             this.lastCoverQuality = cover.getCombatScore();
             this.entryThreatDirection = soldier.getThreatAwareness().getPrimaryDirection(soldier.position());
             
@@ -407,12 +408,12 @@ public class CoverBehaviorManager {
     
     public long getTimeInCover() {
         if (coverEntryTime == 0) return 0;
-        return System.currentTimeMillis() - coverEntryTime;
+        return GameClock.nowMs() - coverEntryTime;
     }
     
     public long getTimeSeeking() {
         if (seekingStartTime == 0) return 0;
-        return System.currentTimeMillis() - seekingStartTime;
+        return GameClock.nowMs() - seekingStartTime;
     }
     
     public long getLastPeekTime() {
@@ -420,7 +421,7 @@ public class CoverBehaviorManager {
     }
     
     public void onPeekShot() {
-        this.lastPeekTime = System.currentTimeMillis();
+        this.lastPeekTime = GameClock.nowMs();
     }
     
     public void recordPeekCycle() {
@@ -540,7 +541,7 @@ public class CoverBehaviorManager {
     @javax.annotation.Nullable
     public Vec3 getRecentSuppressionFiringOrigin() {
         if (recentSuppressionFiringOrigin == null
-            || System.currentTimeMillis() - recentSuppressionFiringOriginTime > SUPPRESSION_FIRING_ORIGIN_MEMORY_MS) {
+            || GameClock.nowMs() - recentSuppressionFiringOriginTime > SUPPRESSION_FIRING_ORIGIN_MEMORY_MS) {
             return null;
         }
         return recentSuppressionFiringOrigin;
@@ -549,7 +550,7 @@ public class CoverBehaviorManager {
     private void recordSuppressionFiringOrigin(@javax.annotation.Nullable Vec3 firingOrigin) {
         if (firingOrigin != null) {
             recentSuppressionFiringOrigin = firingOrigin;
-            recentSuppressionFiringOriginTime = System.currentTimeMillis();
+            recentSuppressionFiringOriginTime = GameClock.nowMs();
         }
     }
 
@@ -731,12 +732,12 @@ public class CoverBehaviorManager {
     
     public long getTimeSinceLastPeek() {
         if (lastPeekEndTime == 0) return Long.MAX_VALUE;
-        return System.currentTimeMillis() - lastPeekEndTime;
+        return GameClock.nowMs() - lastPeekEndTime;
     }
     
     public long getTimeInCurrentPeekState() {
         if (peekStartTime == 0) return 0;
-        return System.currentTimeMillis() - peekStartTime;
+        return GameClock.nowMs() - peekStartTime;
     }
     
     public void resetPeekState() {

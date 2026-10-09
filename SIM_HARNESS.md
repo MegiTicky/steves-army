@@ -24,6 +24,9 @@ signals.
 # headless: run a single scenario (fast iteration)
 .\gradlew runServer -Psim.autorun=true -Psim.scenario=mg_rifleman_seek_contrast
 
+# headless at real-time 20 TPS (default is unthrottled — see Fast ticks below)
+.\gradlew runServer -Psim.autorun=true -Psim.fastticks=false
+
 # interactive: from the dev client or a server console
 /stevesarmy_sim run all
 /stevesarmy_sim run hold_enclosed_pocket
@@ -37,6 +40,39 @@ counter-chain evidence, a per-soldier segmented state timeline, and a
 velocity pulls, worst body rays seen while hiding/standing). The final
 autorun log line `SIM COMPLETE` is the CI-style grep anchor; per-scenario
 `PASS`/`FAIL` is in the report and the `[Sim]` log lines.
+
+### Fast ticks
+
+By default, autorun suites are **unthrottled**: `SimManager.onFastTickClock`
+pins `MinecraftServer.nextTickTime` (the vanilla 50 ms/tick pacing anchor)
+~100 ms into the past every tick, so the server ticks at CPU speed instead of
+real time. A full 69-scenario suite drops from ~38 minutes to a few minutes.
+Two pieces keep behavior identical to production 20 TPS:
+
+- Gameplay millisecond timers (peek cadence, cover entry, suppression memory,
+  reservation timeouts — everything reading `GameClock.nowMs()`) resolve to
+  game-time-derived milliseconds (50 ms per tick) while fast ticks are on, so
+  they tick-for-tick match the wall-clock behavior at 20 TPS.
+- World saving is disabled for the sim world during autorun (`noSave`), since
+  the throwaway world is rebuilt per scenario anyway.
+
+`-Psim.fastticks=false` runs the old real-time 20 TPS regime (A/B comparisons,
+timing-debugging); `-Psim.fastticks=true` forces unthrottling for interactive
+`/stevesarmy_sim` runs. Production and normal dev runs never touch any of
+this (`auto` = on iff `sim.autorun`).
+
+Known fidelity limit: **async worker latency is wall-clock, not tick-clock.**
+`asyncPathfindingEnabled`/`asyncCoverPilotEnabled` (both default true) run A*
+and cover-pilot searches on worker threads; a result that takes ~3 ms of real
+worker time arrives within the same or next tick at 20 TPS (50 ms/tick) but
+1–3 ticks later when unthrottled (~1–3 ms/tick). `GameClock` cannot absorb
+this — it is thread scheduling, not a timer read. In practice this only
+matters for latency-sensitive detectors in already-unstable scenarios (one
+known case: `clear_deep_objective_sequence` hit `PositionDeadlock` at a fixed
+tick in 2 of 3 unthrottled runs, 0 of 4 at 20 TPS — that scenario also FAILs
+on the 20 TPS baseline with varying reasons). Verdict-level A/B on stable
+scenarios matches exactly. If a fast-run-only signal looks async-related,
+rerun that scenario with `-Psim.fastticks=false` before chasing it.
 
 ### Watching the simulation
 

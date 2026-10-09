@@ -1,5 +1,6 @@
 package com.stevesarmy.squad;
 
+import com.stevesarmy.GameClock;
 import com.stevesarmy.StevesArmyConfig;
 import com.stevesarmy.entity.SoldierEntity;
 import net.minecraft.core.BlockPos;
@@ -35,7 +36,7 @@ public class SquadLaneAssignment {
     public SquadLaneAssignment(UUID squadId, BlockPos rawTarget, List<SoldierEntity> team, SquadFormation formation) {
         this.squadId = squadId;
         this.rawTarget = rawTarget;
-        this.timestamp = System.currentTimeMillis();
+        this.timestamp = GameClock.nowMs();
         this.formation = formation;
 
         List<SoldierEntity> sorted = new ArrayList<>(team);
@@ -109,7 +110,7 @@ public class SquadLaneAssignment {
     public SquadFormation getFormation() { return formation; }
 
     public boolean isExpired() {
-        return System.currentTimeMillis() - timestamp > 30000;
+        return GameClock.nowMs() - timestamp > 30000;
     }
 
     /**

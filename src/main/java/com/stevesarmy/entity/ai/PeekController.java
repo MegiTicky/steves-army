@@ -1,5 +1,6 @@
 package com.stevesarmy.entity.ai;
 
+import com.stevesarmy.GameClock;
 import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.combat.GunIntegration;
 import com.stevesarmy.combat.TargetAcquisition;
@@ -69,12 +70,12 @@ public class PeekController {
 
     public long getTimeInCurrentState() {
         if (stateStartTime == 0) return 0;
-        return System.currentTimeMillis() - stateStartTime;
+        return GameClock.nowMs() - stateStartTime;
     }
 
     public long getTimeSinceLastPeek() {
         if (lastPeekEndTime == 0) return Long.MAX_VALUE;
-        return System.currentTimeMillis() - lastPeekEndTime;
+        return GameClock.nowMs() - lastPeekEndTime;
     }
 
     public void setLastPeekEndTime(long time) { this.lastPeekEndTime = time; }
@@ -370,7 +371,7 @@ public class PeekController {
             this.coverReturnTarget = CoverTacticalGoal.getCoverStandingPositionStatic(cover.getPosition());
             mover.moveTo(targetPos, PEEK_REACHED_DISTANCE, PEEK_SPEED, "PeekController", "slide to peek");
             setState(soldier, State.MOVING_TO_PEEK);
-            stateStartTime = System.currentTimeMillis();
+            stateStartTime = GameClock.nowMs();
         }
     }
 
@@ -410,7 +411,7 @@ public class PeekController {
                 StevesArmyMod.LOGGER.info("[PeekController] Soldier {} peek slide failed, staying hidden",
                     soldier.getId());
             }
-            lastPeekEndTime = System.currentTimeMillis();
+            lastPeekEndTime = GameClock.nowMs();
             setIdleState(soldier, cover);
             stateStartTime = 0;
         }
@@ -516,7 +517,7 @@ public class PeekController {
 
     private void enterExposed(SoldierEntity soldier, CoverPoint cover) {
         setState(soldier, State.EXPOSED);
-        stateStartTime = System.currentTimeMillis();
+        stateStartTime = GameClock.nowMs();
         
         boolean isHalf = cover.getType() == CoverType.HALF;
         if (isHalf) {
@@ -639,7 +640,7 @@ public class PeekController {
                                 boolean allowDuringReload) {
         soldier.tracePeek("return-start", "coverType=" + cover.getType() + ", allowDuringReload=" + allowDuringReload);
         setState(soldier, State.RETURNING_TO_COVER);
-        stateStartTime = System.currentTimeMillis();
+        stateStartTime = GameClock.nowMs();
         returnAllowedDuringReload = allowDuringReload;
         
         boolean isHalf = cover.getType() == CoverType.HALF;
@@ -668,7 +669,7 @@ public class PeekController {
 
     private void completeReturn(SoldierEntity soldier, CoverPoint cover) {
         soldier.tracePeek("return-complete", "coverType=" + cover.getType());
-        lastPeekEndTime = System.currentTimeMillis();
+        lastPeekEndTime = GameClock.nowMs();
         recordPeekCycle(soldier);
         setIdleState(soldier, cover);
         stateStartTime = 0;

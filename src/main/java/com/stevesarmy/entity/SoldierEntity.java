@@ -1,5 +1,6 @@
 package com.stevesarmy.entity;
 
+import com.stevesarmy.GameClock;
 import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.StevesArmyConfig;
 import com.stevesarmy.compat.VS2Compat;
@@ -1755,7 +1756,7 @@ public class SoldierEntity extends PathfinderMob implements Container {
                 BlockPos pos = BlockPos.containing(position);
                 clearGoToState();
                 pingMoveTarget = pos;
-                pingMoveTimestamp = System.currentTimeMillis();
+                pingMoveTimestamp = GameClock.nowMs();
                 setSquadMode(com.stevesarmy.squad.SquadMode.HOLD);
                 setHoldPosition(pos);
                 coverBehaviorManager.clearCover();
@@ -1765,7 +1766,7 @@ public class SoldierEntity extends PathfinderMob implements Container {
             case GO_TO -> {
                 pingMoveGeneration++;
                 pingMoveTarget = BlockPos.containing(position);
-                pingMoveTimestamp = System.currentTimeMillis();
+                pingMoveTimestamp = GameClock.nowMs();
                 persistentGoTo = true;
                 goToHolding = false;
                 setSquadMode(com.stevesarmy.squad.SquadMode.HOLD);
@@ -1778,9 +1779,9 @@ public class SoldierEntity extends PathfinderMob implements Container {
                 BlockPos pos = BlockPos.containing(position);
                 threatAwareness.onPingDirection(pos);
                 pingThreatPos = pos;
-                pingThreatTimestamp = System.currentTimeMillis();
+                pingThreatTimestamp = GameClock.nowMs();
                 forcedTargetPos = pos;
-                forcedTargetTimestamp = System.currentTimeMillis();
+                forcedTargetTimestamp = GameClock.nowMs();
                 com.stevesarmy.StevesArmyMod.LOGGER.info("Set threat direction position: {} (forced target inherited from ENEMY)", pingThreatPos);
             }
             case LOCATION -> {
@@ -1849,7 +1850,7 @@ public BlockPos getPingMoveTarget() {
 
     public boolean hasValidPingMoveTarget() {
         return pingMoveTarget != null &&
-               (persistentGoTo || System.currentTimeMillis() - pingMoveTimestamp < PING_MOVE_MEMORY_MS);
+               (persistentGoTo || GameClock.nowMs() - pingMoveTimestamp < PING_MOVE_MEMORY_MS);
     }
 
     public boolean hasPersistentGoTo() {
@@ -1907,7 +1908,7 @@ public BlockPos getPingMoveTarget() {
 
     public boolean hasValidAttackTarget() {
         return attackTargetPos != null &&
-               System.currentTimeMillis() - attackTargetTimestamp < ATTACK_MEMORY_MS;
+               GameClock.nowMs() - attackTargetTimestamp < ATTACK_MEMORY_MS;
     }
 
     /**
@@ -1918,7 +1919,7 @@ public BlockPos getPingMoveTarget() {
      */
     public void refreshAttackOrderClock() {
         if (attackTargetPos != null) {
-            attackTargetTimestamp = System.currentTimeMillis();
+            attackTargetTimestamp = GameClock.nowMs();
         }
     }
 
@@ -1932,7 +1933,7 @@ public BlockPos getPingMoveTarget() {
     private void refreshAttackTargetUnderFire() {
         if (attackTargetPos == null || coverBehaviorManager == null) return;
         if (coverBehaviorManager.getSuppressionTracker().getSuppressionLevel() >= 0.2f) {
-            attackTargetTimestamp = System.currentTimeMillis();
+            attackTargetTimestamp = GameClock.nowMs();
         }
     }
 
@@ -1943,7 +1944,7 @@ public BlockPos getPingMoveTarget() {
     public void setAttackTarget(BlockPos pos) {
         attackGeneration++;
         this.attackTargetPos = pos;
-        this.attackTargetTimestamp = System.currentTimeMillis();
+        this.attackTargetTimestamp = GameClock.nowMs();
         // Clear incompatible ping move target
         clearPingMoveTarget();
         // ATTACK is objective-only: it defines where the soldier should
@@ -1977,7 +1978,7 @@ public BlockPos getPingMoveTarget() {
     
     public boolean hasValidPingThreatPos() {
         return pingThreatPos != null && 
-               System.currentTimeMillis() - pingThreatTimestamp < PING_THREAT_MEMORY_MS;
+               GameClock.nowMs() - pingThreatTimestamp < PING_THREAT_MEMORY_MS;
     }
     
     public void clearPingThreatPos() {
@@ -1991,12 +1992,12 @@ public BlockPos getPingMoveTarget() {
     
     public boolean hasValidForcedTarget() {
         return forcedTargetPos != null && 
-               System.currentTimeMillis() - forcedTargetTimestamp < FORCED_TARGET_MEMORY_MS;
+               GameClock.nowMs() - forcedTargetTimestamp < FORCED_TARGET_MEMORY_MS;
     }
     
     public void setForcedTargetPos(BlockPos pos) {
         this.forcedTargetPos = pos;
-        this.forcedTargetTimestamp = System.currentTimeMillis();
+        this.forcedTargetTimestamp = GameClock.nowMs();
     }
     
     public void clearForcedTarget() {

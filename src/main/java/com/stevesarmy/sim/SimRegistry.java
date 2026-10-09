@@ -1,5 +1,6 @@
 package com.stevesarmy.sim;
 
+import com.stevesarmy.GameClock;
 import com.stevesarmy.combat.cover.CoverFinder;
 import com.stevesarmy.combat.cover.CoverReservationManager;
 import com.stevesarmy.entity.EnemySoldierEntity;
@@ -3139,7 +3140,7 @@ public final class SimRegistry {
                 (java.util.Map<java.util.UUID, java.util.Map<net.minecraft.core.BlockPos, Long>>) field.get(null);
             java.util.Map<net.minecraft.core.BlockPos, Long> perSoldier = stamps.get(holder.getUUID());
             if (perSoldier != null && perSoldier.containsKey(pos)) {
-                perSoldier.put(pos, System.currentTimeMillis() - backMillis);
+                perSoldier.put(pos, GameClock.nowMs() - backMillis);
             }
         } catch (ReflectiveOperationException ignored) {
             // Leave the stamp alone; the keep-alive assert will fail loudly instead.

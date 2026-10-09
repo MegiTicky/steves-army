@@ -62,6 +62,25 @@ public final class SimManager {
     private static int yLevel = Y_BASE;
     private static boolean autorun = false;
 
+    /**
+     * sim.fastticks: 'auto' (default) = unthrottle iff sim.autorun; explicit
+     * true/false overrides. Unthrottled = {@link #onFastTickClock} holds the
+     * vanilla tick deadline in the past so the between-tick wait returns
+     * instantly and scenarios tick at CPU speed.
+     */
+    private static final boolean FAST_TICKS = resolveFastTicks();
+
+    private static boolean resolveFastTicks() {
+        String mode = System.getProperty("sim.fastticks", "auto");
+        if ("auto".equalsIgnoreCase(mode)) return Boolean.getBoolean("sim.autorun");
+        return Boolean.parseBoolean(mode);
+    }
+
+    /** True when the tick loop should skip real-time pacing. */
+    public static boolean fastTicks() {
+        return FAST_TICKS;
+    }
+
     // live run state
     private static ServerLevel level;
     private static SimScenario scenario;
@@ -111,7 +130,12 @@ public final class SimManager {
                 return;
             }
         }
-        StevesArmyMod.LOGGER.info("[Sim] sim.autorun detected — running {} scenario(s) headless", scenarios.size());
+        StevesArmyMod.LOGGER.info("[Sim] sim.autorun detected — running {} scenario(s) headless; fastTicks={}", scenarios.size(), FAST_TICKS);
+        // Throwaway world: skip mid-run autosaves. Under fast ticks they would
+        // otherwise fire far more often in wall time; strays are swept at
+        // startup and every fixture is rebuilt per scenario, so nothing reads
+        // persisted state.
+        event.getServer().getAllLevels().forEach(l -> l.noSave = true);
         start(event.getServer().overworld(), scenarios, true);
     }
 
@@ -192,6 +216,48 @@ public final class SimManager {
     public static void onServerCleanupTick(TickEvent.ServerTickEvent event) {
         if (event.phase != TickEvent.Phase.END || phase != Phase.CLEANUP) return;
         finishScenario();
+    }
+
+    /**
+     * MinecraftServer.nextTickTime drives the vanilla 50 ms/tick pacing: each
+     * iteration advances it by 50 and then blocks in waitUntilNextTick until
+     * the clock passes it, which locks scenarios to real time. Holding it
+     * ~100 ms in the past makes every pacing check fall through instantly, so
+     * the server ticks at CPU speed while the task queue still drains through
+     * the normal loop. The value must come from Util.getMillis (the monotonic
+     * clock vanilla compares against), never the wall clock. Reflection with
+     * both name dialects: production classes are SRG-named, dev classes are
+     * mojmap-named. Gated on FAST_TICKS, so production never touches this.
+     */
+    private static volatile java.lang.reflect.Field nextTickTimeField;
+    private static boolean fastTicksLogged;
+
+    @SubscribeEvent
+    public static void onFastTickClock(TickEvent.ServerTickEvent event) {
+        if (!FAST_TICKS || event.phase != TickEvent.Phase.END || level == null) return;
+        try {
+            java.lang.reflect.Field field = nextTickTimeField;
+            if (field == null) {
+                for (String name : new String[] {"f_129726_", "nextTickTime"}) {
+                    try {
+                        field = net.minecraft.server.MinecraftServer.class.getDeclaredField(name);
+                        field.setAccessible(true);
+                        break;
+                    } catch (ReflectiveOperationException ignored) {
+                        // wrong name dialect for this environment; try the next
+                    }
+                }
+                nextTickTimeField = field;
+                if (field == null) return;
+            }
+            field.setLong(level.getServer(), net.minecraft.Util.getMillis() - 100L);
+            if (!fastTicksLogged) {
+                fastTicksLogged = true;
+                StevesArmyMod.LOGGER.info("[Sim] fast ticks active — real-time pacing disabled");
+            }
+        } catch (ReflectiveOperationException | IllegalArgumentException ignored) {
+            // never let the accelerator break the tick loop
+        }
     }
 
     private static void beginScenario() {

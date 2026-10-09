@@ -1,5 +1,6 @@
 package com.stevesarmy.combat;
 
+import com.stevesarmy.GameClock;
 import com.stevesarmy.StevesArmyConfig;
 import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.entity.ai.CoverTacticalGoal;
@@ -39,7 +40,7 @@ public class ThreatAwareness {
             this.entity = entity;
             this.position = position;
             this.weight = weight;
-            this.lastSeenTime = System.currentTimeMillis();
+            this.lastSeenTime = GameClock.nowMs();
         }
     }
 
@@ -137,7 +138,7 @@ public class ThreatAwareness {
                 .normalize();
         }
         
-        smoothDirectionLastUpdateTime = System.currentTimeMillis();
+        smoothDirectionLastUpdateTime = GameClock.nowMs();
         
         if (CoverTacticalGoal.isDebugLoggingEnabled()) {
             StevesArmyMod.LOGGER.info("[ThreatAwareness] Smooth direction updated: ({}, {}, {})",
@@ -149,7 +150,7 @@ public class ThreatAwareness {
 
     public void setSmoothDirection(Vec3 direction) {
         this.smoothDirection = direction != null ? direction.normalize() : null;
-        this.smoothDirectionLastUpdateTime = direction != null ? System.currentTimeMillis() : 0;
+        this.smoothDirectionLastUpdateTime = direction != null ? GameClock.nowMs() : 0;
     }
 
     public void clearSmoothDirection() {
@@ -186,7 +187,7 @@ public class ThreatAwareness {
             
             if (entry.entity != null && entry.entity.isAlive()) {
                 entry.position = entry.entity.blockPosition();
-                entry.lastSeenTime = System.currentTimeMillis();
+                entry.lastSeenTime = GameClock.nowMs();
             } else {
                 entry.weight *= WEIGHT_DECAY_PER_TICK;
             }
@@ -199,7 +200,7 @@ public class ThreatAwareness {
         
         int decayTimeMs = StevesArmyConfig.getThreatSmoothDecayTimeMs();
         if (decayTimeMs > 0 && smoothDirection != null) {
-            long timeSinceUpdate = System.currentTimeMillis() - smoothDirectionLastUpdateTime;
+            long timeSinceUpdate = GameClock.nowMs() - smoothDirectionLastUpdateTime;
             if (timeSinceUpdate > decayTimeMs) {
                 smoothDirection = null;
                 smoothDirectionLastUpdateTime = 0;
@@ -369,7 +370,7 @@ public class ThreatAwareness {
             smoothDirection != null ? String.format("%.2f", smoothDirection.z) : "none");
         
         if (smoothDirection != null) {
-            long timeSinceUpdate = System.currentTimeMillis() - smoothDirectionLastUpdateTime;
+            long timeSinceUpdate = GameClock.nowMs() - smoothDirectionLastUpdateTime;
             int decayTimeMs = StevesArmyConfig.getThreatSmoothDecayTimeMs();
             if (decayTimeMs > 0) {
                 StevesArmyMod.LOGGER.info("  Smooth direction age: {}ms / {}ms decay threshold",

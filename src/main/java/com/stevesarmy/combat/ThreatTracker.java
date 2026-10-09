@@ -1,5 +1,6 @@
 package com.stevesarmy.combat;
 
+import com.stevesarmy.GameClock;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.entity.LivingEntity;
 import java.util.*;
@@ -36,7 +37,7 @@ public class ThreatTracker {
     
     public void reportThreatAtPosition(BlockPos position) {
         UUID dummyId = UUID.randomUUID();
-        long currentTime = System.currentTimeMillis();
+        long currentTime = GameClock.nowMs();
         ThreatInfo info = new ThreatInfo(dummyId, position, 0.5, currentTime);
         knownThreats.put(dummyId, info);
     }

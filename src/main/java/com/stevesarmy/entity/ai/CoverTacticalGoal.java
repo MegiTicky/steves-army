@@ -1,5 +1,6 @@
 package com.stevesarmy.entity.ai;
 
+import com.stevesarmy.GameClock;
 import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.StevesArmyConfig;
 import com.stevesarmy.combat.CombatStateSnapshot;
@@ -1330,7 +1331,7 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
 
         int blacklistClearInSec = 0;
         if (lastBlacklistClearTime > 0) {
-            long elapsedMs = System.currentTimeMillis() - lastBlacklistClearTime;
+            long elapsedMs = GameClock.nowMs() - lastBlacklistClearTime;
             blacklistClearInSec = (int) Math.max(0L, (BLACKLIST_CLEAR_INTERVAL_MS - elapsedMs) / 1000L);
         }
 
@@ -1444,9 +1445,9 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
             continuousSuppressionRepositionStarted = false;
         } else {
             if (continuousSuppressionStartTime == 0L) {
-                continuousSuppressionStartTime = System.currentTimeMillis();
+                continuousSuppressionStartTime = GameClock.nowMs();
             } else if (!continuousSuppressionRepositionStarted
-                && System.currentTimeMillis() - continuousSuppressionStartTime >= CONTINUOUS_SUPPRESSION_REPOSITION_DELAY_MS
+                && GameClock.nowMs() - continuousSuppressionStartTime >= CONTINUOUS_SUPPRESSION_REPOSITION_DELAY_MS
                 && !coverManager.isContinuousSuppressionRepositionRequested()) {
                 continuousSuppressionRepositionStarted = true;
                 coverManager.requestContinuousSuppressionReposition();
@@ -1505,7 +1506,7 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
     private boolean isExposedToFlank() {
         // Close range no longer suppresses flank reasoning: a flank at 5 blocks
         // is more dangerous than one at 50, so the ordinary evaluation runs.
-        if (System.currentTimeMillis() - lastFlankRepositionTime < FLANK_REPOSITION_COOLDOWN_MS) {
+        if (GameClock.nowMs() - lastFlankRepositionTime < FLANK_REPOSITION_COOLDOWN_MS) {
             PerformanceMetrics.recordCoverSearchCooldownSkip();
             return false;
         }
@@ -2894,7 +2895,7 @@ private void tickRepositioning() {
                     StevesArmyMod.LOGGER.info("[CoverGoal] Soldier {} flanked, repositioning to {}",
                         soldier.getId(), flankCover.get().getPosition());
                 }
-                lastFlankRepositionTime = System.currentTimeMillis();
+                lastFlankRepositionTime = GameClock.nowMs();
                 startRepositioning(flankCover.get());
                 return;
             }
@@ -3318,7 +3319,7 @@ private void tickRepositioning() {
         if (!recoverySafetyPeekDone) {
             if (!recoverySafetyPeekInProgress) {
                 recoverySafetyPeekInProgress = true;
-                recoverySafetyPeekStartMs = System.currentTimeMillis();
+                recoverySafetyPeekStartMs = GameClock.nowMs();
                 recoverySafetyPeekSeqSnapshot = tr.getSuppressionEventSequence();
             }
             // Suppressed during the peek -> peek was unsafe; reset and retry later.
@@ -3327,7 +3328,7 @@ private void tickRepositioning() {
                 recoverySafetyPeekInProgress = false;
                 return false;
             }
-            long elapsed = System.currentTimeMillis() - recoverySafetyPeekStartMs;
+            long elapsed = GameClock.nowMs() - recoverySafetyPeekStartMs;
             if (elapsed < StevesArmyConfig.getRecoverySafetyPeekMs()) {
                 return false;
             }
@@ -3933,7 +3934,7 @@ private boolean shouldExitCoverForFollow() {
         searchReserveAttempts = 0;
         Level level = soldier.level();
         CoverFinder finder = new CoverFinder(level);
-        long now = System.currentTimeMillis();
+        long now = GameClock.nowMs();
         if (now - lastBlacklistClearTime > BLACKLIST_CLEAR_INTERVAL_MS) {
             failedCoverPositions.removeIf(pos -> !pos.equals(compromisedCoverPosition));
             blacklistReasons.entrySet().removeIf(entry -> !entry.getKey().equals(compromisedCoverPosition));
@@ -4851,7 +4852,7 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
             }
         }
         
-        long now = System.currentTimeMillis();
+        long now = GameClock.nowMs();
         java.util.Map<BlockPos, CoverDebugManager.BlacklistDebugEntry> blacklistInfo = new java.util.HashMap<>();
         for (java.util.Map.Entry<BlockPos, BlacklistEntry> entry : blacklistReasons.entrySet()) {
             int ageSeconds = (int)(entry.getValue().getAgeMs(now) / 1000);
@@ -5035,7 +5036,7 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
         // we do NOT change attackCommandGeneration — that's done by caller)
         attackPhase = AttackPhase.SELECTING_COVER;
         clearingPoiTarget = null;
-        attackPhaseStartTime = System.currentTimeMillis();
+        attackPhaseStartTime = GameClock.nowMs();
         attackCoverArrivalTime = 0;
         attackExpectedCover = null;
         attackDwellEligible = false;
@@ -5130,7 +5131,7 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
     /** Fraction of the minimum dwell elapsed (0-1+) used by the debug overlay. */
     public float getAttackDwellFraction() {
         if (attackPhase != AttackPhase.OCCUPYING_COVER || attackCoverArrivalTime <= 0) return 0.0f;
-        long dwellTime = System.currentTimeMillis() - attackCoverArrivalTime;
+        long dwellTime = GameClock.nowMs() - attackCoverArrivalTime;
         float ftLevel = FireTeamSuppressionTracker.getLevel(soldier);
         float dwellMult = (1.0f + ftLevel * 1.5f) * groupCohesionDwellMult();
         long minDwell = (long)(ATTACK_MIN_DWELL_MS * dwellMult);
@@ -5178,7 +5179,7 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
 
     public float getAttackDwellElapsedMs() {
         if (attackPhase != AttackPhase.OCCUPYING_COVER || attackCoverArrivalTime <= 0) return 0;
-        return System.currentTimeMillis() - attackCoverArrivalTime;
+        return GameClock.nowMs() - attackCoverArrivalTime;
     }
 
     public float getAttackRequiredDwellMs() {
@@ -5215,12 +5216,12 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
 
     public long getAttackPhaseAgeMs() {
         if (attackPhaseStartTime <= 0) return 0;
-        return System.currentTimeMillis() - attackPhaseStartTime;
+        return GameClock.nowMs() - attackPhaseStartTime;
     }
 
     public long getLastAdvanceTriggerAgeMs() {
         if (lastAdvanceTriggerTime <= 0) return Long.MAX_VALUE;
-        return System.currentTimeMillis() - lastAdvanceTriggerTime;
+        return GameClock.nowMs() - lastAdvanceTriggerTime;
     }
 
     /**
@@ -5240,7 +5241,7 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
 
     public boolean isAttackDwellMet() {
         if (attackPhase != AttackPhase.OCCUPYING_COVER || attackCoverArrivalTime <= 0) return false;
-        long dwellTime = System.currentTimeMillis() - attackCoverArrivalTime;
+        long dwellTime = GameClock.nowMs() - attackCoverArrivalTime;
         float ftLevel = FireTeamSuppressionTracker.getLevel(soldier);
         float dwellMult = (1.0f + ftLevel * 1.5f) * groupCohesionDwellMult();
         long minDwell = (long)(ATTACK_MIN_DWELL_MS * dwellMult);
@@ -5252,7 +5253,7 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
         if (attackCommandGeneration != gen) {
             attackCommandGeneration = gen;
             attackPhase = AttackPhase.SELECTING_COVER;
-            attackPhaseStartTime = System.currentTimeMillis();
+            attackPhaseStartTime = GameClock.nowMs();
             attackCoverArrivalTime = 0;
             attackExpectedCover = null;
             attackDwellEligible = false;
@@ -5353,7 +5354,7 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
                 // If suppressed or not recovered, don't start a new move yet
                 if (!canLeaveCoverNow() && currentCover != null) {
                     attackPhase = AttackPhase.OCCUPYING_COVER;
-                    attackCoverArrivalTime = System.currentTimeMillis();
+                    attackCoverArrivalTime = GameClock.nowMs();
                     if (attackDebugLog()) {
                         StevesArmyMod.LOGGER.info("[AttackPhase] Soldier {} SELECTING_COVER -> OCCUPYING_COVER: suppressed, waiting at {}",
                             soldier.getId(), currentCover.getPosition());
@@ -5407,7 +5408,7 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
                      coverState == CoverBehaviorManager.CoverState.SUPPRESSED_IN_COVER) &&
                     currentCoverIsExpected) {
                     attackPhase = AttackPhase.OCCUPYING_COVER;
-                    attackCoverArrivalTime = System.currentTimeMillis();
+                    attackCoverArrivalTime = GameClock.nowMs();
                     attackExpectedCover = null;
                     attackDwellEligible = false;
                     attackHasPeekedThisCover = false;
@@ -5434,7 +5435,7 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
 
                 if (arrivedAtExpected) {
                     attackPhase = AttackPhase.OCCUPYING_COVER;
-                    attackCoverArrivalTime = System.currentTimeMillis();
+                    attackCoverArrivalTime = GameClock.nowMs();
                     attackExpectedCover = null;
                     attackDwellEligible = false;
                     attackHasPeekedThisCover = false;
@@ -5493,9 +5494,9 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
                 boolean pinned = getCoverManager().isPinned();
                 boolean recovered = getCoverManager().getSuppressionTracker().isRecovered();
                 if (!recovered) {
-                    attackCoverArrivalTime = System.currentTimeMillis();
+                    attackCoverArrivalTime = GameClock.nowMs();
                 }
-                long dwellTime = System.currentTimeMillis() - attackCoverArrivalTime;
+                long dwellTime = GameClock.nowMs() - attackCoverArrivalTime;
                 PeekController peekCtrl = getPeekController();
                 boolean peeking = peekCtrl.isExposed() || peekCtrl.isMovingToPeek() || peekCtrl.isReturning();
                 float ftLevel = FireTeamSuppressionTracker.getLevel(soldier);
@@ -5549,7 +5550,7 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
                     && clearingView.assignedPoi() != null
                     && clearingView.assignedPoiChecked();
                 if (clearingJobDone && canAdvance) {
-                    lastAdvanceTriggerTime = System.currentTimeMillis();
+                    lastAdvanceTriggerTime = GameClock.nowMs();
                     if (attackDebugLog()) {
                         StevesArmyMod.LOGGER.info("[AttackPhase] Soldier {} job target checked, advancing to next",
                             soldier.getId());
@@ -5562,7 +5563,7 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
                 // Hard watchdog: if stuck with all gates passed for >10s, force
                 // advance regardless of peek state or any flickering conditions.
                 if (dwellMet && canAdvance && dwellTime > 10000) {
-                    lastAdvanceTriggerTime = System.currentTimeMillis();
+                    lastAdvanceTriggerTime = GameClock.nowMs();
                     if (attackDebugLog()) {
                         StevesArmyMod.LOGGER.info("[AttackPhase] Soldier {} OCCUPYING watchdog: stuck {}ms with all gates pass, forcing advance",
                             soldier.getId(), dwellTime);
@@ -5597,7 +5598,7 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
                     && (!fireteamPinned || smokeAdvance) && (!heavyHold || smokeAdvance)
                     && !peekCompletedThisCover && dwellTime >= (long)(minDwell * 2);
                 if (hardTimeout || maxDwellReached || (canAdvance && peekCompletedThisCover) || peekLatchBypass) {
-                    lastAdvanceTriggerTime = System.currentTimeMillis();
+                    lastAdvanceTriggerTime = GameClock.nowMs();
                     if (attackDebugLog() && hardTimeout) {
                         StevesArmyMod.LOGGER.info("[AttackPhase] Soldier {} hard occupancy timeout after {}ms, forcing advance",
                             soldier.getId(), dwellTime);
@@ -6348,7 +6349,7 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
         // Reset peek controller for new cover and seed the peek cooldown
         // so soldier settles before peeking — prevents immediate "jump out"
         getPeekController().resetForNewCover(soldier, cover.getPosition());
-        getPeekController().setLastPeekEndTime(System.currentTimeMillis());
+        getPeekController().setLastPeekEndTime(GameClock.nowMs());
         resetSuppressionEpisodes();
         latchedMachineGunnerSearchCenter = null;
         
@@ -6418,7 +6419,7 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
         failedCoverPositions.add(pos);
         lastFailedCover = pos;
         blacklistRevision++;
-        blacklistReasons.put(pos, new BlacklistEntry(reason, System.currentTimeMillis()));
+        blacklistReasons.put(pos, new BlacklistEntry(reason, GameClock.nowMs()));
         // Release the old target cover reservation explicitly (clearTargetCover no longer releases)
         CoverPoint oldTarget = getCoverManager().getTargetCover();
         if (oldTarget != null) {

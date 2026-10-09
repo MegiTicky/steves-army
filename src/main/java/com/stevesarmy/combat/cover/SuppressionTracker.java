@@ -1,5 +1,6 @@
 package com.stevesarmy.combat.cover;
 
+import com.stevesarmy.GameClock;
 import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.combat.GunIntegration;
 import com.stevesarmy.debug.DiagnosticLogManager;
@@ -70,7 +71,7 @@ public class SuppressionTracker {
         float distanceFactor = (float)(NEAR_MISS_THRESHOLD - distance) / (float)NEAR_MISS_THRESHOLD;
         float speedMultiplier = Mth.clamp(bulletSpeed / BASE_SPEED, MIN_SPEED_MULTIPLIER, MAX_SPEED_MULTIPLIER);
 
-        long now = System.currentTimeMillis();
+        long now = GameClock.nowMs();
         if (now - lastBurstTime < BURST_WINDOW_MS) {
             burstCount++;
         } else {
@@ -99,7 +100,7 @@ public class SuppressionTracker {
      * No distance scaling, no burst damping, no speed multiplier.
      */
     public void onCbcNearMiss(LivingEntity soldier) {
-        recordSuppressionEvent(MAX_SUPPRESSION, System.currentTimeMillis());
+        recordSuppressionEvent(MAX_SUPPRESSION, GameClock.nowMs());
         nearMissCount++;
         traceSuppressionEvent(soldier, "cbc-near-miss", MAX_SUPPRESSION);
 
@@ -117,7 +118,7 @@ public class SuppressionTracker {
         float speedMultiplier = Mth.clamp(bulletSpeed / BASE_SPEED, MIN_SPEED_MULTIPLIER, MAX_SPEED_MULTIPLIER);
         float weaponMultiplier = GunIntegration.isMachineGun(shooter) ? MACHINE_GUN_SUPPRESSION_MULTIPLIER : 1.0f;
         float add = DIRECT_FIRE_SUPPRESSION * speedMultiplier * weaponMultiplier;
-        recordSuppressionEvent(add, System.currentTimeMillis());
+        recordSuppressionEvent(add, GameClock.nowMs());
 
         if (debugLog()) {
             StevesArmyMod.LOGGER.info("[Suppression] incoming fire from {}: speedMult=" + String.format("%.2f", speedMultiplier) + ", weaponMult=" + String.format("%.2f", weaponMultiplier) + ", +" + String.format("%.2f", add) + " sup -> " + String.format("%.2f", suppressionLevel),
@@ -127,7 +128,7 @@ public class SuppressionTracker {
 
     public void onTakeDamage() {
         float add = 0.5f;
-        recordSuppressionEvent(add, System.currentTimeMillis());
+        recordSuppressionEvent(add, GameClock.nowMs());
 
         if (debugLog()) {
             StevesArmyMod.LOGGER.info("[Suppression] took damage: +" + String.format("%.2f", add) + " sup -> " + String.format("%.2f", suppressionLevel));
@@ -157,7 +158,7 @@ public class SuppressionTracker {
         float add = strength * distanceFactor * effectiveExposure;
 
         // Explosion burst damping
-        long now = System.currentTimeMillis();
+        long now = GameClock.nowMs();
         float burstFactor = 1.0f;
         if (now - lastExplosionTime < burstWindowMs) {
             explosionBurstCount++;
@@ -252,18 +253,18 @@ public class SuppressionTracker {
         if (isPinned()) {
             return false;
         }
-        long timeSinceLastSuppression = System.currentTimeMillis() - lastSuppressionTime;
+        long timeSinceLastSuppression = GameClock.nowMs() - lastSuppressionTime;
         return timeSinceLastSuppression > MIN_PEEK_TIME_MS;
     }
 
     public boolean isRecovered() {
         if (isSuppressed()) return false;
-        long timeSinceLastSuppression = System.currentTimeMillis() - lastSuppressionTime;
+        long timeSinceLastSuppression = GameClock.nowMs() - lastSuppressionTime;
         return timeSinceLastSuppression > MIN_RECOVERY_TIME_MS;
     }
 
     public long getTimeSinceLastSuppression() {
-        return System.currentTimeMillis() - lastSuppressionTime;
+        return GameClock.nowMs() - lastSuppressionTime;
     }
 
     public int getNearMissCount() {

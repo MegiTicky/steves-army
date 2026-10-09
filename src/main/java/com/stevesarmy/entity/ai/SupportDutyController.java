@@ -1,5 +1,6 @@
 package com.stevesarmy.entity.ai;
 
+import com.stevesarmy.GameClock;
 import com.stevesarmy.compat.PlayerReviveCompat;
 import com.stevesarmy.combat.GunIntegration;
 import com.stevesarmy.combat.cover.CoverBehaviorManager;
@@ -671,7 +672,7 @@ public final class SupportDutyController {
         ClaimEntry entry = CLAIMS.get(target.getUUID());
         if (entry == null) return false;
         if (entry.claimerId().equals(soldier.getUUID())) return true;
-        if (System.currentTimeMillis() - entry.timestamp() > CLAIM_TIMEOUT_MS) {
+        if (GameClock.nowMs() - entry.timestamp() > CLAIM_TIMEOUT_MS) {
             CLAIMS.remove(target.getUUID());
             return false;
         }
@@ -679,7 +680,7 @@ public final class SupportDutyController {
     }
 
     private void claim(LivingEntity target) {
-        CLAIMS.put(target.getUUID(), new ClaimEntry(soldier.getUUID(), System.currentTimeMillis()));
+        CLAIMS.put(target.getUUID(), new ClaimEntry(soldier.getUUID(), GameClock.nowMs()));
     }
 
     private void releaseClaim(LivingEntity target) {
@@ -692,7 +693,7 @@ public final class SupportDutyController {
     private static boolean isOnFailureCooldown(LivingEntity target) {
         Long failedAt = TARGET_FAILURES.get(target.getUUID());
         if (failedAt == null) return false;
-        if (System.currentTimeMillis() - failedAt > TARGET_FAILURE_COOLDOWN_MS) {
+        if (GameClock.nowMs() - failedAt > TARGET_FAILURE_COOLDOWN_MS) {
             TARGET_FAILURES.remove(target.getUUID());
             return false;
         }
@@ -700,7 +701,7 @@ public final class SupportDutyController {
     }
 
     private static void recordTargetFailure(LivingEntity target) {
-        TARGET_FAILURES.put(target.getUUID(), System.currentTimeMillis());
+        TARGET_FAILURES.put(target.getUUID(), GameClock.nowMs());
     }
 
     private void finish(int cooldown) {
