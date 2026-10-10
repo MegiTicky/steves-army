@@ -15,13 +15,27 @@ Example video: [Steve's Army gameplay](https://youtu.be/sHR4XjqFlCI)
 - Order soldiers to attack positions, move to locations, or provide suppressive fire.
 - Open soldier inventories to equip weapons, armor, and ammunition.
 - Recall or dismiss individual soldiers.
+- **Body swap:** tap `V` to swap bodies with the soldier you are looking at; hold `V`
+  for the role wheel with a Previous Body swap-back. Damage round-trips through
+  bodies — swapping back is never a free heal.
+
+### Friend or Foe
+
+- Mark players, scoreboard teams, or entity categories as **friendly**, **neutral**,
+  or **hostile**; stances override the built-in rules (player > team > category).
+- Manage stances in the squad command screen's **FoF tab**, with an optional look-at
+  mark keybind, or with the `/stevesarmy fof` commands.
+- Hostile-marked players are engaged like enemies, neutral players are ignored until
+  they attack, and grenade safety honors hostile marks.
+- Vanilla monsters proactively hunt your soldiers (Recruits-style) and can be marked
+  per owner; both directions are configurable.
 
 ### Fire Teams
 
 - Divide your squad into up to four fire teams.
 - Assign recruits directly to a team.
 - View and reorganize teams through the squad command screen.
-- Soldiers are distributed intelligently by weapon type and position.
+- Soldiers are distributed intelligently by role and position.
 - Use the optional fire-team control wheel for quick selection.
 
 ### Smart Combat AI
@@ -31,7 +45,9 @@ Example video: [Steve's Army gameplay](https://youtu.be/sHR4XjqFlCI)
 - Target acquisition speed responds to visibility, exposure, movement, and brightness.
 - Soldiers reload from their own inventories, preferably from behind cover.
 - Soldiers use healing items when injured.
-- Machine guns are especially effective at pinning enemies down.
+- Machine guns fire real machine-gun bursts at active targets and rotate their suppression across last-seen positions.
+- Pathfinding weighs line-of-sight danger: squads prefer covered routes and low-crawl through exposed stretches when suppressed, without ever refusing the objective.
+- Close-quarters doctrine: soldiers queue at doorways, pre-aim around corners, and clear rooms as a team.
 
 ### Tactical Cover System
 
@@ -40,6 +56,7 @@ Example video: [Steve's Army gameplay](https://youtu.be/sHR4XjqFlCI)
 - Behavior timing is randomized so soldiers do not act like robots.
 - Soldiers abandon positions with no viable firing angle and search for better cover.
 - Each cover position is reserved for one soldier to prevent crowding.
+- Soldiers caught without cover plant and engage, sidestep off a blocked firing lane, or make a checked withdrawal instead of freezing.
 
 ### Suppression
 
@@ -50,11 +67,19 @@ Example video: [Steve's Army gameplay](https://youtu.be/sHR4XjqFlCI)
 ### Attack Movement
 
 - When ordered to attack, soldiers advance from cover to cover.
-- They spread out to avoid clustering and continue moving toward the objective.
+- Fire teams cross open ground in bounds with overwatch and covering fire.
+- Attack orders now **clear and secure an area**: soldiers work through the space's blind spots as assigned claims and complete the order as "Area secured" only when the ground is observed and contact is resolved.
 
 ### Respawn as a Squadmate
 
 When you die, you automatically respawn as your nearest living squadmate.
+
+### Supply Pouches
+
+- Dead soldiers drop their whole kit inside a single **supply pouch** instead of a shower of item entities.
+- The pouch is a 27-slot container item: shift + use opens it, use throws it.
+- A direct hit hands the contents to a player or restocks a soldier slot-by-slot; a miss lands a ground pouch anyone can pick up.
+- The support medic throws homing pouches to resupply squadmates mid-fight.
 
 ### Valkyrien Skies Support
 
@@ -62,9 +87,9 @@ When you die, you automatically respawn as your nearest living squadmate.
 - They stay seated while the ship moves and disembark safely.
 - They avoid Valkyrien Skies ships while pathfinding and teleport away if they become entangled.
 
-### TaCZ Gun Compatibility
+### Gun Compatibility
 
-Steve's Army supports Timeless and Classic Guns firearms. Soldiers use TaCZ weapons with aiming, recoil, magazine management, and manual bolting, while consuming ammunition from their own inventories.
+Steve's Army supports TaCZ (Timeless and Classic Guns) and Point Blank (Vic's Point Blank) firearms. Soldiers use supported weapons with aiming, recoil, magazine management, and manual bolting, while consuming ammunition from their own inventories. Superb Warfare vehicles are also supported as hard targets for anti-tank soldiers.
 
 ### Ping Wheel System
 
@@ -92,8 +117,14 @@ Pings appear as diamond markers with distances and labels. They are shared with 
 | Mod | Supported range | Tested version |
 | --- | --- | --- |
 | TaCZ (Timeless and Classic Guns) | 1.1.0 or newer | 1.1.8 |
-| Valkyrien Skies 2 | 2.3.0 or newer | 2.3.0-beta.5 |
+| Point Blank (Vic's Point Blank) | 1.7.0 or newer | — |
+| Valkyrien Skies 2 | 2.3.0-beta.5 or newer | 2.3.0-beta.5 |
 | PlayerRevive | 2.0 or newer | 2.0.31 |
+| Superb Warfare | 0.8.0 or newer | — |
+| Tallyho | 3.2 or newer | — |
+| VS Analog Warfare | 0.4 or newer | — |
+| Yes Steve Model | 2.6.5 or newer | — |
+| LesRaisins Tactical Equipments | 0.3.0 or newer | — |
 
 ## Development
 
