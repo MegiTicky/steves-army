@@ -201,6 +201,42 @@ public final class SimTerrain {
         wall(32, 16, 32, 19, 3, Blocks.STONE_BRICKS.defaultBlockState());
     }
 
+    /**
+     * Long-course egress fixture (~74-block span): house A (west) is
+     * partitioned into a front room (east) and a back room (west) with one
+     * interior door, so soldiers spawned deep must path through both doors
+     * to leave. A 50-block open street with scattered waist-high cover
+     * separates it from house B (east, single west door). Long enough that
+     * dock-window quantization reads as in-game minutes.
+     */
+    public void longStreetBlock() {
+        platform();
+        // House A MIRRORED: front room x7..10, back room x12..15, and the
+        // single door on the WEST wall's south half (6,21) — the squad exits
+        // away from the objective and must round the house to head east. The
+        // south offset matters: the defender's street nest sits on the z=18.5
+        // lane, and a door at z=18 would let his fire rake the whole interior
+        // through the west door and the partition gap (7 deaths in one run);
+        // at z=21 the lane terminates on the west wall and only the doorway
+        // itself stays exposed.
+        building(6, 12, 16, 24, 3, new int[][]{{6, 21}});
+        wall(11, 13, 11, 17, 3, Blocks.STONE_BRICKS.defaultBlockState());
+        wall(11, 19, 11, 23, 3, Blocks.STONE_BRICKS.defaultBlockState());
+        // House B: single west door; the order pings its center. The 1-high
+        // stub at x=73 gives the defender a dock-valid hold cell behind it —
+        // without adjacent cover his HOLD relocation wanders (street nests,
+        // doorway camps), and a door-camping guard makes the entrance a
+        // point-blank death funnel the egress asserts cannot pace against.
+        building(67, 12, 77, 24, 3, new int[][]{{67, 18}});
+        coverRow(73, 13, 73, 17, 1);
+        // Vertical cover lines (north-south walls) so the advance hops
+        // block-to-block sideways around them, like street-side walls.
+        coverRow(28, 12, 28, 17, 1);
+        coverRow(40, 18, 40, 23, 1);
+        coverRow(52, 12, 52, 17, 1);
+        coverRow(62, 18, 62, 23, 1);
+    }
+
     public void block(int x, int y, int z, BlockState state) {
         BlockPos pos = origin.offset(x, y, z);
         // The world silently rejects blocks above the build limit; surface that

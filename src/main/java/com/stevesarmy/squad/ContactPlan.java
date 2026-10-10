@@ -499,6 +499,19 @@ public final class ContactPlan {
         return contact == null ? null : contact.threatCenter();
     }
 
+    /**
+     * True when the soldier's squad has an open close-contact plan. Cheap
+     * read used by movement-policy callers (e.g. the spine flow-dwell) that
+     * need "is the squad in contact right now" without running a gate.
+     */
+    public static boolean hasLiveContact(SoldierEntity soldier) {
+        if (!StevesArmyConfig.isSquadContactPlanEnabled() || soldier == null) {
+            return false;
+        }
+        UUID squadId = soldier.getSquadId();
+        return squadId != null && CONTACTS.containsKey(squadId);
+    }
+
     // ------------------------------------------------------------------- gate
 
     /**

@@ -3754,8 +3754,10 @@ public final class SimRegistry {
         // inside house B, sampled every 20t (the poll is the resolution).
         final long[] exitTick = new long[labels.length];
         final long[] arriveTick = new long[labels.length];
+        final long[] streetDockTick = new long[labels.length];
         java.util.Arrays.fill(exitTick, -1L);
         java.util.Arrays.fill(arriveTick, -1L);
+        java.util.Arrays.fill(streetDockTick, -1L);
         SimScenario.Builder builder = SimScenario.builder("clear_long_egress")
             .description("ATTACK clearing egress pacing across a 50-block street: the squad is "
                 + "spread through partitioned house A (front soldier at the door, three deep in "
@@ -3811,6 +3813,17 @@ public final class SimRegistry {
                         && s.getZ() > 11.5 && s.getZ() < 24.5) {
                         arriveTick[i] = at;
                     }
+                    // Path-based progression evidence: a dock on street cover
+                    // between the houses (the spine advance hops cover-to-
+                    // cover; a soldier who runs the street without docking
+                    // once is progressing on straight-line distance).
+                    if (streetDockTick[i] < 0 && s.getX() > 17.5 && s.getX() < 66.5) {
+                        var st = s.getCoverBehaviorManager().getState();
+                        if (st == com.stevesarmy.combat.cover.CoverBehaviorManager.CoverState.IN_COVER
+                            || st == com.stevesarmy.combat.cover.CoverBehaviorManager.CoverState.SUPPRESSED_IN_COVER) {
+                            streetDockTick[i] = at;
+                        }
+                    }
                 }
             });
         }
@@ -3833,6 +3846,8 @@ public final class SimRegistry {
             })
             .assertThat("firefight happened (tracers recorded)", view -> !view.shots().isEmpty())
             .assertThat("squad reached house B", view -> probe.enteredZone)
+            .assertThat("every soldier docked on street cover en route (spine progression)",
+                view -> java.util.Arrays.stream(streetDockTick).allMatch(t -> t > 0))
             .assertThat("every soldier got out of house A",
                 view -> java.util.Arrays.stream(exitTick).allMatch(t -> t > 0))
             .assertThat("every soldier arrived at house B (no mid-route strand)",

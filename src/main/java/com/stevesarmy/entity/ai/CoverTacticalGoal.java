@@ -202,6 +202,14 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
     // Fallback advance when no cover found in corridor
     private static final double ATTACK_FALLBACK_ADVANCE_LENGTH = 4.0;
     private static final int ATTACK_FALLBACK_STUCK_TICKS = 60;
+    // Spine hop: route distance one advance leg covers along the spine
+    // polyline (walked along the real route, not a straight-line chunk).
+    private static final double ATTACK_SPINE_HOP_LENGTH = 6.0;
+    // Spine corridor half-width. Wider than the legacy straight-line
+    // corridor (6): the route dodges cover rows, so docks BESIDE a row can
+    // sit several blocks off the polyline while still being the natural
+    // cover on the street the route is walking.
+    private static final double ATTACK_SPINE_CORRIDOR_WIDTH = 10.0;
 
     // Attack phase state
     private AttackPhase attackPhase = AttackPhase.NONE;
@@ -303,6 +311,21 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
     private double fallbackAdvanceArriveDistSq = 4.0;
     private Vec3 fallbackLastPosition = null;
     private int fallbackNoProgressResets = 0;
+
+    // Advance spine (path-based progression): the wide-lens route to the
+    // objective, computed once per command. ATTACK cover progression is
+    // measured as walked distance along this polyline instead of straight-
+    // line distance — the two disagree wherever a building forces the route
+    // away from the objective before rounding it.
+    private com.stevesarmy.entity.ai.pathfinding.AdvanceSpine attackSpine = null;
+    private int spineRetryAfterTick = 0;
+    /** Best spine progress this command — the spine-frame frontier. */
+    private double attackSpineProgressFrontier = -Double.MAX_VALUE;
+    /** Best spine progress any dock in this command bought (egress clock). */
+    private double clearingEgressBestProgress = -Double.MAX_VALUE;
+    /** LoS to the objective along the straight line (spine exposure gate). */
+    private boolean attackSpineExposed = false;
+    private int spineExposureRefreshTick = 0;
 
     private final Set<BlockPos> failedCoverPositions = new HashSet<>();
     private final java.util.Map<BlockPos, BlacklistEntry> blacklistReasons = new java.util.HashMap<>();
@@ -5104,6 +5127,38 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
     private boolean isForwardCoverCandidate(BlockPos candidatePos, BlockPos objective, Vec3 objectiveDir) {
         if (objectiveDir == null) return false;
 
+        // Path-based frame: progress is walked distance gained along the
+        // advance spine, so a cover that only "advances" on the straight
+        // line (across an interior wall) is rejected and the true exit
+        // route's covers qualify even while they locally walk away from
+        // the objective. The minimum gain is a FULL HOP of route: docks
+        // that buy less turn the route's interior corridor into a dock
+        // relay (the house-interior orbit) instead of a walk to the exit.
+        // A candidate must also sit AHEAD of the spine frontier —
+        // regressing behind the best reached point is the pocket orbit,
+        // not progress.
+        if (attackSpine != null) {
+            // Exposure gate: indoors with the straight line to the objective
+            // blocked, no live contact and no suppression, spine-frame docks
+            // are suspended — the interior segment is flowed (hop legs), not
+            // relayed. Docking stays available under live contact or
+            // suppression regardless of geometry.
+            if (!attackSpineExposed && !ContactPlan.hasLiveContact(soldier)
+                && !getCoverManager().isSuppressed()) {
+                return false;
+            }
+            double candProg = attackSpine.progress(candidatePos);
+            double soldierProg = attackSpine.progress(soldier.blockPosition());
+            if (candProg < soldierProg + ATTACK_SPINE_HOP_LENGTH) {
+                return false;
+            }
+            if (attackSpineProgressFrontier > -Double.MAX_VALUE / 2.0D
+                && candProg < attackSpineProgressFrontier - ATTACK_FRONTIER_TOLERANCE) {
+                return false;
+            }
+            return true;
+        }
+
         // Minimum projected forward progress from current position
         Vec3 candidateCenter = candidatePos.getCenter();
         Vec3 disp = candidateCenter.subtract(soldier.position());
@@ -5129,6 +5184,15 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
 
     private boolean isAttackCorridorCandidate(BlockPos candidatePos, BlockPos objective, Vec3 objectiveDir) {
         if (!isForwardCoverCandidate(candidatePos, objective, objectiveDir)) return false;
+
+        // Spine frame: the corridor is a band along the route, and the next
+        // dock may not be more than one corridor-length of route ahead.
+        if (attackSpine != null) {
+            double delta = attackSpine.progress(candidatePos)
+                - attackSpine.progress(soldier.blockPosition());
+            return delta <= ATTACK_CORRIDOR_FORWARD_LENGTH
+                && attackSpine.corridorDistance(candidatePos) <= ATTACK_SPINE_CORRIDOR_WIDTH;
+        }
 
         Vec3 displacement = candidatePos.getCenter().subtract(soldier.position());
         double forward = displacement.x * objectiveDir.x + displacement.z * objectiveDir.z;
@@ -5213,6 +5277,15 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
         }
         // Frontier is slightly ahead of best progress to allow some lateral movement
         attackFrontierDistance = attackBestObjectiveDist;
+        // Spine-frame frontier: the furthest point along the advance route
+        // this command has reached. Lateral movement along the route is
+        // free; regressing behind it (pocket orbit) is filtered out.
+        if (attackSpine != null) {
+            double prog = attackSpine.progress(soldier.blockPosition());
+            if (prog > attackSpineProgressFrontier) {
+                attackSpineProgressFrontier = prog;
+            }
+        }
     }
 
     /**
@@ -5275,6 +5348,10 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
         peekCompletedThisCover = false;
         attackBestObjectiveDist = Double.MAX_VALUE;
         attackFrontierDistance = Double.MAX_VALUE;
+        attackSpine = null;
+        spineRetryAfterTick = 0;
+        attackSpineProgressFrontier = -Double.MAX_VALUE;
+        clearingEgressBestProgress = -Double.MAX_VALUE;
 
         // Stagger for this command
         attackAdvanceStaggerTicks = Math.abs(soldier.getUUID().hashCode() % 60);
@@ -5346,6 +5423,10 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
         attackPhase = AttackPhase.NONE;
         attackBestObjectiveDist = Double.MAX_VALUE;
         attackFrontierDistance = Double.MAX_VALUE;
+        attackSpine = null;
+        spineRetryAfterTick = 0;
+        attackSpineProgressFrontier = -Double.MAX_VALUE;
+        clearingEgressBestProgress = -Double.MAX_VALUE;
 
         if (attackDebugLog()) {
             StevesArmyMod.LOGGER.info("[AttackPhase] Soldier {} objective complete -> hold at {} (exposed={}, searchQueued={})",
@@ -5479,6 +5560,95 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
         return dwellTime >= minDwell;
     }
 
+    /**
+     * Maintain the advance spine: the wide-lens route from this soldier to
+     * the attack objective. Computed once per command (with a retry backoff
+     * when the probe finds nothing), re-probed when it ages out, the order
+     * moves, or the soldier drifts off the route. Every path-based
+     * progression consumer (scoring, corridor filters, frontier, hop legs,
+     * dwell) reads this; a null spine falls back to the straight-line math.
+     */
+    private void tickAttackSpine(BlockPos objective) {
+        if (!StevesArmyConfig.isAttackPathSpineEnabled()) {
+            if (attackSpine != null) {
+                attackSpine = null;
+                soldier.setAttackSpine(null);
+            }
+            return;
+        }
+        // The spine is an APPROACH structure. Within the investigate band the
+        // clearing machinery owns docking (corner checks, settle, short-job
+        // walks) and spine-frame progression only fragments the last blocks
+        // into micro-docks and orbit relays — dissolve the spine there and
+        // every consumer (filters, scoring, hop legs, windows) falls back to
+        // the legacy behavior that already works at close range.
+        if (objective != null
+            && objective.distSqr(soldier.blockPosition()) <= CLEARING_INVESTIGATE_BAND_SQ) {
+            if (attackSpine != null) {
+                attackSpine = null;
+                soldier.setAttackSpine(null);
+            }
+            return;
+        }
+        if (attackSpine != null) {
+            if (attackSpine.isStale(soldier.tickCount, objective, soldier.getX(), soldier.getZ())) {
+                attackSpine = null;
+                soldier.setAttackSpine(null);
+                spineRetryAfterTick = soldier.tickCount + 20;
+            } else {
+                refreshSpineExposure(objective);
+                return;
+            }
+        }
+        if (soldier.tickCount < spineRetryAfterTick) return;
+        // The spine probe manages its OWN retry cadence (100t below); it must
+        // not inherit clearingGuideRoute's 600t unreachable cache — a single
+        // budget-starved probe (the wide lens explores a huge region from
+        // inside a building and can come back empty on roulette) would
+        // otherwise poison the spine AND every assemble walk for half a
+        // minute.
+        clearingUnreachableUntil.remove(objective.immutable());
+        Path route = clearingGuideRoute(objective);
+        com.stevesarmy.entity.ai.pathfinding.AdvanceSpine spine =
+            com.stevesarmy.entity.ai.pathfinding.AdvanceSpine.of(route, objective, soldier.tickCount);
+        if (spine != null && spine.length() >= 2.0D) {
+            attackSpine = spine;
+            soldier.setAttackSpine(spine);
+            // The frontier is expressed in the spine's own progress frame;
+            // a rebuilt spine re-bases that frame at the soldier, so the
+            // frontier MUST reset with it — a frontier carried across a
+            // rebuild compares coordinates from two different routes and
+            // rejects every dock forever (the doorstep park).
+            attackSpineProgressFrontier = spine.progress(soldier.blockPosition());
+            spineExposureRefreshTick = 0;
+            refreshSpineExposure(objective);
+            if (attackDebugLog()) {
+                StevesArmyMod.LOGGER.info(
+                    "[AttackAdvance] Soldier {} spine to {} ({} blocks walked, canReach={})",
+                    soldier.getId(), objective.toShortString(),
+                    String.format("%.1f", spine.length()), spine.canReach());
+            }
+        } else {
+            spineRetryAfterTick = soldier.tickCount + 100;
+        }
+    }
+
+    /**
+     * Whether the soldier has LoS to the OBJECTIVE along the straight line,
+     * refreshed at most every 40t. Indoors (blocked) with no contact and no
+     * suppression, spine-frame dock selection is suspended: the interior
+     * segment of the route is WALKED (hop legs), not relayed dock-to-dock —
+     * docking on interior walls beside the exit route is what turned the
+     * house exit into a 10s relay. Cover-hopping engages when the route is
+     * exposed (the street), under live contact, or under suppression.
+     */
+    private void refreshSpineExposure(BlockPos objective) {
+        if (soldier.tickCount < spineExposureRefreshTick) return;
+        spineExposureRefreshTick = soldier.tickCount + 40;
+        attackSpineExposed = VisibilityRay.trace(soldier.level(),
+            soldier.getEyePosition(), Vec3.atCenterOf(objective), soldier).clear();
+    }
+
     private void initAttackPhase() {
         int gen = soldier.getAttackGeneration();
         if (attackCommandGeneration != gen) {
@@ -5492,6 +5662,10 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
             peekCompletedThisCover = false;
             attackBestObjectiveDist = Double.MAX_VALUE;
             attackFrontierDistance = Double.MAX_VALUE;
+            attackSpine = null;
+            spineRetryAfterTick = 0;
+            attackSpineProgressFrontier = -Double.MAX_VALUE;
+            clearingEgressBestProgress = -Double.MAX_VALUE;
             fallbackAdvanceTarget = null;
             fallbackAdvanceAssemble = false;
                 fallbackStuckTicks = 0;
@@ -5532,6 +5706,8 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
             objective.getX() + 0.5, objective.getY() + 0.5, objective.getZ() + 0.5);
         double objRadiusSq = ATTACK_OBJECTIVE_RADIUS * ATTACK_OBJECTIVE_RADIUS;
 
+        tickAttackSpine(objective);
+
         // Clearing doctrine: a registered ATTACK order of record turns the
         // advance into reach-the-area -> clear -> secure. The coordinator
         // decides what progress the squad needs next and owns completion;
@@ -5564,8 +5740,20 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
                 if (clearingEgressBestDistSq < 0) {
                     clearingEgressBestDistSq = egressDistSq;
                 } else {
-                    if (egressDistSq
-                        < clearingEgressBestDistSq - CLEARING_DOCK_PROGRESS_DELTA_SQ) {
+                    // Spine frame: a dock "bought approach" when it advanced
+                    // the route by a full block — straight-line distance to
+                    // the ping lies inside buildings (the exit route walks
+                    // AWAY from the ping first).
+                    boolean boughtApproach = egressDistSq
+                        < clearingEgressBestDistSq - CLEARING_DOCK_PROGRESS_DELTA_SQ;
+                    if (attackSpine != null) {
+                        double dockProgress = attackSpine.progress(arrivedDock.getPosition());
+                        boughtApproach =
+                            dockProgress > clearingEgressBestProgress + 1.0D;
+                        clearingEgressBestProgress =
+                            Math.max(clearingEgressBestProgress, dockProgress);
+                    }
+                    if (boughtApproach) {
                         clearingEgressTicks = 0;
                     }
                     clearingEgressBestDistSq = Math.min(clearingEgressBestDistSq, egressDistSq);
@@ -5663,6 +5851,12 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
                         if (dockedForSearch()) {
                             getCoverManager().clearCover();
                         }
+                        // Job-directed: keep the full-route assemble walk —
+                        // the spine points at the PING, but this window's
+                        // target is an assigned corner job whose route can
+                        // diverge from the ping spine; hopping along the
+                        // ping route strands the corner unchecked (order
+                        // never completes).
                         startAssembleAdvance();
                         if (fallbackAdvanceTarget != null) {
                             attackPhase = AttackPhase.SELECTING_COVER;
@@ -5702,6 +5896,9 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
                     // short in-band route to the job directly; arrival
                     // re-arms the normal dock machinery.
                     if (getCoverManager().getCurrentCover() == null) {
+                        // Job-directed (same rule as the far-job window):
+                        // the assemble walk targets the assigned job, not
+                        // the ping spine.
                         startAssembleAdvance();
                         if (fallbackAdvanceTarget != null) {
                             attackPhase = AttackPhase.SELECTING_COVER;
@@ -5746,7 +5943,7 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
                     if (dockedForSearch()) {
                         getCoverManager().clearCover();
                     }
-                    startAssembleAdvance();
+                    startWindowAdvance();
                     if (fallbackAdvanceTarget != null) {
                         attackPhase = AttackPhase.SELECTING_COVER;
                     } else {
@@ -5855,6 +6052,7 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
             clearingAssembleTicks = 0;
             clearingEgressTicks = 0;
             clearingEgressBestDistSq = -1.0;
+            clearingEgressBestProgress = -Double.MAX_VALUE;
             clearingStaleBestJob = null;
             clearingStaleBestDistSq = -1.0;
             investigateJob = null;
@@ -6071,8 +6269,18 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
                 }
 
                 float dwellMult = (1.0f + ftLevel * 1.5f) * groupCohesionDwellMult();
-                long minDwell = (long)(ATTACK_MIN_DWELL_MS * dwellMult);
-                long maxDwell = (long)(ATTACK_MAX_DWELL_MS * dwellMult) + (attackAdvanceStaggerTicks * 50L);
+                // Spine flow advance: hopping cover-to-cover along the route
+                // with NO live contact is locomotion, not a fighting pause —
+                // a glance per dock keeps the squad moving. Under contact,
+                // or without a spine, the legacy fighting dwell applies
+                // unchanged.
+                boolean spineFlow = attackSpine != null
+                    && !ContactPlan.hasLiveContact(soldier);
+                long flowDwellMs = spineFlow
+                    ? StevesArmyConfig.getAttackSpineFlowDwellMs() : ATTACK_MIN_DWELL_MS;
+                long minDwell = (long)(flowDwellMs * dwellMult);
+                long maxDwell = (long)((spineFlow ? flowDwellMs * 2L : ATTACK_MAX_DWELL_MS)
+                    * dwellMult) + (attackAdvanceStaggerTicks * 50L);
                 boolean dwellMet = dwellTime >= minDwell;
                 boolean maxDwellReached = dwellTime >= maxDwell && (recovered || smokeAdvance)
                     && !peeking && (!fireteamPinned || smokeAdvance);
@@ -6502,6 +6710,23 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
      * crosses a building at a snail's pace and can run out of scenario clock.
      * Arrival and stuck handling are the shared fallback machinery.
      */
+    /**
+     * Window-driven advance toward a far target (investigate far-job,
+     * refused reposition, direct egress): hop along the advance spine when
+     * one exists — dock-to-dock between hops is the cover machinery's job,
+     * and the covers between here and the objective get USED. The full-route
+     * assemble walk is the spine-less fallback only: it crosses the street
+     * in one unprotected sprint and is exactly the "direct pathfind" the
+     * path-based progression exists to replace.
+     */
+    private void startWindowAdvance() {
+        if (attackSpine != null) {
+            startFallbackAdvance();
+        } else {
+            startAssembleAdvance();
+        }
+    }
+
     private void startAssembleAdvance() {
         if (!soldier.hasValidAttackTarget()) return;
         BlockPos guide = clearingPoiTarget != null
@@ -6580,6 +6805,61 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
             guide.getZ() - soldier.getZ());
         double dist = toTarget.length();
         if (dist < stopRadius) return;
+
+        // Spine hop: with an advance spine, legs walk ALONG the route — a
+        // straight-line leg from inside a building points at a wall, and the
+        // whole point of the spine is that the real route is known. The leg
+        // ends at route-progress +HOP; docking between hops is the cover
+        // machinery's job (the next ATTACK_SELECTING search is spine-filtered).
+        if (attackSpine != null) {
+            double soldierProg = attackSpine.progress(soldier.blockPosition());
+            if (soldierProg >= attackSpine.length() - 2.0D) {
+                // End of the spine while the objective is still beyond the
+                // stop radius: the probe returned a PARTIAL route (node
+                // budget, walked-cap roulette) and its end is a dead point —
+                // clamped hops would loop here forever. Drop the spine and
+                // re-probe from this advanced position; the wide lens from
+                // mid-route usually reaches the rest of the way.
+                attackSpine = null;
+                soldier.setAttackSpine(null);
+                spineRetryAfterTick = 0;
+                if (attackDebugLog()) {
+                    StevesArmyMod.LOGGER.info(
+                        "[AttackAdvance] Soldier {} reached end of partial spine at progress {} — re-probing",
+                        soldier.getId(), String.format("%.1f", soldierProg));
+                }
+                return;
+            }
+            double legEnd = Math.min(attackSpine.length(), soldierProg + ATTACK_SPINE_HOP_LENGTH);
+            BlockPos destBlock = attackSpine.pointAt(legEnd, soldier.blockPosition().getY());
+            Path path = soldier.getNavigation().createPath(
+                destBlock.getX() + 0.5, destBlock.getY(), destBlock.getZ() + 0.5, 1);
+            if (path != null && path.canReach()) {
+                ContactPlan.MovePermission permission = ContactPlan.checkAdvance(soldier, destBlock);
+                if (permission.allowed) {
+                    soldier.getEngagementTelemetry().setMovingSupported(true, "", "contact-plan");
+                    fallbackAdvanceTarget = destBlock;
+                    fallbackAdvanceAssemble = true;
+                    fallbackAdvanceArriveDistSq = 4.0;
+                    fallbackStuckTicks = 0;
+                    fallbackLastPosition = soldier.position();
+                    fallbackNoProgressResets = 0;
+                    soldier.getNavigation().moveTo(path, 1.2D);
+                    if (attackDebugLog()) {
+                        StevesArmyMod.LOGGER.info(
+                            "[AttackAdvance] Soldier {} spine hop to {} (route {}+{} blocks)",
+                            soldier.getId(), destBlock.toShortString(),
+                            String.format("%.1f", soldierProg),
+                            String.format("%.1f", ATTACK_SPINE_HOP_LENGTH));
+                    }
+                    return;
+                }
+                soldier.getEngagementTelemetry().setMovingSupported(false, permission.reason, "contact-plan");
+                return;
+            }
+            // Spine hop unpathable (transient terrain): fall through to the
+            // legacy straight-line leg below.
+        }
 
         Vec3 dir = toTarget.normalize();
         double advanceLen = Math.min(ATTACK_FALLBACK_ADVANCE_LENGTH, dist - stopRadius);

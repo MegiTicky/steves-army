@@ -105,6 +105,9 @@ public class StevesArmyConfig {
     public static final ForgeConfigSpec.IntValue ATTACK_CLEAR_RAY_BUDGET;
     public static final ForgeConfigSpec.IntValue ATTACK_CLEAR_SETTLE_TICKS;
     public static final ForgeConfigSpec.IntValue ATTACK_CLEAR_STALL_TICKS;
+    public static final ForgeConfigSpec.BooleanValue ATTACK_CLEAR_DIRECT_EGRESS;
+    public static final ForgeConfigSpec.BooleanValue ATTACK_PATH_SPINE_ENABLED;
+    public static final ForgeConfigSpec.IntValue ATTACK_SPINE_FLOW_DWELL_MS;
     public static final ForgeConfigSpec.DoubleValue CLOSE_COMBAT_SEEK_RADIUS;
     public static final ForgeConfigSpec.IntValue CLOSE_COMBAT_REEVAL_INTERVAL_TICKS;
 
@@ -749,6 +752,31 @@ BUILDER.pop();
                      "long marks the attack STALLED (reported once; the order persists).",
                      "Default: 600 ticks (30 s)")
             .defineInRange("attackClearStallTicks", 600, 100, 2400);
+
+        ATTACK_CLEAR_DIRECT_EGRESS = BUILDER
+            .comment("Direct egress for approach-stage soldiers: a check job beyond the investigate",
+                     "band (or no in-band job at all) is walked as one full route to the target -",
+                     "partial paths taken - instead of being dock-hopped. Fixes soldiers parking at",
+                     "a dock mid-route or drifting backwards when the exit faces away from the",
+                     "objective. false restores dock-hop-only advances.",
+                     "Default: true")
+            .define("attackClearDirectEgress", true);
+
+        ATTACK_PATH_SPINE_ENABLED = BUILDER
+            .comment("Path-based attack progression (advance spine): route the soldier to the attack",
+                     "ping once with the wide-lens pathfinder, then measure cover progression along",
+                     "that route instead of straight-line distance. Covers that advance the route win;",
+                     "interior covers that do not are rejected, so soldiers exit buildings by the door",
+                     "and dock on street cover en route. false restores straight-line progression.",
+                     "Default: true")
+            .define("attackPathSpineEnabled", true);
+
+        ATTACK_SPINE_FLOW_DWELL_MS = BUILDER
+            .comment("Cover dwell (ms) during a spine advance with NO live contact: the soldier",
+                     "docks, glances, and keeps hopping. Under contact the legacy dwell (4000 ms",
+                     "baseline, suppression-scaled) applies unchanged.",
+                     "Default: 600 ms")
+            .defineInRange("attackSpineFlowDwellMs", 600, 200, 2000);
 
         BUILDER.pop();
 
@@ -1759,6 +1787,18 @@ BUILDER.pop();
 
     public static int getAttackClearStallTicks() {
         return ATTACK_CLEAR_STALL_TICKS.get();
+    }
+
+    public static boolean isAttackClearDirectEgress() {
+        return ATTACK_CLEAR_DIRECT_EGRESS.get();
+    }
+
+    public static boolean isAttackPathSpineEnabled() {
+        return ATTACK_PATH_SPINE_ENABLED.get();
+    }
+
+    public static long getAttackSpineFlowDwellMs() {
+        return ATTACK_SPINE_FLOW_DWELL_MS.get();
     }
 
     public static double getCloseCombatSeekRadius() {

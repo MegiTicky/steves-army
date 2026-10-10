@@ -698,12 +698,64 @@ public final class ClearingCoordinator {
                 taken.add(best);
             }
         }
+        skipBehindEveryone(state, squad, now);
+    }
+
+    /** Candidates at parity (2 blocks) with the soldier's objective distance are not "behind". */
+    private static final double BEHIND_SLACK_SQ = 4.0;
+
+    /**
+     * Blind spots farther from the objective than every living soldier cannot
+     * be reached by advancing — holding the order open for them asks the squad
+     * to walk backwards, which is exactly the stuck-behind failure this
+     * coordinator must not create. Mark them checked (skipped): the doctrine
+     * accepts an unobserved pocket behind the whole squad once everyone is
+     * past it.
+     */
+    private static void skipBehindEveryone(ClearingState state, List<SoldierEntity> squad, long now) {
+        boolean anyAlive = false;
+        for (SoldierEntity soldier : squad) {
+            if (soldier.isAlive()) {
+                anyAlive = true;
+                break;
+            }
+        }
+        if (!anyAlive) {
+            return;
+        }
+        for (BlockPos poi : state.pois) {
+            long key = poi.asLong();
+            if (state.checkedTick.containsKey(key) || state.claims.containsValue(poi)) {
+                continue;
+            }
+            double poiToObj = poi.distSqr(state.objective);
+            boolean behindEveryone = true;
+            for (SoldierEntity soldier : squad) {
+                if (soldier.isAlive()
+                    && poiToObj + BEHIND_SLACK_SQ < state.objective.distSqr(soldier.blockPosition())) {
+                    behindEveryone = false;
+                    break;
+                }
+            }
+            if (behindEveryone) {
+                state.checkedTick.put(key, now);
+            }
+        }
     }
 
     private static BlockPos nearestUnchecked(ClearingState state, SoldierEntity soldier,
                                              Set<BlockPos> taken) {
         BlockPos best = null;
         double bestDist = Double.MAX_VALUE;
+        // Forward preference: a check target behind the soldier (farther from
+        // the objective than he already is) drags the back of the squad
+        // backwards while the front advances — the stuck-in-house pin. Claim
+        // the nearest FORWARD target when one exists; plain nearest remains
+        // the fallback so a squad with nothing forward still works its list.
+        BlockPos bestForward = null;
+        double bestForwardDist = Double.MAX_VALUE;
+        BlockPos objective = state.objective;
+        double soldierToObj = objective.distSqr(soldier.blockPosition());
         for (BlockPos poi : state.pois) {
             if (state.checkedTick.containsKey(poi.asLong()) || taken.contains(poi)) {
                 continue;
@@ -713,7 +765,14 @@ public final class ClearingCoordinator {
                 bestDist = dist;
                 best = poi;
             }
+            if (poi.distSqr(objective) + BEHIND_SLACK_SQ < soldierToObj
+                && dist < bestForwardDist) {
+                bestForwardDist = dist;
+                bestForward = poi;
+            }
         }
+        // Contacts stay exempt from the forward filter: a last-known behind
+        // the squad is a real threat back there, not a stale corner.
         for (BlockPos contact : state.contactPoints.values()) {
             if (state.checkedTick.containsKey(contact.asLong()) || taken.contains(contact)) {
                 continue;
@@ -724,7 +783,7 @@ public final class ClearingCoordinator {
                 best = contact;
             }
         }
-        return best;
+        return bestForward != null ? bestForward : best;
     }
 
     // -------------------------------------------------- stage and completion

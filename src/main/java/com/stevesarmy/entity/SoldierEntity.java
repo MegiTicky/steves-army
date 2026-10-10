@@ -270,7 +270,20 @@ public class SoldierEntity extends PathfinderMob implements Container {
     private long attackTargetTimestamp = 0;
     private static final long ATTACK_MEMORY_MS = 60000;
     private int attackGeneration = 0;
-    
+
+    /** Cached advance-spine route for the current attack command; not persisted —
+     * the owning goal rebuilds it per command and nulls it on reset. Exposed here
+     * so the cover scorer (a different package) can read path-based progression. */
+    private transient com.stevesarmy.entity.ai.pathfinding.AdvanceSpine attackSpine = null;
+
+    public com.stevesarmy.entity.ai.pathfinding.AdvanceSpine getAttackSpine() {
+        return attackSpine;
+    }
+
+    public void setAttackSpine(com.stevesarmy.entity.ai.pathfinding.AdvanceSpine spine) {
+        this.attackSpine = spine;
+    }
+
     private BlockPos pingThreatPos = null;
     private long pingThreatTimestamp = 0;
     private static final long PING_THREAT_MEMORY_MS = 20000;
