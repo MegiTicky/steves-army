@@ -23,8 +23,11 @@ public final class AdvanceSpine {
 
     /** Age after which the spine is re-probed (terrain/tactics drift). */
     public static final long MAX_AGE_TICKS = 400L;
-    /** Perpendicular drift from the polyline that invalidates the spine. */
-    public static final double MAX_DRIFT = 6.0D;
+    /** Perpendicular drift from the polyline that invalidates the spine.
+     * Matched to the dock corridor width: docks sit up to that far off the
+     * route by design, and invalidating the spine at every such dock reverts
+     * the soldier to the legacy 4s dwell while the probe retries. */
+    public static final double MAX_DRIFT = 10.0D;
 
     private final BlockPos objective;
     private final boolean canReach;
@@ -147,6 +150,14 @@ public final class AdvanceSpine {
 
     public double length() {
         return length;
+    }
+
+    /** Horizontal distance from the route's END node to a block position —
+     * tells a real route (ends at the objective) from an interior stub. */
+    public double endHorizontalDist(BlockPos pos) {
+        double dx = xs[xs.length - 1] - (pos.getX() + 0.5D);
+        double dz = zs[zs.length - 1] - (pos.getZ() + 0.5D);
+        return Math.sqrt(dx * dx + dz * dz);
     }
 
     public BlockPos objective() {

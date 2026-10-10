@@ -17,6 +17,8 @@ import net.minecraft.world.level.pathfinder.PathFinder;
 public class SoldierGroundNavigation extends GroundPathNavigation {
     private boolean asyncMoveRequest;
     private AsyncSoldierPath validatedAsyncPath;
+    /** The pathfinder createPathFinder built — vanilla keeps it private. */
+    private PathFinder soldierPathFinder;
 
     public SoldierGroundNavigation(Mob mob, Level level) {
         super(mob, level);
@@ -28,10 +30,12 @@ public class SoldierGroundNavigation extends GroundPathNavigation {
         this.nodeEvaluator = new HazardAwareWalkNodeEvaluator();
         this.nodeEvaluator.setCanPassDoors(true);
         if (StevesArmyConfig.isAsyncPathfindingEnabled()) {
-            return new AsyncSoldierPathfinder(this.nodeEvaluator, maxVisitedNodes, this.level,
+            this.soldierPathFinder = new AsyncSoldierPathfinder(this.nodeEvaluator, maxVisitedNodes, this.level,
                 () -> asyncMoveRequest);
+            return this.soldierPathFinder;
         }
-        return new PathFinder(this.nodeEvaluator, maxVisitedNodes);
+        this.soldierPathFinder = new PathFinder(this.nodeEvaluator, maxVisitedNodes);
+        return this.soldierPathFinder;
     }
 
     /**
@@ -68,11 +72,29 @@ public class SoldierGroundNavigation extends GroundPathNavigation {
      * a best-effort stub at the interior wall nearest the straight line.
      * Raising the lens lifts region and walked cap together, which makes the
      * real detour route reachable and returns the true full path.
+     *
+     * <p>The lens does NOT lift the visited-node budget (that comes from the
+     * navigation's own multiplier field, default 1.0 → 512 nodes at
+     * FOLLOW_RANGE 32), so a wide probe from inside a building routinely
+     * exhausts its budget and returns a random-length stub. Wide probes are
+     * rare and caller-paced, so the budget is raised for the duration of
+     * this one call and restored after.
      */
     @javax.annotation.Nullable
     public Path createWidePath(BlockPos target, int accuracy, float lensRange) {
-        return this.createPath(java.util.Collections.singleton(target), 8, false,
-            accuracy, lensRange);
+        // Mirrors the vanilla createPath region capture, but passes an
+        // explicit visited-node budget multiplier: the default 512-node
+        // budget (FOLLOW_RANGE × 16 nodes at multiplier 1.0) routinely
+        // exhausts on cross-building probes and returns random-length
+        // stubs. Sync call — the same corridor-aware pipeline runs on the
+        // calling thread.
+        BlockPos center = this.mob.blockPosition();
+        int extent = (int) lensRange + 8;
+        net.minecraft.world.level.PathNavigationRegion region = new net.minecraft.world.level.PathNavigationRegion(
+            this.level, center.offset(-extent, -extent, -extent),
+            center.offset(extent, extent, extent));
+        return this.soldierPathFinder.findPath(region, this.mob,
+            java.util.Collections.singleton(target), lensRange, accuracy, 8.0F);
     }
 
     /** Read-back of the current navigation speed (no vanilla getter in 1.20.1). */
