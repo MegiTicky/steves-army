@@ -230,16 +230,14 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
     private BlockPos clearingLastDockPos = null;
     /** How long an assigned check target may stay unobserved before walking to it. */
     private static final int CLEARING_INVESTIGATE_TICKS = 160;
+    /** Jobs beyond this range of the soldier are walked, not dock-hopped (12 blocks). */
+    private static final double CLEARING_INVESTIGATE_BAND_SQ = 144.0D;
     /** Before walking to an assigned check target, how long its "no route" verdict holds. */
     private static final int CLEARING_POI_UNREACHABLE_BACKOFF_TICKS = 600;
     /** Per-guide "no route" verdicts: guide position -> expiry tick. Keyed by
      * guide because the search-fail and investigate paths probe different
      * guides for the same order; a single-slot cache would thrash between them. */
     private final Map<BlockPos, Long> clearingUnreachableUntil = new HashMap<>();
-    /** TEMP DIAGNOSTIC (wave A validation): rate limiter for partial-path logs. */
-    private long lastPartialPathLogTick = -200L;
-    /** TEMP Wave-A diagnostic: rate-limit clock for the [AttackClear][view] line. */
-    private long lastViewDiagTick = -200L;
     /** The assigned job an in-flight investigate reposition was delivered for,
      * and the position it started from — the re-dock measures the approach. */
     private BlockPos investigateJob = null;
@@ -262,6 +260,30 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
      * assemble escalates to releasing the dock and walking in directly.
      */
     private int assembleDockFailures = 0;
+    /**
+     * Direct egress (attackClearDirectEgress): consecutive parked ticks while
+     * the soldier's job lies beyond investigate range — or there is no in-band
+     * job at all. Dock-hopping cannot deliver a far job (the re-dock search
+     * only finds cover near the soldier, every window misses, and the delivery
+     * grade poisons the route cache), so past the window the soldier walks one
+     * full route instead. Mirrors the assemble window/backoff shape.
+     */
+    private int clearingEgressTicks = 0;
+    private long egressRetryAfterTick = 0;
+    /**
+     * Churn grading for the dwell clocks: a re-dock restarts a clock only if
+     * it closed at least this much on the best approach the dwell has seen.
+     * The cover system re-docks a soldier every window or two while he orbits
+     * a pocket; resetting clocks on every arrival lets the churn itself starve
+     * the walk that would end it.
+     */
+    private static final double CLEARING_DOCK_PROGRESS_DELTA_SQ = 4.0;
+    /** Best distance-sq to the egress guide since the egress dwell last reset; -1 unanchored. */
+    private double clearingEgressBestDistSq = -1.0;
+    /** Claim the stale-dwell best-distance is measured against; null unanchored. */
+    private BlockPos clearingStaleBestJob = null;
+    /** Best distance-sq to {@link #clearingStaleBestJob} since the stale dwell last reset. */
+    private double clearingStaleBestDistSq = -1.0;
 
     private long lastFlankRepositionTime = 0;
     private long failedFlankSearchFingerprint = Long.MIN_VALUE;
@@ -5219,6 +5241,11 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
         fallbackLastPosition = null;
         fallbackNoProgressResets = 0;
         clearingUnreachableUntil.clear();
+        clearingEgressTicks = 0;
+        egressRetryAfterTick = 0;
+        clearingEgressBestDistSq = -1.0;
+        clearingStaleBestJob = null;
+        clearingStaleBestDistSq = -1.0;
 
         // Cancel pending retry
         pendingRetryCover = null;
@@ -5510,18 +5537,6 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
         // decides what progress the squad needs next and owns completion;
         // this goal executes it through the existing cover machinery.
         clearingView = ClearingCoordinator.viewFor(soldier);
-        // TEMP Wave-A diagnostics: the clearing view as the executor sees it,
-        // rate-limited to one line per 200t — the APPROACH/CLEAR stall family
-        // is invisible without it. Deliberately NOT gated on attackDebugLog:
-        // the view-null case (no coordinator state at all) is one of the
-        // things this line exists to catch.
-        if (soldier.tickCount - lastViewDiagTick >= 200) {
-            lastViewDiagTick = soldier.tickCount;
-            StevesArmyMod.LOGGER.info(
-                "[AttackClear][view] Soldier {} view={} poiTarget={} staleTicks={} phase={}",
-                soldier.getId(), clearingView == null ? "NULL" : clearingView.toString(),
-                clearingPoiTarget, clearingStaleTargetTicks, attackPhase);
-        }
         if (clearingView != null) {
             clearingPoiTarget = resolveClearingPoi(clearingView);
             // A fresh dock is a fresh observation attempt: the check needs
@@ -5535,8 +5550,38 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
                 clearingLastDockPos = null;
             } else if (!arrivedDock.getPosition().equals(clearingLastDockPos)) {
                 clearingLastDockPos = arrivedDock.getPosition();
-                clearingStaleTargetTicks = 0;
                 clearingAssembleTicks = 0;
+                // Dwell-clock churn grading: sideways and backward re-docks
+                // (the pocket orbit) must not restart the egress/stale clocks
+                // — the orbit re-docks faster than the windows expire, so an
+                // unconditional reset here means the clocks never fire and
+                // the soldier never leaves. A re-dock only counts as progress
+                // when it closes on that clock's target past the best the
+                // dwell has seen.
+                BlockPos egressGuide = soldier.getAttackTargetPos();
+                double egressDistSq = egressGuide == null
+                    ? Double.MAX_VALUE : egressGuide.distSqr(soldier.blockPosition());
+                if (clearingEgressBestDistSq < 0) {
+                    clearingEgressBestDistSq = egressDistSq;
+                } else {
+                    if (egressDistSq
+                        < clearingEgressBestDistSq - CLEARING_DOCK_PROGRESS_DELTA_SQ) {
+                        clearingEgressTicks = 0;
+                    }
+                    clearingEgressBestDistSq = Math.min(clearingEgressBestDistSq, egressDistSq);
+                }
+                BlockPos staleJob = clearingView.assignedPoi();
+                double staleDistSq = staleJob == null
+                    ? Double.MAX_VALUE : staleJob.distSqr(soldier.blockPosition());
+                if (staleJob == null || !staleJob.equals(clearingStaleBestJob)) {
+                    clearingStaleBestJob = staleJob;
+                    clearingStaleBestDistSq = staleDistSq;
+                    clearingStaleTargetTicks = 0;
+                } else if (staleDistSq
+                    < clearingStaleBestDistSq - CLEARING_DOCK_PROGRESS_DELTA_SQ) {
+                    clearingStaleTargetTicks = 0;
+                    clearingStaleBestDistSq = staleDistSq;
+                }
                 // Grade the investigate delivery: a re-dock that bought no
                 // approach toward the job means the reachability probe and
                 // the walkable terrain disagree (pathfinder canReach vs the
@@ -5575,10 +5620,20 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
             boolean staleTarget = clearingView.assignedPoi() != null
                 && !clearingView.assignedPoiChecked()
                 && clearingView.assignedPoi().equals(clearingPoiTarget);
+            // A far job is egress, not churn: the walk is the pinned soldier's
+            // way OUT of a fatal funnel, so heavy suppression must not veto it
+            // (the travel machinery crawls him through; the doctrine is "pinned
+            // = dive but approach low", never "pinned = stay pinned").
+            boolean farEgressJob = StevesArmyConfig.isAttackClearDirectEgress()
+                && clearingView.assignedPoi() != null
+                && clearingView.assignedPoi().distSqr(soldier.blockPosition())
+                    > CLEARING_INVESTIGATE_BAND_SQ;
             clearingStaleTargetTicks = staleTarget ? clearingStaleTargetTicks + 1 : 0;
             if (staleTarget && clearingStaleTargetTicks >= CLEARING_INVESTIGATE_TICKS
+                // Never fight an in-flight walk for the legs either.
+                && fallbackAdvanceTarget == null
                 && !clearingHold()
-                && !FireTeamSuppressionTracker.isHeavilySuppressed(soldier)
+                && (farEgressJob || !FireTeamSuppressionTracker.isHeavilySuppressed(soldier))
                 // Never fight the cover system for the legs: an in-flight
                 // reposition owns navigation, and two movers issuing paths
                 // cancel each other's pending paths into a freeze.
@@ -5587,7 +5642,34 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
                 && (attackPhase == AttackPhase.OCCUPYING_COVER
                     || attackPhase == AttackPhase.SELECTING_COVER)) {
                 BlockPos assigned = clearingView.assignedPoi();
-                if (!clearingGuideReachable(assigned)) {
+                if (farEgressJob) {
+                    // Far job: dock-hopping cannot deliver it. The re-dock
+                    // search only finds cover near the soldier, so every
+                    // window misses the job, the delivery grade reads "bought
+                    // no approach", and the route cache backs off 600t — the
+                    // soldier orbits his start pocket for minutes. Walk the
+                    // full route instead: the partial path is taken, the
+                    // fallback machinery services arrival and stuck, and the
+                    // in-band investigate re-dock takes over on arrival.
+                    if (!clearingGuideReachable(assigned)) {
+                        Long until = clearingUnreachableUntil.get(assigned);
+                        if (attackDebugLog()) {
+                            StevesArmyMod.LOGGER.info("[AttackAdvance] Soldier {} job {} unreachable (backoff {}t left), holding dock",
+                                soldier.getId(), assigned.toShortString(),
+                                until == null ? 0 : Math.max(0, until - soldier.tickCount));
+                        }
+                        clearingStaleTargetTicks = 0;
+                    } else {
+                        if (dockedForSearch()) {
+                            getCoverManager().clearCover();
+                        }
+                        startAssembleAdvance();
+                        if (fallbackAdvanceTarget != null) {
+                            attackPhase = AttackPhase.SELECTING_COVER;
+                        }
+                        clearingStaleTargetTicks = 0;
+                    }
+                } else if (!clearingGuideReachable(assigned)) {
                     Long until = clearingUnreachableUntil.get(assigned);
                     if (attackDebugLog()) {
                         StevesArmyMod.LOGGER.info("[AttackAdvance] Soldier {} job {} unreachable (backoff {}t left), holding dock",
@@ -5612,10 +5694,74 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
                     clearingStaleTargetTicks = 0;
                 } else {
                     // Reposition refused (no step available right now):
-                    // retry soon instead of waiting another full window.
+                    // retry soon instead of waiting another full window —
+                    // unless the soldier has no dock at all, in which case
+                    // the refused reposition is the NO_COVER spin (the search
+                    // from this pocket finds nothing and never will). A
+                    // dockless soldier must not orbit his claim: walk the
+                    // short in-band route to the job directly; arrival
+                    // re-arms the normal dock machinery.
+                    if (getCoverManager().getCurrentCover() == null) {
+                        startAssembleAdvance();
+                        if (fallbackAdvanceTarget != null) {
+                            attackPhase = AttackPhase.SELECTING_COVER;
+                        }
+                    }
                     clearingStaleTargetTicks = CLEARING_INVESTIGATE_TICKS / 2;
                 }
             }
+            // Direct egress (APPROACH, no in-band job): a soldier parked at a
+            // dock with no resolved claim has no advance driver at all — the
+            // stale window above needs a target, and the corridor search from
+            // a pocket finds no forward cover. After a parked window, walk one
+            // full route toward the objective: the partial path is taken, and
+            // the in-band machinery resumes when a claim comes within range.
+            // The same recovery covers the dockless NO_COVER spin anywhere in
+            // the area: no claim, no dock, nothing to occupy, and the cover
+            // search failing on repeat is not a state to stand in.
+            BlockPos egressGuide = soldier.getAttackTargetPos();
+            boolean joblessDockless = clearingPoiTarget == null
+                && getCoverManager().getCurrentCover() == null
+                && egressGuide != null
+                && egressGuide.distSqr(soldier.blockPosition())
+                    > CLEARING_INVESTIGATE_BAND_SQ;
+            if (StevesArmyConfig.isAttackClearDirectEgress()
+                && clearingPoiTarget == null
+                && (clearingView.stage() == ClearingCoordinator.ClearingStage.APPROACH
+                    || joblessDockless)
+                && (!clearingView.insideArea() || joblessDockless)
+                && !clearingHold()
+                && soldier.tickCount >= egressRetryAfterTick
+                && fallbackAdvanceTarget == null
+                // No suppression veto: this walk is the exit from the funnel
+                // the soldier is being pinned in (same doctrine as above).
+                && !ExposedCombatController.hasActiveMove(soldier)
+                && getCoverManager().getState() != CoverBehaviorManager.CoverState.REPOSITIONING
+                && getCoverManager().getState() != CoverBehaviorManager.CoverState.SEEKING_COVER
+                && (attackPhase == AttackPhase.OCCUPYING_COVER
+                    || attackPhase == AttackPhase.SELECTING_COVER)) {
+                clearingEgressTicks++;
+                if (clearingEgressTicks >= CLEARING_INVESTIGATE_TICKS) {
+                    clearingEgressTicks = 0;
+                    if (dockedForSearch()) {
+                        getCoverManager().clearCover();
+                    }
+                    startAssembleAdvance();
+                    if (fallbackAdvanceTarget != null) {
+                        attackPhase = AttackPhase.SELECTING_COVER;
+                    } else {
+                        // Route probe failed or the contact plan denied the
+                        // walk: back off before re-querying next window.
+                        egressRetryAfterTick = soldier.tickCount
+                            + CLEARING_ASSEMBLE_RETRY_BACKOFF_TICKS;
+                    }
+                }
+            }
+            // No churn reset on the other phases: the MOVING_TO_COVER flapping
+            // of the pocket orbit is exactly the no-progress time this clock
+            // measures. It pauses while the soldier walks (the gate above only
+            // accrues docked/seeking phases) and restarts only through the
+            // dock-arrival grading above.
             // SECURE-phase assemble: every check ran and every contact is
             // resolved, so the coordinator has completion armed except for
             // squad members still OUTSIDE the area — a soldier parked in
@@ -5707,6 +5853,10 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
             clearingStaleTargetTicks = 0;
             clearingLastDockPos = null;
             clearingAssembleTicks = 0;
+            clearingEgressTicks = 0;
+            clearingEgressBestDistSq = -1.0;
+            clearingStaleBestJob = null;
+            clearingStaleBestDistSq = -1.0;
             investigateJob = null;
             investigateStartPos = null;
         }
@@ -5733,6 +5883,14 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
         if (attackPhase == AttackPhase.SELECTING_COVER && fallbackAdvanceTarget != null
             && (!clearingHold() || fallbackAdvanceAssemble)) {
             tickFallbackAdvance();
+            if (fallbackAdvanceTarget != null && fallbackAdvanceAssemble) {
+                // Full-route walks service themselves to arrival (or stuck).
+                // Dropping them to the corridor search every refresh tick
+                // re-docks the soldier at the nearest cover — inside a
+                // cover-rich pocket the re-dock wins every time and the walk
+                // never leaves the building.
+                return;
+            }
             if (fallbackAdvanceTarget != null && soldier.tickCount % ATTACK_CORRIDOR_REFRESH_TICKS != 0) {
                 return;
             }
@@ -6104,6 +6262,72 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
         }
         Path path = soldier.getNavigation().createPath(
             guide.getX() + 0.5, guide.getY(), guide.getZ() + 0.5, 1);
+        // Vanilla PathNavigation short-circuits a probe whose target matches
+        // its cached targetPos while a walk is in flight: any earlier probe
+        // to this guide (a rejected assemble window, a discarded
+        // reachability check) caches the guide, and every later mid-walk
+        // probe then replays the SOLDIER'S CURRENT DOCK WALK — a 1-5 node
+        // path ending at his own dock — as the "route". That dock walk is
+        // not a route anywhere: re-probe against offset targets, which the
+        // short-circuit cannot have cached.
+        if (path != null && path == soldier.getNavigation().getPath()
+            && !soldier.getNavigation().isDone()) {
+            int[][] probeOffsets = {{1, 0}, {0, 1}, {-1, 0}};
+            for (int[] offset : probeOffsets) {
+                Path retried = soldier.getNavigation().createPath(
+                    guide.getX() + 0.5 + offset[0], guide.getY(),
+                    guide.getZ() + 0.5 + offset[1], 1);
+                if (retried == null || retried != soldier.getNavigation().getPath()) {
+                    path = retried;
+                    break;
+                }
+            }
+        }
+        // Wide-lens retry for far guides. The soldier A* caps BOTH the search
+        // region and the walked-path-length at FOLLOW_RANGE (32): from inside
+        // a building the door detour spends ~20 walked blocks before the route
+        // even heads at the guide, so every cross-building probe ends as a
+        // best-effort stub at the interior wall nearest the straight line —
+        // the real exit walks AWAY from the guide until it rounds the
+        // building, so it never wins best-effort. Re-probe with the lens
+        // widened to the guide distance plus detour headroom (bounded): the
+        // real route becomes reachable and the search returns the full path.
+        net.minecraft.world.level.pathfinder.Node pathEnd =
+            path == null ? null : path.getEndNode();
+        double guideDx = guide.getX() + 0.5 - soldier.getX();
+        double guideDz = guide.getZ() + 0.5 - soldier.getZ();
+        double guideDistSq = guideDx * guideDx + guideDz * guideDz;
+        // A stub is not just a path that ends at the soldier's feet: the
+        // best-effort interior collapse can end several blocks away (the
+        // partition gap, a far wall) and still leave the guide exactly as
+        // far off as before. A real egress route must CUT the guide
+        // distance; anything that barely dents it is the same collapse in
+        // a longer costume and gets the wide lens too.
+        double guideDist = Math.sqrt(guideDistSq);
+        double endGuideDist = pathEnd == null ? Double.MAX_VALUE
+            : Math.sqrt(pathEnd.asBlockPos().distSqr(guide));
+        boolean stubRoute = pathEnd == null
+            || pathEnd.asBlockPos().distSqr(soldier.blockPosition()) < 9.0D
+            || endGuideDist > guideDist - 8.0D;
+        if (guideDistSq > 64.0D && (path == null || path.getNodeCount() == 0 || stubRoute)) {
+            float lensRange = (float) Math.min(96.0D, guideDist + 24.0D);
+            Path widened = soldier.getNavigation() instanceof SoldierGroundNavigation nav
+                ? nav.createWidePath(guide, 1, lensRange)
+                : null;
+            net.minecraft.world.level.pathfinder.Node wideEnd =
+                widened == null ? null : widened.getEndNode();
+            if (widened != null && widened.getNodeCount() > 0 && wideEnd != null
+                && wideEnd.asBlockPos().distSqr(soldier.blockPosition()) > 9.0D
+                && Math.sqrt(wideEnd.asBlockPos().distSqr(guide)) < guideDist - 8.0D) {
+                if (attackDebugLog()) {
+                    StevesArmyMod.LOGGER.info(
+                        "[AttackAdvance] Soldier {} wide-lens route to {} ({} nodes, canReach={}, lens={})",
+                        soldier.getId(), guide.toShortString(), widened.getNodeCount(),
+                        widened.canReach(), lensRange);
+                }
+                return widened;
+            }
+        }
         if (path == null || path.getNodeCount() == 0) {
             clearingUnreachableUntil.put(guide.immutable(),
                 (long) soldier.tickCount + CLEARING_POI_UNREACHABLE_BACKOFF_TICKS);
@@ -6112,16 +6336,6 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
                     soldier.getId(), guide.toShortString(), CLEARING_POI_UNREACHABLE_BACKOFF_TICKS);
             }
             return null;
-        }
-        // TEMP DIAGNOSTIC (wave A validation): partial-path acceptance shape.
-        if (!path.canReach() && soldier.tickCount - lastPartialPathLogTick >= 100) {
-            lastPartialPathLogTick = soldier.tickCount;
-            net.minecraft.world.level.pathfinder.Node end = path.getEndNode();
-            StevesArmyMod.LOGGER.info(
-                "[AttackAdvance][diag] Soldier {} guide {} PARTIAL canReach=false nodes={} end={} from={}",
-                soldier.getId(), guide.toShortString(), path.getNodeCount(),
-                end == null ? "none" : end.asBlockPos().toShortString(),
-                soldier.blockPosition().toShortString());
         }
         return path;
     }
@@ -6157,7 +6371,7 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
             }
             BlockPos mine = view.assignedPoi();
             if (mine == null || view.assignedPoiChecked()
-                || mine.distSqr(soldier.blockPosition()) > 144.0D) {
+                || mine.distSqr(soldier.blockPosition()) > CLEARING_INVESTIGATE_BAND_SQ) {
                 return null;
             }
             return mine;
@@ -6301,6 +6515,31 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
             if (attackDebugLog()) {
                 StevesArmyMod.LOGGER.info("[AttackAdvance] Soldier {} assemble path unreachable to {}, backing off",
                     soldier.getId(), guide);
+            }
+            return;
+        }
+        // Stub guard: a "route" that ends where the soldier already stands
+        // while the guide is far away is not an egress — and neither is one
+        // that shuffles a few blocks to a partition gap without cutting the
+        // guide distance (clearingGuideRoute's lens then failed too). A*
+        // found nothing walkable toward the guide (boxed-in start cell,
+        // degenerate probe) — none of that proves the guide unreachable, so
+        // retry the window later but do NOT arm the 600t unreachable cache:
+        // the cache turns one bad probe into a half-minute freeze that
+        // repeats.
+        net.minecraft.world.level.pathfinder.Node stubEnd = path.getEndNode();
+        double guideDistSq = guide.distSqr(soldier.blockPosition());
+        double endGuideDist = stubEnd == null ? Double.MAX_VALUE
+            : Math.sqrt(stubEnd.asBlockPos().distSqr(guide));
+        if (stubEnd != null && guideDistSq > 36.0D
+            && (stubEnd.asBlockPos().distSqr(soldier.blockPosition()) < 9.0D
+                || endGuideDist > Math.sqrt(guideDistSq) - 8.0D)) {
+            assembleRetryAfterTick = soldier.tickCount + CLEARING_ASSEMBLE_RETRY_BACKOFF_TICKS;
+            if (attackDebugLog()) {
+                StevesArmyMod.LOGGER.info(
+                    "[AttackAdvance] Soldier {} stub route to {} ({} nodes from {}), retrying",
+                    soldier.getId(), guide.toShortString(), path.getNodeCount(),
+                    stubEnd.asBlockPos().toShortString());
             }
             return;
         }

@@ -307,10 +307,14 @@ public final class ContactPlan {
             LAST_OPEN_TICK.put(squadId, now);
             StevesArmyMod.LOGGER.info("[ContactPlan][diag] squad {} SWAP contact -> threat {} known {} at t{}",
                 squadId, contact.threatId, contact.lastKnown.toShortString(), now);
-        } else {
+        } else if (freshest != null) {
             // Same threat: refresh the sighting clock, migrate the anchor
             // only past the hysteresis (evidence gathered at the old corner
             // says nothing about the new one — migration re-arms the roles).
+            // freshest CAN be null with a contact still open — the intel
+            // pool emptied between ticks while nobody closed the contact —
+            // and an empty pool has nothing to refresh the anchor from;
+            // keep the contact as-is and let the staleness machinery act.
             contact.lastSightingTick = Math.max(contact.lastSightingTick, freshest.lastSeenTime);
             BlockPos known = freshest.lastKnownPosition.immutable();
             if (contact.lastKnown.distSqr(known) > KNOWN_MIGRATION_DIST_SQ) {

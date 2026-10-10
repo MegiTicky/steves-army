@@ -59,6 +59,22 @@ public class SoldierGroundNavigation extends GroundPathNavigation {
         return this.createPath(target, accuracy);
     }
 
+    /**
+     * Wide-lens probe for far guides. The normal probe derives BOTH the
+     * search region and {@code maxDistance} — the walked-path-length cap —
+     * from FOLLOW_RANGE (32): from inside a building the door detour spends
+     * ~20 walked blocks before the route even heads at the guide, so every
+     * cross-building guide reads as unreachable and the search collapses to
+     * a best-effort stub at the interior wall nearest the straight line.
+     * Raising the lens lifts region and walked cap together, which makes the
+     * real detour route reachable and returns the true full path.
+     */
+    @javax.annotation.Nullable
+    public Path createWidePath(BlockPos target, int accuracy, float lensRange) {
+        return this.createPath(java.util.Collections.singleton(target), 8, false,
+            accuracy, lensRange);
+    }
+
     /** Read-back of the current navigation speed (no vanilla getter in 1.20.1). */
     public double getNavSpeedModifier() {
         return this.speedModifier;

@@ -92,6 +92,7 @@ public final class SimRegistry {
             clearBenchmarkNorthDoorFunnel(),
             clearDeepObjectiveSequence(),
             clearHouseExit(),
+            clearLongEgress(),
             cqbDoorContact(),
             clearCheckerDeath());
     }
@@ -3731,6 +3732,123 @@ public final class SimRegistry {
                         if (!inB && d > 6.0) return false;
                     }
                     return true;
+                })
+            .build();
+    }
+
+    /**
+     * REPRODUCTION (Wave A.1, user in-game report 2026-10-10): the squad
+     * starts spread through a partitioned house A while the order pings
+     * house B at the far end of a 50-block street. In-game, front soldiers
+     * leave quickly and advance while the back grinds inside the start
+     * house — the pacing asserts below encode healthy egress, and FAILING
+     * them is the reproduction: the per-soldier exit-tick evidence names
+     * how far behind the back soldiers actually fall, and the state
+     * timeline + [AttackClear][view] diag names the mechanism (behind-
+     * claims, dock-window quantization, gate denials).
+     */
+    private static SimScenario clearLongEgress() {
+        ClearingProbe probe = new ClearingProbe();
+        final String[] labels = {"alpha", "bravo", "charlie", "delta"};
+        // First tick each soldier stands outside house A's east wall /
+        // inside house B, sampled every 20t (the poll is the resolution).
+        final long[] exitTick = new long[labels.length];
+        final long[] arriveTick = new long[labels.length];
+        java.util.Arrays.fill(exitTick, -1L);
+        java.util.Arrays.fill(arriveTick, -1L);
+        SimScenario.Builder builder = SimScenario.builder("clear_long_egress")
+            .description("ATTACK clearing egress pacing across a 50-block street: the squad is "
+                + "spread through partitioned house A (front soldier at the door, three deep in "
+                + "the back room) with the ping in house B 50 blocks east and one armed defender "
+                + "holding B. Healthy egress: everyone is out of house A promptly and close "
+                + "together — no soldier lags far behind the front. Failing the pacing asserts "
+                + "reproduces the in-game back-soldiers-stuck-behind report.")
+            // 4800: egress quantization + the 50-block crossing + the far
+            // exchange need headroom; cqb_door_contact needed 4800 for its
+            // close 2v1 alone.
+            .duration(4800)
+            .field(96, 40)
+            .armed()
+            // Clearing flow check-dock walks register as cover claims —
+            // same waiver as the clearing family until the detector
+            // learns dock ADVANCES (wave-B scope).
+            // ExposedWhileHiding: the known 1-high-cover "hiding but
+            // standing" family — house B's arrival docks read partially
+            // exposed to the guard; fix awaits the concealment go-ahead.
+            // FireDeadlock + RotationOscillation: WP4 engagement-arbiter
+            // families (wave B). This is the first arrival scenario to end
+            // in a guarded-house standoff — exactly the state those fix —
+            // so they fire here until wave B lands.
+            // PositionDeadlock: the arrival seek-transient — docking into
+            // house B under guard fire can hold SEEKING_COVER ~125t against
+            // the detector's 120t threshold and self-resolves into a dock
+            // (run 220446: delta 675-800 → docked 975). The three arrival
+            // asserts below own the strand guarantee directly, so the
+            // generic detector is waived here, not everywhere.
+            .suppressDetectors("CoverOscillation", "ExposedWhileHiding",
+                "FireDeadlock", "RotationOscillation", "PositionDeadlock")
+            .terrain(t -> t.longStreetBlock());
+        addClearingProbe(builder, 40, 4780, 20, probe,
+            // House B interior.
+            (x, z) -> x > 66.5 && x < 77.5 && z > 11.5 && z < 24.5);
+        // 5t grid, not 20t: a healthy egress walks the x<6.5 doorway strip
+        // in ~15t — a 20t grid can straddle the whole window and record a
+        // false -1 (run 215824: delta exited at ~445, probe saw 6.85/7.25).
+        for (int t = 40; t <= 4780; t += 5) {
+            final int at = t;
+            builder.action(at, "egress probe", ctx -> {
+                for (int i = 0; i < labels.length; i++) {
+                    SoldierEntity s = ctx.soldier(labels[i]);
+                    if (s == null || !s.isAlive()) continue;
+                    // Out of house A = committed through the west door: the
+                    // doorway cell spans x 6..7, so 6.5 is its midpoint — a
+                    // soldier sampled at x=5.5-6.5 has left the interior but
+                    // a tighter threshold clips the doorway transit.
+                    if (exitTick[i] < 0 && s.getX() < 6.5) {
+                        exitTick[i] = at;
+                    }
+                    if (arriveTick[i] < 0 && s.getX() > 66.5
+                        && s.getZ() > 11.5 && s.getZ() < 24.5) {
+                        arriveTick[i] = at;
+                    }
+                }
+            });
+        }
+        builder.action(4740, "egress diag", ctx ->
+            com.stevesarmy.StevesArmyMod.LOGGER.info("[Sim][diag] long_egress exitTicks={} arriveTicks={}",
+                java.util.Arrays.toString(exitTick), java.util.Arrays.toString(arriveTick)));
+        return builder
+            .setup(ctx -> {
+                // Mirrored house A: door on the WEST wall, so alpha fronts the
+                // exit and delta is deepest east behind the partition.
+                ctx.spawnAnchor(12, 0, 18); // house A back room, with the squad
+                ctx.spawnFriendly(ModEntities.SOLDIER.get(), "alpha", 8, 0, 18, SquadMode.HOLD);
+                ctx.spawnFriendly(ModEntities.SOLDIER.get(), "bravo", 14, 0, 15, SquadMode.HOLD);
+                ctx.spawnFriendly(ModEntities.SOLDIER.get(), "charlie", 14, 0, 21, SquadMode.HOLD);
+                ctx.spawnFriendly(ModEntities.SOLDIER.get(), "delta", 15, 0, 18, SquadMode.HOLD);
+                EnemySoldierEntity guard = ctx.spawnEnemyLabeled("guard", 74, 0, 15);
+                guard.setSquadMode(SquadMode.HOLD);
+                guard.setHoldPosition(ctx.terrain.at(74, 0, 15));
+                ctx.issueAttackOrder(72, 18); // house B center
+            })
+            .assertThat("firefight happened (tracers recorded)", view -> !view.shots().isEmpty())
+            .assertThat("squad reached house B", view -> probe.enteredZone)
+            .assertThat("every soldier got out of house A",
+                view -> java.util.Arrays.stream(exitTick).allMatch(t -> t > 0))
+            .assertThat("every soldier arrived at house B (no mid-route strand)",
+                view -> java.util.Arrays.stream(arriveTick).allMatch(t -> t > 0))
+            .assertThat("every soldier exited house A by t=1800 (egress pacing)",
+                view -> java.util.Arrays.stream(exitTick).allMatch(t -> t > 0 && t <= 1800))
+            .assertThat("front-to-back exit spread within 1000t (the squad moves as one)",
+                view -> {
+                    long min = Long.MAX_VALUE;
+                    long max = -1L;
+                    for (long t : exitTick) {
+                        if (t <= 0) return false;
+                        min = Math.min(min, t);
+                        max = Math.max(max, t);
+                    }
+                    return max - min <= 1000;
                 })
             .build();
     }
