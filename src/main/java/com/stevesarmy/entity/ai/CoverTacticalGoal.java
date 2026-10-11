@@ -447,6 +447,17 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
     // silent frozen state.
     private int debugSearchRadius = -1;
     private int noCoverSearchStreak = 0;
+
+    // Dock-stall escalation: a FORWARD dock whose next-cover search keeps
+    // coming back empty is a starved hold, not a valid hold — the search
+    // center/radius/filters are fixed, so retrying identically can never
+    // make progress. After ATTACK_DOCK_STALL_SEARCHES consecutive failures
+    // from the same dock, release the dock and let the fallback advance
+    // re-center the search. The keep-dock doctrine (f25f358) fixed blocked-
+    // door churn but removed the only escape; this restores a bounded form.
+    private static final int ATTACK_DOCK_STALL_SEARCHES = 3;
+    private BlockPos attackStallDock = null;
+    private int attackStallFails = 0;
     private String debugLastSearchMode = "";
     private String debugLastSearchResult = "";
     private String debugLastSearchPhase = "";
@@ -1095,17 +1106,28 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
             if (getCoverManager().getCurrentCover() != null
                 && (coverState == CoverBehaviorManager.CoverState.IN_COVER
                     || coverState == CoverBehaviorManager.CoverState.SUPPRESSED_IN_COVER)) {
+                BlockPos dock = getCoverManager().getCurrentCover().getPosition();
+                if (dock.equals(attackStallDock)) {
+                    attackStallFails++;
+                } else {
+                    attackStallDock = dock;
+                    attackStallFails = 1;
+                }
+                boolean stalled = attackStallFails >= ATTACK_DOCK_STALL_SEARCHES;
                 // A dock BEHIND the advance is not a hold position: holding it
                 // froze followers inside the start building while the front
                 // soldier carried the route alone. Release it and take the
                 // dockless recovery below — but protection still yields to
-                // fire and contact, same as the spine revalidation.
+                // fire and contact, same as the spine revalidation. A FORWARD
+                // dock releases only once its searches have starved (stalled).
                 if (getCoverManager().isSuppressed()
                     || ContactPlan.hasLiveContact(soldier)
-                    || !isBackwardAttackDock(getCoverManager().getCurrentCover().getPosition())) {
+                    || (!isBackwardAttackDock(dock) && !stalled)) {
                     attackPhase = AttackPhase.OCCUPYING_COVER;
                     return;
                 }
+                attackStallDock = null;
+                attackStallFails = 0;
                 getCoverManager().clearCover();
             }
             // No dock anywhere: a fallback advance step is the recovery (it
@@ -1123,6 +1145,8 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
             return;
         }
 
+        attackStallDock = null;
+        attackStallFails = 0;
         attackPhase = AttackPhase.MOVING_TO_COVER;
         if (getCoverManager().getCurrentCover() == null && getCoverManager().getTargetCover() != null) {
             getCoverManager().setState(CoverBehaviorManager.CoverState.SEEKING_COVER);
