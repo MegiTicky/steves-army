@@ -87,7 +87,7 @@ public class StevesArmyCommand {
                     "  /stevesarmy spawn vehicle_crew <owner> [squad <callsign>] <position> [yaw] [pitch] [loadout_nbt]\n" +
                     "  /stevesarmy spawn team_garrison <team> [squad <callsign>] <position> [yaw] [pitch] [loadout_nbt]\n" +
                     "  /stevesarmy spawn enemy [squad <callsign>] <position> [yaw] [pitch] [loadout_nbt]\n" +
-                    "  /stevesarmy spawn enemy anti_tank <position> [yaw] [pitch] [loadout_nbt]\n" +
+                    "  /stevesarmy spawn enemy anti_tank [squad <callsign>] <position> [yaw] [pitch] [loadout_nbt]\n" +
                     "  /stevesarmy spawn enemy vehicle_crew <position> [yaw] [pitch] [loadout_nbt]\n" +
                     "  /stevesarmy squad create <callsign> [owner|team <team>|enemy]\n" +
                     "  /stevesarmy squad list\n" +
@@ -133,8 +133,11 @@ public class StevesArmyCommand {
                 .then(Commands.literal("enemy")
                     .then(Commands.literal("squad")
                         .then(Commands.argument("callsign", StringArgumentType.word())
-                            .then(createEnemySquadSpawnArgs())))
+                            .then(createEnemySquadSpawnArgs(ModEntities.ENEMY_SOLDIER.get()))))
                     .then(Commands.literal("anti_tank")
+                        .then(Commands.literal("squad")
+                            .then(Commands.argument("callsign", StringArgumentType.word())
+                                .then(createEnemySquadSpawnArgs(ModEntities.ENEMY_ANTI_TANK.get()))))
                         .then(createSpawnArguments(ModEntities.ENEMY_ANTI_TANK.get(), false)))
                     .then(Commands.literal("vehicle_crew")
                         .then(createSpawnArguments(ModEntities.ENEMY_VEHICLE_CREW.get(), false)))
@@ -581,9 +584,11 @@ public class StevesArmyCommand {
         return position;
     }
 
-    private static ArgumentBuilder<CommandSourceStack, ?> createEnemySquadSpawnArgs() {
+    private static ArgumentBuilder<CommandSourceStack, ?> createEnemySquadSpawnArgs(
+        EntityType<? extends SoldierEntity> entityType
+    ) {
         Function<CommandContext<CommandSourceStack>, Integer> execute = context ->
-            spawnEnemyWithCallsign(context, StringArgumentType.getString(context, "callsign"));
+            spawnEnemyWithCallsign(context, entityType, StringArgumentType.getString(context, "callsign"));
         var position = Commands.argument("position", Vec3Argument.vec3())
             .executes(execute::apply)
             .then(Commands.argument("loadout", CompoundTagArgument.compoundTag())
@@ -835,7 +840,11 @@ public class StevesArmyCommand {
         return 1;
     }
 
-    private static int spawnEnemyWithCallsign(CommandContext<CommandSourceStack> context, String callsign) {
+    private static int spawnEnemyWithCallsign(
+        CommandContext<CommandSourceStack> context,
+        EntityType<? extends SoldierEntity> entityType,
+        String callsign
+    ) {
         CommandSourceStack source = context.getSource();
         String n = callsign.toLowerCase(java.util.Locale.ROOT);
         if (!SquadData.CALLSIGN_PATTERN.matcher(n).matches()) { source.sendFailure(Component.literal("Invalid callsign: " + callsign)); return 0; }
@@ -843,9 +852,9 @@ public class StevesArmyCommand {
         float pitch = optionalFloat(context, "pitch", 0.0F);
         CompoundTag loadout = optionalLoadout(context);
         Vec3 position = Vec3Argument.getVec3(context, "position");
-        SoldierSpawner.SpawnResult result = SoldierSpawner.spawnWithCallsign(source.getLevel(), ModEntities.ENEMY_SOLDIER.get(), null, callsign, position, yaw, pitch, loadout);
+        SoldierSpawner.SpawnResult result = SoldierSpawner.spawnWithCallsign(source.getLevel(), entityType, null, callsign, position, yaw, pitch, loadout);
         if (!result.success()) { source.sendFailure(Component.literal(result.message())); return 0; }
-        source.sendSuccess(() -> Component.literal("Spawned enemy soldier " + result.soldier().getUUID() + " into squad '" + n + "'."), false);
+        source.sendSuccess(() -> Component.literal("Spawned " + describeSoldier(result.soldier()) + " " + result.soldier().getUUID() + " into squad '" + n + "'."), false);
         return 1;
     }
 
