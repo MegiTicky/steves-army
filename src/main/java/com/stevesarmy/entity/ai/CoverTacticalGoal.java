@@ -432,6 +432,7 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
     /** Distance to the current repositioning target when the attempt began (timeout budget input). */
     private double repositioningStartDist = 2.0;
     private final Map<BlockPos, Path> validatedCoverPaths = new HashMap<>();
+    private final Set<BlockPos> unreachableCoverPaths = new HashSet<>();
     private BlockPos validatedCoverPathSource = null;
     private long validatedCoverPathTick = Long.MIN_VALUE;
     private ExactPathValidationBudget exactPathValidationBudget = new ExactPathValidationBudget();
@@ -4121,6 +4122,7 @@ private boolean shouldExitCoverForFollow() {
         }
 
         validatedCoverPaths.clear();
+        unreachableCoverPaths.clear();
         validatedCoverPathSource = null;
         validatedCoverPathTick = Long.MIN_VALUE;
         exactPathValidationBudget = new ExactPathValidationBudget();
@@ -4204,6 +4206,7 @@ private boolean shouldExitCoverForFollow() {
         PerformanceMetrics.recordRoleCoverSearch(machineGunnerPipeline);
         long searchStarted = System.nanoTime();
         validatedCoverPaths.clear();
+        unreachableCoverPaths.clear();
         validatedCoverPathSource = null;
         validatedCoverPathTick = Long.MIN_VALUE;
         exactPathValidationBudget = new ExactPathValidationBudget();
@@ -5575,13 +5578,22 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
             double lateral = Math.abs(displacement.x * objectiveDir.z - displacement.z * objectiveDir.x);
             if (forward > ATTACK_CORRIDOR_FORWARD_LENGTH || lateral > ATTACK_WIDE_SECTOR_HALF_WIDTH) continue;
 
-            if (!exactPathValidationBudget.tryAcquire()) {
-                PerformanceMetrics.recordExactCoverPathValidationBudgetExhausted();
-                break;
+            // Reuse an exact path already validated this tick; an accuracy-1 probe
+            // that cannot reach within one block could not reach exactly either,
+            // so its miss feeds the shared negative cache.
+            Path path = validatedCoverPaths.get(cover.getPosition());
+            if (path == null) {
+                if (!exactPathValidationBudget.tryAcquire()) {
+                    PerformanceMetrics.recordExactCoverPathValidationBudgetExhausted();
+                    break;
+                }
+                Vec3 standingPos = getCoverStandingPosition(cover.getPosition());
+                path = navigation.createPath(standingPos.x, standingPos.y, standingPos.z, 1);
+                if (path == null || !path.canReach()) {
+                    unreachableCoverPaths.add(cover.getPosition().immutable());
+                    continue;
+                }
             }
-            Vec3 standingPos = getCoverStandingPosition(cover.getPosition());
-            Path path = navigation.createPath(standingPos.x, standingPos.y, standingPos.z, 1);
-            if (path == null || !path.canReach()) continue;
 
             boolean protectedFromThreat = protectionFinder
                 .isPrimaryThreatProtected(cover, soldier, getThreats().getPrimaryDirection(soldier.position()));
@@ -7617,11 +7629,18 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
         if (soldier.tickCount != validatedCoverPathTick
             || !source.equals(validatedCoverPathSource)) {
             validatedCoverPaths.clear();
+            unreachableCoverPaths.clear();
             validatedCoverPathSource = source.immutable();
             validatedCoverPathTick = soldier.tickCount;
         }
         if (validatedCoverPaths.containsKey(target)) {
             return true;
+        }
+        // Unreachable targets are the expensive probes (A* exhausts the whole
+        // region), so a miss is remembered for this tick and source block instead
+        // of being re-charged by later passes over the same candidates.
+        if (unreachableCoverPaths.contains(target)) {
+            return false;
         }
 
         if (!exactPathValidationBudget.tryAcquire()) {
@@ -7639,6 +7658,8 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
         PerformanceMetrics.recordExactCoverPathValidation(reachable);
         if (reachable) {
             validatedCoverPaths.put(target.immutable(), path);
+        } else {
+            unreachableCoverPaths.add(target.immutable());
         }
         return reachable;
     }
