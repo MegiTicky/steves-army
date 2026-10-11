@@ -50,7 +50,10 @@ public final class AsyncSoldierPathfinder extends PathFinder {
         // pipeline on the calling thread — the danger cost must not depend on
         // how the request was made.
         if (!asyncRequest.getAsBoolean()) {
-            HazardAwarePathPreparation syncPreparation = prepare(region, mob, positions, maxDistance, reachRange);
+            // The snapshot exists only to give the worker thread an immutable world;
+            // a synchronous request never leaves the calling thread, so it reads the
+            // live region directly and skips the whole 65^3 block-state capture.
+            HazardAwarePathPreparation syncPreparation = prepare(region, mob, positions, maxDistance, reachRange, false);
             if (syncPreparation != null) {
                 try {
                     return processPath(syncPreparation.evaluator(), syncPreparation.start(), syncPreparation.targets(),
@@ -64,7 +67,7 @@ public final class AsyncSoldierPathfinder extends PathFinder {
                 .findPath(region, mob, positions, maxDistance, reachRange, maxVisitedNodesMultiplier);
         }
 
-        HazardAwarePathPreparation preparation = prepare(region, mob, positions, maxDistance, reachRange);
+        HazardAwarePathPreparation preparation = prepare(region, mob, positions, maxDistance, reachRange, true);
         if (preparation == null) {
             PerformanceMetrics.recordAsyncPathFallback();
             return new PathFinder(synchronousEvaluator, maxVisitedNodes)
@@ -92,13 +95,15 @@ public final class AsyncSoldierPathfinder extends PathFinder {
 
     private HazardAwarePathPreparation prepare(PathNavigationRegion region, Mob mob,
                                                 Set<BlockPos> positions, float maxDistance,
-        int reachRange) {
+        int reachRange, boolean snapshotRegion) {
         NodeEvaluator evaluator = NodeEvaluatorPool.take();
         boolean prepared = false;
         try {
-            SnapshotPathNavigationRegion snapshot = SnapshotPathNavigationRegion.capture(
-                level, region, mob, maxDistance, reachRange);
-            evaluator.prepare(snapshot, PathfindingMobSnapshot.capture(mob));
+            PathNavigationRegion searchRegion = region;
+            if (snapshotRegion) {
+                searchRegion = SnapshotPathNavigationRegion.capture(level, region, mob, maxDistance, reachRange);
+            }
+            evaluator.prepare(searchRegion, PathfindingMobSnapshot.capture(mob));
             prepared = true;
             Node start = evaluator.getStart();
             if (start == null) {
