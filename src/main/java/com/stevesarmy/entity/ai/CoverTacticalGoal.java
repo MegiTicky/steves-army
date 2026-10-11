@@ -191,6 +191,14 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
     private static final long ATTACK_MAX_DWELL_MS = 8000;
     private static final long ATTACK_HARD_OCCUPANCY_TIMEOUT_MS = 15000;
     private static final double ATTACK_OBJECTIVE_RADIUS = 4.0;
+    /** Matches ContactPlan.MG_BACK_ROW_LAG_BLOCKS: absorb threshold jitter. */
+    private static final double MG_BACK_ROW_LAG_BLOCKS = 1.0;
+    /**
+     * How far past the MG's dock the frontmost rifleman must be before the
+     * gunner abandons it and leapfrogs to a cover behind the new line. One
+     * spine hop — a shorter lead makes the dock cycle at dwell cadence.
+     */
+    private static final double MG_LEAPFROG_MARGIN_BLOCKS = 5.0;
 
     // Attack corridor constants (search rectangle along objective direction)
     private static final int ATTACK_CORRIDOR_FORWARD_LENGTH = 24;
@@ -4267,11 +4275,21 @@ private boolean shouldExitCoverForFollow() {
                 // that pool with nothing spine-forward in it and the search
                 // degrades to distance-scoring whatever is nearby.
                 if (attackSpine != null) {
-                    double prog = attackSpine.progress(soldier.blockPosition());
-                    searchCenter = attackSpine.pointAt(
-                        Math.min(attackSpine.length(), prog + 12.0D),
-                        soldier.blockPosition().getY());
-                } else {
+                    // Base-of-fire row discipline: the MG's candidate pool must
+                    // hold covers BEHIND the rifleman line, but the spine-ahead
+                    // center pools only forward rows — the row filter then
+                    // rejects the whole pool and the base fallback charges
+                    // anyway (run: candidates=9 rejectedAhead=9). Center the
+                    // gunner's pool on himself so behind-line rows exist in it.
+                    if (mgBackRowRuleActive()) {
+                        searchCenter = soldier.blockPosition();
+                    } else {
+                        double prog = attackSpine.progress(soldier.blockPosition());
+                        searchCenter = attackSpine.pointAt(
+                            Math.min(attackSpine.length(), prog + 12.0D),
+                            soldier.blockPosition().getY());
+                    }
+                } else if (!mgBackRowRuleActive()) {
                     Vec3 toTarget = new Vec3(
                         attackPos.getX() - soldier.getX(),
                         0,
@@ -4461,6 +4479,9 @@ private boolean shouldExitCoverForFollow() {
                 CoverPoint cover = sc.cover;
                 if (currentCover != null && cover.getPosition().equals(currentCover.getPosition())) continue;
                 if (failedCoverPositions.contains(cover.getPosition())) continue;
+                // Base-of-fire row discipline: an MG candidate pool centered on
+                // himself still holds ahead-of-line covers; they never dock.
+                if (violatesMgBackRow(cover.getPosition())) continue;
 
                 if (!isAttackCorridorCandidate(cover.getPosition(), soldier.getAttackTargetPos(), objectiveDir)) {
                     logRejectedAttackCover(cover, soldier.getAttackTargetPos(), objectiveDir);
@@ -4716,6 +4737,10 @@ private boolean shouldExitCoverForFollow() {
                     // protection alone pulled followers back into the start
                     // building whenever the forward row was reserved.
                     .filter(sc -> !isBehindAttackSpine(sc.cover.getPosition()))
+                    // Base-of-fire row discipline: the pool walk commits the
+                    // first claimable candidate — without this filter a failed
+                    // reservation on a behind cover would let the gunner charge.
+                    .filter(sc -> !violatesMgBackRow(sc.cover.getPosition()))
                     .toList();
             outcome = tryReservePool(soldierPool, currentCover, reserveAttemptsCap(searchCenter));
             if (outcome == CoverMoveResult.COVER_STARTED) {
@@ -4832,6 +4857,17 @@ private boolean shouldExitCoverForFollow() {
             if (currentCover != null
                 && soldier.position().distanceTo(candidateCover.getPosition().getCenter())
                     < COVER_REACHED_DISTANCE) {
+                continue;
+            }
+            // Base-of-fire row discipline, ALL pools: this is the single
+            // choke point every dock attempt passes through, so the gunner
+            // never commits a cover ahead of the squad's rifleman line no
+            // matter which search branch produced it.
+            if (violatesMgBackRow(candidateCover.getPosition())) {
+                if (attackDebugLog()) {
+                    StevesArmyMod.LOGGER.info("[ReservePool] {} skip {} mg-back-row",
+                        soldier.getId(), candidateCover.getPosition().toShortString());
+                }
                 continue;
             }
             // Advance doctrine: a dock the navigation cannot EXACTLY reach is
@@ -5431,6 +5467,57 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
     }
 
     /**
+     * Base-of-fire row discipline (ContactPlan's "mg back row" gate mirrored
+     * for cover selection): the machine gunner is the squad's support weapon —
+     * he advances cover-to-cover BEHIND the squad's frontmost rifleman, never
+     * into the assault line. Active whenever the gunner has an attack target
+     * and at least one living non-MG squadmate; solo gunners and HOLD mode are
+     * exempt.
+     */
+    private boolean mgBackRowRuleActive() {
+        return soldier.getRole() == SoldierRole.MACHINE_GUNNER
+            && soldier.hasValidAttackTarget()
+            && ContactPlan.frontAssaultDistance(soldier,
+                Vec3.atCenterOf(soldier.getAttackTargetPos())) != Double.MAX_VALUE;
+    }
+
+    /** True when this cover position sits ahead of the squad's rifleman line. */
+    private boolean violatesMgBackRow(BlockPos coverPos) {
+        if (!mgBackRowRuleActive()) return false;
+        Vec3 reference = Vec3.atCenterOf(soldier.getAttackTargetPos());
+        double frontDist = ContactPlan.frontAssaultDistance(soldier, reference);
+        return Vec3.atCenterOf(coverPos).distanceTo(reference)
+            < frontDist - MG_BACK_ROW_LAG_BLOCKS;
+    }
+
+    /**
+     * Base-of-fire row hold for a DOCKED machine gunner: true while the
+     * squad's rifleman line has not yet passed his current cover by the
+     * leapfrog margin — the dock is still the back row, so his job there is
+     * holding the firing lane, and the peek system's "blind dock is useless"
+     * eviction and the dwell clock's cover-cycling do not apply. Static so
+     * PeekController can consult it without a goal reference.
+     */
+    public static boolean mgRowHoldActive(SoldierEntity soldier) {
+        if (soldier.getRole() != SoldierRole.MACHINE_GUNNER
+            || !soldier.hasValidAttackTarget()) {
+            return false;
+        }
+        CoverBehaviorManager manager = soldier.getCoverBehaviorManager();
+        if (manager == null || manager.getCurrentCover() == null) {
+            return false;
+        }
+        Vec3 reference = Vec3.atCenterOf(soldier.getAttackTargetPos());
+        double frontDist = ContactPlan.frontAssaultDistance(soldier, reference);
+        if (frontDist == Double.MAX_VALUE) {
+            return false;
+        }
+        double dockDist = Vec3.atCenterOf(manager.getCurrentCover().getPosition())
+            .distanceTo(reference);
+        return frontDist > dockDist - MG_LEAPFROG_MARGIN_BLOCKS;
+    }
+
+    /**
      * Finds a path-reachable forward cover outside the preferred narrow corridor.
      * Protection is a preference here so a structure cannot trap an ATTACK soldier
      * when its usable exit cover is not aligned with the current threat direction.
@@ -5449,6 +5536,7 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
             CoverPoint cover = sc.cover;
             if (currentCover != null && cover.getPosition().equals(currentCover.getPosition())) continue;
             if (failedCoverPositions.contains(cover.getPosition())) continue;
+            if (violatesMgBackRow(cover.getPosition())) continue;
             if (!isForwardCoverCandidate(cover.getPosition(), objective, objectiveDir)) continue;
             if (cover.getPosition().distSqr(objective) <= ATTACK_OBJECTIVE_RADIUS * ATTACK_OBJECTIVE_RADIUS) continue;
 
@@ -6663,6 +6751,21 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
 
                 boolean canAdvance = dwellMet && (recovered || smokeAdvance)
                     && (!fireteamPinned || smokeAdvance) && (!heavyHold || smokeAdvance);
+
+                // Base-of-fire dwell discipline: a docked MG is the squad's
+                // support weapon — his job at a dock is to hold the firing
+                // lane and keep the enemy pinned, not to cycle covers every
+                // dwell window. The dwell clock alone churned him sideways
+                // across a cover row (4 docks of 25t on one row: every
+                // re-search's best behind-line candidate was the next spot on
+                // the same row). He leaves a dock only when the rifleman line
+                // has passed it by the leapfrog margin — the row gate then
+                // hands him a cover behind the NEW line — or through the
+                // repair paths below (reposition request, hard timeout).
+                if (mgRowHoldActive(soldier)) {
+                    canAdvance = false;
+                    maxDwellReached = false;
+                }
 
                 // Secured area: this soldier's job is to hold a watch position,
                 // not to keep advancing — every advance trigger below is a

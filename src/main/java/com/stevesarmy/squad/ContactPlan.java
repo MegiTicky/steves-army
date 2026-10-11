@@ -80,6 +80,14 @@ public final class ContactPlan {
      * mover's route; rays beyond the budget buy telemetry, not safety.
      */
     private static final int SUPPORT_RAY_BUDGET = 4;
+
+    /**
+     * How far behind the squad's frontmost rifleman the machine gunner is
+     * allowed to sit. One block absorbs threshold jitter (a mate stepping
+     * through a doorway dips a block behind his row) without letting the gun
+     * creep into the assault line.
+     */
+    private static final double MG_BACK_ROW_LAG_BLOCKS = 1.0;
     /**
      * Casualty emergency window: a squadmate death counts as "the fight is
      * here" for this long after the plan first observed the soldier gone.
@@ -378,6 +386,40 @@ public final class ContactPlan {
     }
 
     /**
+     * Distance (blocks) from the soldier's frontmost living non-MG squadmate
+     * to the reference point — the assault line the base-of-fire row
+     * discipline is measured against. MAX_VALUE when the soldier has no
+     * non-MG mates alive (solo gunner: no row to stay behind, doctrine
+     * inactive).
+     */
+    public static double frontAssaultDistance(SoldierEntity soldier, Vec3 reference) {
+        if (!(soldier.level() instanceof ServerLevel level) || soldier.getSquadId() == null) {
+            return Double.MAX_VALUE;
+        }
+        List<SoldierEntity> mates = new ArrayList<>();
+        for (UUID memberId : squadMembers(level, soldier.getSquadId())) {
+            if (memberId.equals(soldier.getUUID())) {
+                continue;
+            }
+            if (level.getEntity(memberId) instanceof SoldierEntity mate && mate.isAlive()) {
+                mates.add(mate);
+            }
+        }
+        return frontAssaultDistance(mates, reference);
+    }
+
+    private static double frontAssaultDistance(List<SoldierEntity> mates, Vec3 reference) {
+        double front = Double.MAX_VALUE;
+        for (SoldierEntity mate : mates) {
+            if (mate.getRole() == SoldierRole.MACHINE_GUNNER) {
+                continue;
+            }
+            front = Math.min(front, Math.sqrt(mate.distanceToSqr(reference)));
+        }
+        return front;
+    }
+
+    /**
      * Base of fire: a machine gunner with a clear lane is the doctrine answer
      * (his lane IS the covering fire), then anyone with a clear lane. Nearest
      * to the threat first within each class — the closest confirmed lane is
@@ -526,13 +568,35 @@ public final class ContactPlan {
         }
         UUID squadId = soldier.getSquadId();
         CloseContact contact = squadId == null ? null : CONTACTS.get(squadId);
-        if (contact == null) {
-            return MovePermission.allow("no active contact");
-        }
         if (!(soldier.level() instanceof ServerLevel level)) {
             // The gate is a server decision; a client-side caller has no
             // authority to deny movement anyway.
             return MovePermission.allow("client side");
+        }
+
+        // Base-of-fire row discipline runs BEFORE the contact gate: the
+        // dockless spine-hop legs advance on failed cover searches long before
+        // the observe pass opens a contact, and a gunner who outfronts the
+        // riflemen on those legs is exactly the "charge first" report. The
+        // reference line is the attack objective. When a contact IS open the
+        // rule runs inside the gate below instead — after the emergencies,
+        // so an overrun-range or mate-down gunner is never row-locked.
+        if (contact == null && soldier.getRole() == SoldierRole.MACHINE_GUNNER) {
+            Vec3 rowReference = soldier.hasValidAttackTarget()
+                ? Vec3.atCenterOf(soldier.getAttackTargetPos()) : null;
+            if (rowReference != null) {
+                double frontDist = frontAssaultDistance(soldier, rowReference);
+                if (frontDist < Double.MAX_VALUE
+                    && Vec3.atCenterOf(dest).distanceTo(rowReference)
+                        < frontDist - MG_BACK_ROW_LAG_BLOCKS) {
+                    gateDiag(soldier, "mg back row");
+                    return MovePermission.deny("mg back row");
+                }
+            }
+        }
+
+        if (contact == null) {
+            return MovePermission.allow("no active contact");
         }
         MinecraftServer server = level.getServer();
         if (server == null) {
@@ -612,6 +676,21 @@ public final class ContactPlan {
             }
             if (level.getEntity(memberId) instanceof SoldierEntity mate && mate.isAlive()) {
                 mates.add(mate);
+            }
+        }
+
+        // Base-of-fire row discipline, in-contact form: placed after the
+        // emergencies so an overrun-range or mate-down gunner is never
+        // row-locked, but before the support/geometry legs — a gunner is the
+        // squad's support weapon, not its point man, and the emergencies
+        // above are the only things that excuse charging.
+        if (soldier.getRole() == SoldierRole.MACHINE_GUNNER) {
+            double frontDist = frontAssaultDistance(mates, threat);
+            if (frontDist < Double.MAX_VALUE
+                && Vec3.atCenterOf(dest).distanceTo(threat)
+                    < frontDist - MG_BACK_ROW_LAG_BLOCKS) {
+                gateDiag(soldier, "mg back row");
+                return MovePermission.deny("mg back row");
             }
         }
 

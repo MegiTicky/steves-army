@@ -286,7 +286,11 @@ public class PeekController {
                     // and the routine channel refuses movement while
                     // suppressed — use the emergency channel instead.
                     soldier.getCoverBehaviorManager().requestContinuousSuppressionReposition();
-                } else {
+                } else if (!CoverTacticalGoal.mgRowHoldActive(soldier)) {
+                    // Base-of-fire row hold: a docked MG's dock is the row
+                    // position and the firing lane, not the sight picture —
+                    // the peek system's "useless dock" verdict does not apply
+                    // while the rifleman line has not passed him.
                     soldier.getCoverBehaviorManager().requestReposition();
                 }
                 setIdleState(soldier, cover);
@@ -589,7 +593,8 @@ public class PeekController {
         }
 
         if (blindPeekTicks >= BLIND_PEEK_REPOSITION_TICKS
-            && !soldier.getCoverBehaviorManager().isRepositionRequested()) {
+            && !soldier.getCoverBehaviorManager().isRepositionRequested()
+            && !CoverTacticalGoal.mgRowHoldActive(soldier)) {
             soldier.getCoverBehaviorManager().requestReposition();
             if (CoverTacticalGoal.isDebugLoggingEnabled()) {
                 StevesArmyMod.LOGGER.info("[PeekController] Soldier {} blind-peek timeout reached after {} ticks, requesting reposition (freshContacts={})",

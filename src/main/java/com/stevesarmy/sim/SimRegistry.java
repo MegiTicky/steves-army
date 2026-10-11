@@ -3997,6 +3997,7 @@ public final class SimRegistry {
         final int[] dockStartTick = new int[labels.length];
         final double[] dockStartX = new double[labels.length];
         final double[] dockStartZ = new double[labels.length];
+        final boolean[] dockHoldActive = new boolean[labels.length];
         java.util.Arrays.fill(dockStartTick, -1);
         // Guard health forensics: the guard died ~t55 with zero shots in two
         // runs (killing the firefight before it starts). Track hp changes so
@@ -4075,15 +4076,36 @@ public final class SimRegistry {
                     boolean docked = st == com.stevesarmy.combat.cover.CoverBehaviorManager.CoverState.IN_COVER
                         || st == com.stevesarmy.combat.cover.CoverBehaviorManager.CoverState.SUPPRESSED_IN_COVER;
                     boolean inStreet = s.getX() > 17.5 && s.getX() < 66.5;
+                    // Row-hold state at THIS sample: the rifleman line has not
+                    // yet passed this soldier's position by the leapfrog
+                    // margin — a dock left under this condition is an abandoned
+                    // holding dock (the churn), while a dock left after the
+                    // line passed is the correct leapfrog-follow hop.
+                    boolean rowHold = false;
+                    if (docked) {
+                        double selfDist = curDist[i];
+                        double frontRifle = Double.MAX_VALUE;
+                        for (int j = 0; j < labels.length; j++) {
+                            if (j == i || labels[j].startsWith("gunner")) continue;
+                            if (curDist[j] < frontRifle) frontRifle = curDist[j];
+                        }
+                        if (selfDist < Double.MAX_VALUE && frontRifle < Double.MAX_VALUE
+                            && frontRifle > selfDist - 5.0) {
+                            rowHold = true;
+                        }
+                    }
                     if (docked && inStreet) {
                         if (dockStartTick[i] < 0) {
                             dockStartTick[i] = at;
                             dockStartX[i] = s.getX();
                             dockStartZ[i] = s.getZ();
+                            dockHoldActive[i] = rowHold;
+                        } else if (rowHold) {
+                            dockHoldActive[i] = true;
                         }
                     } else if (dockStartTick[i] >= 0) {
                         dockEpisodes.get(i).add(new double[]{dockStartTick[i], at,
-                            dockStartX[i], dockStartZ[i]});
+                            dockStartX[i], dockStartZ[i], dockHoldActive[i] ? 1 : 0});
                         dockStartTick[i] = -1;
                     }
                 }
@@ -4137,24 +4159,26 @@ public final class SimRegistry {
                 view -> !dockEpisodes.get(0).isEmpty())
             .assertThat("gunner stayed in the back row DURING the firefight (never the frontmost soldier while the guard lives)",
                 view -> gunnerAheadSamples[0] * 5 <= 100)
-            .assertThat("gunner docks cover-to-cover (no street hop skips more than 14 blocks of cover rows)",
+            .assertThat("gunner docks cover-to-cover (no FORWARD street hop skips more than 14 blocks of cover rows; backward re-docks are repositions, not skips)",
                 view -> {
                     double prevX = Double.NaN;
                     double maxGap = 0;
                     for (double[] e : dockEpisodes.get(0)) {
                         if (e[2] <= 17.5) continue; // street docks only
-                        if (!Double.isNaN(prevX)) maxGap = Math.max(maxGap, Math.abs(e[2] - prevX));
+                        if (!Double.isNaN(prevX) && e[2] > prevX) {
+                            maxGap = Math.max(maxGap, e[2] - prevX);
+                        }
                         prevX = e[2];
                     }
                     return maxGap <= 14.0;
                 })
-            .assertThat("gunner held his street docks (at most one dock shorter than 60t — cover skipped, not used)",
+            .assertThat("gunner never abandons a back-row holding dock (a short dock left while the rifleman line had not passed is the cover churn)",
                 view -> {
-                    int skipped = 0;
+                    int abandoned = 0;
                     for (double[] e : dockEpisodes.get(0)) {
-                        if (e[1] - e[0] < 60) skipped++;
+                        if (e[1] - e[0] < 60 && e[4] > 0) abandoned++;
                     }
-                    return skipped <= 1;
+                    return abandoned <= 1;
                 })
             .build();
     }
