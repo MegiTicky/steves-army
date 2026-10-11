@@ -219,6 +219,12 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
     // before re-searching. Matched to the street cover-row spacing so a leg
     // lands beside the next row instead of jumping past it.
     private static final double ATTACK_SPINE_LEG_LENGTH = 12.0;
+    // Catch-up steps tried when the row gate denies a full leg: from a bunched
+    // squad start every full leg lands past the back-row line, which froze the
+    // gunner at spawn until the riflemen were a whole leg ahead. Shortened
+    // fractions keep him trailing the group (each candidate is re-validated by
+    // the same gate, so the row line itself is never weakened).
+    private static final double[] CATCHUP_LEG_FRACTIONS = {0.5D, 0.25D};
     // Spine corridor half-width. Wider than the legacy straight-line
     // corridor (6): the route dodges cover rows, so docks BESIDE a row can
     // sit several blocks off the polyline while still being the natural
@@ -7331,6 +7337,38 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
                     return;
                 }
                 soldier.getEngagementTelemetry().setMovingSupported(false, permission.reason, "contact-plan");
+                // Row gate on a full leg: fall back to a shortened catch-up
+                // step that the same gate allows, so the gunner trails the
+                // squad instead of freezing until the front is a leg-length
+                // ahead. Full legs resume once the squad stretches out.
+                if ("mg back row".equals(permission.reason)) {
+                    for (double frac : CATCHUP_LEG_FRACTIONS) {
+                        double shortEnd = Math.min(attackSpine.length(),
+                            soldierProg + ATTACK_SPINE_LEG_LENGTH * frac);
+                        if (shortEnd <= soldierProg + 1.0D) {
+                            continue;
+                        }
+                        BlockPos shortDest = attackSpine.pointAt(shortEnd,
+                            soldier.blockPosition().getY());
+                        if (!ContactPlan.checkAdvance(soldier, shortDest).allowed) {
+                            continue;
+                        }
+                        Path shortPath = soldier.getNavigation().createPath(
+                            shortDest.getX() + 0.5, shortDest.getY(), shortDest.getZ() + 0.5, 1);
+                        if (shortPath == null || !shortPath.canReach()) {
+                            continue;
+                        }
+                        soldier.getEngagementTelemetry().setMovingSupported(true, "", "contact-plan");
+                        fallbackAdvanceTarget = shortDest;
+                        fallbackAdvanceAssemble = true;
+                        fallbackAdvanceArriveDistSq = 4.0;
+                        fallbackStuckTicks = 0;
+                        fallbackLastPosition = soldier.position();
+                        fallbackNoProgressResets = 0;
+                        soldier.getNavigation().moveTo(shortPath, 1.2D);
+                        return;
+                    }
+                }
                 return;
             }
             // Spine hop unpathable (transient terrain): fall through to the
