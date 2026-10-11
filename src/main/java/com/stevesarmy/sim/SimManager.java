@@ -283,11 +283,18 @@ public final class SimManager {
     private static void beginScenario() {
         scenario = queue.get(queueIndex);
         StevesArmyMod.LOGGER.info("[Sim] === scenario {}/{}: {} ===", queueIndex + 1, queue.size(), scenario.name);
+        // Chunks BEFORE the fixture builds: a fresh world (rm -rf run/world)
+        // loads its real chunks asynchronously, and a setBlockAndUpdate that
+        // lands before the load is silently replaced when the real chunk
+        // arrives (run 101100: recording showed zero terrain cells and the
+        // squad died pinned at spawn; run 102214: the slab landed after the
+        // spawns and suffocated the squad at 1 hp / 10 ticks).
+        forceChunks();
         terrain = new SimTerrain(level, new BlockPos(0, yLevel, 0), scenario.width, scenario.depth);
         scenario.terrainBuilder.accept(terrain);
         recorder = new SimRecorder(scenario.width, scenario.depth);
         recorder.captureTerrain(terrain);
-        forceChunks();
+        healMissingFixtureBlocks();
         // The session-start sweep misses actors leaked into unloaded chunks of
         // the saved world; now that this scenario's chunks are forced, sweep
         // again so a leaked soldier/anchor cannot join the live run.
@@ -654,7 +661,33 @@ public final class SimManager {
             for (int cz = chunkMinZ; cz <= chunkMaxZ; cz++) {
                 level.setChunkForced(cx, cz, true);
                 forcedChunks.add(new ChunkPos(cx, cz));
+                // setChunkForced only QUEUES the load — without this barrier
+                // the next line's writes can still race the chunk system on a
+                // fresh world. Blocking on FULL guarantees the real chunk
+                // exists before the fixture writes into it.
+                level.getChunk(cx, cz, net.minecraft.world.level.chunk.ChunkStatus.FULL, true);
             }
+        }
+    }
+
+    /**
+     * Re-places any fixture block the world dropped. The chunk barrier in
+     * forceChunks should make this a no-op; it exists so a residual placement
+     * failure surfaces as a healed fixture plus a loud log instead of a squad
+     * dying on a half-built slab.
+     */
+    private static void healMissingFixtureBlocks() {
+        if (terrain == null) return;
+        int healed = 0;
+        for (Map.Entry<BlockPos, net.minecraft.world.level.block.state.BlockState> entry
+            : terrain.placedStates().entrySet()) {
+            if (!level.getBlockState(entry.getKey()).equals(entry.getValue())) {
+                level.setBlockAndUpdate(entry.getKey(), entry.getValue());
+                healed++;
+            }
+        }
+        if (healed > 0) {
+            StevesArmyMod.LOGGER.warn("[Sim] healed {} fixture block(s) lost to the world-load race", healed);
         }
     }
 

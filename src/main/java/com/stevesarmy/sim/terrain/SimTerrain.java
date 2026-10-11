@@ -6,7 +6,9 @@ import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Programmatic terrain fixture built from real blocks so the real VisibilityRay
@@ -20,6 +22,8 @@ public final class SimTerrain {
     public final int depth;
     private final ServerLevel level;
     private final List<BlockPos> placed = new ArrayList<>();
+    /** Placed block states by world position — the boot-race heal pass re-applies these. */
+    private final Map<BlockPos, BlockState> placedStates = new LinkedHashMap<>();
 
     public SimTerrain(ServerLevel level, BlockPos origin, int width, int depth) {
         this.level = level;
@@ -248,6 +252,7 @@ public final class SimTerrain {
         }
         level.setBlockAndUpdate(pos, state);
         placed.add(pos);
+        placedStates.put(pos, state);
     }
 
     public void fill(BlockPos from, BlockPos to, BlockState state) {
@@ -267,11 +272,17 @@ public final class SimTerrain {
         return placed;
     }
 
+    /** Placed block states by world position (the boot-race heal pass re-applies these). */
+    public Map<BlockPos, BlockState> placedStates() {
+        return placedStates;
+    }
+
     /** Removes exactly the blocks this fixture placed. */
     public void clear() {
         for (BlockPos pos : placed) {
             level.removeBlock(pos, false);
         }
         placed.clear();
+        placedStates.clear();
     }
 }

@@ -1081,8 +1081,18 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
             if (getCoverManager().getCurrentCover() != null
                 && (coverState == CoverBehaviorManager.CoverState.IN_COVER
                     || coverState == CoverBehaviorManager.CoverState.SUPPRESSED_IN_COVER)) {
-                attackPhase = AttackPhase.OCCUPYING_COVER;
-                return;
+                // A dock BEHIND the advance is not a hold position: holding it
+                // froze followers inside the start building while the front
+                // soldier carried the route alone. Release it and take the
+                // dockless recovery below — but protection still yields to
+                // fire and contact, same as the spine revalidation.
+                if (getCoverManager().isSuppressed()
+                    || ContactPlan.hasLiveContact(soldier)
+                    || !isBackwardAttackDock(getCoverManager().getCurrentCover().getPosition())) {
+                    attackPhase = AttackPhase.OCCUPYING_COVER;
+                    return;
+                }
+                getCoverManager().clearCover();
             }
             // No dock anywhere: a fallback advance step is the recovery (it
             // re-centers the next search), but under a clearing order it must
@@ -4162,6 +4172,15 @@ private boolean shouldExitCoverForFollow() {
         searchReserveAttempts = 0;
         Level level = soldier.level();
         CoverFinder finder = new CoverFinder(level);
+        // Exposure gate: the interior-walk doctrine owns the legs while the
+        // soldier has no route LoS, no contact and no suppression — a search
+        // here can only dock the start building's own walls (the turn-around),
+        // and its failure path must not run exposed-combat against the walk.
+        if (spineInteriorWalkGate()) {
+            getCoverManager().setState(CoverBehaviorManager.CoverState.NO_COVER);
+            logCoverSearchPerformance(finder, searchStarted, CoverMoveResult.NO_COVER_FOUND, "spine-walk-gate");
+            return CoverMoveResult.NO_COVER_FOUND;
+        }
         long now = GameClock.nowMs();
         if (now - lastBlacklistClearTime > BLACKLIST_CLEAR_INTERVAL_MS) {
             failedCoverPositions.removeIf(pos -> !pos.equals(compromisedCoverPosition));
@@ -4692,6 +4711,11 @@ private boolean shouldExitCoverForFollow() {
             List<CoverFinder.ScoredCover> soldierPool = reusableScored == null
                 ? List.of() : reusableScored.stream()
                     .filter(sc -> !sc.cover.getPosition().equals(selectedPos))
+                    // Advance doctrine: the fallback pools may hold adjacent
+                    // on-route protection, never a cover behind the advance —
+                    // protection alone pulled followers back into the start
+                    // building whenever the forward row was reserved.
+                    .filter(sc -> !isBehindAttackSpine(sc.cover.getPosition()))
                     .toList();
             outcome = tryReservePool(soldierPool, currentCover, reserveAttemptsCap(searchCenter));
             if (outcome == CoverMoveResult.COVER_STARTED) {
@@ -4708,6 +4732,7 @@ private boolean shouldExitCoverForFollow() {
                 }
                 centerPool = centerPool.stream()
                     .filter(sc -> !sc.cover.getPosition().equals(selectedPos))
+                    .filter(sc -> !isBehindAttackSpine(sc.cover.getPosition()))
                     .toList();
                 outcome = tryReservePool(centerPool, currentCover, reserveAttemptsCap(searchCenter));
                 if (outcome == CoverMoveResult.COVER_STARTED) {
@@ -4775,9 +4800,33 @@ private boolean shouldExitCoverForFollow() {
      */
     private CoverMoveResult tryReservePool(List<CoverFinder.ScoredCover> pool,
                                            CoverPoint currentCover, int attemptCap) {
+        CoverPoint starvedCandidate = null;
         for (CoverFinder.ScoredCover candidate : pool) {
             CoverPoint candidateCover = candidate.cover;
-            if (failedCoverPositions.contains(candidateCover.getPosition())) continue;
+            if (failedCoverPositions.contains(candidateCover.getPosition())) {
+                if (attackDebugLog()) {
+                    StevesArmyMod.LOGGER.info("[ReservePool] {} skip {} blacklisted",
+                        soldier.getId(), candidateCover.getPosition().toShortString());
+                }
+                continue;
+            }
+            // Advance doctrine, ALL pools including the top-scored one: a
+            // cover behind the advance is the turn-around, and protection
+            // scoring loves it (the wall the squad just passed). A suppressed
+            // soldier may keep near-side protection but not retreat down the
+            // route — the 8-block pullback to the start building's face is
+            // the in-game "he went back into the house" report.
+            if (isBehindAttackSpine(candidateCover.getPosition())) {
+                if (attackDebugLog()) {
+                    StevesArmyMod.LOGGER.info("[ReservePool] {} skip {} behind-spine (prog {} vs {})",
+                        soldier.getId(), candidateCover.getPosition().toShortString(),
+                        String.format("%.1f", attackSpine != null
+                            ? attackSpine.progress(candidateCover.getPosition()) : -1.0),
+                        String.format("%.1f", attackSpine != null
+                            ? attackSpine.progress(soldier.blockPosition()) : -1.0));
+                }
+                continue;
+            }
             if (currentCover != null
                 && candidateCover.getPosition().equals(currentCover.getPosition())) continue;
             if (currentCover != null
@@ -4785,23 +4834,83 @@ private boolean shouldExitCoverForFollow() {
                     < COVER_REACHED_DISTANCE) {
                 continue;
             }
+            // Advance doctrine: a dock the navigation cannot EXACTLY reach is
+            // not a dock. A partial A* path out of an enclosed pocket walks
+            // the soldier the WRONG WAY — deeper into the building the route
+            // is leaving — and the move still "starts", so the dock ladder
+            // re-anchors him inside (the re-entry + in-place pinball). Budget
+            // exhaustion is not a verdict: stop the pool rather than treat
+            // every unprobed candidate as unreachable.
+            if (attackSpineFramed()) {
+                if (!hasExactPathValidationBudget()) {
+                    if (attackDebugLog()) {
+                        StevesArmyMod.LOGGER.info("[ReservePool] {} budget out at {}",
+                            soldier.getId(), candidateCover.getPosition().toShortString());
+                    }
+                    starvedCandidate = candidateCover;
+                    break;
+                }
+                if (!isExactCoverPathReachable(candidateCover)) {
+                    if (attackDebugLog()) {
+                        StevesArmyMod.LOGGER.info("[ReservePool] {} skip {} not-exact-reachable",
+                            soldier.getId(), candidateCover.getPosition().toShortString());
+                    }
+                    continue;
+                }
+            }
             if (searchReserveAttempts >= attemptCap) break;
-            if (!CoverReservationManager.reserve(candidateCover.getPosition(), soldier)) continue;
-            searchReserveAttempts++;
-            getCoverManager().setTargetCover(candidateCover);
-            if (soldier.hasValidAttackTarget()) {
-                attackExpectedCover = candidateCover.getPosition();
+            if (commitCoverMove(candidateCover) == CoverMoveResult.COVER_STARTED) {
+                return CoverMoveResult.COVER_STARTED;
             }
-            boolean movementStarted = moveToCover(candidateCover);
-            if (!movementStarted && pendingRetryCover == null && !isReloadBlockedMove()) {
-                blacklistCover(candidateCover.getPosition(), BlacklistReason.PATH_FAILED);
-                CoverReservationManager.release(candidateCover.getPosition(), soldier);
-                getCoverManager().clearTargetCover();
-                continue;
-            }
-            return CoverMoveResult.COVER_STARTED;
         }
-        return CoverMoveResult.NO_COVER_FOUND;
+        if (starvedCandidate == null) {
+            return CoverMoveResult.NO_COVER_FOUND;
+        }
+        // Budget-starvation fallback: the exact-reach budget is shared with
+        // the finder's own corridor validation, so a cover-rich stretch (the
+        // street cover rows) drains all 16 during pool construction and every
+        // pool walk then breaks at its first candidate — the search fails
+        // without a single movement attempt (run 103206: all four of the
+        // leader's mid-street searches starved and he crossed the street
+        // dockless). The starved candidate already passed the behind-spine
+        // and blacklist filters (they run before the budget check), and the
+        // advance's spine hop legs service the approach, so attempt it
+        // blind: a genuine unreachable dock still blacklists here and the
+        // next search tries the next candidate.
+        if (attackDebugLog()) {
+            StevesArmyMod.LOGGER.info("[ReservePool] {} budget-starved, attempting {} blind",
+                soldier.getId(), starvedCandidate.getPosition().toShortString());
+        }
+        return commitCoverMove(starvedCandidate);
+    }
+
+    /**
+     * Reserves and starts movement to a candidate the pool filters already
+     * accepted. Both failure modes (reserve conflict, failed path start)
+     * blacklist/release/clear as needed and report NO_COVER_FOUND so the
+     * caller can move to the next candidate or end the pool.
+     */
+    private CoverMoveResult commitCoverMove(CoverPoint candidateCover) {
+        if (!CoverReservationManager.reserve(candidateCover.getPosition(), soldier)) {
+            if (attackDebugLog()) {
+                StevesArmyMod.LOGGER.info("[ReservePool] {} skip {} reserve-conflict",
+                    soldier.getId(), candidateCover.getPosition().toShortString());
+            }
+            return CoverMoveResult.NO_COVER_FOUND;
+        }
+        searchReserveAttempts++;
+        getCoverManager().setTargetCover(candidateCover);
+        if (soldier.hasValidAttackTarget()) {
+            attackExpectedCover = candidateCover.getPosition();
+        }
+        boolean movementStarted = moveToCover(candidateCover);
+        if (!movementStarted && pendingRetryCover == null && !isReloadBlockedMove()) {
+            blacklistCover(candidateCover.getPosition(), BlacklistReason.PATH_FAILED);
+            CoverReservationManager.release(candidateCover.getPosition(), soldier);
+            getCoverManager().clearTargetCover();
+            return CoverMoveResult.NO_COVER_FOUND;
+        }
+        return CoverMoveResult.COVER_STARTED;
     }
 
     /**
@@ -4827,8 +4936,14 @@ private boolean shouldExitCoverForFollow() {
             && !soldier.isPreparingOrReloading();
         ExposedCombatController.Decision decision = ExposedCombatController.decide(
             soldier, Math.sqrt(nearestDistSq), hasLoS, gunReady, getCoverManager().isSuppressed());
-        if (decision.moveTarget != null) {
-            Vec3 move = decision.moveTarget;
+        Vec3 move = decision.moveTarget;
+        // Advance doctrine: a withdraw target behind the spine is the
+        // mid-advance turn-around — hold the plant instead of retreating
+        // into the route's rear.
+        if (move != null && isBehindAttackSpine(BlockPos.containing(move.x, move.y, move.z))) {
+            move = null;
+        }
+        if (move != null) {
             // Plain vanilla navigation: the controller's freeze gates must
             // not apply to doctrine moves, and short nudges do not need
             // the cover-path machinery.
@@ -5216,6 +5331,103 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
         double forward = displacement.x * objectiveDir.x + displacement.z * objectiveDir.z;
         double lateral = Math.abs(displacement.x * objectiveDir.z - displacement.z * objectiveDir.x);
         return forward <= ATTACK_CORRIDOR_FORWARD_LENGTH && lateral <= ATTACK_CORRIDOR_HALF_WIDTH;
+    }
+
+    /**
+     * True while the attack-spine frame should constrain dock acceptance:
+     * an active corridor advance (valid target, live spine) with no clearing
+     * job and no secured hold owning the soldier. Interior clearing docks and
+     * SECURE watch positions are progression-neutral by design and stay
+     * unframed.
+     */
+    private boolean attackSpineFramed() {
+        return attackSpine != null
+            && soldier.hasValidAttackTarget()
+            && !clearingHold()
+            && clearingPoiTarget == null;
+    }
+
+    /**
+     * Mild spine frame for the RESERVATION FALLBACK pools. The primary
+     * corridor pool demands a full hop of forward progress, but a follower
+     * whose forward docks are taken may hold adjacent on-route protection —
+     * he just may not take a cover meaningfully BEHIND him. Without this
+     * filter the fallback pools score by protection alone, and the walls of
+     * the building the squad just exited outrank every spine-forward
+     * candidate (the mid-advance turn-around).
+     *
+     * When the spine is DOWN (end-of-route drop + re-probe backoff — the
+     * whole final approach to an enclosed objective), the filter falls back
+     * to the objective bearing. Otherwise the backward filter goes inert
+     * exactly where protection scoring pulls hardest, and the last dock
+     * before the objective is a cover behind the soldier (run 100647:
+     * charlie re-docked 3 blocks west of his high-water on B's south-west
+     * corner during the null window).
+     */
+    private boolean isBehindAttackSpine(BlockPos pos) {
+        if (attackSpineFramed()) {
+            return attackSpine.progress(pos)
+                < attackSpine.progress(soldier.blockPosition()) - 2.0D;
+        }
+        return behindAlongObjectiveBearing(pos, 2.0D);
+    }
+
+    /**
+     * Hard backward test for docks the cover system chose OUTSIDE the attack
+     * search (suppression parking, emergency relocation): a dock half a
+     * corridor behind the soldier is the building he came from, not route
+     * protection, and must not be ratified as an attack arrival.
+     */
+    private boolean isBackwardAttackDock(BlockPos pos) {
+        if (attackSpineFramed()) {
+            return attackSpine.progress(pos)
+                < attackSpine.progress(soldier.blockPosition()) - 6.0D;
+        }
+        return behindAlongObjectiveBearing(pos, 6.0D);
+    }
+
+    /**
+     * Spineless "behind" test: signed distance along the straight bearing to
+     * the attack objective. Only meaningful while the order is active and the
+     * objective is still ahead of this soldier.
+     */
+    private boolean behindAlongObjectiveBearing(BlockPos pos, double blocks) {
+        if (!StevesArmyConfig.isAttackPathSpineEnabled() || clearingPoiTarget != null) {
+            return false;
+        }
+        BlockPos objective = soldier.getAttackTargetPos();
+        if (objective == null) {
+            return false;
+        }
+        Vec3 bearing = Vec3.atCenterOf(objective).subtract(soldier.position());
+        double bearingLen = bearing.horizontalDistance();
+        if (bearingLen < 1.0E-4) {
+            return false;
+        }
+        Vec3 offset = Vec3.atCenterOf(pos).subtract(soldier.position());
+        double along = (offset.x * bearing.x + offset.z * bearing.z) / bearingLen;
+        return along < -blocks;
+    }
+
+    /**
+     * Exposure gate (the interior-walk doctrine): with the spine alive but NO
+     * line of sight to the objective — the start building's interior — and no
+     * personal suppression, the interior segment of the route is WALKED along
+     * the spine instead of relayed dock-to-dock. The only cover inside is the
+     * building's own walls, so every dock the search can take there is the
+     * deeper-into-the-house turn-around. Contact is deliberately NOT a veto:
+     * it is squad-shared, so a front soldier's sighting would otherwise lift
+     * the gate for everyone still inside; each walk leg is vetted per-tick by
+     * ContactPlan.checkAdvance, and personally pinned soldiers keep the
+     * suppression machinery (the gate lifts for them until they recover).
+     */
+    private boolean spineInteriorWalkGate() {
+        return attackSpine != null
+            && StevesArmyConfig.isAttackPathSpineEnabled()
+            && !attackSpineExposed
+            && !getCoverManager().isSuppressed()
+            && clearingPoiTarget == null
+            && !clearingHold();
     }
 
     /**
@@ -5663,6 +5875,9 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
             // rebuild compares coordinates from two different routes and
             // rejects every dock forever (the doorstep park).
             attackSpineProgressFrontier = spine.progress(soldier.blockPosition());
+            // A rebuilt spine is a fresh enclosed-approach evaluation: the
+            // sticky exposure flag belongs to the old route's premise.
+            attackSpineExposed = false;
             spineExposureRefreshTick = 0;
             refreshSpineExposure(objective);
             // Spine-dock revalidation: a dock taken before the spine existed
@@ -5696,19 +5911,55 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
     }
 
     /**
-     * Whether the soldier has LoS to the OBJECTIVE along the straight line,
-     * refreshed at most every 40t. Indoors (blocked) with no contact and no
-     * suppression, spine-frame dock selection is suspended: the interior
-     * segment of the route is WALKED (hop legs), not relayed dock-to-dock —
-     * docking on interior walls beside the exit route is what turned the
-     * house exit into a 10s relay. Cover-hopping engages when the route is
-     * exposed (the street), under live contact, or under suppression.
+     * Whether the ROUTE AHEAD is exposed, refreshed at most every 40t. The
+     * probe ray runs to the spine point one leg ahead — not to the objective:
+     * an objective inside a building keeps that ray blocked from the whole
+     * approach street, which would read "indoors" for an exposed crossing and
+     * suspend docking for the entire advance (the dockless mid-street walk).
+     * From an enclosed pocket the leg ray terminates on the walls the route
+     * threads, so the interior stays "covered" and the walk owns the legs;
+     * on an open street the ray clears and cover-hopping resumes.
+     *
+     * Two hardening terms, both from the mid-street dockless regression: the
+     * probe targets HEAD height above the route point (the block center sits
+     * at knee height, so a 1-high street cover row between walker and probe
+     * read as "enclosed" and suspended docking across half the street), and
+     * exposure is STICKY-once — the gate's premise is the enclosed approach
+     * segment, and once the route has shown sky that premise never returns;
+     * a fresh spine build (new enclosed approach) resets it.
      */
     private void refreshSpineExposure(BlockPos objective) {
         if (soldier.tickCount < spineExposureRefreshTick) return;
         spineExposureRefreshTick = soldier.tickCount + 40;
-        attackSpineExposed = VisibilityRay.trace(soldier.level(),
-            soldier.getEyePosition(), Vec3.atCenterOf(objective), soldier).clear();
+        // Near the objective the advance hands over to the arrival/clearing
+        // machinery; the leg probe clamps to the spine's end there, which
+        // lands INSIDE the target building and stays wall-blocked — without
+        // this handover term the gate would read "indoors" for the whole
+        // final stretch and the street stays dockless to the door.
+        boolean nearObjective = soldier.blockPosition().distSqr(objective)
+            <= ATTACK_SPINE_LEG_LENGTH * ATTACK_SPINE_LEG_LENGTH * 1.5;
+        Vec3 probe = null;
+        if (attackSpine != null && !nearObjective) {
+            double ahead = Math.min(attackSpine.length(),
+                attackSpine.progress(soldier.blockPosition()) + ATTACK_SPINE_LEG_LENGTH);
+            BlockPos aheadPos = attackSpine.pointAt(ahead, soldier.blockPosition().getY());
+            // Block center = knee height; 1-high cover rows blocked the ray
+            // and re-closed the gate mid-street. Standing-eye height asks
+            // the doctrine question: would the route ahead be exposed.
+            probe = Vec3.atCenterOf(aheadPos).add(0.0D, 1.1D, 0.0D);
+        }
+        if (probe == null) {
+            probe = Vec3.atCenterOf(objective);
+        }
+        attackSpineExposed = attackSpineExposed
+            || nearObjective
+            || VisibilityRay.trace(soldier.level(),
+                soldier.getEyePosition(), probe, soldier).clear();
+        if (attackDebugLog()) {
+            StevesArmyMod.LOGGER.info("[SpineExposure] {} at {} probe {} exposed={} nearObj={} spine={}",
+                soldier.getId(), soldier.blockPosition().toShortString(), probe != null ? "set" : "null",
+                attackSpineExposed, nearObjective, attackSpine != null);
+        }
     }
 
     private void initAttackPhase() {
@@ -6127,7 +6378,20 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
         // Clearing orders skip this: inside the area the job is CLEAR/SECURE,
         // and SquadActivityManager finishes the order, not this radius.
         if (clearingView == null && distToObjective <= objRadiusSq) {
-            if (attackPhase != AttackPhase.COMPLETE) {
+            // An order is not DONE while the soldier is pinned or suppressed
+            // short of his dock: completing under fire hands control to
+            // NORMAL-mode seeking, whose protection scoring then walks him
+            // BACKWARD off the objective (the post-arrival backward drift).
+            // The dock move continues under attack mode; completion waits
+            // for the pin to lift.
+            if (getCoverManager().isPinned() || getCoverManager().isSuppressed()) {
+                if (attackDebugLog() && attackPhase != AttackPhase.COMPLETE
+                    && soldier.tickCount % 100 == 0) {
+                    StevesArmyMod.LOGGER.info(
+                        "[AttackPhase] Soldier {} at objective but pinned/suppressed, holding attack mode",
+                        soldier.getId());
+                }
+            } else if (attackPhase != AttackPhase.COMPLETE) {
                 attackPhase = AttackPhase.COMPLETE;
                 updateAttackProgress(objective);
                 if (attackDebugLog()) {
@@ -6135,7 +6399,9 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
                 }
                 completeAttackAtObjective();
             }
-            return;
+            if (attackPhase == AttackPhase.COMPLETE) {
+                return;
+            }
         }
 
         CoverBehaviorManager.CoverState coverState = getCoverManager().getState();
@@ -6191,6 +6457,28 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
                     break;
                 }
 
+                // Exposure gate: indoors (no LoS to the objective) with no
+                // contact and no suppression, the corridor search must not
+                // run — every dock it can take inside is a wall of the
+                // building the route is leaving (the turn-around). Release
+                // any dock and walk the spine instead; cover-hopping resumes
+                // when refreshSpineExposure sees the open route.
+                if (spineInteriorWalkGate() && !isReloadBlockedMove()) {
+                    if (soldier.tickCount >= egressRetryAfterTick) {
+                        if (dockedForSearch()) {
+                            getCoverManager().clearCover();
+                        }
+                        attackExpectedCover = null;
+                        startWindowAdvance();
+                        if (fallbackAdvanceTarget == null) {
+                            // Walk refused (contact plan, probe roulette):
+                            // back off instead of re-issuing every tick.
+                            egressRetryAfterTick = soldier.tickCount + 40;
+                        }
+                    }
+                    break;
+                }
+
                 // Search execution is budgeted by CoverSearchScheduler. Do not
                 // treat a queued search as a failed search and advance exposed.
                 requestCoverSearch(QueuedSearchMode.ATTACK_SELECTING);
@@ -6223,11 +6511,20 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
 
                 // Reconciliation: if the cover system has parked us in a cover
                 // (e.g., suppression pulled us back while we were advancing),
-                // treat it as arrival so the attack phase can recover.
+                // treat it as arrival so the attack phase can recover. A dock
+                // BEHIND the advance is the exception: parking in the building
+                // the route just left is not an arrival, it is the mid-advance
+                // turn-around — fall through to a fresh spine-framed search.
+                // Under fire SELECTING_COVER settles straight back into
+                // OCCUPYING via canLeaveCoverNow(), so this adds no churn
+                // while suppressed.
                 boolean currentCoverIsExpected = currentCover != null
                     && (attackExpectedCover == null || currentCover.getPosition().equals(attackExpectedCover));
-                if ((coverState == CoverBehaviorManager.CoverState.IN_COVER ||
-                     coverState == CoverBehaviorManager.CoverState.SUPPRESSED_IN_COVER) &&
+                boolean backwardPark = currentCover != null
+                    && isBackwardAttackDock(currentCover.getPosition());
+                if (!backwardPark
+                    && (coverState == CoverBehaviorManager.CoverState.IN_COVER ||
+                        coverState == CoverBehaviorManager.CoverState.SUPPRESSED_IN_COVER) &&
                     currentCoverIsExpected) {
                     attackPhase = AttackPhase.OCCUPYING_COVER;
                     attackCoverArrivalTime = GameClock.nowMs();
@@ -6255,7 +6552,8 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
                     arrivedAtExpected = true;
                 }
 
-                if (arrivedAtExpected) {
+                if (arrivedAtExpected && (currentCover == null
+                    || !isBackwardAttackDock(currentCover.getPosition()))) {
                     attackPhase = AttackPhase.OCCUPYING_COVER;
                     attackCoverArrivalTime = GameClock.nowMs();
                     attackExpectedCover = null;
@@ -7028,6 +7326,14 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
     private void tickFallbackAdvance() {
         if (fallbackAdvanceTarget == null) return;
 
+        // Keep the exposure gate live while the walk owns the legs: the spine
+        // only refreshes it on rebuilds, and a stale "indoors" verdict would
+        // keep the search suspended long after the soldier is in the open.
+        BlockPos walkObjective = soldier.getAttackTargetPos();
+        if (attackSpine != null && walkObjective != null) {
+            refreshSpineExposure(walkObjective);
+        }
+
         // Contact-plan mid-walk check: if support was lost while advancing,
         // the segment completes only when continuing increases the distance
         // to the threat; otherwise stop at once — walking into the danger
@@ -7442,6 +7748,15 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
             soldier.setLowCrouching(activeSuppressionRouteMovement == RouteMovement.CRAWL);
             boolean accepted = navigation.moveTo(path, activeSuppressionRouteMovement == RouteMovement.CRAWL
                 ? CRAWL_ROUTE_SPEED : 1.2D);
+            if (!accepted && soldier.getNavigation().getPath() != null
+                && soldier.getNavigation().getPath().sameAs(path)) {
+                // 1.20.1 PathNavigation.moveTo returns false when the requested
+                // path is the SAME one already being followed. That is the
+                // movement already underway — a spine walk leg to this very
+                // dock — not a start failure; reading it as one blacklisted the
+                // dock, released the reservation, and kept the walk dockless.
+                accepted = true;
+            }
             if (DiagnosticLogManager.isCoverPerformanceLoggingEnabled()) {
                 StevesArmyMod.LOGGER.info(
                     "[CoverPerf] soldier={} tick={} path={} accepted={} nodes={} buildMs={} cover={} from={}",

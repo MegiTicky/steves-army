@@ -1,5 +1,6 @@
 package com.stevesarmy.sim;
 
+import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.combat.ExposureCalculator;
 import com.stevesarmy.combat.GunIntegration;
 import com.stevesarmy.combat.cover.IncomingFireHandler;
@@ -165,6 +166,18 @@ public final class SimGunHandler implements GunIntegration.GunHandler {
         }
 
         IncomingFireHandler.checkNearMissLineSegment(level, eye, stop, BULLET_SPEED, shooter);
+        if (shooter.tickCount < 400) {
+            // Spawn-bleed forensics: broken fresh-world runs showed 1 hp / 10 t
+            // intake + instant suppression at the squad spawn with ZERO tracer
+            // taps — this names the shooter, the ray, and where the clip
+            // stopped while the anomaly window is open.
+            StevesArmyMod.LOGGER.info("[SimGun] t{} {} eye=({},{},{}) stop=({},{},{}) hit={} ammo={}",
+                shooter.tickCount, shooter.getName().getString(),
+                String.format("%.1f", eye.x), String.format("%.1f", eye.y), String.format("%.1f", eye.z),
+                String.format("%.1f", stop.x), String.format("%.1f", stop.y), String.format("%.1f", stop.z),
+                entityHit != null ? entityHit.getEntity().getName().getString() : "none",
+                state.ammo);
+        }
         return GunIntegration.ShootResult.SUCCESS;
     }
 

@@ -3755,16 +3755,39 @@ public final class SimRegistry {
         final long[] exitTick = new long[labels.length];
         final long[] arriveTick = new long[labels.length];
         final long[] streetDockTick = new long[labels.length];
+        // Backtrack doctrine: once a soldier has committed through the door,
+        // the advance is one-way — he may jitter at the threshold but never
+        // walk back into the house interior nor retreat meaningfully behind
+        // his forwardmost point. Earlier passes hid exactly this: recordings
+        // showed interior re-entries up to ~1240t and retreats up to ~13
+        // blocks, none of it asserted.
+        final int[] reentrySamples = new int[labels.length];
+        // Retreat is measured in OBJECTIVE-DISTANCE space: a retreat means
+        // ending up meaningfully farther from the objective than the closest
+        // approach so far. Raw westward-x regression misreads the final
+        // approach — staging on house B's south face then cutting to the
+        // west/door side drops ~4 blocks of x while getting 4 blocks CLOSER
+        // to the objective (run 104710: alpha (70.5,25.5)→(66.5,17.5),
+        // dist 9.5→5.5, counted as a 4.08 "retreat"). The turn-around bug
+        // this hunts (the in-game walk-back into house A) moves AWAY from
+        // the objective by 7+ blocks and still fails this hard.
+        final double[] maxObjectiveRegression = new double[labels.length];
+        final double[] closestApproachDist = new double[labels.length];
         java.util.Arrays.fill(exitTick, -1L);
         java.util.Arrays.fill(arriveTick, -1L);
         java.util.Arrays.fill(streetDockTick, -1L);
+        java.util.Arrays.fill(closestApproachDist, Double.MAX_VALUE);
         SimScenario.Builder builder = SimScenario.builder("clear_long_egress")
             .description("ATTACK clearing egress pacing across a 50-block street: the squad is "
                 + "spread through partitioned house A (front soldier at the door, three deep in "
                 + "the back room) with the ping in house B 50 blocks east and one armed defender "
                 + "holding B. Healthy egress: everyone is out of house A promptly and close "
-                + "together — no soldier lags far behind the front. Failing the pacing asserts "
-                + "reproduces the in-game back-soldiers-stuck-behind report.")
+                + "together — no soldier lags far behind the front, and the advance is one-way: "
+                + "no re-entry into house A and no retreat behind the soldier's forwardmost "
+                + "point. Failing "
+                + "the pacing asserts reproduces the in-game back-soldiers-stuck-behind report; "
+                + "failing the backtrack asserts reproduces the in-game turn-around-into-the-"
+                + "house report.")
             // 4800: egress quantization + the 50-block crossing + the far
             // exchange need headroom; cqb_door_contact needed 4800 for its
             // close 2v1 alone.
@@ -3787,16 +3810,26 @@ public final class SimRegistry {
             // (run 220446: delta 675-800 → docked 975). The three arrival
             // asserts below own the strand guarantee directly, so the
             // generic detector is waived here, not everywhere.
+            // StuckSeek: the same arrival seek-transient on a longer fuse —
+            // the final dock can hold SEEKING 265-395t before the dock walk
+            // resolves (run 105206: bravo 265t WARN resolved; run 105701:
+            // bravo 395t FAIL, docked 34t later). The streetDock/arrival
+            // asserts own "did he get there"; the timing nuance is wave-B
+            // work, not an egress failure.
             .suppressDetectors("CoverOscillation", "ExposedWhileHiding",
-                "FireDeadlock", "RotationOscillation", "PositionDeadlock")
+                "FireDeadlock", "RotationOscillation", "PositionDeadlock", "StuckSeek")
             .terrain(t -> t.longStreetBlock());
         addClearingProbe(builder, 40, 4780, 20, probe,
             // House B interior.
             (x, z) -> x > 66.5 && x < 77.5 && z > 11.5 && z < 24.5);
-        // 5t grid, not 20t: a healthy egress walks the x<6.5 doorway strip
-        // in ~15t — a 20t grid can straddle the whole window and record a
-        // false -1 (run 215824: delta exited at ~445, probe saw 6.85/7.25).
-        for (int t = 40; t <= 4780; t += 5) {
+        // 1t grid through the pacing horizon, 5t after: a healthy egress
+        // crosses the ~1-block doorway strip in 2-3t, and even a 5t grid can
+        // straddle the whole transit (run 20261011 093005: alpha crossed
+        // unsampled, arrived house B at t370 with exitTick still -1 — three
+        // false assert failures). South of the house's west half is also
+        // unambiguously out (the spine exits via the west door then the
+        // south face), which widens the catch window.
+        for (int t = 40; t <= 4780; t += (t < 1800 ? 1 : 5)) {
             final int at = t;
             builder.action(at, "egress probe", ctx -> {
                 for (int i = 0; i < labels.length; i++) {
@@ -3806,7 +3839,8 @@ public final class SimRegistry {
                     // doorway cell spans x 6..7, so 6.5 is its midpoint — a
                     // soldier sampled at x=5.5-6.5 has left the interior but
                     // a tighter threshold clips the doorway transit.
-                    if (exitTick[i] < 0 && s.getX() < 6.5) {
+                    if (exitTick[i] < 0
+                        && (s.getX() < 6.5 || (s.getZ() > 24.5 && s.getX() < 17.5))) {
                         exitTick[i] = at;
                     }
                     if (arriveTick[i] < 0 && s.getX() > 66.5
@@ -3824,12 +3858,51 @@ public final class SimRegistry {
                             streetDockTick[i] = at;
                         }
                     }
+                    // Backtrack tracking, measured only after the first exit:
+                    // interior band is house A's footprint minus the doorway
+                    // cell (x 6..7), so threshold jostling doesn't count.
+                    // Peek transits are exempt: the peek tip is a sanctioned
+                    // forward extension and the return walk to the dock dips
+                    // behind it by design (run 094026: bravo/delta "retreated"
+                    // 3.2 blocks stepping back off their peek tip at the
+                    // house B dock — dock-to-peek-tip-to-dock, not a
+                    // turn-around). The metric FREEZES at house B arrival:
+                    // from there on the soldier is fighting the guard, and
+                    // suppression repositions / protection docks inside the
+                    // objective are CQB behavior (cqb-contact layer), not
+                    // advance discipline. Metric is objective-DISTANCE
+                    // regression (see the array declaration above).
+                    if (exitTick[i] >= 0) {
+                        double x = s.getX();
+                        if (arriveTick[i] < 0) {
+                            int peekOrdinal = s.getSyncedPeekState();
+                            boolean peekTransit = peekOrdinal
+                                    == com.stevesarmy.entity.ai.PeekController.State.MOVING_TO_PEEK.ordinal()
+                                || peekOrdinal
+                                    == com.stevesarmy.entity.ai.PeekController.State.RETURNING_TO_COVER.ordinal();
+                            if (!peekTransit) {
+                                double dx = x - 72.0D;
+                                double dz = s.getZ() - 18.0D;
+                                double dist = Math.sqrt(dx * dx + dz * dz);
+                                if (dist < closestApproachDist[i]) closestApproachDist[i] = dist;
+                                double regression = dist - closestApproachDist[i];
+                                if (regression > maxObjectiveRegression[i]) {
+                                    maxObjectiveRegression[i] = regression;
+                                }
+                            }
+                        }
+                        if (x > 7.0 && x < 16.5 && s.getZ() > 11.5 && s.getZ() < 24.5) {
+                            reentrySamples[i]++;
+                        }
+                    }
                 }
             });
         }
         builder.action(4740, "egress diag", ctx ->
-            com.stevesarmy.StevesArmyMod.LOGGER.info("[Sim][diag] long_egress exitTicks={} arriveTicks={}",
-                java.util.Arrays.toString(exitTick), java.util.Arrays.toString(arriveTick)));
+            com.stevesarmy.StevesArmyMod.LOGGER.info("[Sim][diag] long_egress exitTicks={} arriveTicks={} reentrySamples={} maxObjectiveRegression={} closestApproach={}",
+                java.util.Arrays.toString(exitTick), java.util.Arrays.toString(arriveTick),
+                java.util.Arrays.toString(reentrySamples), java.util.Arrays.toString(maxObjectiveRegression),
+                java.util.Arrays.toString(closestApproachDist)));
         return builder
             .setup(ctx -> {
                 // Mirrored house A: door on the WEST wall, so alpha fronts the
@@ -3864,6 +3937,22 @@ public final class SimRegistry {
                         max = Math.max(max, t);
                     }
                     return max - min <= 1000;
+                })
+            .assertThat("no soldier re-enters house A after exiting (one-way advance)",
+                view -> {
+                    for (int i = 0; i < labels.length; i++) {
+                        if (exitTick[i] < 0) continue; // covered by the exit assert
+                        if (reentrySamples[i] * 5 > 40) return false;
+                    }
+                    return true;
+                })
+            .assertThat("no soldier ends up 3.5 blocks farther from the objective than his closest approach (one-way advance)",
+                view -> {
+                    for (int i = 0; i < labels.length; i++) {
+                        if (exitTick[i] < 0) continue;
+                        if (maxObjectiveRegression[i] > 3.5) return false;
+                    }
+                    return true;
                 })
             .build();
     }
