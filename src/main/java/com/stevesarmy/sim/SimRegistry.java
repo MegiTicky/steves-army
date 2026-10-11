@@ -4224,25 +4224,30 @@ public final class SimRegistry {
         final java.util.List<double[]> guardHpLog = new java.util.ArrayList<>();
         final int[] gunnerAheadSamples = new int[1];
         final double[] curDist = new double[labels.length];
-        // First gunner dock ON the row line (field zone): the rear-rim lure
-        // parks him in cover BEHIND the spawn line (x≈0 CONCEALMENT rim) for
-        // hundreds of ticks while the riflemen fight — tracked as this
-        // scenario's expectedFail until the ATTACK cover search rejects
-        // backward candidates.
+        // Two separate findings on this terrain:
+        // 1. LURE (expectedFail): the gunner's FIRST dock is the rear platform
+        //    rim (x≈0 CONCEALMENT, behind the spawn line) because the ATTACK
+        //    cover search accepts backward candidates.
+        // 2. STALL (fixed, ea76cb6): he used to stay parked there — the
+        //    docked next-cover search retried an empty pool forever. The
+        //    dock-stall release now walks him out (~t90) and up the rows.
         final long[] firstFieldDock = {Long.MAX_VALUE};
+        final boolean[] rimLureDocked = {false};
         SimScenario.Builder builder = SimScenario.builder("mg_attack_half_rows")
             .description("MG + riflemen ATTACK across waist-high E-W cover rows (peek-over "
                 + "half cover). The gunner must work the row line behind the riflemen — "
                 + "docking, peeking over the top, hopping row-to-row — and never outfront "
                 + "the riflemen while the guard lives. Same doctrine asserts as "
                 + "mg_attack_cover_skip on a different cover geometry. KNOWN GAP "
-                + "(expectedFail): the ATTACK cover search accepts the rear platform rim "
-                + "as CONCEALMENT cover and parks the gunner behind the spawn line — the "
-                + "far-side/junk-cover lure family, manifesting here as an advance stall.")
+                + "(expectedFail): the gunner's FIRST dock is the rear platform "
+                + "rim (x≈0 CONCEALMENT) — the ATTACK cover search accepts "
+                + "backward candidates (far-side/junk-cover lure family). The "
+                + "old advance STALL on that dock is fixed by the dock-stall "
+                + "release and stays a green assert.")
             .expectedFail(
-                "gunner parks in rear rim cover (x≈0 CONCEALMENT) during the advance "
-                    + "— far-side/junk-cover lure; the ATTACK search accepts backward "
-                    + "candidates (2/2 runs, park 320t+ / total)")
+                "gunner's first dock is backward rear-rim cover (x≈0 "
+                    + "CONCEALMENT lure) — the ATTACK search accepts backward "
+                    + "candidates; the stall itself is fixed (dock-stall release)")
             .duration(4800)
             .field(96, 40)
             .armed()
@@ -4302,6 +4307,9 @@ public final class SimRegistry {
                     boolean docked = st == com.stevesarmy.combat.cover.CoverBehaviorManager.CoverState.IN_COVER
                         || st == com.stevesarmy.combat.cover.CoverBehaviorManager.CoverState.SUPPRESSED_IN_COVER;
                     boolean inField = s.getX() > 14 && s.getX() < 72;
+                    if (i == 0 && docked && !inField && firstFieldDock[0] == Long.MAX_VALUE) {
+                        rimLureDocked[0] = true;
+                    }
                     boolean rowHold = false;
                     if (docked) {
                         double selfDist = curDist[i];
@@ -4382,8 +4390,10 @@ public final class SimRegistry {
         return builder
             .assertThat("riflemen reached the objective (route sanity)",
                 view -> arriveTick[1] > 0 && arriveTick[2] > 0)
-            .assertThat("gunner advanced onto the row line promptly (first row dock well before the riflemen settle; later = parked in rear cover)",
-                view -> firstFieldDock[0] < 400)
+            .assertThat("gunner advanced onto the row line promptly (the rear-rim lure must not become a stall; dock-stall release walks him out)",
+                view -> firstFieldDock[0] < 460)
+            .assertThat("gunner's first dock is NOT backward rear-rim cover (ATTACK search lure - expectedFail until the search rejects backward candidates)",
+                view -> !rimLureDocked[0])
             .assertThat("gunner docked on row cover at least once en route (he engages the cover machine)",
                 view -> !dockEpisodes.get(0).isEmpty())
             .assertThat("gunner stayed in the back row DURING the firefight (never the frontmost soldier while the guard lives)",
