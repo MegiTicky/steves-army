@@ -3998,6 +3998,12 @@ public final class SimRegistry {
         final double[] dockStartX = new double[labels.length];
         final double[] dockStartZ = new double[labels.length];
         final boolean[] dockHoldActive = new boolean[labels.length];
+        // Saw the soldier PEEK out (EXPOSED) at some point during the open
+        // dock: separates a dock that was used to engage from one that was
+        // docked and immediately abandoned — the churn signature needs the
+        // "never used" half, because a healthy catch-up advance also leaves
+        // short row-holding docks once it has peeked and fired from them.
+        final boolean[] dockPeeked = new boolean[labels.length];
         java.util.Arrays.fill(dockStartTick, -1);
         // Guard health forensics: the guard died ~t55 with zero shots in two
         // runs (killing the firefight before it starts). Track hp changes so
@@ -4100,12 +4106,18 @@ public final class SimRegistry {
                             dockStartX[i] = s.getX();
                             dockStartZ[i] = s.getZ();
                             dockHoldActive[i] = rowHold;
+                            dockPeeked[i] = false;
                         } else if (rowHold) {
                             dockHoldActive[i] = true;
                         }
+                        if (s.getSyncedPeekState()
+                            == com.stevesarmy.entity.ai.PeekController.State.EXPOSED.ordinal()) {
+                            dockPeeked[i] = true;
+                        }
                     } else if (dockStartTick[i] >= 0) {
                         dockEpisodes.get(i).add(new double[]{dockStartTick[i], at,
-                            dockStartX[i], dockStartZ[i], dockHoldActive[i] ? 1 : 0});
+                            dockStartX[i], dockStartZ[i], dockHoldActive[i] ? 1 : 0,
+                            dockPeeked[i] ? 1 : 0});
                         dockStartTick[i] = -1;
                     }
                 }
@@ -4172,11 +4184,11 @@ public final class SimRegistry {
                     }
                     return maxGap <= 14.0;
                 })
-            .assertThat("gunner never abandons a back-row holding dock (a short dock left while the rifleman line had not passed is the cover churn)",
+            .assertThat("gunner never abandons an unused back-row dock (a short dock left while the rifleman line had not passed AND without ever peeking from it is the cover churn; a peeked dock the advance machinery hops on from is a healthy catch-up step)",
                 view -> {
                     int abandoned = 0;
                     for (double[] e : dockEpisodes.get(0)) {
-                        if (e[1] - e[0] < 60 && e[4] > 0) abandoned++;
+                        if (e[1] - e[0] < 60 && e[4] > 0 && e[5] <= 0) abandoned++;
                     }
                     return abandoned <= 1;
                 })
