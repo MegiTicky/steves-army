@@ -93,6 +93,7 @@ public final class SimRegistry {
             clearDeepObjectiveSequence(),
             clearHouseExit(),
             clearLongEgress(),
+            mgAttackCoverSkip(),
             cqbDoorContact(),
             clearCheckerDeath());
     }
@@ -3969,6 +3970,195 @@ public final class SimRegistry {
      * deliberately keeps open); once the gate opens, the checker crosses and
      * the order completes. Guns armed on both sides — the exchange is organic.
      */
+    /**
+     * USER REPORT reproduction: machine gunners in ATTACK "constantly skip the
+     * cover — after reaching a cover he immediately cancels it and heads to the
+     * next cover, almost straight line to the objective, while he is supposed
+     * to stay in the back row." The gunner spawns DEEPEST in house A so any
+     * forward overtaking is visible, and every street dock is tracked as an
+     * episode (start tick, end tick, position): the complaint's signature is a
+     * chain of short-held docks — dock, release, next dock — instead of the
+     * base-of-fire doctrine of anchoring behind the riflemen and suppressing.
+     * The back-row metric freezes each soldier's closest approach at arrival
+     * and fails when the gunner outfronts either rifleman during the advance.
+     * Instrumentation first: the [Sim][diag] dump lists the episode chains so
+     * thresholds are set from observed behavior, not guesses.
+     */
+    private static SimScenario mgAttackCoverSkip() {
+        final String[] labels = {"gunner", "r1", "r2"};
+        final long[] arriveTick = new long[labels.length];
+        final double[] closestApproachDist = new double[labels.length];
+        java.util.Arrays.fill(arriveTick, -1L);
+        java.util.Arrays.fill(closestApproachDist, Double.MAX_VALUE);
+        // Dock episodes per soldier: [startTick, endTick, x, z] rows appended
+        // when a street dock ends (cover state leaves IN_COVER-family).
+        final java.util.List<java.util.List<double[]>> dockEpisodes = new java.util.ArrayList<>();
+        for (int i = 0; i < labels.length; i++) dockEpisodes.add(new java.util.ArrayList<>());
+        final int[] dockStartTick = new int[labels.length];
+        final double[] dockStartX = new double[labels.length];
+        final double[] dockStartZ = new double[labels.length];
+        java.util.Arrays.fill(dockStartTick, -1);
+        // Guard health forensics: the guard died ~t55 with zero shots in two
+        // runs (killing the firefight before it starts). Track hp changes so
+        // the cause discriminates: 1hp/10t = the spawn-bleed pacing, 2/tick =
+        // suffocation, one big drop = fall/void.
+        final java.util.List<double[]> guardHpLog = new java.util.ArrayList<>();
+        // Back-row doctrine, sampled DURING the firefight (guard alive, nobody
+        // arrived yet): the gunner must never be the frontmost soldier toward
+        // the objective. Final closest-approach comparison alone hides this —
+        // run 6: gunner closest 3.46 < r1's 0.50, but that r1 value came at
+        // t1025 AFTER the guard died; during the exchange (t260-445) the
+        // gunner sat 10 blocks in FRONT of both riflemen at row 62.
+        final int[] gunnerAheadSamples = new int[1];
+        // Sampled objective distance per soldier for the probe tick.
+        final double[] curDist = new double[labels.length];
+        SimScenario.Builder builder = SimScenario.builder("mg_attack_cover_skip")
+            .description("USER REPORT: MG in ATTACK skips cover after cover (dock -> immediate "
+                + "cancel -> next cover), advancing in a near straight line to the objective "
+                + "instead of staying in the back row. Gunner spawns deepest in house A; every "
+                + "street dock is tracked as an episode and the gunner must never outfront the "
+                + "riflemen before any of them arrives.")
+            .duration(4800)
+            .field(96, 40)
+            .armed()
+            .suppressDetectors("PositionDeadlock", "StuckSeek")
+            .terrain(t -> t.longStreetBlock());
+        builder.setup(ctx -> {
+            ctx.spawnAnchor(12, 0, 18);
+            // Gunner deepest (back row start); riflemen ahead of him.
+            ctx.spawnFriendly(ModEntities.MACHINE_GUNNER.get(), "gunner", 8, 0, 18, SquadMode.HOLD);
+            ctx.spawnFriendly(ModEntities.SOLDIER.get(), "r1", 12, 0, 15, SquadMode.HOLD);
+            ctx.spawnFriendly(ModEntities.SOLDIER.get(), "r2", 14, 0, 21, SquadMode.HOLD);
+            // Guard closer than clear_long_egress's (74,15): the reported churn
+            // happens under FIRE, and at 26 blocks the stalled squad never
+            // accumulates detection (stationary soldiers gain slowly) — the
+            // guard must engage while the advance is still healthy.
+            EnemySoldierEntity guard = ctx.spawnEnemyLabeled("guard", 66, 0, 16);
+            guard.setSquadMode(SquadMode.HOLD);
+            guard.setHoldPosition(ctx.terrain.at(66, 0, 16));
+            ctx.issueAttackOrder(72, 18);
+        });
+        // Dock-episode probe: 5t resolution (a "reached cover then immediately
+        // cancelled" dock still lasts the approach walk, far above 5t). Street
+        // docks only (x 17.5..66.5) — house-A interior docks are egress, not
+        // advance doctrine.
+        for (int t = 20; t <= 4700; t += 5) {
+            final int at = t;
+            builder.action(at, "dock probe", ctx -> {
+                if (!ctx.enemies.isEmpty()) {
+                    LivingEntity g = ctx.enemies.get(0);
+                    guardHpLog.add(new double[]{at, g.getX(), g.getY(), g.getZ(),
+                        g.getHealth(), g.fallDistance});
+                } else {
+                    guardHpLog.add(new double[]{at, -1, -1, -1, -1, -1});
+                }
+                for (int i = 0; i < labels.length; i++) {
+                    SoldierEntity s = ctx.soldier(labels[i]);
+                    if (s == null || !s.isAlive()) continue;
+                    if (arriveTick[i] < 0 && s.getX() > 66.5
+                        && s.getZ() > 11.5 && s.getZ() < 24.5) {
+                        arriveTick[i] = at;
+                    }
+                    boolean peekTransit = s.getSyncedPeekState()
+                            == com.stevesarmy.entity.ai.PeekController.State.MOVING_TO_PEEK.ordinal()
+                        || s.getSyncedPeekState()
+                            == com.stevesarmy.entity.ai.PeekController.State.RETURNING_TO_COVER.ordinal();
+                    double dist = Double.MAX_VALUE;
+                    if (!peekTransit) {
+                        double dx = s.getX() - 72.0D;
+                        double dz = s.getZ() - 18.0D;
+                        dist = Math.sqrt(dx * dx + dz * dz);
+                        if (dist < closestApproachDist[i]) closestApproachDist[i] = dist;
+                    }
+                    curDist[i] = dist;
+                    var st = s.getCoverBehaviorManager().getState();
+                    boolean docked = st == com.stevesarmy.combat.cover.CoverBehaviorManager.CoverState.IN_COVER
+                        || st == com.stevesarmy.combat.cover.CoverBehaviorManager.CoverState.SUPPRESSED_IN_COVER;
+                    boolean inStreet = s.getX() > 17.5 && s.getX() < 66.5;
+                    if (docked && inStreet) {
+                        if (dockStartTick[i] < 0) {
+                            dockStartTick[i] = at;
+                            dockStartX[i] = s.getX();
+                            dockStartZ[i] = s.getZ();
+                        }
+                    } else if (dockStartTick[i] >= 0) {
+                        dockEpisodes.get(i).add(new double[]{dockStartTick[i], at,
+                            dockStartX[i], dockStartZ[i]});
+                        dockStartTick[i] = -1;
+                    }
+                }
+                // Firefight simultaneity: only counts while the guard is alive
+                // and every soldier is still advancing — after the guard dies
+                // the walk-in is unopposed and positions reshuffle freely.
+                boolean guardAlive = !ctx.enemies.isEmpty() && ctx.enemies.get(0).isAlive();
+                if (guardAlive && arriveTick[0] < 0 && arriveTick[1] < 0 && arriveTick[2] < 0
+                    && curDist[0] < Double.MAX_VALUE && curDist[1] < Double.MAX_VALUE
+                    && curDist[2] < Double.MAX_VALUE
+                    && curDist[0] < Math.min(curDist[1], curDist[2]) - 2.0) {
+                    gunnerAheadSamples[0]++;
+                }
+            });
+        }
+        builder.action(4700, "diag", ctx -> {
+            StringBuilder gh = new StringBuilder();
+            double prevHp = -1, prevY = -999;
+            for (double[] r : guardHpLog) {
+                if (r[0] <= 200 || r[4] != prevHp || Math.abs(r[2] - prevY) > 0.5) {
+                    gh.append(String.format("[t%d hp=%.1f y=%.1f fall=%.1f] ",
+                        (long) r[0], r[4], r[2], r[5]));
+                    prevHp = r[4];
+                    prevY = r[2];
+                }
+            }
+            com.stevesarmy.StevesArmyMod.LOGGER.info("[Sim][diag] guardHp: {}", gh);
+            com.stevesarmy.StevesArmyMod.LOGGER.info("[Sim][diag] gunnerAheadSamples={} (x5t each, while guard alive)",
+                gunnerAheadSamples[0]);
+            for (int i = 0; i < labels.length; i++) {
+                StringBuilder sb = new StringBuilder();
+                for (double[] e : dockEpisodes.get(i)) {
+                    sb.append(String.format("[t%d..t%d dur=%.0f @(%.0f,%.0f)] ",
+                        (long) e[0], (long) e[1], e[1] - e[0], e[2], e[3]));
+                }
+                com.stevesarmy.StevesArmyMod.LOGGER.info("[Sim][diag] {} docks={} arrive={} closest={}",
+                    labels[i], dockEpisodes.get(i).size(),
+                    arriveTick[i] < 0 ? "never" : ("t" + arriveTick[i]),
+                    closestApproachDist[i] == Double.MAX_VALUE ? "n/a"
+                        : String.format("%.2f", closestApproachDist[i]));
+                if (sb.length() > 0) {
+                    com.stevesarmy.StevesArmyMod.LOGGER.info("[Sim][diag] {} episodes: {}",
+                        labels[i], sb);
+                }
+            }
+        });
+        return builder
+            .assertThat("riflemen reached house B (route sanity)",
+                view -> arriveTick[1] > 0 && arriveTick[2] > 0)
+            .assertThat("gunner docked on street cover at least once en route (he engages the cover machine)",
+                view -> !dockEpisodes.get(0).isEmpty())
+            .assertThat("gunner stayed in the back row DURING the firefight (never the frontmost soldier while the guard lives)",
+                view -> gunnerAheadSamples[0] * 5 <= 100)
+            .assertThat("gunner docks cover-to-cover (no street hop skips more than 14 blocks of cover rows)",
+                view -> {
+                    double prevX = Double.NaN;
+                    double maxGap = 0;
+                    for (double[] e : dockEpisodes.get(0)) {
+                        if (e[2] <= 17.5) continue; // street docks only
+                        if (!Double.isNaN(prevX)) maxGap = Math.max(maxGap, Math.abs(e[2] - prevX));
+                        prevX = e[2];
+                    }
+                    return maxGap <= 14.0;
+                })
+            .assertThat("gunner held his street docks (at most one dock shorter than 60t — cover skipped, not used)",
+                view -> {
+                    int skipped = 0;
+                    for (double[] e : dockEpisodes.get(0)) {
+                        if (e[1] - e[0] < 60) skipped++;
+                    }
+                    return skipped <= 1;
+                })
+            .build();
+    }
+
     private static SimScenario cqbDoorContact() {
         ClearingProbe probe = new ClearingProbe();
         // The guard is HOLD-pinned beside the door, so its last-known is a
