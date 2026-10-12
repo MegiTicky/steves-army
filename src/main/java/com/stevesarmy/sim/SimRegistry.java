@@ -79,6 +79,7 @@ public final class SimRegistry {
             streetSoloNoCoord(),
             cqbDoorwayQueue(),
             cqbCornerPie(),
+            attackPingCornerPie(),
             cqbLostContactWatch(),
             clearEmptyRoom(),
             clearInteriorEnemy(),
@@ -1436,6 +1437,60 @@ public final class SimRegistry {
             // Hold doctrine docks within the 10-block hold radius; the room
             // entry itself is not required (cover inside radius wins).
             .assertThat("march reaches hold radius of the objective (final dist to (16,8) <= 10.5)",
+                view -> {
+                    SimSample last = lastSample(view, "pie");
+                    return last != null && Math.hypot(last.state.position.x - 16.5,
+                        last.state.position.z - 8.5) <= 10.5;
+                })
+            .build();
+    }
+
+    /**
+     * Corner pie-slicing under an ATTACK order (the clearing-doctrine path
+     * players actually ping in-game, no manual CQB toggle). Same house bend
+     * and intel placement as cqb_corner_pie, but the march is driven by
+     * issueAttackOrder: CoverTacticalGoal owns the advance and SoldierCombatGoal
+     * only enters when it has targets/cover, so this probes whether the pie
+     * check survives that ownership on the attack path.
+     */
+    private static SimScenario attackPingCornerPie() {
+        return SimScenario.builder("attack_ping_corner_pie")
+            .description("Corner pie-slicing under an attack ping: an ordinary soldier (no manual "
+                + "CQB) advances on an ATTACK order toward the cqbCourse northwest room while "
+                + "squad intel places a threat just past the west-door corner arc. The path bends "
+                + "at the door; while still south of the door line the soldier must pre-aim INTO "
+                + "the arc (northward facing) instead of staring at the wall he is hugging.")
+            .duration(1000)
+            .armed()
+            .terrain(t -> t.cqbCourse())
+            .setup(ctx -> {
+                ctx.spawnAnchor(26, 0, 30);
+                ctx.spawnFriendly(ModEntities.SOLDIER.get(), "pie", 26, 0, 22, SquadMode.HOLD);
+                // Deterministic intel just past the corner arc, kept fresh.
+                ctx.injectThreat(16, 10, 1.0f);
+                ctx.issueAttackOrder(16, 8);
+            })
+            .action(90, "refresh threat intel", ctx -> ctx.refreshInjectedThreats())
+            .action(180, "refresh threat intel", ctx -> ctx.refreshInjectedThreats())
+            .action(270, "refresh threat intel", ctx -> ctx.refreshInjectedThreats())
+            .action(360, "refresh threat intel", ctx -> ctx.refreshInjectedThreats())
+            .action(450, "refresh threat intel", ctx -> ctx.refreshInjectedThreats())
+            .action(540, "refresh threat intel", ctx -> ctx.refreshInjectedThreats())
+            .action(630, "refresh threat intel", ctx -> ctx.refreshInjectedThreats())
+            .assertThat("pre-aims the corner arc while approaching (>= 4 northward-facing "
+                    + "samples still south of the door line z=13)",
+                view -> {
+                    int n = 0;
+                    for (SimSample s : view.timeline().series("pie")) {
+                        if (s.state.position.z > 13.0
+                            && Math.cos(Math.PI * s.headYaw / 180.0) < -0.3) {
+                            n++;
+                        }
+                    }
+                    return n >= 4;
+                })
+            .assertThat("attack order advances the soldier to the objective room "
+                    + "(final dist to (16,8) <= 10.5)",
                 view -> {
                     SimSample last = lastSample(view, "pie");
                     return last != null && Math.hypot(last.state.position.x - 16.5,
