@@ -63,6 +63,12 @@ public class SoldierMoveToPingGoal extends Goal {
         timeToRecalcPath = 0;
         soldier.cancelCoverMovement();
         soldier.clearFormationOffset();
+        // A starved GO_TO cover seek can hand off a prone-latched soldier;
+        // the walk starts upright and TravelCrawlController re-crawls it
+        // when suppression warrants.
+        if (soldier.isFiringProne()) {
+            soldier.setFiringProne(false);
+        }
         computeNavigationTarget();
         submitNavigation();
     }

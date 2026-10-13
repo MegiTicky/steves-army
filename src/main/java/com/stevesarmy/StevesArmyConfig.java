@@ -187,6 +187,7 @@ public class StevesArmyConfig {
     public static final ForgeConfigSpec.IntValue ASYNC_PATHFINDING_MAX_PENDING_TICKS;
     public static final ForgeConfigSpec.IntValue EXACT_PATH_VALIDATION_LIMIT;
     public static final ForgeConfigSpec.IntValue COVER_SEARCH_FAILURE_RETRY_TICKS;
+    public static final ForgeConfigSpec.IntValue GO_TO_SEEK_GRACE_TICKS;
     public static final ForgeConfigSpec.IntValue COVER_SCORING_MAX_CONTACTS;
     public static final ForgeConfigSpec.IntValue MOVE_GOAL_REPATH_TICKS;
 
@@ -1310,6 +1311,13 @@ BUILDER.pop();
                      "Default: 20")
             .defineInRange("coverSearchFailureRetryTicks", 20, 1, 200);
 
+        GO_TO_SEEK_GRACE_TICKS = BUILDER
+            .comment("Ticks a GO_TO ping move may hunt for a cover route before handing the",
+                     "walk to direct navigation. The counter is keyed on the destination, not",
+                     "the ping generation, so repeated re-pings to the same spot cannot keep",
+                     "restarting the hunt (the mashed-ping strand). Default: 60")
+            .defineInRange("goToSeekGraceTicks", 60, 10, 400);
+
         COVER_SCORING_MAX_CONTACTS = BUILDER
             .comment("Maximum squad firing contacts traced per cover candidate while scoring cover.",
                      "Contacts beyond the cap are skipped for scoring only; targeting and peek",
@@ -1960,6 +1968,10 @@ BUILDER.pop();
 
     public static int getCoverSearchFailureRetryTicks() {
         return COVER_SEARCH_FAILURE_RETRY_TICKS.get();
+    }
+
+    public static int getGoToSeekGraceTicks() {
+        return GO_TO_SEEK_GRACE_TICKS.get();
     }
 
     public static int getMoveGoalRepathTicks() {

@@ -1131,6 +1131,34 @@ public final class ClearingCoordinator {
     }
 
     /**
+     * Fail-closed concession: the assigned soldier has proven it can neither
+     * check this obligation nor advance on it (bounded failed searches, no
+     * walkable route). Mark it checked so the order can settle or report
+     * STALLED instead of hanging on a soldier frozen between the two — the
+     * same skip precedent as {@link #skipBehindEveryone}. A later observation
+     * re-arms the check through the normal renewed-obligation path. Counts as
+     * progress: concessions un-latch the stall report like a real check.
+     *
+     * @return true when this call marked the target checked.
+     */
+    public static boolean concedePoi(SoldierEntity soldier, BlockPos poi) {
+        ClearingState state = stateForSoldier(soldier);
+        if (state == null || poi == null) {
+            return false;
+        }
+        if (!isTargetStillOpen(soldier, poi)) {
+            return false;
+        }
+        long now = state.level.getGameTime();
+        if (state.checkedTick.putIfAbsent(poi.asLong(), now) == null) {
+            state.lastCheckTick = now;
+            noteProgress(state, now);
+            return true;
+        }
+        return false;
+    }
+
+    /**
      * True when a candidate dock position has line of sight to this soldier's
      * clearing check target — a dock that cannot observe the blind spot keeps
      * the soldier busy without ever contributing a check.

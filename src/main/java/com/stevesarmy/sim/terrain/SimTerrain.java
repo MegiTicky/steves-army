@@ -41,6 +41,15 @@ public final class SimTerrain {
         wall(width + 1, -1, width + 1, depth + 1, 3, Blocks.STONE_BRICKS.defaultBlockState());
     }
 
+    /**
+     * platform() floor without the containment border walls: for scenarios
+     * that must be genuinely coverless — any wall, including the border, is
+     * a cover candidate within search radius.
+     */
+    public void floorOnly() {
+        fill(origin.offset(-1, -1, -1), origin.offset(width + 1, -1, depth + 1), Blocks.SMOOTH_STONE.defaultBlockState());
+    }
+
     /** Ground-level box wall: x1..x2 × z1..z2 footprint, h tall, hollow opening-free. */
     public void wall(int x1, int z1, int x2, int z2, int h, BlockState state) {
         for (int x = x1; x <= x2; x++) {

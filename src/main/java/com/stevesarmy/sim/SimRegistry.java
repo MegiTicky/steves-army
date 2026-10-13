@@ -98,6 +98,8 @@ public final class SimRegistry {
             mgAttackHalfRows(),
             mgAttackScatteredBlocks(),
             cqbDoorContact(),
+            attackGuideUnreachableConcede(),
+            goToVolleyStrandDirectWalk(),
             clearCheckerDeath());
     }
 
@@ -1509,6 +1511,146 @@ public final class SimRegistry {
                     SimSample last = lastSample(view, "pie");
                     return last != null && Math.hypot(last.state.position.x - 16.5,
                         last.state.position.z - 8.5) <= 10.5;
+                })
+            .build();
+    }
+
+    /**
+     * Attack order at an objective sealed inside a wall pocket: every POI the
+     * coordinator derives from the ping floods only the pocket interior, so
+     * the dockless soldier outside faces an unreachable guide with no dock to
+     * hold and no advance to take. That combination used to re-request the
+     * same doomed search forever — the frozen SELECTING_COVER/NO_COVER wall.
+     * After bounded starved searches the job is conceded and the soldier must
+     * make visible progress on the order.
+     */
+    private static SimScenario attackGuideUnreachableConcede() {
+        return SimScenario.builder("attack_guide_unreachable_concede")
+            .description("Dockless attack soldier, unreachable guide: the attack ping lands inside "
+                + "a sealed building on a borderless (coverless) floor, so every cover search "
+                + "fails and the assigned corner job has no walkable route. The soldier must "
+                + "concede the job after bounded starved searches and advance, not mill in place.")
+            .duration(1000)
+            .armed()
+            .terrain(t -> {
+                t.floorOnly();
+                t.building(33, 9, 39, 15, 3, new int[0][]); // sealed objective box, no doors
+            })
+            .setup(ctx -> {
+                ctx.spawnAnchor(4, 0, 30);
+                ctx.spawnFriendly(ModEntities.SOLDIER.get(), "concede", 10, 0, 30, SquadMode.HOLD);
+                ctx.injectThreat(36, 12, 1.0f);
+                ctx.setDangerSweepEnabled(false);
+                ctx.issueAttackOrder(36, 12);
+            })
+            .action(250, "refresh threat intel", ctx -> ctx.refreshInjectedThreats())
+            .action(500, "refresh threat intel", ctx -> ctx.refreshInjectedThreats())
+            .action(750, "refresh threat intel", ctx -> ctx.refreshInjectedThreats())
+            .assertThat("advances on the order despite the sealed box "
+                    + "(final displacement from spawn >= 8)",
+                view -> {
+                    SimSample last = lastSample(view, "concede");
+                    return last != null && Math.hypot(
+                        last.state.position.x - 10.5, last.state.position.z - 30.5) >= 8.0;
+                })
+            .assertThat("closes on the sealed box (final dist to (36,12) <= 14)",
+                view -> {
+                    SimSample last = lastSample(view, "concede");
+                    return last != null && Math.hypot(
+                        last.state.position.x - 36.5, last.state.position.z - 12.5) <= 14.0;
+                })
+            .build();
+    }
+
+    /**
+     * GO_TO volley into a coverless corridor: the destination has no cover
+     * route, and the player re-pings the same spot every 30 ticks. Every
+     * re-ping bumped the move generation and restarted the 200t relocation
+     * window, so the direct-walk fallback could never fire — the soldier
+     * stood prone flashing SEEKING/NO_COVER. The seek-starvation bail is
+     * keyed on the destination, so the volley cannot restart it and the
+     * soldier must walk.
+     */
+    private static SimScenario goToVolleyStrandDirectWalk() {
+        return SimScenario.builder("goto_volley_strand_direct_walk")
+            .description("Mashed GO_TO pings over a coverless platform: the cover relocation "
+                + "seek starves, and the direct walk must take over within the destination-"
+                + "keyed grace instead of stranding prone in a SEEKING/NO_COVER flash.")
+            .duration(700)
+            .armed()
+            .terrain(t -> t.floorOnly()) // coverless corridor: every seek must fail
+            .setup(ctx -> {
+                ctx.spawnAnchor(4, 0, 24);
+                ctx.spawnFriendly(ModEntities.SOLDIER.get(), "mover", 8, 0, 24, SquadMode.HOLD);
+                ctx.injectThreat(14, 22, 1.0f);
+                ctx.setDangerSweepEnabled(false);
+                ctx.issueGoTo(34, 24);
+            })
+            .action(60, "re-ping GO_TO (volley)", ctx -> ctx.issueGoTo(34, 24))
+            .action(90, "re-ping GO_TO (volley)", ctx -> ctx.issueGoTo(34, 24))
+            .action(120, "re-ping GO_TO (volley)", ctx -> ctx.issueGoTo(34, 24))
+            .action(150, "re-ping GO_TO + refresh threat", ctx -> {
+                ctx.issueGoTo(34, 24);
+                ctx.refreshInjectedThreats();
+            })
+            .action(180, "re-ping GO_TO (volley)", ctx -> ctx.issueGoTo(34, 24))
+            .action(210, "re-ping GO_TO (volley)", ctx -> ctx.issueGoTo(34, 24))
+            .action(240, "re-ping GO_TO (volley)", ctx -> ctx.issueGoTo(34, 24))
+            .action(270, "re-ping GO_TO (volley)", ctx -> ctx.issueGoTo(34, 24))
+            .action(300, "re-ping GO_TO (volley)", ctx -> ctx.issueGoTo(34, 24))
+            .action(330, "re-ping GO_TO (volley)", ctx -> ctx.issueGoTo(34, 24))
+            .action(360, "re-ping GO_TO (volley)", ctx -> ctx.issueGoTo(34, 24))
+            .action(390, "re-ping GO_TO (volley)", ctx -> ctx.issueGoTo(34, 24))
+            .action(420, "re-ping GO_TO (volley)", ctx -> ctx.issueGoTo(34, 24))
+            .action(450, "re-ping GO_TO (volley)", ctx -> ctx.issueGoTo(34, 24))
+            .action(480, "re-ping GO_TO (volley)", ctx -> ctx.issueGoTo(34, 24))
+            .action(510, "re-ping GO_TO (volley)", ctx -> ctx.issueGoTo(34, 24))
+            .action(540, "re-ping GO_TO (volley)", ctx -> ctx.issueGoTo(34, 24))
+            .action(570, "re-ping GO_TO (volley)", ctx -> ctx.issueGoTo(34, 24))
+            .action(600, "re-ping GO_TO (volley)", ctx -> ctx.issueGoTo(34, 24))
+            .action(630, "re-ping GO_TO (volley)", ctx -> ctx.issueGoTo(34, 24))
+            .assertThat("makes progress while the pings mash "
+                    + "(displacement from spawn at t330 >= 6)",
+                view -> {
+                    SimSample at = sampleAt(view, "mover", 330);
+                    return at != null && Math.hypot(
+                        at.state.position.x - 8.5, at.state.position.z - 24.5) >= 6.0;
+                })
+            .assertThat("completes the approach (closest approach to the ping <= 4; "
+                    + "post-completion combat drift is legal)",
+                view -> {
+                    double best = Double.MAX_VALUE;
+                    for (SimSample s : view.timeline().series("mover")) {
+                        double d = Math.hypot(
+                            s.state.position.x - 34.5, s.state.position.z - 24.5);
+                        if (d < best) best = d;
+                    }
+                    return best <= 4.0;
+                })
+            .assertThat("never strands prone away from the destination "
+                    + "(at t330: not prone, or already within 6 of the ping)",
+                view -> {
+                    SimSample at = sampleAt(view, "mover", 330);
+                    if (at == null) return false;
+                    boolean near = Math.hypot(
+                        at.state.position.x - 34.5, at.state.position.z - 24.5) <= 6.0;
+                    return near || !"SWIMMING".equals(at.posture);
+                })
+            .assertThat("state flash stays bounded once the walk owns the legs "
+                    + "(<= 8 SEEKING/NO_COVER transitions after t200)",
+                view -> {
+                    int flips = 0;
+                    String prev = null;
+                    for (SimSample s : view.timeline().series("mover")) {
+                        if (s.tick < 200) continue;
+                        boolean flash = "SEEKING_COVER".equals(s.state.coverState)
+                            || "NO_COVER".equals(s.state.coverState);
+                        if (flash && prev != null && !prev.equals(s.state.coverState)) {
+                            flips++;
+                        }
+                        prev = flash ? s.state.coverState : null;
+                    }
+                    return flips <= 8;
                 })
             .build();
     }

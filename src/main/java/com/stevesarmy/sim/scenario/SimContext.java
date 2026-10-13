@@ -233,6 +233,30 @@ public final class SimContext {
         }
     }
 
+    /**
+     * GO_TO ping through the network-path sequence (PingMessage): stale ATTACK
+     * state clears first, then each soldier receives the ping (bumping the
+     * move generation), then the squad activity is replaced. Re-calling this
+     * reproduces the mashed-ping volley the GO_TO strand reacts to.
+     */
+    public void issueGoTo(int x, int z) {
+        if (anchor == null) {
+            throw new IllegalStateException("spawn an anchor before issueGoTo — the anchor owns the order");
+        }
+        BlockPos objective = terrain.at(x, 0, z);
+        for (SoldierEntity soldier : friendlies) {
+            soldier.clearAttackTarget();
+        }
+        for (SoldierEntity soldier : friendlies) {
+            soldier.receivePing(com.stevesarmy.ping.PingType.GO_TO,
+                new Vec3(objective.getX() + 0.5, objective.getY(), objective.getZ() + 0.5));
+        }
+        com.stevesarmy.squad.SquadActivityManager.applyCommandCore(
+            anchor.getUUID(), com.stevesarmy.squad.FireTeam.ALL,
+            com.stevesarmy.ping.PingType.GO_TO, objective,
+            level.dimension().location().hashCode(), List.copyOf(friendlies));
+    }
+
     // --- danger-map verification seams ---------------------------------------
 
     /**

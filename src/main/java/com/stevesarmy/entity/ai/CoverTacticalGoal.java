@@ -459,6 +459,31 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
     private static final int ATTACK_DOCK_STALL_SEARCHES = 3;
     private BlockPos attackStallDock = null;
     private int attackStallFails = 0;
+
+    // Guide-stall concession: a DOCKLESS soldier whose clearing guide is
+    // unreachable has neither a dock to hold nor an advance to take — the
+    // search-fail branch used to re-request the same doomed search forever
+    // (the frozen SELECTING_COVER/NO_COVER wall). After
+    // ATTACK_DOCK_STALL_SEARCHES consecutive failures against the same
+    // unreachable guide, concede the obligation to the coordinator so the
+    // order can settle or report STALLED instead of hanging on this soldier.
+    private BlockPos attackGuideStallGuide = null;
+    private int attackGuideStallFails = 0;
+
+    // GO_TO seek-starvation tracker. Keyed on the DESTINATION, not the ping
+    // generation: every re-ping bumps the generation and resets
+    // goToRelocationTicks, so a player mashing the ping could restart the
+    // 200t relocation window forever and the direct-walk fallback would
+    // never fire. This counter only resets when the destination changes or
+    // a cover route actually commits.
+    private BlockPos goToStallDestination = null;
+    private int goToSeekStallTicks = 0;
+
+    // The generation whose cover relocation LANDED on a dock that is not the
+    // pinged destination (side cover on the route can sit past the target).
+    // requestGoToRelocation declines it so the direct walk finishes the
+    // approach instead of re-capturing the ping into the same dock loop.
+    private int goToRelocationLandedGeneration = -1;
     private String debugLastSearchMode = "";
     private String debugLastSearchResult = "";
     private String debugLastSearchPhase = "";
@@ -1140,7 +1165,33 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
             BlockPos guide = clearingPoiTarget != null
                 ? clearingPoiTarget : soldier.getAttackTargetPos();
             if (clearingGuideReachable(guide)) {
+                attackGuideStallGuide = null;
+                attackGuideStallFails = 0;
                 startFallbackAdvance();
+            } else {
+                // Dockless with an unreachable guide has NO recovery at all:
+                // no dock to hold, no advance to take, and re-requesting the
+                // same doomed search 1/s was the frozen SELECTING_COVER wall.
+                // After bounded consecutive failures, concede the obligation
+                // — the coordinator marks it checked (re-armed on sighting),
+                // the claim strips, and the next pass assigns reachable work
+                // so the order can settle or report STALLED.
+                if (guide != null && guide.equals(attackGuideStallGuide)) {
+                    attackGuideStallFails++;
+                } else {
+                    attackGuideStallGuide = guide;
+                    attackGuideStallFails = 1;
+                }
+                if (attackGuideStallFails >= ATTACK_DOCK_STALL_SEARCHES
+                    && ClearingCoordinator.concedePoi(soldier, guide)) {
+                    if (attackDebugLog()) {
+                        StevesArmyMod.LOGGER.info(
+                            "[AttackAdvance] Soldier {} conceded unreachable job {} after {} starved searches",
+                            soldier.getId(), guide.toShortString(), attackGuideStallFails);
+                    }
+                    attackGuideStallGuide = null;
+                    attackGuideStallFails = 0;
+                }
             }
             attackPhase = AttackPhase.SELECTING_COVER;
             return;
@@ -1180,12 +1231,16 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
     public boolean requestGoToRelocation(BlockPos destination, int commandGeneration) {
         if (destination == null || !soldier.hasValidPingMoveTarget()
             || soldier.getPingMoveGeneration() != commandGeneration
-            || failedGoToRelocationGeneration == commandGeneration) {
+            || failedGoToRelocationGeneration == commandGeneration
+            || goToRelocationLandedGeneration == commandGeneration) {
             return false;
         }
         if (relocationType == RelocationType.GO_TO
             && relocationCommandGeneration == commandGeneration) {
             return true;
+        }
+        if (relocationCommandGeneration != commandGeneration) {
+            goToRelocationLandedGeneration = -1;
         }
 
         clearRelocationTarget();
@@ -2285,14 +2340,37 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
             return;
         }
 
-        if (relocationType == RelocationType.GO_TO
-            && ++goToRelocationTicks > MAX_GO_TO_RELOCATION_TICKS) {
-            if (DiagnosticLogManager.isCoverLoggingEnabled()) {
-                StevesArmyMod.LOGGER.info("[CoverRelocation] Soldier {} GO_TO relocation timed out after {} ticks",
-                    soldier.getId(), goToRelocationTicks);
+        if (relocationType == RelocationType.GO_TO) {
+            // Seek-starvation bail: while no cover route has committed, the
+            // relocation is just the SEEKING/NO_COVER flash. Keyed on the
+            // destination so re-pinging the same spot cannot restart the
+            // hunt — the mashed-ping strand — and the direct walk in
+            // SoldierMoveToPingGoal takes over the same generation.
+            if (!relocationCenter.equals(goToStallDestination)) {
+                goToStallDestination = relocationCenter;
+                goToSeekStallTicks = 0;
             }
-            failGoToRelocation();
-            return;
+            if (getCoverManager().getTargetCover() == null) {
+                if (++goToSeekStallTicks >= StevesArmyConfig.getGoToSeekGraceTicks()) {
+                    if (DiagnosticLogManager.isCoverLoggingEnabled()) {
+                        StevesArmyMod.LOGGER.info(
+                            "[CoverRelocation] Soldier {} GO_TO seek starved {}t without a cover commit - direct walk",
+                            soldier.getId(), goToSeekStallTicks);
+                    }
+                    failGoToRelocation();
+                    return;
+                }
+            } else {
+                goToSeekStallTicks = 0;
+            }
+            if (++goToRelocationTicks > MAX_GO_TO_RELOCATION_TICKS) {
+                if (DiagnosticLogManager.isCoverLoggingEnabled()) {
+                    StevesArmyMod.LOGGER.info("[CoverRelocation] Soldier {} GO_TO relocation timed out after {} ticks",
+                        soldier.getId(), goToRelocationTicks);
+                }
+                failGoToRelocation();
+                return;
+            }
         }
 
         // Suppressed-traveler doctrine: a near-miss during a GO_TO ping move
@@ -8140,7 +8218,17 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
         }
 
         if (relocationType == RelocationType.GO_TO) {
-            soldier.completeGoToIfGeneration(relocationCommandGeneration);
+            // The dock must actually BE the pinged destination to complete
+            // the move: side cover on the route can sit past the target, and
+            // completing there strands the player's order 10 blocks early.
+            // A short/past dock marks the generation landed — the direct
+            // walk finishes the remaining approach.
+            if (relocationCenter != null
+                && soldier.blockPosition().distSqr(relocationCenter) <= 4 * 4) {
+                soldier.completeGoToIfGeneration(relocationCommandGeneration);
+            } else {
+                goToRelocationLandedGeneration = relocationCommandGeneration;
+            }
         }
         if (relocationType != RelocationType.NONE) {
             relocationType = RelocationType.NONE;
@@ -8203,6 +8291,14 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
     private void enterOpenGroundFallbackPosture() {
         CoverBehaviorManager mgr = getCoverManager();
         if (soldier.isPreparingOrReloading() || soldier.isHealing() || mgr.isInCover()) {
+            return;
+        }
+        // A pending move ping owns the soldier's next action: after a starved
+        // GO_TO seek the direct walk takes over the same generation, and it
+        // must not start from a freshly re-armed prone latch (that latch is
+        // what froze GO_TO soldiers face-down in the open). TravelCrawlController
+        // still crawls the walk when suppression warrants it.
+        if (soldier.hasValidPingMoveTarget() && !soldier.hasValidAttackTarget()) {
             return;
         }
         boolean underFire = mgr.isSuppressed() || mgr.isPinned()
