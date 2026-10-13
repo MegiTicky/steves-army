@@ -100,6 +100,7 @@ public final class SimRegistry {
             cqbDoorContact(),
             attackGuideUnreachableConcede(),
             goToVolleyStrandDirectWalk(),
+            goToVolleyStreet(),
             clearCheckerDeath());
     }
 
@@ -1634,6 +1635,102 @@ public final class SimRegistry {
                     if (at == null) return false;
                     boolean near = Math.hypot(
                         at.state.position.x - 34.5, at.state.position.z - 24.5) <= 6.0;
+                    return near || !"SWIMMING".equals(at.posture);
+                })
+            .assertThat("state flash stays bounded once the walk owns the legs "
+                    + "(<= 8 SEEKING/NO_COVER transitions after t200)",
+                view -> {
+                    int flips = 0;
+                    String prev = null;
+                    for (SimSample s : view.timeline().series("mover")) {
+                        if (s.tick < 200) continue;
+                        boolean flash = "SEEKING_COVER".equals(s.state.coverState)
+                            || "NO_COVER".equals(s.state.coverState);
+                        if (flash && prev != null && !prev.equals(s.state.coverState)) {
+                            flips++;
+                        }
+                        prev = flash ? s.state.coverState : null;
+                    }
+                    return flips <= 8;
+                })
+            .build();
+    }
+
+    /**
+     * The realistic GO_TO volley: the streetBlock fixture (two houses, doors,
+     * a street between them, waist-high cover rows) instead of a bare floor.
+     * The order is "move into the far room of house B" while the player
+     * re-pings the same spot every 30 ticks — the mashed-ping pattern from
+     * the in-game strand. Docks en route will land short of the far room;
+     * the landing check must hand the remainder to the direct walk instead
+     * of completing the order at a street dock, and the volley must not
+     * restart the seek window. Real maps always have some cover, so this is
+     * the representative case; the coverless volley is the edge case.
+     */
+    private static SimScenario goToVolleyStreet() {
+        return SimScenario.builder("goto_volley_street")
+            .description("Mashed GO_TO pings on the streetBlock fixture: the destination is the "
+                + "far room of house B (two doors deep), with waist-high cover rows in the "
+                + "street. Re-pings must not strand the soldier prone at a street dock — the "
+                + "approach has to keep advancing into the ordered room.")
+            .duration(900)
+            .armed()
+            .terrain(t -> {
+                t.streetBlock();
+                t.coverRow(19, 12, 20, 13, 1);
+                t.coverRow(19, 17, 20, 18, 1);
+            })
+            .setup(ctx -> {
+                ctx.spawnAnchor(4, 0, 32);
+                ctx.spawnFriendly(ModEntities.SOLDIER.get(), "mover", 10, 0, 34, SquadMode.HOLD);
+                ctx.injectThreat(21, 15, 1.0f);
+                ctx.setDangerSweepEnabled(false);
+                ctx.issueGoTo(34, 15);
+            })
+            .action(60, "re-ping GO_TO (volley)", ctx -> ctx.issueGoTo(34, 15))
+            .action(90, "re-ping GO_TO (volley)", ctx -> ctx.issueGoTo(34, 15))
+            .action(120, "re-ping GO_TO (volley)", ctx -> ctx.issueGoTo(34, 15))
+            .action(150, "re-ping GO_TO + refresh threat", ctx -> {
+                ctx.issueGoTo(34, 15);
+                ctx.refreshInjectedThreats();
+            })
+            .action(180, "re-ping GO_TO (volley)", ctx -> ctx.issueGoTo(34, 15))
+            .action(210, "re-ping GO_TO (volley)", ctx -> ctx.issueGoTo(34, 15))
+            .action(240, "re-ping GO_TO (volley)", ctx -> ctx.issueGoTo(34, 15))
+            .action(270, "re-ping GO_TO (volley)", ctx -> ctx.issueGoTo(34, 15))
+            .action(300, "re-ping GO_TO (volley)", ctx -> ctx.issueGoTo(34, 15))
+            .action(330, "re-ping GO_TO (volley)", ctx -> ctx.issueGoTo(34, 15))
+            .action(360, "re-ping GO_TO (volley)", ctx -> ctx.issueGoTo(34, 15))
+            .action(390, "re-ping GO_TO (volley)", ctx -> ctx.issueGoTo(34, 15))
+            .action(420, "re-ping GO_TO (volley)", ctx -> ctx.issueGoTo(34, 15))
+            .action(450, "re-ping GO_TO (volley)", ctx -> ctx.issueGoTo(34, 15))
+            .action(480, "re-ping GO_TO (volley)", ctx -> ctx.issueGoTo(34, 15))
+            .action(510, "re-ping GO_TO (volley)", ctx -> ctx.issueGoTo(34, 15))
+            .assertThat("keeps advancing while the pings mash "
+                    + "(displacement from spawn at t330 >= 10)",
+                view -> {
+                    SimSample at = sampleAt(view, "mover", 330);
+                    return at != null && Math.hypot(
+                        at.state.position.x - 10.5, at.state.position.z - 34.5) >= 10.0;
+                })
+            .assertThat("enters the ordered far room of house B "
+                    + "(closest approach to (34,15) <= 5)",
+                view -> {
+                    double best = Double.MAX_VALUE;
+                    for (SimSample s : view.timeline().series("mover")) {
+                        double d = Math.hypot(
+                            s.state.position.x - 34.5, s.state.position.z - 15.5);
+                        if (d < best) best = d;
+                    }
+                    return best <= 5.0;
+                })
+            .assertThat("never strands prone away from the destination "
+                    + "(at t450: not prone, or already within 8 of the ping)",
+                view -> {
+                    SimSample at = sampleAt(view, "mover", 450);
+                    if (at == null) return false;
+                    boolean near = Math.hypot(
+                        at.state.position.x - 34.5, at.state.position.z - 15.5) <= 8.0;
                     return near || !"SWIMMING".equals(at.posture);
                 })
             .assertThat("state flash stays bounded once the walk owns the legs "
