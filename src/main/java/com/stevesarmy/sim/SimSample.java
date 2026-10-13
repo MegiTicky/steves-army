@@ -60,6 +60,12 @@ public final class SimSample {
     public final boolean clearingAssembleArmed;
     /** True while executing a coordinator-driven advance (investigate walk or SECURE assemble). */
     public final boolean clearingAdvancing;
+    /** Move-control source for this tick ("cqb-caution"/"vanilla"/"controller"...); null when unavailable. */
+    public final String moveSource;
+    /** CQB caution reason ("enemy near path"/"manual CQB"); null or "none" when inactive/unavailable. */
+    public final String cautionReason;
+    /** Applied movement speed intent (mob.getSpeed()); null when zero or unavailable. */
+    public final Double appliedSpeed;
 
     public SimSample(int tick, String label, CombatStateSnapshot state,
                      float health, float maxHealth, boolean hasAttackTarget,
@@ -70,7 +76,8 @@ public final class SimSample {
                      String posture, boolean rising, float syncedCoverHeight,
                      double dangerAtSoldier, boolean dangerLegExposed, float headYaw,
                      int clearingStage, int clearingChecked, boolean clearingAssembleArmed,
-                     boolean clearingAdvancing) {
+                     boolean clearingAdvancing,
+                     String moveSource, String cautionReason, Double appliedSpeed) {
         this.tick = tick;
         this.label = label;
         this.state = state;
@@ -100,5 +107,8 @@ public final class SimSample {
         this.clearingChecked = clearingChecked;
         this.clearingAssembleArmed = clearingAssembleArmed;
         this.clearingAdvancing = clearingAdvancing;
+        this.moveSource = moveSource;
+        this.cautionReason = cautionReason;
+        this.appliedSpeed = appliedSpeed;
     }
 }

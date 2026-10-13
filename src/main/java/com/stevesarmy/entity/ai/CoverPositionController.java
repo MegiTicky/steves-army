@@ -43,6 +43,8 @@ public class CoverPositionController extends MoveControl {
     /** Sim-harness telemetry: which subsystem produced the current movement (and why). */
     public String debugMoveSource() { return debugMoveSource; }
     public String debugMoveReason() { return debugMoveReason; }
+    /** Current CQB caution reason from the steering advisor ("none" when inactive). */
+    public String cautionReason() { return steeringAdvisor.getCautionReason(); }
     private Vec3 debugLastSetVelocity = Vec3.ZERO;
     // Sim-harness telemetry: how often the cover-anchor velocity actually engaged.
     private int debugAnchorTicks;
@@ -393,6 +395,16 @@ public class CoverPositionController extends MoveControl {
             if (tickCautionSteering(anchorTarget)) {
                 return;
             }
+            // Caution active but the steer target bailed (swept collision,
+            // degenerate steer vector) - the vanilla path follower must still
+            // hold the caution cap, or a nav re-issue sprints through the
+            // threat window at full modifier for the transition ticks.
+            boolean bailCautionActive = this.mob instanceof SoldierEntity bailSoldier
+                && steeringAdvisor.isCautionActive(bailSoldier);
+            if (bailCautionActive) {
+                this.speedModifier = steeringAdvisor.getCautionSpeed(
+                    (SoldierEntity) this.mob, this.speedModifier);
+            }
             float previousYaw = this.mob.getYRot();
             float previousBodyYaw = this.mob.yBodyRot;
             float previousHeadYaw = this.mob.getYHeadRot();
@@ -401,7 +413,7 @@ public class CoverPositionController extends MoveControl {
             applyCoverAnchorVelocity(anchorTarget);
             this.debugLastSetVelocity = this.mob.getDeltaMovement();
             this.debugMoveSource = "vanilla";
-            this.debugMoveReason = "navigation";
+            this.debugMoveReason = bailCautionActive ? "navigation caution" : "navigation";
             return;
         }
 
@@ -435,7 +447,19 @@ public class CoverPositionController extends MoveControl {
 
         // Re-assert target position every tick so super.tick() doesn't reset to WAIT.
         // Slow before the arrival radius so vanilla's 90-degree turn cap cannot orbit it.
-        this.setWantedPosition(targetPos.x, targetPos.y, targetPos.z, getApproachSpeed(distance));
+        double approachSpeed = getApproachSpeed(distance);
+        boolean cautionClamped = false;
+        if (this.mob instanceof SoldierEntity cautionSoldier
+            && steeringAdvisor.isCautionActive(cautionSoldier)) {
+            // Controller-owned legs (dock handoffs) must obey the same caution
+            // cap as path following - the branch above only covers navigation.
+            // Speed clamp only: the lateral steer offset would fight the dock.
+            approachSpeed = steeringAdvisor.getCautionSpeed(cautionSoldier, approachSpeed);
+            cautionClamped = true;
+        }
+        this.setWantedPosition(targetPos.x, targetPos.y, targetPos.z, approachSpeed);
+        this.debugMoveSource = "controller";
+        this.debugMoveReason = cautionClamped ? "handoff caution" : "handoff";
 
         float previousYaw = this.mob.getYRot();
         float previousBodyYaw = this.mob.yBodyRot;

@@ -366,8 +366,16 @@ public final class SimManager {
                 slotOffset = Math.sqrt(dx * dx + dz * dz);
             }
             int anchorPulls = -1;
+            String moveSource = null;
+            String cautionReason = null;
+            Double appliedSpeed = null;
             if (soldier.getMoveControl() instanceof com.stevesarmy.entity.ai.CoverPositionController ctrl) {
                 anchorPulls = ctrl.getDebugAnchorPulls();
+                moveSource = ctrl.debugMoveSource();
+                cautionReason = ctrl.cautionReason();
+                if (soldier.getSpeed() > 0.0f) {
+                    appliedSpeed = (double) soldier.getSpeed();
+                }
             }
             int exposedRays = -1;
             int exposedHeadRays = -1;
@@ -423,7 +431,8 @@ public final class SimManager {
                 clearingView == null ? -1 : clearingView.stage().ordinal(),
                 clearingView == null ? -1 : clearingView.checkedCount(),
                 clearingView != null && clearingView.secureAssemble(),
-                soldier.getCoverTacticalGoal().isClearingAdvancing()));
+                soldier.getCoverTacticalGoal().isClearingAdvancing(),
+                moveSource, cautionReason, appliedSpeed));
             recorder.soldier(label, snap, los, nearestX, nearestZ,
                 shotCounts.getOrDefault(soldier.getUUID(), 0),
                 hasGun,
@@ -434,7 +443,8 @@ public final class SimManager {
                 soldier.isPreparingOrReloading(),
                 soldier.getPose().name(), soldier.isHalfCoverRising(),
                 snap.currentCover != null ? soldier.getSyncedCoverCurrentHeight() : -1f,
-                dangerAtSoldier, dangerLegExposed);
+                dangerAtSoldier, dangerLegExposed,
+                moveSource, cautionReason, appliedSpeed);
         }
         recorder.endFrame(context.enemies);
     }

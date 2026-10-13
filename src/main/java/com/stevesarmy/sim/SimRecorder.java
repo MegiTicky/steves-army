@@ -105,7 +105,8 @@ public final class SimRecorder {
                         double slotOffset, int anchorPulls, int exposedRays, int exposedHeadRays,
                         int probedRays, boolean reloading,
                         String posture, boolean rising, float syncedCoverHeight,
-                        double dangerAtSoldier, boolean dangerLegExposed) {
+                        double dangerAtSoldier, boolean dangerLegExposed,
+                        String moveSource, String cautionReason, Double appliedSpeed) {
         if (current == null) return;
         if (!firstSoldier) current.append(',');
         firstSoldier = false;
@@ -196,6 +197,15 @@ public final class SimRecorder {
             if (dangerLegExposed) {
                 current.append(",\"dle\":1");
             }
+        }
+        if (moveSource != null && !"none".equals(moveSource)) {
+            current.append(",\"ms\":").append(quote(moveSource));
+        }
+        if (cautionReason != null && !"none".equals(cautionReason)) {
+            current.append(",\"cr\":").append(quote(cautionReason));
+        }
+        if (appliedSpeed != null && appliedSpeed > 0.0) {
+            current.append(",\"sp\":").append(num(appliedSpeed));
         }
         current.append('}');
     }

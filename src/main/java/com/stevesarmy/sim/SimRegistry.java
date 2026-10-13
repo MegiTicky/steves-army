@@ -1489,6 +1489,20 @@ public final class SimRegistry {
                     }
                     return n >= 4;
                 })
+            .assertThat("caution slow-down engages and holds the cap while active "
+                    + "(>= 10 moving capped samples, none above the 0.37 auto modifier)",
+                view -> {
+                    int engaged = 0;
+                    for (SimSample s : view.timeline().series("pie")) {
+                        if (s.cautionReason == null || "none".equals(s.cautionReason)) continue;
+                        if (s.appliedSpeed != null && s.appliedSpeed > 0.0) {
+                            // cap contract: min(requested, 0.37) modifier x 0.35 speed attr
+                            if (s.appliedSpeed > 0.37 * 0.35 + 0.005) return false;
+                            engaged++;
+                        }
+                    }
+                    return engaged >= 10;
+                })
             .assertThat("attack order advances the soldier to the objective room "
                     + "(final dist to (16,8) <= 10.5)",
                 view -> {
