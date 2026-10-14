@@ -184,14 +184,23 @@ public class ThreatAwareness {
         Iterator<ThreatEntry> it = threats.iterator();
         while (it.hasNext()) {
             ThreatEntry entry = it.next();
-            
+
             if (entry.entity != null && entry.entity.isAlive()) {
                 entry.position = entry.entity.blockPosition();
                 entry.lastSeenTime = GameClock.nowMs();
+            } else if (entry.entity != null) {
+                // A corpse is not a threat. Keeping the entry made caution
+                // steering ("enemy near path") and threat-aware cover scoring
+                // churn around the kill site long after the fight moved on —
+                // soldiers shuffled at 0.01-0.13 b/t with zero living enemies
+                // (user report 2026-10-14; ghost_corpse_no_caution). Where the
+                // body lies is squad-intel business (lastKnownPosition).
+                it.remove();
+                continue;
             } else {
                 entry.weight *= WEIGHT_DECAY_PER_TICK;
             }
-            
+
             if (entry.weight < MIN_WEIGHT) {
                 it.remove();
                 continue;

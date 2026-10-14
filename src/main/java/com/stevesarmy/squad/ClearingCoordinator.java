@@ -823,6 +823,24 @@ public final class ClearingCoordinator {
             // wall as "inside" and could complete a clearing without entry.
             if (!state.areaCells.contains(at.asLong())) {
                 allInside = false;
+                // An outside soldier's motion still feeds the still-tracking
+                // bookkeeping below; an inside soldier's does not need to —
+                // see the idle-restlessness exemption further down.
+            }
+            // Idle restlessness must not block completion: once every soldier
+            // is physically inside a fully healthy area (all checks done,
+            // contacts resolved, no recent contact — the gate below), there is
+            // nothing left to fight. Idle cover re-searches otherwise keep a
+            // soldier pacing between two anchors forever (navWalking every
+            // sample), so an order that had already won never settled, never
+            // reported "Area secured", and never converted to HOLD (user
+            // report 2026-10-14). hasValidAttackTarget cannot discriminate —
+            // it is the order-objective clock and reads true for every
+            // soldier until completion.
+            if (state.areaCells.contains(at.asLong())) {
+                state.navStillPos.remove(soldier.getUUID());
+                state.navStillTicks.remove(soldier.getUUID());
+                continue;
             }
             CoverBehaviorManager.CoverState coverState = soldier.getCoverBehaviorManager().getState();
             boolean coverWalking = coverState == CoverBehaviorManager.CoverState.SEEKING_COVER
@@ -1009,7 +1027,8 @@ public final class ClearingCoordinator {
             activity.objective());
         ServerPlayer owner = server.getPlayerList().getPlayer(activity.ownerId());
         if (owner != null) {
-            owner.sendSystemMessage(Component.literal("[Squad] Area secured."));
+            owner.sendSystemMessage(Component.literal(
+                "[Squad] Area secured. All clear - holding position."));
         }
         StevesArmyMod.LOGGER.info("[AttackClear] order {} {} secured at {} (pois={}, checked={})",
             activity.ownerId(), activity.fireTeam(), activity.objective(),

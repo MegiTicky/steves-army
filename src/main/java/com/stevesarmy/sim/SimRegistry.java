@@ -104,6 +104,7 @@ public final class SimRegistry {
             cautionAdsTravelFloor(),
             suppressedCrawlPace(),
             clearCheckerDeath(),
+            ghostCorpseNoCaution(),
             attackSuperiorityAdvance(),
             attackParityAdvance(),
             attackSuperioritySustained(),
@@ -5376,6 +5377,103 @@ public final class SimRegistry {
     }
 
     /**
+     * REGRESSION (user-spotted t990, run attack_superiority_advance
+     * 20261014_113627): a killed enemy's personal ThreatAwareness entry
+     * outlived the corpse and kept caution steering ("enemy near path") plus
+     * cover churn alive around the kill site — all four soldiers shuffled at
+     * 0.01-0.13 b/t for ~300t after the last defender died, with suppression
+     * 0.00 and zero living enemies. A corpse is not a threat: once the enemy
+     * is down, a soldier walking past the kill site must travel at free
+     * speed with no caution cap. Deterministic by construction — unarmed,
+     * single soldier, scripted kill.
+     */
+    private static SimScenario ghostCorpseNoCaution() {
+        final boolean[] killed = {false};
+        final int[] killTick = {-1};
+        /** Caution frames inside the corpse transit band (the bug signature). */
+        final int[] ghostCautionFrames = {0};
+        /** Caution-capped crawl frames inside the transit band. */
+        final int[] slowFramesNearCorpse = {0};
+        final double corpseX = 24.5;
+        final double corpseZ = 20.5;
+        SimScenario.Builder builder = SimScenario.builder("ghost_corpse_no_caution")
+            .description("Kill an enemy at 4 blocks, then GO_TO straight past the kill site: no "
+                + "caution steering and no speed cap may engage near the corpse. Guards the "
+                + "dead-entity ghost threat that shuffled soldiers at 0.01-0.13 b/t around "
+                + "kill sites long after the fight ended.")
+            .duration(800)
+            .core()
+            .terrain(t -> t.platform())
+            .setup(ctx -> {
+                ctx.spawnAnchor(18, 0, 20);
+                ctx.spawnFriendly(ModEntities.SOLDIER.get(), "alpha", 20, 0, 20, SquadMode.HOLD);
+                // Unarmed scenario: the victim never fires, alpha never shoots —
+                // the kill is scripted and the run has no combat dice.
+                ctx.spawnEnemyLabeled("victim", 24, 0, 20);
+            });
+        for (int t = 30; t <= 150; t += 5) {
+            final int at = t;
+            builder.action(at, "kill the detected enemy once", ctx -> {
+                if (killed[0]) {
+                    return;
+                }
+                if (ctx.enemies.isEmpty()) {
+                    return;
+                }
+                EnemySoldierEntity victim = ctx.enemies.get(0);
+                if (!victim.isAlive() || victim.isRemoved()) {
+                    killed[0] = true;
+                    killTick[0] = at;
+                    return;
+                }
+                SoldierEntity alpha = ctx.soldier("alpha");
+                boolean detected = alpha != null && alpha.isAlive()
+                    && (!alpha.getThreatAwareness().getThreatInfos().isEmpty()
+                        || alpha.hasValidAttackTarget());
+                if (detected) {
+                    victim.hurt(victim.level().damageSources().generic(), 1000.0F);
+                    killed[0] = !victim.isAlive();
+                    killTick[0] = at;
+                }
+            });
+        }
+        builder.action(160, "walk past the kill site", ctx -> ctx.issueGoTo(34, 20));
+        for (int t = 170; t <= 700; t += 5) {
+            final int at = t;
+            builder.action(at, "ghost caution probe", ctx -> {
+                SoldierEntity alpha = ctx.soldier("alpha");
+                if (alpha == null || !alpha.isAlive()) {
+                    return;
+                }
+                double dist = Math.sqrt(Math.pow(alpha.getX() - corpseX, 2)
+                    + Math.pow(alpha.getZ() - corpseZ, 2));
+                if (dist > 12.0) {
+                    return;
+                }
+                if (alpha.getMoveControl()
+                        instanceof com.stevesarmy.entity.ai.CoverPositionController ctrl
+                    && "enemy near path".equals(ctrl.cautionReason())) {
+                    ghostCautionFrames[0]++;
+                }
+                if (!alpha.getNavigation().isDone() && alpha.getSpeed() <= 0.15F) {
+                    slowFramesNearCorpse[0]++;
+                }
+            });
+        }
+        return builder
+            .assertThat("the enemy was detected and killed",
+                view -> killed[0] && killTick[0] > 0)
+            .assertThat("alpha walked past the kill site (reached x >= 30)",
+                view -> view.timeline().series("alpha").stream()
+                    .anyMatch(s -> s.state.position.x >= 30.0))
+            .assertThat("no ghost caution near the corpse (enemy near path never active)",
+                view -> ghostCautionFrames[0] == 0)
+            .assertThat("no caution-capped crawl near the corpse (speed > 0.15 while moving)",
+                view -> slowFramesNearCorpse[0] == 0)
+            .build();
+    }
+
+    /**
      * BEHAVIOR PROBE (user report 2026-10-13): how does the ATTACK advance
      * profile change when the defense holds FIRE SUPERIORITY instead of
      * parity? In-game report: soldiers used to bound cover-to-cover (0.5.1)
@@ -5445,6 +5543,11 @@ public final class SimRegistry {
             // (this scenario deliberately creates that standoff shape).
             .suppressDetectors("CoverOscillation", "ExposedWhileHiding",
                 "FireDeadlock", "RotationOscillation", "PositionDeadlock", "StuckSeek",
+                // Live-fire peek cadence roulette: 6 clean peek exposures from
+                // one row inside a 290t firefight trips it on some dice
+                // (run 20261014_123449), never on others — the probe owns its
+                // behavior asserts, not peek doctrine.
+                "PeekThrash",
                 // Hardened-defender artifact: hits land but damage is ignored,
                 // so "enemy took no damage" can never distinguish a dead firing
                 // chain from the instrument (run 20261014_113930: two false
