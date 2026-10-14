@@ -108,7 +108,8 @@ public final class SimRegistry {
             attackSuperiorityAdvance(),
             attackParityAdvance(),
             attackSuperioritySustained(),
-            attackParitySustained());
+            attackParitySustained(),
+            attackPeekGateDiscipline());
     }
 
     public static SimScenario byName(String name) {
@@ -5499,6 +5500,195 @@ public final class SimRegistry {
 
     private static SimScenario attackParitySustained() {
         return attackFireAdvance("attack_parity_sustained", 1, true);
+    }
+
+    /**
+     * Peek-before-advance gate, end to end (user question 2026-10-13: "for a
+     * soldier to advance he needs to be peeking in his cover for at least a
+     * certain amount of time without getting pinned back to ducking — test if
+     * this is actually working").
+     *
+     * Phase 1 (t40-t290): scripted near-miss pressure from the enemy side keeps
+     * the docked soldier unrecovered. The dwell clock freezes while !recovered
+     * (CoverTacticalGoal resets attackCoverArrivalTime every such tick), so NO
+     * dwell-gated advance trigger can legally fire and the 15s hard timeout
+     * never matures inside the window. The row is the only cover on the field,
+     * so the relocation channel has nowhere forward to go either. The soldier
+     * must hold the row line and stay ducked.
+     *
+     * Phase 2 (t290+): pressure lifts and a lone cover block appears near the
+     * objective (terrain.block writes live), giving the advance a dock to take.
+     * After the 2500ms recovery window the dwell clock restarts from zero, so
+     * the peek path (dwell met + peek completed + recovered) wins the race
+     * against the 10s/15s watchdogs. The soldier must expose to the threat at
+     * least once before a new ATTACK_SELECTING advance search fires.
+     *
+     * The disarmed hardened enemy is HOLD-pinned so pressure geometry stays
+     * scripted. Advance searches are detected through the lastSearch snapshot
+     * (mode ATTACK_SELECTING) rather than position: the gate governs the
+     * search trigger, and cs=REPOSITIONING alone cannot separate a gated
+     * advance from a cover-manager relocation.
+     */
+    private static SimScenario attackPeekGateDiscipline() {
+        SimScenario.Builder b = SimScenario.builder("attack_peek_gate_discipline")
+            .description("Peek-before-advance gate: scripted pressure pins the docked soldier "
+                + "through the whole dwell window (frozen dwell -> no legal advance trigger), "
+                + "then lifts and reveals a forward dock. While pinned he holds the row, stays "
+                + "ducked, and fires no ATTACK_SELECTING advance search; after recovery a peek "
+                + "precedes the advance search. Disarmed hardened enemy is HOLD-pinned so "
+                + "pressure geometry stays scripted.")
+            .duration(800)
+            .armed()
+            .terrain(t -> {
+                t.platform();
+                t.coverRow(10, 20, 26, 20, 1); // the only cover during the pin phase
+            })
+            .setup(ctx -> {
+                // Spawn far enough out that the row (~11 spine blocks of
+                // progress) clears ATTACK_SPINE_HOP_LENGTH: with the spawn any
+                // closer the spine-frame candidate filter rejects every first
+                // dock on this field and the soldier stands pinned in the open.
+                // Objective sits past the enemy so the revealed block (~22
+                // spine blocks) clears frontier+hop as the SECOND dock; with a
+                // shorter spine the hop gate + objective-exclusion radius leave
+                // no legal advance target and the release-phase search fails.
+                ctx.spawnAnchor(12, 0, 32);
+                ctx.spawnFriendly(ModEntities.SOLDIER.get(), "rifleman", 20, 0, 32, SquadMode.HOLD);
+                EnemySoldierEntity target = ctx.spawnEnemyLabeled("target", 18, 0, 8);
+                target.setSquadMode(SquadMode.HOLD);
+                target.setHoldPosition(ctx.terrain.at(18, 0, 8));
+                ctx.harden("target");
+                ctx.disarmSoldier("target"); // no return fire: the pressure timeline is ours
+                ctx.injectThreat(18, 9, 1.0f);
+                ctx.issueAttackOrder(20, 2);
+                // Name every advance trigger in the run log ([AttackPhase] lines).
+                com.stevesarmy.debug.DiagnosticLogManager.setAttackLoggingEnabled(true);
+            })
+            // FireStarvation: the hardened enemy can never take damage.
+            // PeekThrash: the pin-release cycle intentionally produces repeated
+            // peek attempts from one dock.
+            // DangerOracleMismatch: the injected suppression origins bake danger
+            // cells the LoS oracle (entity-driven) legitimately disagrees with.
+            // StuckSeek: the post-advance seek tail (finding the next dock on a
+            // sparse field) is cover-search roulette, not the gate this scenario
+            // measures — the pin/peek/recovery asserts above are the contract.
+            // ExposedWhileHiding: same tail — where the post-advance re-dock
+            // lands (rarely a north-face slot with no protection) is dock
+            // scoring roulette; dedicated dock-quality scenarios own that.
+            .suppressDetectors("FireStarvation", "PeekThrash", "DangerOracleMismatch",
+                "StuckSeek", "ExposedWhileHiding");
+        for (int t = 40; t <= 290; t += 10) {
+            b.action(t, "pinned pressure",
+                ctx -> ctx.injectSuppressionFromGround("rifleman", 2, 18.5, 8.5, 1.5, 3.0f));
+        }
+        for (int t = 60; t <= 720; t += 60) {
+            b.action(t, "refresh threat intel", ctx -> ctx.refreshInjectedThreats());
+        }
+        return b
+            .action(295, "reveal advance cover", ctx -> ctx.terrain.block(22, 1, 10,
+                net.minecraft.world.level.block.Blocks.STONE_BRICKS.defaultBlockState()))
+            .action(790, "restore logging defaults",
+                ctx -> com.stevesarmy.debug.DiagnosticLogManager.setAttackLoggingEnabled(false))
+            .assertThat("validity: docked on the row by t300 (cover claim z on the row line)",
+                view -> {
+                    for (SimSample s : view.timeline().series("rifleman")) {
+                        if (s.tick > 300) break;
+                        if (s.state.currentCover != null) {
+                            int z = s.state.currentCover.getZ();
+                            return z >= 19 && z <= 23;
+                        }
+                    }
+                    return false;
+                })
+            .assertThat("PIN HOLDS: while pressure is live (t75-t290) the soldier never "
+                    + "crosses the row line z=19",
+                view -> {
+                    for (SimSample s : view.timeline().series("rifleman")) {
+                        if (s.tick < 75) continue;
+                        if (s.tick > 290) break;
+                        if (s.state.position.z <= 19.0) return false;
+                    }
+                    return true;
+                })
+            .assertThat("PINNED = DUCKED: while pinned (t75-t290) the soldier never exposes "
+                    + "(no peek exposure states)",
+                view -> {
+                    for (SimSample s : view.timeline().series("rifleman")) {
+                        if (s.tick < 75) continue;
+                        if (s.tick > 290) break;
+                        String ps = s.state.peekState;
+                        if ("EXPOSED".equals(ps) || "STANDING_IN_HALF_COVER".equals(ps)) {
+                            return false;
+                        }
+                    }
+                    return true;
+                })
+            .assertThat("NO ADVANCE SEARCH WHILE PINNED: no new ATTACK_SELECTING cover search "
+                    + "lands during the pin (t40-t290)",
+                view -> {
+                    String baseline = null;
+                    for (SimSample s : view.timeline().series("rifleman")) {
+                        if (s.tick < 40 || s.tick > 290) continue;
+                        String ls = String.valueOf(s.state.lastSearch);
+                        if (baseline == null) {
+                            baseline = ls;
+                            continue;
+                        }
+                        if (ls.startsWith("ATTACK_SELECTING") && !ls.equals(baseline)) {
+                            return false;
+                        }
+                    }
+                    return baseline != null;
+                })
+            .assertThat("GATE OPENS: after pressure lifts the soldier leaves the dock (or an "
+                    + "advance search fires) by t700",
+                view -> {
+                    String baseline = null;
+                    for (SimSample s : view.timeline().series("rifleman")) {
+                        if (s.tick < 40) continue;
+                        String ls = String.valueOf(s.state.lastSearch);
+                        if (baseline == null) baseline = ls;
+                        if (s.tick < 295 || s.tick > 700) continue;
+                        boolean leftCover = !"IN_COVER".equals(s.state.coverState)
+                            && !"SUPPRESSED_IN_COVER".equals(s.state.coverState);
+                        boolean newSearch = ls.startsWith("ATTACK_SELECTING")
+                            && !ls.equals(baseline);
+                        boolean queued = "ATTACK_SELECTING".equals(s.state.queuedMode);
+                        if (leftCover || newSearch || queued) return true;
+                    }
+                    return false;
+                })
+            .assertThat("LADDER: peek activity precedes leaving the dock after release "
+                    + "(advance ran through the peek-gated path)",
+                view -> {
+                    boolean peeked = false;
+                    for (SimSample s : view.timeline().series("rifleman")) {
+                        if (s.tick >= 290) {
+                            String ps = s.state.peekState;
+                            if ("EXPOSED".equals(ps) || "STANDING_IN_HALF_COVER".equals(ps)
+                                || "MOVING_TO_PEEK".equals(ps)
+                                || "RETURNING_TO_COVER".equals(ps)) {
+                                peeked = true;
+                            }
+                            boolean leftCover = !"IN_COVER".equals(s.state.coverState)
+                                && !"SUPPRESSED_IN_COVER".equals(s.state.coverState);
+                            if (s.tick >= 295 && leftCover) return peeked;
+                        }
+                    }
+                    return false;
+                })
+            .assertThat("RECOVERED BEFORE ADVANCE: suppression has decayed (<= 0.45) when the "
+                    + "soldier leaves the dock",
+                view -> {
+                    for (SimSample s : view.timeline().series("rifleman")) {
+                        if (s.tick < 295) continue;
+                        boolean leftCover = !"IN_COVER".equals(s.state.coverState)
+                            && !"SUPPRESSED_IN_COVER".equals(s.state.coverState);
+                        if (leftCover) return s.state.suppressionLevel <= 0.45f;
+                    }
+                    return false;
+                })
+            .build();
     }
 
     private static SimScenario attackFireAdvance(String name, int defenderCount, boolean hardenDefenders) {
