@@ -103,7 +103,11 @@ public final class SimRegistry {
             goToVolleyStreet(),
             cautionAdsTravelFloor(),
             suppressedCrawlPace(),
-            clearCheckerDeath());
+            clearCheckerDeath(),
+            attackSuperiorityAdvance(),
+            attackParityAdvance(),
+            attackSuperioritySustained(),
+            attackParitySustained());
     }
 
     public static SimScenario byName(String name) {
@@ -5368,6 +5372,207 @@ public final class SimRegistry {
                 view -> probe.securedSeen && probe.securedAtTick > killTick[0])
             .assertThat("squad reached the objective space",
                 view -> probe.enteredZone)
+            .build();
+    }
+
+    /**
+     * BEHAVIOR PROBE (user report 2026-10-13): how does the ATTACK advance
+     * profile change when the defense holds FIRE SUPERIORITY instead of
+     * parity? In-game report: soldiers used to bound cover-to-cover (0.5.1)
+     * and now push straight at the objective — good against thin defenses,
+     * lethal against a defended street. Same longStreetBlock map, same
+     * 4-rifleman squad, two defense sizes; the per-soldier advance
+     * telemetry (dock episodes, longest exposed run, moving-under-fire
+     * time, casualties) is the evidence and the user judges the behavior.
+     * Full-only: live-fire roulette.
+     */
+    private static SimScenario attackSuperiorityAdvance() {
+        return attackFireAdvance("attack_superiority_advance", 3, false);
+    }
+
+    private static SimScenario attackParityAdvance() {
+        return attackFireAdvance("attack_parity_advance", 1, false);
+    }
+
+    /** Sustained variants: damage-immune defenders keep the exchange live all run. */
+    private static SimScenario attackSuperioritySustained() {
+        return attackFireAdvance("attack_superiority_sustained", 3, true);
+    }
+
+    private static SimScenario attackParitySustained() {
+        return attackFireAdvance("attack_parity_sustained", 1, true);
+    }
+
+    private static SimScenario attackFireAdvance(String name, int defenderCount, boolean hardenDefenders) {
+        final String[] labels = {"alpha", "bravo", "charlie", "delta"};
+        final int n = labels.length;
+        // Per-soldier advance-profile telemetry, sampled every 5t.
+        final double[] lastX = new double[n];
+        final double[] lastZ = new double[n];
+        final boolean[] haveLast = new boolean[n];
+        /** Samples walking exposed (not docked in cover). */
+        final int[] exposedMoveSamples = new int[n];
+        /** Of those, samples with suppression >= 0.5 (advancing under fire). */
+        final int[] exposedMoveUnderFire = new int[n];
+        final int[] curRun = new int[n];
+        final int[] maxExposedRun = new int[n];
+        final double[] curRunDist = new double[n];
+        final double[] maxRunDistance = new double[n];
+        /** Cover-dock transitions over the whole run (street subset below). */
+        final int[] dockEpisodes = new int[n];
+        final boolean[] prevInCover = new boolean[n];
+        final int[] streetDockEpisodes = new int[n];
+        final double[] maxForwardX = new double[n];
+        final int[] firstDeathTick = new int[n];
+        /** Closest approach to any living enemy while not docked (blocks). */
+        final double[] closestExposedApproach = new double[n];
+        java.util.Arrays.fill(closestExposedApproach, Double.MAX_VALUE);
+        final int[] enemyDeathTick = new int[defenderCount];
+        java.util.Arrays.fill(enemyDeathTick, -1);
+        final int[] probeSamples = {0};
+
+        SimScenario.Builder builder = SimScenario.builder(name)
+            .description("ATTACK advance behavior probe on the 50-block defended street: the squad "
+                + "starts at the west end in the open and pings house B; " + defenderCount
+                + " armed defenders hold the east end behind the cover lines. Measurement run for "
+                + "the user-reported fire-superiority charge: dock cadence, exposed-walk runs, "
+                + "moving-under-fire time, and casualties on both sides — the user judges the "
+                + "behavior, these numbers only have to be honest.")
+            .duration(4800)
+            .field(96, 40)
+            .armed()
+            // Live-fire standoff families, same waiver set as clear_long_egress
+            // (this scenario deliberately creates that standoff shape).
+            .suppressDetectors("CoverOscillation", "ExposedWhileHiding",
+                "FireDeadlock", "RotationOscillation", "PositionDeadlock", "StuckSeek",
+                // Hardened-defender artifact: hits land but damage is ignored,
+                // so "enemy took no damage" can never distinguish a dead firing
+                // chain from the instrument (run 20261014_113930: two false
+                // FireStarvations while tracers recorded).
+                hardenDefenders ? "FireStarvation" : "CoverOscillation")
+            .terrain(t -> t.longStreetBlock());
+        for (int t = 20; t <= 4780; t += 5) {
+            final int at = t;
+            builder.action(at, "advance profile probe", ctx -> {
+                probeSamples[0]++;
+                for (int i = 0; i < n; i++) {
+                    SoldierEntity s = ctx.soldier(labels[i]);
+                    if (s == null) continue;
+                    if (!s.isAlive()) {
+                        if (firstDeathTick[i] < 0) firstDeathTick[i] = at;
+                        continue;
+                    }
+                    double x = s.getX();
+                    double z = s.getZ();
+                    maxForwardX[i] = Math.max(maxForwardX[i], x);
+                    var cover = s.getCoverBehaviorManager();
+                    boolean inCover = cover.getState()
+                            == com.stevesarmy.combat.cover.CoverBehaviorManager.CoverState.IN_COVER
+                        || cover.getState()
+                            == com.stevesarmy.combat.cover.CoverBehaviorManager.CoverState.SUPPRESSED_IN_COVER;
+                    if (inCover && !prevInCover[i]) {
+                        dockEpisodes[i]++;
+                        if (x < 66.5) streetDockEpisodes[i]++;
+                    }
+                    prevInCover[i] = inCover;
+                    double disp = haveLast[i]
+                        ? Math.sqrt((x - lastX[i]) * (x - lastX[i]) + (z - lastZ[i]) * (z - lastZ[i]))
+                        : 0.0;
+                    lastX[i] = x;
+                    lastZ[i] = z;
+                    haveLast[i] = true;
+                    boolean movingExposed = !inCover && disp > 0.5;
+                    if (movingExposed) {
+                        exposedMoveSamples[i]++;
+                        if (cover.getSuppressionTracker().getSuppressionLevel() >= 0.5) {
+                            exposedMoveUnderFire[i]++;
+                        }
+                        curRun[i]++;
+                        curRunDist[i] += disp;
+                        if (curRun[i] > maxExposedRun[i]) {
+                            maxExposedRun[i] = curRun[i];
+                            maxRunDistance[i] = curRunDist[i];
+                        }
+                    } else {
+                        curRun[i] = 0;
+                        curRunDist[i] = 0.0;
+                    }
+                    if (!inCover) {
+                        double nearest = Double.MAX_VALUE;
+                        for (EnemySoldierEntity e : ctx.enemies) {
+                            if (!e.isAlive() || e.isRemoved()) continue;
+                            double d = Math.sqrt(
+                                (x - e.getX()) * (x - e.getX()) + (z - e.getZ()) * (z - e.getZ()));
+                            nearest = Math.min(nearest, d);
+                        }
+                        if (nearest < closestExposedApproach[i]) {
+                            closestExposedApproach[i] = nearest;
+                        }
+                    }
+                }
+                for (int e = 0; e < defenderCount && e < ctx.enemies.size(); e++) {
+                    EnemySoldierEntity en = ctx.enemies.get(e);
+                    if (enemyDeathTick[e] < 0 && !(en.isAlive() && !en.isRemoved())) {
+                        enemyDeathTick[e] = at;
+                    }
+                }
+            });
+        }
+        builder.action(4740, "advance profile diag", ctx -> {
+            for (int i = 0; i < n; i++) {
+                com.stevesarmy.StevesArmyMod.LOGGER.info(
+                    "[Sim][diag] {} {}: maxFwd={} docks={} streetDocks={} exposedMove={} underFire={} "
+                        + "worstRun={}samp ({}blk) closestApproach={} firstDeath={}",
+                    name, labels[i],
+                    String.format("%.1f", maxForwardX[i]),
+                    dockEpisodes[i], streetDockEpisodes[i],
+                    exposedMoveSamples[i], exposedMoveUnderFire[i],
+                    maxExposedRun[i], String.format("%.1f", maxRunDistance[i]),
+                    closestExposedApproach[i] == Double.MAX_VALUE ? "-" :
+                        String.format("%.1f", closestExposedApproach[i]),
+                    firstDeathTick[i] < 0 ? "-" : String.valueOf(firstDeathTick[i]));
+            }
+            com.stevesarmy.StevesArmyMod.LOGGER.info("[Sim][diag] {} defender death ticks: {}", name,
+                java.util.Arrays.toString(java.util.Arrays.copyOf(enemyDeathTick, defenderCount)));
+        });
+        return builder
+            .setup(ctx -> {
+                // Squad in the open at the west end of the street; the four
+                // waist-high cover lines (x=28/40/52/62) are the bound
+                // options between them and house B.
+                ctx.spawnAnchor(18, 0, 18);
+                ctx.spawnFriendly(ModEntities.SOLDIER.get(), "alpha", 18, 0, 18, SquadMode.HOLD);
+                ctx.spawnFriendly(ModEntities.SOLDIER.get(), "bravo", 18, 0, 14, SquadMode.HOLD);
+                ctx.spawnFriendly(ModEntities.SOLDIER.get(), "charlie", 18, 0, 22, SquadMode.HOLD);
+                ctx.spawnFriendly(ModEntities.SOLDIER.get(), "delta", 20, 0, 18, SquadMode.HOLD);
+                // Parity: the house B guard alone. Superiority: two more
+                // defenders docked behind the x=52 (north lane) and x=62
+                // (south lane) cover rows.
+                EnemySoldierEntity guard = ctx.spawnEnemyLabeled("guard", 74, 0, 15);
+                guard.setSquadMode(SquadMode.HOLD);
+                guard.setHoldPosition(ctx.terrain.at(74, 0, 15));
+                if (defenderCount >= 2) {
+                    EnemySoldierEntity flanker = ctx.spawnEnemyLabeled("flanker", 53, 0, 14);
+                    flanker.setSquadMode(SquadMode.HOLD);
+                    flanker.setHoldPosition(ctx.terrain.at(53, 0, 14));
+                }
+                if (defenderCount >= 3) {
+                    EnemySoldierEntity runner = ctx.spawnEnemyLabeled("runner", 63, 0, 20);
+                    runner.setSquadMode(SquadMode.HOLD);
+                    runner.setHoldPosition(ctx.terrain.at(63, 0, 20));
+                }
+                if (hardenDefenders) {
+                    // The point is the advance profile UNDER sustained fire,
+                    // not who wins: immortal defenders keep the exchange
+                    // (and the contact-plan gate) live for the whole clock.
+                    for (String enemyLabel : new String[] {"guard", "flanker", "runner"}) {
+                        ctx.harden(enemyLabel);
+                    }
+                }
+                ctx.issueAttackOrder(72, 18); // house B center
+            })
+            .assertThat("firefight happened (tracers recorded)", view -> !view.shots().isEmpty())
+            .assertThat("advance probe collected samples", view -> probeSamples[0] > 100)
             .build();
     }
 }
