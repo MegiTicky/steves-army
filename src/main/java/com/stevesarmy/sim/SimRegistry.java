@@ -111,7 +111,8 @@ public final class SimRegistry {
             attackParitySustained(),
             attackPeekGateDiscipline(),
             suppressedRelocationSafeRoute(),
-            attackAbsolutePinHold());
+            attackAbsolutePinHold(),
+            CautionSteeringScenarios.freshnessAndPace());
     }
 
     public static SimScenario byName(String name) {
@@ -1763,19 +1764,16 @@ public final class SimRegistry {
     }
 
     /**
-     * Cautious-travel speed floor under the TaCZ gun-speed emulation. The sim
-     * gun taxes MOVEMENT_SPEED like production TaCZ does (weight MULTIPLY_BASE,
-     * ADS -0.2 MULTIPLY_TOTAL while aiming), and the caution cap multiplies the
-     * resulting attribute — the compound that made in-game advances crawl.
-     * The caution cap must hold an absolute floor (0.37 of the BASE attribute),
-     * so caution-active travel keeps its designed pace regardless of gun state.
+     * Automatic caution retains normal GO_TO pace under TaCZ gun-speed emulation.
+     * With no live target to aim at, this march requests 1.2 times the weight-taxed
+     * attribute (0.39795 b/t), rather than the retired 0.37-base caution cap.
+     * Exact modifier/ADS/slow-request behavior is covered by CautionSteeringScenarios.
      */
     private static SimScenario cautionAdsTravelFloor() {
         return SimScenario.builder("caution_ads_travel_floor")
             .description("GO_TO across the streetBlock with a threat near the path and the "
-                + "sim gun's TaCZ speed emulation engaged: the caution cap must keep "
-                + "travel at 0.37 of the BASE attribute instead of compounding with "
-                + "the gun's weight/ADS taxes into sneak-or-worse pace.")
+                + "sim gun's TaCZ speed emulation engaged: automatic caution retains "
+                + "the requested GO_TO pace with the normal weapon weight tax.")
             .duration(600)
             .armed()
             .terrain(t -> {
@@ -1816,8 +1814,8 @@ public final class SimRegistry {
                     }
                     return best <= 5.0;
                 })
-            .assertThat("caution-active travel holds the absolute cap floor "
-                    + "(median caution-window speed in [0.120, 0.139] b/t = 0.37x base attr)",
+            .assertThat("automatic caution retains requested GO_TO pace "
+                    + "(median caution-window speed in [0.38, 0.41] b/t)",
                 view -> {
                     java.util.List<Double> speeds = new java.util.ArrayList<>();
                     for (SimSample s : view.timeline().series("mover")) {
@@ -1832,7 +1830,7 @@ public final class SimRegistry {
                     }
                     speeds.sort(Double::compare);
                     double median = speeds.get(speeds.size() / 2);
-                    return median >= 0.120 && median <= 0.139;
+                    return median >= 0.38 && median <= 0.41;
                 })
             .build();
     }

@@ -32,7 +32,8 @@ public class ThreatAwareness {
         @Nullable LivingEntity entity;
         BlockPos position;
         float weight;
-        long lastSeenTime;
+        // Observation time is independent of the live-reference position refresh in tick().
+        long lastObservedTime;
 
         ThreatEntry(ThreatSource source, @Nullable LivingEntity entity, BlockPos position, float weight) {
             this.source = source;
@@ -40,7 +41,7 @@ public class ThreatAwareness {
             this.entity = entity;
             this.position = position;
             this.weight = weight;
-            this.lastSeenTime = GameClock.nowMs();
+            this.lastObservedTime = GameClock.nowMs();
         }
     }
 
@@ -89,10 +90,19 @@ public class ThreatAwareness {
     }
 
     public void onEntityDetected(LivingEntity entity, Vec3 soldierPos) {
+        onEntityDetected(entity, soldierPos, true);
+    }
+
+    /** Remembered/hidden target acquisition preserves scoring without renewing observation age. */
+    public void onEntityDetected(LivingEntity entity, Vec3 soldierPos, boolean observed) {
+        ThreatEntry previous = findByEntity(entity);
+        long observedTime = observed ? GameClock.nowMs()
+            : previous != null ? previous.lastObservedTime : -1L;
         removeByEntity(entity);
         
         float weight = calculateDistanceWeight(entity, soldierPos);
         threats.add(new ThreatEntry(ThreatSource.ENTITY_DETECTED, entity, entity.blockPosition(), weight));
+        threats.get(threats.size() - 1).lastObservedTime = observedTime;
         
         updateSmoothDirection(entity.position());
         
@@ -187,7 +197,6 @@ public class ThreatAwareness {
 
             if (entry.entity != null && entry.entity.isAlive()) {
                 entry.position = entry.entity.blockPosition();
-                entry.lastSeenTime = GameClock.nowMs();
             } else if (entry.entity != null) {
                 // A corpse is not a threat. Keeping the entry made caution
                 // steering ("enemy near path") and threat-aware cover scoring
@@ -336,7 +345,7 @@ public class ThreatAwareness {
     public List<ThreatInfo> getThreatInfos() {
         List<ThreatInfo> infos = new ArrayList<>();
         for (ThreatEntry entry : threats) {
-            infos.add(new ThreatInfo(entry.position, entry.weight, entry.entity));
+            infos.add(new ThreatInfo(entry.position, entry.weight, entry.entity, entry.lastObservedTime));
         }
         return infos;
     }
@@ -345,11 +354,22 @@ public class ThreatAwareness {
         public final BlockPos position;
         public final float weight;
         @Nullable public final LivingEntity entity;
+        public final long lastObservedTime;
 
         public ThreatInfo(BlockPos position, float weight, @Nullable LivingEntity entity) {
+            this(position, weight, entity, GameClock.nowMs());
+        }
+
+        public ThreatInfo(BlockPos position, float weight, @Nullable LivingEntity entity, long lastObservedTime) {
             this.position = position;
             this.weight = weight;
             this.entity = entity;
+            this.lastObservedTime = lastObservedTime;
+        }
+
+        public boolean wasObservedWithin(long nowMs, long maxAgeMs) {
+            return lastObservedTime >= 0 && nowMs >= lastObservedTime
+                && nowMs - lastObservedTime <= maxAgeMs;
         }
     }
 

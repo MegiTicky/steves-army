@@ -436,6 +436,16 @@ Recording: frames now carry `yh` (head yaw) for aim-orientation assertions.
 
 ## Detectors (all run in every scenario)
 
+`caution_freshness_and_pace` is a core server-level input/controller probe with AI
+disabled so observations cannot renew accidentally. It checks fresh and expired
+position pings, squad intel and retained living references; corner-watch freshness;
+automatic steering and fallback at requested pace under an attribute tax; requested
+slow movement; manual CQB's ramp/cap; and restoration after a fallback clamp.
+`caution_ads_travel_floor` now guards normal GO_TO pace (about 0.398 b/t with
+weapon weight), replacing its historical assertion for the retired automatic cap.
+Use `suppressed_crawl_pace` and `cover_approach_crawl` for end-to-end crawl checks,
+and `cqb_doorway_queue` / `cqb_corner_pie` for manual CQB flow.
+
 StuckSeek, SeekFailLoop, CoverOscillation, PeekThrash (incl. aborted
 peek cycles), SuppressionStarve, FollowEscapeBlocked, PathFailStorm,
 PositionDeadlock, FireStarvation (armed runs only), ReservationDrift

@@ -501,7 +501,7 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
             }
 
             if (isDetected) {
-                threats.onEntityDetected(potential, soldier.position());
+                threats.onEntityDetected(potential, soldier.position(), hasLineOfSight && detectionRefreshed);
                 if (hasLineOfSight && detectionRefreshed) {
                     reportThreatToSquadIntel(potential, 1.0f);
                 }
@@ -2366,7 +2366,7 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
                 if (threatDirTarget.isPresent()) {
                     this.target = threatDirTarget.get();
                     soldier.setTarget(target);
-                    threats.onEntityDetected(target, soldier.position());
+                    threats.onEntityDetected(target, soldier.position(), false);
                     threatTracker.reportThreatDirect(target);
                     if (isDebugLogging()) {
                         StevesArmyMod.LOGGER.info("[CombatGoal] Acquired threat-direction target (cover fallback): {}", 
@@ -2386,7 +2386,7 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
                 if (nearLastKnown.isPresent()) {
                     this.target = nearLastKnown.get();
                     soldier.setTarget(target);
-                    threats.onEntityDetected(target, soldier.position());
+                    threats.onEntityDetected(target, soldier.position(), false);
                     threatTracker.reportThreatDirect(target);
                     if (isDebugLogging()) {
                         StevesArmyMod.LOGGER.info("[CombatGoal] Acquired target near last known position (cover fallback): {}", 
@@ -2402,7 +2402,7 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
             if (closest.isPresent()) {
                 this.target = closest.get();
                 soldier.setTarget(target);
-                threats.onEntityDetected(target, soldier.position());
+                threats.onEntityDetected(target, soldier.position(), false);
                 threatTracker.reportThreatDirect(target);
                 if (isDebugLogging()) {
                     StevesArmyMod.LOGGER.info("[CombatGoal] Acquired closest target (cover fallback): {}", 

@@ -853,6 +853,16 @@ flowchart LR
 
 ### Smooth Direction
 
+`ThreatInfo.lastObservedTime` records actual sightings/pings, independently of
+the live entity-position refresh. Cached detection and hidden-target fallback
+acquisition preserve that age. Cover-scoring memory retains its existing lifetime.
+`CqbSteeringAdvisor` uses only observations up to 6 seconds old and squad intel
+within the existing 120-tick staleness window, for both steering and corner watch.
+Automatic caution retains the requested movement modifier and normal weapon speed
+effects. Manual CQB retains its ramp to a 0.24-base-attribute cap, without boosting
+requested slower movement. Doorway queueing still applies while caution is active.
+Fallback speed clamps are temporary and never overwrite the stored request.
+
 - Updated via `updateSmoothDirection(threatPos)` with configurable `blendFactor`
 - Decays after `threatSmoothDecayTimeMs` ms of no updates
 - Used by `CoverTacticalGoal` for threat direction and peek direction

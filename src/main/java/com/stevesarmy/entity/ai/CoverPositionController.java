@@ -14,13 +14,12 @@ import net.minecraft.world.phys.shapes.VoxelShape;
 public class CoverPositionController extends MoveControl {
 
     /**
-     * Caution pace is defined against the soldier's UNBURDENED attribute:
+     * Manual CQB's cap is defined against the soldier's UNBURDENED attribute:
      * TaCZ taxes MOVEMENT_SPEED (gun weight MULTIPLY_BASE, aim/reload
      * MULTIPLY_TOTAL while aiming/reloading), and a cap multiplied against the
-     * taxed value compounds into sneak-or-worse travel (measured 0.100 b/t vs
-     * the designed 0.1295). These helpers express the cap against the base
-     * attribute — gun state can still slow the soldier further, but never
-     * multiplies the caution cap itself.
+     * taxed value compounds the slowdown. Express the manual cap against the
+     * base attribute while respecting any slower requested pace. Automatic
+     * caution keeps the original modifier and normal weapon speed effects.
      */
     private static double baseMoveAttr(Mob mob) {
         var instance = mob.getAttribute(Attributes.MOVEMENT_SPEED);
@@ -32,9 +31,10 @@ public class CoverPositionController extends MoveControl {
      *  speedModifier that super.tick() will multiply by the CURRENT attribute. */
     private double cautionSpeedToModifier(SoldierEntity soldier, double requestedSpeed) {
         double capped = steeringAdvisor.getCautionSpeed(soldier, requestedSpeed);
+        if (!soldier.isCQB()) return requestedSpeed;
         double attr = this.mob.getAttributeValue(Attributes.MOVEMENT_SPEED);
         double base = baseMoveAttr(this.mob);
-        return attr > 1.0e-6 ? capped * (base / attr) : capped;
+        return Math.min(requestedSpeed, attr > 1.0e-6 ? capped * (base / attr) : capped);
     }
 
     public enum MovementResult {
@@ -425,6 +425,7 @@ public class CoverPositionController extends MoveControl {
             // threat window at full modifier for the transition ticks.
             boolean bailCautionActive = this.mob instanceof SoldierEntity bailSoldier
                 && steeringAdvisor.isCautionActive(bailSoldier);
+            double requestedModifier = this.speedModifier;
             if (bailCautionActive) {
                 this.speedModifier = cautionSpeedToModifier(
                     (SoldierEntity) this.mob, this.speedModifier);
@@ -433,6 +434,8 @@ public class CoverPositionController extends MoveControl {
             float previousBodyYaw = this.mob.yBodyRot;
             float previousHeadYaw = this.mob.getYHeadRot();
             super.tick();
+            // A transient cap must not become the next tick's requested speed.
+            this.speedModifier = requestedModifier;
             traceMoveControlRotation("vanilla-navigation", previousYaw, previousBodyYaw, previousHeadYaw);
             applyCoverAnchorVelocity(anchorTarget);
             this.debugLastSetVelocity = this.mob.getDeltaMovement();
@@ -636,8 +639,8 @@ public class CoverPositionController extends MoveControl {
         soldier.traceRotationWrite("cqb-caution-steer", previousYaw, previousBodyYaw, previousHeadYaw,
             "steerTarget=" + steerTarget + ", targetYaw=" + String.format("%.1f", targetYaw)
                 + ", reason=" + steeringAdvisor.getCautionReason());
-        double cautionSpeed = steeringAdvisor.getCautionSpeed(soldier, this.speedModifier);
-        this.mob.setSpeed((float) (cautionSpeed * baseMoveAttr(this.mob)));
+        double cautionModifier = cautionSpeedToModifier(soldier, this.speedModifier);
+        this.mob.setSpeed((float) (cautionModifier * this.mob.getAttributeValue(Attributes.MOVEMENT_SPEED)));
         this.mob.setZza(1.0F);
         this.mob.setXxa(0.0F);
 
