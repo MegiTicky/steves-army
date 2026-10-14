@@ -110,7 +110,8 @@ public final class SimRegistry {
             attackSuperioritySustained(),
             attackParitySustained(),
             attackPeekGateDiscipline(),
-            suppressedRelocationSafeRoute());
+            suppressedRelocationSafeRoute(),
+            attackAbsolutePinHold());
     }
 
     public static SimScenario byName(String name) {
@@ -5877,6 +5878,214 @@ public final class SimRegistry {
         }
         return dockZ;
     }
+
+    // ATTACK absolute-pin doctrine: ten-vs-one fire must freeze the dock -----
+
+    /**
+     * ATTACK absolute-pin doctrine (user report): a soldier advancing on an
+     * ATTACK order into ABSOLUTE enemy fire (10 shooters vs 1) must NEVER
+     * voluntarily walk out of his cover while suppressed. In-game he currently
+     * holds through only ~2 pinned peek cycles and then exits — telemetry
+     * shows coverState flipping to NO_COVER and an upright walk-out under
+     * full suppression. This scenario is the pre-fix reproduction and the
+     * post-fix gate.
+     *
+     * Contract (MOVEMENT-based — the doctrine is about walking out, not state
+     * labels):
+     *  - PINNED LIVE: organic suppression (ten real shooters firing real
+     *    bullets; no scripted injection, no injected threats) saturates to
+     *    >= 0.9 by t400 and again in t800-1400. The late leg is vacuous when
+     *    the soldier died before the window — DIES-AT-DOCK owns that outcome.
+     *  - NEVER-LEAVE: while suppression >= 0.6 the soldier never displaces
+     *    more than 1.0 block from his settled dock (median position over
+     *    t60-240, after the band-edge dock settles; dock-relative because
+     *    attack dock scoring makes the absolute dock z unstable across runs).
+     *  - NO EXIT-WALK: no SEEKING_COVER/REPOSITIONING/NO_COVER episode while
+     *    suppression >= 0.6 carries net displacement beyond 1.5 blocks —
+     *    state churn without displacement is not a walk-out.
+     *  - DIES-AT-DOCK: if the fire kills him, he dies within 1.5 blocks of
+     *    his settled dock — death at the dock is doctrine holding, not a
+     *    failure; passes vacuously when he survives.
+     *
+     * Geometry (lessons from suppressed_relocation_safe_route): band-edge
+     * spawn — (20,14) sits distSqr 144 = exactly 12 blocks from the attack
+     * objective (20,2), so the advance spine dissolves from tick 0 and the
+     * dock is deterministic (~t45, no per-run A* wander). One 1-high dock row
+     * z=10 spanning x12-28 with an open approach south of it. Ten hardened
+     * ARMED enemies HOLD-pinned across the whole front (x4-24, z2-4,
+     * staggered so lanes overlap): every lateral and forward route from the
+     * row crosses at least one live lane, so no slot the scorer could pick is
+     * actually safer. The nearest enemies sit ~7 blocks off the row — inside
+     * the ~16-20 sight range, so the attack target memory survives the whole
+     * pin (the donor's 22.8-block expiry lesson).
+     *
+     * Detectors: FireStarvation is suppressed (hardened enemies can never
+     * take damage — hits land but damage is ignored, so the detector reads
+     * the instrument, not a dead firing chain); PeekThrash (the pinned peek
+     * cadence roulette IS the reported mechanism); DangerOracleMismatch,
+     * StuckSeek and ExposedWhileHiding (seek-tail and dock-quality roulette
+     * are owned by dedicated scenarios — the pinned walk-out this scenario
+     * guards is asserted by position, not by those detectors).
+     * PositionDeadlock deliberately stays ENABLED: a REPOSITIONING-held
+     * freeze with an accepted nav path and zero steps is evidence for the
+     * freeze-then-strip mechanism being reproduced.
+     */
+    private static SimScenario attackAbsolutePinHold() {
+        final String[] enemyLabels =
+            {"e01", "e02", "e03", "e04", "e05", "e06", "e07", "e08", "e09", "e10"};
+        final int[][] enemySpots = {
+            {4, 2}, {6, 4}, {8, 2}, {10, 3}, {12, 2}, {14, 4}, {16, 2}, {18, 3}, {21, 2}, {24, 4}};
+        return SimScenario.builder("attack_absolute_pin_hold")
+            .description("ATTACK absolute-pin doctrine: one rifleman advancing on an ATTACK "
+                + "order into absolute fire (10 armed hardened shooters) must never "
+                + "voluntarily walk out of his dock while suppressed. In-game he exits after "
+                + "~2 pinned peek cycles with coverState NO_COVER. Guards the pin: "
+                + "saturation fire must freeze him at the dock (or kill him there) — never "
+                + "an exit walk.")
+            .duration(2000)
+            .armed()
+            .suppressDetectors("FireStarvation", "PeekThrash", "DangerOracleMismatch",
+                "StuckSeek", "ExposedWhileHiding")
+            .terrain(t -> {
+                t.platform();
+                t.coverRow(12, 10, 28, 10, 1); // the dock row; open approach south of it
+            })
+            .setup(ctx -> {
+                // Band-edge spawn: see the class comment — distSqr to the
+                // attack objective is 144, dissolving the advance spine.
+                ctx.spawnAnchor(20, 0, 14);
+                ctx.spawnFriendly(ModEntities.SOLDIER.get(), "rifleman", 20, 0, 14, SquadMode.HOLD);
+                for (int i = 0; i < enemyLabels.length; i++) {
+                    EnemySoldierEntity e = ctx.spawnEnemyLabeled(
+                        enemyLabels[i], enemySpots[i][0], 0, enemySpots[i][1]);
+                    e.setSquadMode(SquadMode.HOLD);
+                    e.setHoldPosition(ctx.terrain.at(enemySpots[i][0], 0, enemySpots[i][1]));
+                    ctx.harden(enemyLabels[i]); // the pressure never dies
+                }
+                // Past the row (z=2 is north of the z=10 row), 12 blocks out.
+                ctx.issueAttackOrder(20, 2);
+            })
+            .assertThat("FIREFIGHT LIVE: tracers were recorded (the pin is organic gunfire, "
+                    + "not scripted injection)",
+                view -> !view.shots().isEmpty())
+            .assertThat("PINNED LIVE: organic suppression reaches >= 0.9 by t400 and again "
+                    + "in t800-1400 (late leg vacuous if he died before the window — "
+                    + "DIES-AT-DOCK owns that outcome)",
+                view -> {
+                    boolean early = false;
+                    boolean late = false;
+                    boolean aliveLate = false;
+                    for (SimSample s : view.timeline().series("rifleman")) {
+                        if (s.tick <= 400 && s.health > 0f && s.state.suppressionLevel >= 0.9f) {
+                            early = true;
+                        }
+                        if (s.tick >= 800 && s.tick <= 1400 && s.health > 0f) {
+                            aliveLate = true;
+                            if (s.state.suppressionLevel >= 0.9f) late = true;
+                        }
+                    }
+                    return early && (late || !aliveLate);
+                })
+            .assertThat("NEVER-LEAVE: while suppressed (>= 0.6, measured from t100 "
+                    + "post-approach) the soldier never displaces more than 1.0 block from "
+                    + "his settled dock (median position over t60-240; dock-relative because "
+                    + "attack dock scoring makes the absolute dock unstable across runs)",
+                view -> {
+                    double[] dock = settledDockMedian(view);
+                    if (dock == null) return false;
+                    for (SimSample s : view.timeline().series("rifleman")) {
+                        if (s.tick < 100) continue;
+                        if (s.health <= 0f) continue;
+                        if (s.state.suppressionLevel < 0.6f) continue;
+                        double dx = s.state.position.x - dock[0];
+                        double dz = s.state.position.z - dock[1];
+                        if (dx * dx + dz * dz > 1.0) return false;
+                    }
+                    return true;
+                })
+            .assertThat("NO EXIT-WALK: no SEEKING_COVER/REPOSITIONING/NO_COVER episode while "
+                    + "suppressed (>= 0.6, measured from t100 post-approach) carries net "
+                    + "displacement beyond 1.5 blocks — state churn without displacement is "
+                    + "not a walk-out",
+                view -> {
+                    boolean inEpisode = false;
+                    double originX = 0;
+                    double originZ = 0;
+                    for (SimSample s : view.timeline().series("rifleman")) {
+                        if (s.tick < 100) continue;
+                        boolean exitState = "SEEKING_COVER".equals(s.state.coverState)
+                            || "REPOSITIONING".equals(s.state.coverState)
+                            || "NO_COVER".equals(s.state.coverState);
+                        if (!exitState || s.health <= 0f || s.state.suppressionLevel < 0.6f) {
+                            inEpisode = false;
+                            continue;
+                        }
+                        if (!inEpisode) {
+                            inEpisode = true;
+                            originX = s.state.position.x;
+                            originZ = s.state.position.z;
+                        }
+                        double dx = s.state.position.x - originX;
+                        double dz = s.state.position.z - originZ;
+                        if (dx * dx + dz * dz > 2.25) return false;
+                    }
+                    return true;
+                })
+            .assertThat("DIES-AT-DOCK: if the fire kills him he dies within 1.5 blocks of "
+                    + "his settled dock (death at the dock is doctrine holding, not a "
+                    + "failure; vacuous when he survives)",
+                view -> {
+                    double[] dock = settledDockMedian(view);
+                    if (dock == null) return false;
+                    boolean sawDeath = false;
+                    SimSample lastAlive = null;
+                    for (SimSample s : view.timeline().series("rifleman")) {
+                        if (s.health > 0f) lastAlive = s;
+                        else sawDeath = true;
+                    }
+                    if (!sawDeath) return true;
+                    if (lastAlive == null) return false;
+                    double dx = lastAlive.state.position.x - dock[0];
+                    double dz = lastAlive.state.position.z - dock[1];
+                    return dx * dx + dz * dz <= 2.25;
+                })
+            .build();
+    }
+
+    /**
+     * The settled dock of the "rifleman" as the MEDIAN (x,z) of his living
+     * samples in t60-240: after the band-edge dock settles (~t45 with this
+     * geometry) and inside the early engagement, so one relocation hop or
+     * peek excursion cannot move the reference. Median, not min/mean — the
+     * dock-relative line must track the TYPICAL docked position when attack
+     * dock scoring makes the absolute dock z unstable across runs.
+     * Null when the soldier never sampled alive in the window (fixture broke).
+     */
+    private static double[] settledDockMedian(SimScenario.SimRunResultView view) {
+        java.util.List<Double> xs = new java.util.ArrayList<>();
+        java.util.List<Double> zs = new java.util.ArrayList<>();
+        for (SimSample s : view.timeline().series("rifleman")) {
+            if (s.tick < 60) continue;
+            if (s.tick > 240) break;
+            if (s.health <= 0f) continue;
+            xs.add(s.state.position.x);
+            zs.add(s.state.position.z);
+        }
+        if (xs.isEmpty()) return null;
+        double[] xsArr = new double[xs.size()];
+        double[] zsArr = new double[zs.size()];
+        for (int i = 0; i < xs.size(); i++) {
+            xsArr[i] = xs.get(i);
+            zsArr[i] = zs.get(i);
+        }
+        java.util.Arrays.sort(xsArr);
+        java.util.Arrays.sort(zsArr);
+        int mid = xsArr.length / 2;
+        double mx = xsArr.length % 2 == 1 ? xsArr[mid] : (xsArr[mid - 1] + xsArr[mid]) / 2.0;
+        double mz = zsArr.length % 2 == 1 ? zsArr[mid] : (zsArr[mid - 1] + zsArr[mid]) / 2.0;
+        return new double[] {mx, mz};
+    }
+
     private static SimScenario attackFireAdvance(String name, int defenderCount, boolean hardenDefenders) {
         final String[] labels = {"alpha", "bravo", "charlie", "delta"};
         final int n = labels.length;

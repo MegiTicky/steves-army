@@ -402,6 +402,120 @@ legacy fail-open search. The `suppressedRelocationSafeRoute` config (default
 true) gates both, restoring the pre-classifier behavior for attack-target
 soldiers when disabled.
 
+**Pinned-dock protection (same knob).** Classification alone did not close the
+pin: several dock-strip writers still tore the claim down mid-pin and re-seeded
+the machine into exposed walks. While `suppressedRelocationSafeRoute` is on,
+the soldier has no player-ordered relocation (`relocationType == NONE`), and
+`SuppressionTracker.isRecovered()` is false (gated on recovery, not the
+instantaneous suppressed flag, so a flicker between bursts cannot slip a strip
+through), the cover claim is never stripped:
+
+- The entity-level stuck watchdog (`SoldierEntity.tickCoverStuckWatchdog`)
+  calls `CoverTacticalGoal.holdFromStuckWatchdog()` instead of the legacy full
+  reset: the stalled move is cancelled, the current dock claim is kept, and the
+  machine re-holds suppressed-in-cover (dockless: hold position ducked; the
+  claim is presumed unreachable and the recovery-gated machinery re-evaluates
+  it after suppression decays). GO_TO relocations keep the legacy reset.
+- Seek timeout, `tickInCover` drift/push-off/recenter-FAILED, and the
+  `evaluateCoverState` invalid-cover reposition all hold instead of clearing
+  (recenter-FAILED additionally skips the blacklist so the dock stays eligible
+  for the post-recovery evaluation).
+- A pinned soldier with no dock (`docklessSuppressedSearchActive`) never runs
+  the plain `ATTACK_SELECTING` corridor search and never takes a fallback
+  advance (open ground). The queued-search executor, the `SELECTING_COVER`
+  attack phase, and goal `start()` reroute to `runDocklessSuppressedSearch`:
+  the classified suppression search on the existing emergency retry pacing
+  (20t between attempts, 3 consecutive failures then a 100t cooldown). A
+  withheld verdict is not a dead stop — the suppressed open-ground escape
+  below runs before the ducked hold.
+
+Once suppression decays (`isRecovered` true) the strip writers above work
+exactly as before the gate existed. The absolute-pin scenario exposed three
+further launch-time holes, closed the same way:
+
+- **Pinned launches are vetoed at the source.** The continuous-pin emergency
+  channel (8s pinned → immediate reposition) and the shot-in-cover channel no
+  longer LAUNCH while `!canLeaveCoverNow()`: a classifier-approved CRAWL route
+  is still a multi-block walk away from the dock under absolute pin (the
+  pinned creep-out). The requests stay pending and execute after recovery, or
+  re-arm from the next hit/8s interval.
+- **Mid-approach re-suppression completes the approach.** An autonomous cover
+  move caught in the open when fire resumes keeps walking to its selected
+  dock: a soldier already mid-approach is in the "cover close" branch of the
+  suppressed-in-the-open doctrine BY CONSTRUCTION — the pending dock (dock
+  handoff, reload dock, knockback recovery, close-protect) is the dash/crawl
+  target, and aborting it stranded those dockings mid-transit (the round-1
+  dead stop). An exposed fallback-advance leg (open ground, no dock target)
+  still halts: with the origin dock claim held he re-holds it, dockless he
+  hands off to the escape below. Player orders (GO_TO/FOLLOW relocations,
+  suppress-area pings) are exempt either way.
+- **The advance-launch hold.** A docked soldier does not launch an ATTACK
+  corridor advance while (a) fire has been live inside a sustained-quiet
+  window (8s, `ATTACK_ADVANCE_QUIET_MS`), or (b) he was absolutely pinned
+  (≥ `PINNED_THRESHOLD`) at this dock and the fight that pinned him is still
+  live (active threat intel or a live attack target — the absolute-pin latch
+  in `trackSuppressionEpisode`, applied as the pinned-advance hold). This is
+  docked-soldier launch protection only — it never freezes a soldier in the
+  open. The quiet condition alone is not enough
+  because fire going quiet at a dock is an artifact of hiding: enemies stop
+  firing at what they cannot see, so the "recovered" window that follows is
+  not a safe launch window — stepping out is what re-draws the fire. The hold
+  clears when fire is genuinely over (threat gone, dock changed, or 8s true
+  quiet), and never-fired soldiers are exempt (the event-sequence guard).
+- **The held dock keeps its slot anchor armed.** `holdSuppressedAtDock` (and
+  the `tickInCover` drift/push-off/recenter-FAILED guards that route into it)
+  never strip the claim, and they arm the cover-slot anchor instead of
+  clearing the position controller: a shove off the slot while pinned pulls
+  the soldier back into the exact slot block (knockback recovery), which is
+  slot discipline, not a relocation. A hold at CONCEALMENT cover ducks as
+  well (`tickSuppressedInCover` enforces low posture for hiding soldiers
+  there) — concealment stops line of sight, not bullets, and the standing
+  hold left body rays visible through the whole suppression run.
+
+**Suppressed open-ground escape (same knob).** When a suppressed soldier is
+IN THE OPEN (no held cover) and the route classifier withholds every route
+(`NO_ELIGIBLE_COVER`), freezing is not an option — the doctrine (user's
+words: "they should crawl only if the enemy is not nearby (expecting that
+crawling will make the soldier much less likely to get hit). I think the
+threshold might be around 32 blocks ... And for longer distance, it should
+still be short dash when close") composes into three branches, executed by
+`runDocklessSuppressedSearch` → `startSuppressedEscapeMove`:
+
+- **Dash** to the cover when a viable one is CLOSE (within 5 blocks,
+  `ESCAPE_DASH_RANGE`): accept a brief exposure to minimize time in the open.
+- **Crawl** low toward the best available cover when the nearest live firing
+  origin / enemy shooter is FAR (≥ 32 blocks, `ESCAPE_CRAWL_SHOOTER_MIN_DIST`)
+  and no cover is within dash range — the existing low-crouch/crawl posture
+  machinery (`RouteMovement.CRAWL`, `setLowCrouching`, crawl route speed).
+  When the crawl brings him within dash range of that cover, the final
+  stretch upgrades to a dash (`tickSuppressedEscapeCrawlToDash` re-issues the
+  in-flight path at dash speed).
+- **Dash anyway** toward the nearest viable cover when the enemy is inside 32
+  blocks AND no cover is within dash range: movement is the only remaining
+  option (documented doctrine corner — the frozen alternative is the dead
+  escape chain the sim flags as `SuppressionStarve`).
+
+The escape re-runs the existing suppression search with the classifier veto
+downgraded to a preference (`PROTECTED` > `CRAWL_SAFE` > best-scored
+`EXPOSED` — when the classifier withholds everything, MOVE anyway), and with
+no recorded firing origin it moves unclassified (every route reads
+`PROTECTED`; dash). The chosen dock is committed (`escapeCommitCoverPos`):
+no per-tick re-evaluation — it is re-decided only on arrival, invalidation
+(path loss/blacklist), or a suppression-state change (recovery dissolves the
+commit and the soldier behaves exactly as pre-gate).
+
+**Multi-origin route classification (same knob).** Suppression fire often comes
+from several shooters along a line, and a lane approved against the latest
+origin can still cross a second shooter's sight. The goal samples the soldier's
+own suppression-origin memory every tick (`sampleSuppressionFiringOrigin`) into
+a list of up to 4 distinct recent origins (≥2 blocks apart, 15s freshness,
+mirroring `CoverBehaviorManager`'s origin memory). `classifySuppressionRoute`
+then requires every route node (and segment midpoint) to be shielded from ALL
+known origins: any origin seeing the lower body makes the route EXPOSED, any
+eye-only lane makes it CRAWL_SAFE. With the knob off, classification uses the
+single recorded origin only (exact legacy behavior); a squad-threat-intel feed
+of teammates' origins is a possible future widening.
+
 ### 4.4 Suppression Fire Integration
 
 See [Section 15: Suppression Fire Lifecycle](#15-suppression-fire-lifecycle).

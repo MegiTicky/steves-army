@@ -1620,6 +1620,17 @@ public class SoldierEntity extends PathfinderMob implements Container {
         if (coverWatchdogStillTicks >= COVER_WATCHDOG_STILL_TICKS) {
             coverWatchdogStillTicks = 0;
             coverWatchdogLastPos = pos;
+            // Pinned-dock protection (suppressedRelocationSafeRoute): while the
+            // soldier is under fire and not yet recovered, the watchdog must
+            // NOT strip the cover claim via the legacy full reset — cancel the
+            // stalled move and re-hold instead. GO_TO relocations and fully
+            // recovered soldiers keep the legacy reset (handled inside the goal).
+            if (StevesArmyConfig.isSuppressedRelocationSafeRoute()
+                && !coverBehaviorManager.getSuppressionTracker().isRecovered()
+                && coverTacticalGoal instanceof CoverTacticalGoal tacticalGoal) {
+                tacticalGoal.holdFromStuckWatchdog();
+                return;
+            }
             coverTacticalGoal.resetFromStuckWatchdog();
         }
     }
