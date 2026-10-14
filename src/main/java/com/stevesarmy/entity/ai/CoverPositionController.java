@@ -13,6 +13,30 @@ import net.minecraft.world.phys.shapes.VoxelShape;
 
 public class CoverPositionController extends MoveControl {
 
+    /**
+     * Caution pace is defined against the soldier's UNBURDENED attribute:
+     * TaCZ taxes MOVEMENT_SPEED (gun weight MULTIPLY_BASE, aim/reload
+     * MULTIPLY_TOTAL while aiming/reloading), and a cap multiplied against the
+     * taxed value compounds into sneak-or-worse travel (measured 0.100 b/t vs
+     * the designed 0.1295). These helpers express the cap against the base
+     * attribute — gun state can still slow the soldier further, but never
+     * multiplies the caution cap itself.
+     */
+    private static double baseMoveAttr(Mob mob) {
+        var instance = mob.getAttribute(Attributes.MOVEMENT_SPEED);
+        return instance != null ? instance.getBaseValue()
+            : mob.getAttributeValue(Attributes.MOVEMENT_SPEED);
+    }
+
+    /** cap(speed) against the base attribute, expressed for a vanilla-style
+     *  speedModifier that super.tick() will multiply by the CURRENT attribute. */
+    private double cautionSpeedToModifier(SoldierEntity soldier, double requestedSpeed) {
+        double capped = steeringAdvisor.getCautionSpeed(soldier, requestedSpeed);
+        double attr = this.mob.getAttributeValue(Attributes.MOVEMENT_SPEED);
+        double base = baseMoveAttr(this.mob);
+        return attr > 1.0e-6 ? capped * (base / attr) : capped;
+    }
+
     public enum MovementResult {
         NONE,
         IN_PROGRESS,
@@ -402,7 +426,7 @@ public class CoverPositionController extends MoveControl {
             boolean bailCautionActive = this.mob instanceof SoldierEntity bailSoldier
                 && steeringAdvisor.isCautionActive(bailSoldier);
             if (bailCautionActive) {
-                this.speedModifier = steeringAdvisor.getCautionSpeed(
+                this.speedModifier = cautionSpeedToModifier(
                     (SoldierEntity) this.mob, this.speedModifier);
             }
             float previousYaw = this.mob.getYRot();
@@ -454,7 +478,7 @@ public class CoverPositionController extends MoveControl {
             // Controller-owned legs (dock handoffs) must obey the same caution
             // cap as path following - the branch above only covers navigation.
             // Speed clamp only: the lateral steer offset would fight the dock.
-            approachSpeed = steeringAdvisor.getCautionSpeed(cautionSoldier, approachSpeed);
+            approachSpeed = cautionSpeedToModifier(cautionSoldier, approachSpeed);
             cautionClamped = true;
         }
         this.setWantedPosition(targetPos.x, targetPos.y, targetPos.z, approachSpeed);
@@ -613,7 +637,7 @@ public class CoverPositionController extends MoveControl {
             "steerTarget=" + steerTarget + ", targetYaw=" + String.format("%.1f", targetYaw)
                 + ", reason=" + steeringAdvisor.getCautionReason());
         double cautionSpeed = steeringAdvisor.getCautionSpeed(soldier, this.speedModifier);
-        this.mob.setSpeed((float) (cautionSpeed * this.mob.getAttributeValue(Attributes.MOVEMENT_SPEED)));
+        this.mob.setSpeed((float) (cautionSpeed * baseMoveAttr(this.mob)));
         this.mob.setZza(1.0F);
         this.mob.setXxa(0.0F);
 

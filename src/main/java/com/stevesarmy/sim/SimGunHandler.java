@@ -9,6 +9,9 @@ import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.entity.TargetEntity;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.ai.attributes.AttributeInstance;
+import net.minecraft.world.entity.ai.attributes.AttributeModifier;
+import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.projectile.ProjectileUtil;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.ClipContext;
@@ -50,6 +53,24 @@ public final class SimGunHandler implements GunIntegration.GunHandler {
     private static final float BULLET_SPEED = 4.0f;
     private static final float[] RECOIL = {0.5f, 0.25f};
 
+    // TaCZ speed-model emulation (production soldiers carry TaCZ guns, whose
+    // LivingEntitySpeedModifier taxes MOVEMENT_SPEED for every gun holder).
+    // Values are the default pack's AK47: weight 3.5 with SyncConfig's
+    // 0.015/weight-unit MULTIPLY_BASE tax, and movement_speed {base 0.0,
+    // aim -0.2, reload -0.15} applied MULTIPLY_TOTAL while aiming/reloading.
+    // Without this the sim is blind to the ADS/reload slows that production
+    // move-control code multiplies against.
+    private static final double WEIGHT_TAX_PER_UNIT = 0.015;
+    private static final double EMULATED_GUN_WEIGHT = 3.5;
+    private static final double AIM_SPEED_MULT = -0.20;
+    private static final double RELOAD_SPEED_MULT = -0.15;
+    private static final java.util.UUID WEIGHT_MOD_UUID =
+        java.util.UUID.fromString("7d1a2c40-5e8b-4c1a-9f6d-000000000001");
+    private static final java.util.UUID AIM_MOD_UUID =
+        java.util.UUID.fromString("7d1a2c40-5e8b-4c1a-9f6d-000000000002");
+    private static final java.util.UUID RELOAD_MOD_UUID =
+        java.util.UUID.fromString("7d1a2c40-5e8b-4c1a-9f6d-000000000003");
+
     private static SimGunHandler installed;
 
     private static final class GunState {
@@ -57,6 +78,7 @@ public final class SimGunHandler implements GunIntegration.GunHandler {
         long nextShotTick;
         long reloadFinishTick;
         boolean reloading;
+        boolean aiming;
     }
 
     /** Per-entity weapon state; cleared between scenarios by SimIsolation. */
@@ -69,7 +91,15 @@ public final class SimGunHandler implements GunIntegration.GunHandler {
     /** Scenario seam for {@code disarmSoldier}: strips the virtual gun outright. */
     public static void disarm(LivingEntity entity) {
         disarmed.add(entity.getUUID());
-        states.remove(entity.getUUID());
+        GunState state = states.remove(entity.getUUID());
+        if (state != null) {
+            AttributeInstance attr = entity.getAttribute(Attributes.MOVEMENT_SPEED);
+            if (attr != null) {
+                attr.removeModifier(WEIGHT_MOD_UUID);
+                attr.removeModifier(AIM_MOD_UUID);
+                attr.removeModifier(RELOAD_MOD_UUID);
+            }
+        }
     }
 
     public static void setArmed(boolean armed) {
@@ -110,7 +140,38 @@ public final class SimGunHandler implements GunIntegration.GunHandler {
             state.reloading = false;
             state.ammo = magazineSizeOf(entity);
         }
+        applySpeedModifiers(entity, state);
         return state;
+    }
+
+    /**
+     * Mirrors TaCZ LivingEntitySpeedModifier.updateSpeedModifier for the sim
+     * gun: permanent weight tax (MULTIPLY_BASE) plus the aim/reload multipliers
+     * (MULTIPLY_TOTAL) keyed to the live state. Transient modifiers only, so
+     * nothing leaks into saved data.
+     */
+    private static void applySpeedModifiers(LivingEntity entity, GunState state) {
+        AttributeInstance attr = entity.getAttribute(Attributes.MOVEMENT_SPEED);
+        if (attr == null) return;
+        if (attr.getModifier(WEIGHT_MOD_UUID) == null) {
+            attr.addTransientModifier(new AttributeModifier(WEIGHT_MOD_UUID,
+                "Sim gun weight", -EMULATED_GUN_WEIGHT * WEIGHT_TAX_PER_UNIT,
+                AttributeModifier.Operation.MULTIPLY_BASE));
+        }
+        boolean wantAim = state.aiming;
+        if (wantAim && attr.getModifier(AIM_MOD_UUID) == null) {
+            attr.addTransientModifier(new AttributeModifier(AIM_MOD_UUID,
+                "Sim gun ADS", AIM_SPEED_MULT, AttributeModifier.Operation.MULTIPLY_TOTAL));
+        } else if (!wantAim) {
+            attr.removeModifier(AIM_MOD_UUID);
+        }
+        boolean wantReload = state.reloading;
+        if (wantReload && attr.getModifier(RELOAD_MOD_UUID) == null) {
+            attr.addTransientModifier(new AttributeModifier(RELOAD_MOD_UUID,
+                "Sim gun reload", RELOAD_SPEED_MULT, AttributeModifier.Operation.MULTIPLY_TOTAL));
+        } else if (!wantReload) {
+            attr.removeModifier(RELOAD_MOD_UUID);
+        }
     }
 
     private static float straightPitch(Vec3 eye, Vec3 targetPosition) {
@@ -214,6 +275,7 @@ public final class SimGunHandler implements GunIntegration.GunHandler {
         if (state.reloading || state.ammo >= magazineSizeOf(entity)) return;
         state.reloading = true;
         state.reloadFinishTick = entity.tickCount + RELOAD_TICKS;
+        applySpeedModifiers(entity, state);
     }
 
     @Override public boolean isReloading(LivingEntity entity) { return refresh(entity).reloading; }
@@ -228,7 +290,9 @@ public final class SimGunHandler implements GunIntegration.GunHandler {
     }
 
     @Override public void cancelReload(LivingEntity entity) {
-        refresh(entity).reloading = false;
+        GunState state = refresh(entity);
+        state.reloading = false;
+        applySpeedModifiers(entity, state);
     }
 
     @Override public long getShootCoolDown(LivingEntity entity) {
@@ -238,7 +302,12 @@ public final class SimGunHandler implements GunIntegration.GunHandler {
 
     // The aim-quality model gates shot timing; ADS is instant for the sim gun.
     @Override public float getAimProgress(LivingEntity entity) { return 1.0f; }
-    @Override public void aim(LivingEntity entity, boolean isAiming) {}
+
+    @Override public void aim(LivingEntity entity, boolean isAiming) {
+        GunState state = refresh(entity);
+        state.aiming = isAiming;
+        applySpeedModifiers(entity, state);
+    }
     @Override public boolean isBolting(LivingEntity entity) { return false; }
     @Override public boolean isDrawing(LivingEntity entity) { return false; }
     @Override public void bolt(LivingEntity entity) {}
