@@ -208,6 +208,7 @@ public class StevesArmyConfig {
     public static final ForgeConfigSpec.DoubleValue COVER_SOFT_FACTOR;
     public static final ForgeConfigSpec.IntValue COVER_WAIT_TIMEOUT_TICKS;
     public static final ForgeConfigSpec.BooleanValue FIRETEAM_HEAVY_HOLD_REPOSITION;
+    public static final ForgeConfigSpec.BooleanValue SUPPRESSED_RELOCATION_SAFE_ROUTE;
     public static final ForgeConfigSpec.DoubleValue GROUP_COHESION_BAND_BLOCKS;
     public static final ForgeConfigSpec.DoubleValue GROUP_AHEAD_DWELL_MULT;
     public static final ForgeConfigSpec.DoubleValue GROUP_BEHIND_DWELL_MULT;
@@ -1425,6 +1426,17 @@ BUILDER.pop();
                      "Default: true")
             .define("fireteamHeavyHoldReposition", true);
 
+        SUPPRESSED_RELOCATION_SAFE_ROUTE = BUILDER
+            .comment("Suppressed relocation is fully safe or does not happen: every",
+                     "autonomous suppressed reposition must route through the safe-route",
+                     "classifier (PROTECTED / forced-crawl CRAWL_SAFE accepted, EXPOSED",
+                     "withheld so the soldier stays at his current cover). Applies to",
+                     "attack-target soldiers too, whose searches previously skipped the",
+                     "classifier entirely. Disable to restore the legacy behavior where",
+                     "only non-attack soldiers classified their relocation routes.",
+                     "Default: true")
+            .define("suppressedRelocationSafeRoute", true);
+
         GROUP_COHESION_BAND_BLOCKS = BUILDER
             .comment("Distance band (blocks) beyond the fireteam centroid that counts as",
                      "'ahead' or 'behind' the group for dynamic dwell scaling. Default: 8.0")
@@ -2040,6 +2052,10 @@ BUILDER.pop();
 
     public static boolean isFireteamHeavyHoldReposition() {
         return FIRETEAM_HEAVY_HOLD_REPOSITION.get();
+    }
+
+    public static boolean isSuppressedRelocationSafeRoute() {
+        return SUPPRESSED_RELOCATION_SAFE_ROUTE.get();
     }
 
     public static float getGroupCohesionBandBlocks() {

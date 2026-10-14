@@ -391,9 +391,16 @@ ticks spent continuously suppressed do not count as separate episodes.
 - The episode counter resets when a different cover is reached or the queued
   reposition starts.
 
-This is intentionally a first-stage response. The replacement search is still
-the existing general cover search; local trench-constrained movement and route
-exposure scoring can be added independently later.
+Since 0.5.2 every autonomous suppression reposition is route-classified
+(`selectSuppressionRoute`): the whole path is ray-checked against the recorded
+firing origin and only PROTECTED routes or CRAWL_SAFE routes (moved at crawl
+speed, force-crouched) are accepted; EXPOSED routes are withheld and the
+soldier stays at his current cover (`suppression-no-safe-route`). A reposition
+with no recorded firing origin also withholds for autonomous relocations
+(`relocationType == NONE`); player-ordered relocations (GO_TO/FOLLOW) keep the
+legacy fail-open search. The `suppressedRelocationSafeRoute` config (default
+true) gates both, restoring the pre-classifier behavior for attack-target
+soldiers when disabled.
 
 ### 4.4 Suppression Fire Integration
 

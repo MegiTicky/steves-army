@@ -4478,7 +4478,15 @@ private boolean shouldExitCoverForFollow() {
         Optional<CoverPoint> bestCover = Optional.empty();
         List<CoverFinder.ScoredCover> reusableScored = null;
 
-        if (suppressionRouteSearchActive && !soldier.hasValidAttackTarget()) {
+        // Suppressed relocation is fully safe or does not happen: the route
+        // classifier below accepts only PROTECTED / CRAWL_SAFE paths and
+        // withholds everything else, so the soldier stays at his current
+        // cover instead of walking an unclassified attack-corridor dock
+        // (the pinned walk-outs: attack-target soldiers used to skip this
+        // entire pass). suppressedRelocationSafeRoute=false restores the
+        // legacy exemption for attack-target soldiers.
+        if (suppressionRouteSearchActive
+            && (StevesArmyConfig.isSuppressedRelocationSafeRoute() || !soldier.hasValidAttackTarget())) {
             if (suppressionRouteFiringOrigin == null) {
                 if (DiagnosticLogManager.isCoverLoggingEnabled()) {
                     StevesArmyMod.LOGGER.info("[CoverSuppression] Soldier {} withheld reposition: no firing origin is available",
@@ -8090,9 +8098,21 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
         // soldier simply cannot see into the zone. ThreatAwareness already
         // aims the normal search at the ping and its scoring prefers covers
         // with firing lanes toward the threat, so use it instead of failing
-        // the whole relocation with "no firing origin".
+        // the whole relocation with "no firing origin" — but only for
+        // PLAYER-ORDERED relocations. An autonomous suppressed relocation
+        // with no recorded firing origin cannot be classified as safe
+        // (safe-route mode): withhold it and stay at the current cover
+        // rather than walk an unclassified search.
         if (getCoverManager().getRecentSuppressionFiringOrigin() == null
             && soldier.hasValidPingSuppressPos()) {
+            if (StevesArmyConfig.isSuppressedRelocationSafeRoute()
+                && relocationType == RelocationType.NONE) {
+                if (DiagnosticLogManager.isCoverLoggingEnabled()) {
+                    StevesArmyMod.LOGGER.info("[CoverSuppression] Soldier {} withheld suppression reposition: "
+                        + "no firing origin is available (safe-route mode)", soldier.getId());
+                }
+                return CoverMoveResult.NO_ELIGIBLE_COVER;
+            }
             soldier.setLowCrouching(false);
             getCoverManager().resetPeekState();
             getCoverManager().setPeekPosition(null);

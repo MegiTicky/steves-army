@@ -109,7 +109,8 @@ public final class SimRegistry {
             attackParityAdvance(),
             attackSuperioritySustained(),
             attackParitySustained(),
-            attackPeekGateDiscipline());
+            attackPeekGateDiscipline(),
+            suppressedRelocationSafeRoute());
     }
 
     public static SimScenario byName(String name) {
@@ -5691,6 +5692,191 @@ public final class SimRegistry {
             .build();
     }
 
+    /**
+     * Suppressed relocation must be fully safe or not happen (user doctrine
+     * 2026-10-13: "I think we need suppressed relocation to be fully safe, or
+     * else, just stay at that cover").
+     *
+     * Reproduces the death mechanism from the longStreetBlock forensics: a
+     * docked ATTACK soldier under continuous scripted pressure has a forward
+     * lure wall revealed mid-pin, and BEFORE the safe-route classifier the
+     * suppression relocation took the plain attack-corridor path — an upright
+     * walk-out straight toward it while suppression is still ~1.0 (the
+     * alpha/bravo/charlie walk-outs).
+     *
+     * Contract (PIN ONLY): while suppression >= 0.6 the soldier never moves
+     * more than half a block north of his settled dock and never exposes.
+     * The line is dock-relative because attack dock scoring prefers the
+     * forward (north-face) row slots, so the dock z itself is not stable
+     * across runs. The release-phase advance is deliberately NOT asserted
+     * here: the dock-delivery pipeline has a pre-existing move-freeze
+     * roulette (three recorded runs froze a selected cover walk mid-approach
+     * or mid-advance with an accepted nav path and zero steps) that makes
+     * any post-release crossing assert roulette; release-phase advance
+     * health is owned by attack_peek_gate_discipline and the longStreetBlock
+     * A/B fights.
+     *
+     * Geometry: band-edge spawn (12 blocks from the objective, distSqr 144
+     * = CLEARING_INVESTIGATE_BAND_SQ) dissolves the advance spine from tick
+     * zero, so the dock is deterministic (t45, no per-run A* wander; a
+     * longer approach re-arms the spine and docked the row's far east end
+     * in two recorded runs). Enemy at (12,2): close enough that the
+     * soldier's attack target survives the whole pin (sight range ~16-20 —
+     * at 22.8 the target memory expired mid-pin and the cover drop rerouted
+     * the walk-out through the unclassified SEEKING loop), far enough that
+     * his park is not on the measured soldier's assert lines.
+     */
+    private static SimScenario suppressedRelocationSafeRoute() {
+        SimScenario.Builder b = SimScenario.builder("suppressed_relocation_safe_route")
+            .description("Suppressed relocation safety: continuous-pin pressure with a "
+                + "forward lure wall revealed mid-pin. While suppressed the soldier must "
+                + "stay at his dock (the pre-fix bypass walks exposed forward docks at "
+                + "suppression ~1.0); the safe-route classifier must withhold those. "
+                + "Guards the attack-target bypass.")
+            .duration(800)
+            .armed()
+            .terrain(t -> {
+                t.platform();
+                t.coverRow(12, 10, 28, 10, 1); // the dock row; the lure reveals forward of it
+            })
+            .setup(ctx -> {
+                // Band-edge spawn: see the class comment. Enemy close enough
+                // to keep the attack target alive, HOLD-pinned at (12,2).
+                ctx.spawnAnchor(20, 0, 14);
+                ctx.spawnFriendly(ModEntities.SOLDIER.get(), "rifleman", 20, 0, 14, SquadMode.HOLD);
+                EnemySoldierEntity target = ctx.spawnEnemyLabeled("target", 12, 0, 2);
+                target.setSquadMode(SquadMode.HOLD);
+                target.setHoldPosition(ctx.terrain.at(12, 0, 2));
+                ctx.harden("target");
+                ctx.disarmSoldier("target"); // no return fire: the pressure timeline is ours
+                ctx.injectThreat(20, 5, 1.0f);
+                ctx.issueAttackOrder(20, 2);
+                com.stevesarmy.debug.DiagnosticLogManager.setAttackLoggingEnabled(true);
+                com.stevesarmy.debug.DiagnosticLogManager.setCoverPerformanceLoggingEnabled(true);
+            })
+            // FireStarvation: the hardened enemy can never take damage.
+            // PeekThrash: the pin cycle intentionally produces repeated peek
+            // attempts from one dock.
+            // DangerOracleMismatch: the injected suppression origins bake danger
+            // cells the LoS oracle (entity-driven) legitimately disagrees with.
+            // StuckSeek: the post-release seek tail (next dock on a sparse
+            // field) is cover-search roulette, not the safety contract this
+            // scenario measures (asserts below).
+            // ExposedWhileHiding: same tail — where a re-dock lands is dock
+            // scoring roulette; dedicated dock-quality scenarios own that. The
+            // pinned-phase walk-out this scenario guards is asserted by
+            // position, not by this detector.
+            // PositionDeadlock: the dock-delivery pipeline's pre-existing
+            // move-freeze (REPOSITIONING held with an accepted nav path and
+            // zero steps — recorded here t235 and independently on a clean
+            // suppression-free approach) recovers on its own via re-selection
+            // and is a separate follow-up; the pin contract below is
+            // position-asserted and unaffected.
+            .suppressDetectors("FireStarvation", "PeekThrash", "DangerOracleMismatch",
+                "StuckSeek", "ExposedWhileHiding", "PositionDeadlock");
+        for (int t = 250; t <= 390; t += 10) {
+            b.action(t, "pinned pressure",
+                ctx -> ctx.injectSuppressionFromGround("rifleman", 2, 20.5, 5.5, 1.5, 3.0f));
+        }
+        for (int t = 60; t <= 720; t += 60) {
+            b.action(t, "refresh threat intel", ctx -> ctx.refreshInjectedThreats());
+        }
+        return b
+            .action(790, "restore diagnostic flags", ctx -> {
+                com.stevesarmy.debug.DiagnosticLogManager.setAttackLoggingEnabled(false);
+                com.stevesarmy.debug.DiagnosticLogManager.setCoverPerformanceLoggingEnabled(false);
+            })
+            .action(230, "reveal forward lure wall", ctx -> {
+                // Revealed mid-pin, BEFORE the first pinned relocation search
+                // after it sees it, and long after the approach has docked so
+                // the advance cannot grab it early. 2-wide so its south dock
+                // reads threat-protected from the (20.5, 5.5) firing origin.
+                // Forward of the row toward the objective — the pre-fix
+                // relocation bait. Y is terrain-RELATIVE: y=1 sits one block
+                // above the platform floor (origin y=100), matching
+                // coverRow's y=0 footprint.
+                ctx.terrain.block(19, 1, 6, net.minecraft.world.level.block.Blocks.STONE_BRICKS.defaultBlockState());
+                ctx.terrain.block(20, 1, 6, net.minecraft.world.level.block.Blocks.STONE_BRICKS.defaultBlockState());
+            })
+            .assertThat("DOCKED: the soldier has claimed a row cover by t185",
+                view -> {
+                    for (SimSample s : view.timeline().series("rifleman")) {
+                        if (s.tick > 185) break;
+                        if (s.state.currentCover != null) {
+                            int z = s.state.currentCover.getZ();
+                            return z >= 9 && z <= 13;
+                        }
+                    }
+                    return false;
+                })
+            .assertThat("PRESSURE LIVE: suppression >= 0.6 early (t260-290) and late "
+                    + "(t360-390) in the pin window",
+                view -> {
+                    boolean early = view.timeline().series("rifleman").stream()
+                        .filter(s -> s.tick >= 260 && s.tick <= 290)
+                        .anyMatch(s -> s.state.suppressionLevel >= 0.6f);
+                    boolean late = view.timeline().series("rifleman").stream()
+                        .filter(s -> s.tick >= 360 && s.tick <= 390)
+                        .anyMatch(s -> s.state.suppressionLevel >= 0.6f);
+                    return early && late;
+                })
+            .assertThat("SAFE OR STAY: while suppressed (>= 0.6) the soldier never moves "
+                    + "more than half a block north of his dock (t250-420)",
+                view -> {
+                    Double dockZ = settledDockZ(view);
+                    if (dockZ == null) return false;
+                    double line = dockZ - 0.5;
+                    for (SimSample s : view.timeline().series("rifleman")) {
+                        if (s.tick < 250) continue;
+                        if (s.tick > 420) break;
+                        if (s.state.suppressionLevel >= 0.6f && s.state.position.z < line) {
+                            return false;
+                        }
+                    }
+                    return true;
+                })
+            .assertThat("STAYS DUCKED: while suppressed (>= 0.6) and settled in cover "
+                    + "the soldier is never EXPOSED or STANDING_IN_HALF_COVER (t300-370)",
+                view -> {
+                    for (SimSample s : view.timeline().series("rifleman")) {
+                        if (s.tick < 300) continue;
+                        if (s.tick > 370) break;
+                        if (s.state.suppressionLevel >= 0.6f) {
+                            String cs = s.state.coverState;
+                            if (!"IN_COVER".equals(cs) && !"SUPPRESSED_IN_COVER".equals(cs)) {
+                                continue; // mid-move (incl. the delivery-freeze
+                                          // symptom) is the pipeline's state,
+                                          // not the ducked contract
+                            }
+                            String ps = s.state.peekState;
+                            if ("EXPOSED".equals(ps) || "STANDING_IN_HALF_COVER".equals(ps)) {
+                                return false;
+                            }
+                        }
+                    }
+                    return true;
+                })
+            .build();
+    }
+
+    /**
+     * The settled pre-pressure dock of the "rifleman": the most northward
+     * position sampled in t100-240, after the dock system's pre-pressure
+     * churn settles (one recorded run re-docked north at t172-200) and
+     * before the pinned-pressure window opens at t250.
+     * Dock-relative because attack dock scoring prefers forward (north-face)
+     * row slots, so the dock z itself is not stable across runs.
+     */
+    private static Double settledDockZ(SimScenario.SimRunResultView view) {
+        Double dockZ = null;
+        for (SimSample s : view.timeline().series("rifleman")) {
+            if (s.tick < 100) continue;
+            if (s.tick > 240) break;
+            double z = s.state.position.z;
+            dockZ = dockZ == null ? z : Math.min(dockZ, z);
+        }
+        return dockZ;
+    }
     private static SimScenario attackFireAdvance(String name, int defenderCount, boolean hardenDefenders) {
         final String[] labels = {"alpha", "bravo", "charlie", "delta"};
         final int n = labels.length;
