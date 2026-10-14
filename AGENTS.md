@@ -12,3 +12,11 @@ working in the same tree at the same time:
 
 Mod-specific build/run instructions: `../AGENTS.md`. Architecture:
 `ARCHITECTURE.md`. Sim harness: `SIM_HARNESS.md`.
+
+## Commit cadence
+
+Commit small, coherent, verified changes frequently: after each completed fix or
+meaningful milestone, and before handing work off. Do not accumulate unrelated
+uncommitted work. Stage only your claimed files or hunks, preserving other agents'
+changes. Follow explicit user instructions to defer commits; committing does not
+authorize pushing or deploying.
