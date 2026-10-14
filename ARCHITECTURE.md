@@ -863,6 +863,25 @@ effects. Manual CQB retains its ramp to a 0.24-base-attribute cap, without boost
 requested slower movement. Doorway queueing still applies while caution is active.
 Fallback speed clamps are temporary and never overwrite the stored request.
 
+`entity/ai/SoldierSpeedController` resolves raw goal requests at the point where
+`CoverPositionController` consumes them, for vanilla navigation, caution steering,
+door queueing and final dock handoffs. TravelCrawlController now owns posture/state
+only; it no longer saves or writes compensated navigation modifiers. Speed resolution
+uses current attributes, preserves requested slower movement, and applies the 0.65
+base crawl cap and 0.24 base manual-CQB ramp consistently. Ordinary speed intent
+increases by at most 0.06 per movement tick; slowing is immediate. Pinned, upright
+soldiers escaping toward unclaimed cover may dash immediately at their requested
+pace. Firing-prone ownership supersedes residual travel-crawl state.
+
+Cover anchoring shares the speed budget: its added radial motion accelerates by
+at most 0.04 per tick and cannot amplify existing sideways momentum past the larger
+of incoming horizontal speed and the allowed correction pace (at most 0.18).
+Existing radial dock stabilization is retained; vertical motion and unanchored
+external impulses are not globally clamped. Movement-speed telemetry records raw
+request, resolved target/applied intent, actual prior-tick horizontal displacement
+and limiting reason, in both cover logs and simulation recordings. Speed intent
+and measured displacement are distinct quantities.
+
 - Updated via `updateSmoothDirection(threatPos)` with configurable `blendFactor`
 - Decays after `threatSmoothDecayTimeMs` ms of no updates
 - Used by `CoverTacticalGoal` for threat direction and peek direction

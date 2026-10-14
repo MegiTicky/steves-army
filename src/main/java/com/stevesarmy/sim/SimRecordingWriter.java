@@ -258,6 +258,10 @@ public final class SimRecordingWriter {
                    '\\ntargetCover      : ' + (s.tx !== undefined ? p(s.tx) + ', ' + p(s.tz) + (s.tk ? '  [' + s.tk + ']' : '') : '-') +
                    '\\nrelocCenter      : ' + (s.rx !== undefined ? p(s.rx) + ', ' + p(s.rz) : '-') +
                    '\\nlast search      : ' + (s.ls || '-') +
+                   (s.speedRequest !== undefined ? '\\nspeed request    : ' + s.speedRequest.toFixed(3)
+                     + '\\ntarget / applied : ' + s.speedTarget.toFixed(3) + ' / ' + s.speedApplied.toFixed(3)
+                     + '\\nmoved last tick  : ' + s.movedPerTick.toFixed(4)
+                     + '\\nspeed limit      : ' + s.speedLimit : '') +
                    '\\nshots fired      : ' + (s.sf || 0) +
                    (s.am !== undefined ? '\\nammo             : ' + s.am + ' / ' + s.mg : '') +
                    '\\nslot offset      : ' + (s.cd !== undefined ? s.cd.toFixed(2) + (s.cd > 0.35 ? '  [DRIFT]' : '') : '-') +

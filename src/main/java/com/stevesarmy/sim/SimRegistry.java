@@ -112,7 +112,8 @@ public final class SimRegistry {
             attackPeekGateDiscipline(),
             suppressedRelocationSafeRoute(),
             attackAbsolutePinHold(),
-            CautionSteeringScenarios.freshnessAndPace());
+            CautionSteeringScenarios.freshnessAndPace(),
+            SpeedTransitionScenarios.transitions());
     }
 
     public static SimScenario byName(String name) {

@@ -13,28 +13,22 @@ import net.minecraft.world.phys.shapes.VoxelShape;
 
 public class CoverPositionController extends MoveControl {
 
-    /**
-     * Manual CQB's cap is defined against the soldier's UNBURDENED attribute:
-     * TaCZ taxes MOVEMENT_SPEED (gun weight MULTIPLY_BASE, aim/reload
-     * MULTIPLY_TOTAL while aiming/reloading), and a cap multiplied against the
-     * taxed value compounds the slowdown. Express the manual cap against the
-     * base attribute while respecting any slower requested pace. Automatic
-     * caution keeps the original modifier and normal weapon speed effects.
-     */
-    private static double baseMoveAttr(Mob mob) {
-        var instance = mob.getAttribute(Attributes.MOVEMENT_SPEED);
-        return instance != null ? instance.getBaseValue()
-            : mob.getAttributeValue(Attributes.MOVEMENT_SPEED);
-    }
+    private final SoldierSpeedController movementSpeed;
 
-    /** cap(speed) against the base attribute, expressed for a vanilla-style
-     *  speedModifier that super.tick() will multiply by the CURRENT attribute. */
-    private double cautionSpeedToModifier(SoldierEntity soldier, double requestedSpeed) {
-        double capped = steeringAdvisor.getCautionSpeed(soldier, requestedSpeed);
-        if (!soldier.isCQB()) return requestedSpeed;
-        double attr = this.mob.getAttributeValue(Attributes.MOVEMENT_SPEED);
-        double base = baseMoveAttr(this.mob);
-        return Math.min(requestedSpeed, attr > 1.0e-6 ? capped * (base / attr) : capped);
+    public SoldierSpeedController getSpeedController() { return movementSpeed; }
+
+    /** Vanilla consumes a transient resolved modifier; the raw goal request stays intact. */
+    private void tickVanillaMovement() {
+        double raw = this.speedModifier;
+        double absolute = movementSpeed.resolve(raw, this.operation != Operation.WAIT, false);
+        if (this.operation == Operation.WAIT) this.mob.setSpeed(0.0F);
+        double attribute = this.mob.getAttributeValue(Attributes.MOVEMENT_SPEED);
+        this.speedModifier = attribute > 1.0e-6 ? absolute / attribute : 0;
+        try {
+            super.tick();
+        } finally {
+            this.speedModifier = raw;
+        }
     }
 
     public enum MovementResult {
@@ -90,6 +84,7 @@ public class CoverPositionController extends MoveControl {
 
     public CoverPositionController(Mob mob) {
         super(mob);
+        this.movementSpeed = new SoldierSpeedController(mob);
     }
 
     public void moveTo(Vec3 pos, double tolerance, double speed) {
@@ -105,6 +100,7 @@ public class CoverPositionController extends MoveControl {
             this.mob.setZza(0.0F);
             this.mob.setXxa(0.0F);
             this.mob.setSpeed(0.0F);
+            this.movementSpeed.stop();
             this.operation = Operation.WAIT;
             this.debugMoveSource = "cqb-engage";
             this.debugMoveReason = "visible close target";
@@ -228,6 +224,7 @@ public class CoverPositionController extends MoveControl {
     }
 
     private void failWithReason(FailureReason reason, boolean controlledReturn) {
+        this.movementSpeed.stop();
         this.lastResult = MovementResult.FAILED;
         this.lastFailureReason = reason;
         this.controlledReturnToCover = controlledReturn;
@@ -240,6 +237,7 @@ public class CoverPositionController extends MoveControl {
     }
 
     private void completeMove() {
+        this.movementSpeed.stop();
         this.operation = MoveControl.Operation.WAIT;
         this.mob.setZza(0.0F);
         this.mob.setXxa(0.0F);
@@ -262,6 +260,7 @@ public class CoverPositionController extends MoveControl {
     }
 
     public void clear() {
+        this.movementSpeed.stop();
         this.lastResult = MovementResult.NONE;
         this.lastFailureReason = FailureReason.NONE;
         this.controlledReturnToCover = false;
@@ -348,33 +347,21 @@ public class CoverPositionController extends MoveControl {
         double nx = dx / distance;
         double nz = dz / distance;
         Vec3 velocity = this.mob.getDeltaMovement();
-        double towardSpeed = velocity.x * nx + velocity.z * nz;
-
-        // Remove only radial velocity carrying the soldier away from cover.
-        // Tangential movement remains available for normal collision handling.
-        if (towardSpeed < 0.0) {
-            velocity = velocity.subtract(new Vec3(nx, 0.0, nz).scale(towardSpeed));
-            towardSpeed = 0.0;
-            debugAnchorPulls++;
-        }
 
         double desiredSpeed = distance <= COVER_ANCHOR_DEADZONE
             ? 0.0
             : Math.min(COVER_ANCHOR_MAX_SPEED,
                 (distance - COVER_ANCHOR_DEADZONE) * COVER_ANCHOR_RESPONSE);
-        if (towardSpeed < desiredSpeed) {
-            velocity = velocity.add(new Vec3(nx, 0.0, nz).scale(desiredSpeed - towardSpeed));
-            debugAnchorPulls++;
-        } else if (distance <= COVER_ANCHOR_DEADZONE && towardSpeed > 0.0) {
-            velocity = velocity.subtract(new Vec3(nx, 0.0, nz).scale(towardSpeed));
-            debugAnchorPulls++;
-        }
+        Vec3 adjusted = movementSpeed.anchorVelocity(velocity, nx, nz, desiredSpeed,
+            distance <= COVER_ANCHOR_DEADZONE);
+        if (adjusted.distanceToSqr(velocity) > 1.0e-12) debugAnchorPulls++;
 
-        this.mob.setDeltaMovement(velocity.x, velocity.y, velocity.z);
+        this.mob.setDeltaMovement(adjusted.x, adjusted.y, adjusted.z);
     }
 
     @Override
     public void tick() {
+        movementSpeed.beginTick();
         Vec3 anchorTarget = this.coverAnchorTarget;
         this.coverAnchorTarget = null;
 
@@ -396,6 +383,7 @@ public class CoverPositionController extends MoveControl {
             this.mob.setZza(0.0F);
             this.mob.setXxa(0.0F);
             this.mob.setSpeed(0.0F);
+            this.movementSpeed.stop();
             this.mob.setDeltaMovement(0.0D, this.mob.getDeltaMovement().y, 0.0D);
             this.debugLastSetVelocity = Vec3.ZERO;
             this.debugMoveSource = "cqb-engage";
@@ -419,23 +407,14 @@ public class CoverPositionController extends MoveControl {
             if (tickCautionSteering(anchorTarget)) {
                 return;
             }
-            // Caution active but the steer target bailed (swept collision,
-            // degenerate steer vector) - the vanilla path follower must still
-            // hold the caution cap, or a nav re-issue sprints through the
-            // threat window at full modifier for the transition ticks.
+            // Steering can bail on geometry; the shared speed policy still
+            // resolves manual CQB/crawl constraints on the vanilla branch.
             boolean bailCautionActive = this.mob instanceof SoldierEntity bailSoldier
                 && steeringAdvisor.isCautionActive(bailSoldier);
-            double requestedModifier = this.speedModifier;
-            if (bailCautionActive) {
-                this.speedModifier = cautionSpeedToModifier(
-                    (SoldierEntity) this.mob, this.speedModifier);
-            }
             float previousYaw = this.mob.getYRot();
             float previousBodyYaw = this.mob.yBodyRot;
             float previousHeadYaw = this.mob.getYHeadRot();
-            super.tick();
-            // A transient cap must not become the next tick's requested speed.
-            this.speedModifier = requestedModifier;
+            tickVanillaMovement();
             traceMoveControlRotation("vanilla-navigation", previousYaw, previousBodyYaw, previousHeadYaw);
             applyCoverAnchorVelocity(anchorTarget);
             this.debugLastSetVelocity = this.mob.getDeltaMovement();
@@ -478,10 +457,8 @@ public class CoverPositionController extends MoveControl {
         boolean cautionClamped = false;
         if (this.mob instanceof SoldierEntity cautionSoldier
             && steeringAdvisor.isCautionActive(cautionSoldier)) {
-            // Controller-owned legs (dock handoffs) must obey the same caution
-            // cap as path following - the branch above only covers navigation.
-            // Speed clamp only: the lateral steer offset would fight the dock.
-            approachSpeed = cautionSpeedToModifier(cautionSoldier, approachSpeed);
+            // Keep the caution label; the shared speed policy also handles
+            // dock handoffs. Lateral steering would fight the final alignment.
             cautionClamped = true;
         }
         this.setWantedPosition(targetPos.x, targetPos.y, targetPos.z, approachSpeed);
@@ -491,7 +468,7 @@ public class CoverPositionController extends MoveControl {
         float previousYaw = this.mob.getYRot();
         float previousBodyYaw = this.mob.yBodyRot;
         float previousHeadYaw = this.mob.getYHeadRot();
-        super.tick();
+        tickVanillaMovement();
         traceMoveControlRotation(debugMoveSource, previousYaw, previousBodyYaw, previousHeadYaw);
         applyCoverAnchorVelocity(anchorTarget);
         this.debugLastSetVelocity = this.mob.getDeltaMovement();
@@ -584,7 +561,7 @@ public class CoverPositionController extends MoveControl {
                 node.x - this.mob.getX()) * (180.0F / (float) Math.PI)) - 90.0F;
             this.mob.setYRot(this.rotlerp(this.mob.getYRot(), faceYaw, 45.0F));
         }
-        this.mob.setSpeed((float) (0.03 * this.mob.getAttributeValue(Attributes.MOVEMENT_SPEED)));
+        this.mob.setSpeed((float) movementSpeed.resolve(this.speedModifier, true, true));
         this.mob.setZza(1.0F);
         this.mob.setXxa(0.0F);
         applyCoverAnchorVelocity(anchorTarget);
@@ -599,8 +576,8 @@ public class CoverPositionController extends MoveControl {
 
     /**
      * Cautious path following while an enemy is near the remaining path:
-     * slower speed and hugging the side of the path that keeps cover between
-     * the soldier and the enemy (continuous slow-pie, never stopping).
+     * hugging the side of the path that keeps cover between soldier and enemy.
+     * The shared speed controller handles pace independently of steering.
      * Returns false to let the caller follow the path normally.
      */
     private boolean tickCautionSteering(Vec3 anchorTarget) {
@@ -639,8 +616,7 @@ public class CoverPositionController extends MoveControl {
         soldier.traceRotationWrite("cqb-caution-steer", previousYaw, previousBodyYaw, previousHeadYaw,
             "steerTarget=" + steerTarget + ", targetYaw=" + String.format("%.1f", targetYaw)
                 + ", reason=" + steeringAdvisor.getCautionReason());
-        double cautionModifier = cautionSpeedToModifier(soldier, this.speedModifier);
-        this.mob.setSpeed((float) (cautionModifier * this.mob.getAttributeValue(Attributes.MOVEMENT_SPEED)));
+        this.mob.setSpeed((float) movementSpeed.resolve(this.speedModifier, true, false));
         this.mob.setZza(1.0F);
         this.mob.setXxa(0.0F);
 

@@ -66,6 +66,7 @@ public final class SimSample {
     public final String cautionReason;
     /** Applied movement speed intent (mob.getSpeed()); null when zero or unavailable. */
     public final Double appliedSpeed;
+    public final com.stevesarmy.entity.ai.SoldierSpeedController.Telemetry movementSpeed;
 
     public SimSample(int tick, String label, CombatStateSnapshot state,
                      float health, float maxHealth, boolean hasAttackTarget,
@@ -77,7 +78,8 @@ public final class SimSample {
                      double dangerAtSoldier, boolean dangerLegExposed, float headYaw,
                      int clearingStage, int clearingChecked, boolean clearingAssembleArmed,
                      boolean clearingAdvancing,
-                     String moveSource, String cautionReason, Double appliedSpeed) {
+                     String moveSource, String cautionReason, Double appliedSpeed,
+                     com.stevesarmy.entity.ai.SoldierSpeedController.Telemetry movementSpeed) {
         this.tick = tick;
         this.label = label;
         this.state = state;
@@ -110,5 +112,6 @@ public final class SimSample {
         this.moveSource = moveSource;
         this.cautionReason = cautionReason;
         this.appliedSpeed = appliedSpeed;
+        this.movementSpeed = movementSpeed;
     }
 }

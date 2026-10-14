@@ -61,8 +61,10 @@ public final class CautionSteeringScenarios {
                     "probe weapon tax", -0.2, AttributeModifier.Operation.MULTIPLY_TOTAL));
                 s.getNavigation().stop(); // force vanilla fallback, including speed-modifier persistence
                 var ctrl = s.getMoveControl();
-                ctrl.setWantedPosition(s.getX() + 10, s.getY(), s.getZ(), 1.0);
-                ctrl.tick();
+                for (int n = 0; n < 8; n++) {
+                    ctrl.setWantedPosition(s.getX() + 10, s.getY(), s.getZ(), 1.0);
+                    ctrl.tick();
+                }
                 passed[4] = Math.abs(s.getSpeed() - attr.getValue()) < 0.00001;
                 ctrl.setWantedPosition(s.getX() + 10, s.getY(), s.getZ(), 0.12);
                 ctrl.tick();
@@ -76,8 +78,10 @@ public final class CautionSteeringScenarios {
                 s.setCQB(false);
                 s.getThreatAwareness().clear();
                 // Reuse the retained request: a clamp must not overwrite it.
-                ctrl.setWantedPosition(s.getX() + 10, s.getY(), s.getZ(), ctrl.getSpeedModifier());
-                ctrl.tick();
+                for (int n = 0; n < 8; n++) {
+                    ctrl.setWantedPosition(s.getX() + 10, s.getY(), s.getZ(), ctrl.getSpeedModifier());
+                    ctrl.tick();
+                }
                 passed[7] = Math.abs(s.getSpeed() - attr.getValue()) < 0.00001;
                 s.getThreatAwareness().onPingDirection(ctx.terrain.at(24, 0, 20));
             })
@@ -100,8 +104,10 @@ public final class CautionSteeringScenarios {
             .action(210, "fresh automatic lateral-steering branch uses normal requested pace", ctx -> {
                 var s = ctx.soldier("ping");
                 s.getThreatAwareness().onEnemyPing(ctx.terrain.at(24, 0, 20));
-                s.getMoveControl().setWantedPosition(s.getX() + 10, s.getY(), s.getZ(), 1.0);
-                s.getMoveControl().tick();
+                for (int n = 0; n < 8; n++) {
+                    s.getMoveControl().setWantedPosition(s.getX() + 10, s.getY(), s.getZ(), 1.0);
+                    s.getMoveControl().tick();
+                }
                 passed[12] = "cqb-caution".equals(((com.stevesarmy.entity.ai.CoverPositionController)
                     s.getMoveControl()).debugMoveSource())
                     && Math.abs(s.getSpeed() - s.getAttributeValue(Attributes.MOVEMENT_SPEED)) < 0.00001;

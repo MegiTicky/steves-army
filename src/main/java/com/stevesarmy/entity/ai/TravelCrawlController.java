@@ -21,15 +21,10 @@ import java.util.UUID;
  * prone-firing soldier up.
  */
 public class TravelCrawlController {
-    private static final double CRAWL_TRAVEL_SPEED = 0.65D;
     private static final int CHECK_INTERVAL_TICKS = 10;
 
     private final SoldierEntity soldier;
     private boolean crawlActive;
-    /** Navigation speed modifier observed when the crawl engaged; restored on exit. */
-    private double restoredSpeedModifier = -1.0D;
-    /** The modifier we last wrote; restore compares against this, not a constant. */
-    private double activeCrawlModifier = -1.0D;
     private int checkTimer;
     /** Last evaluation result, for the coverstate debug card. */
     private boolean crawlHidesHere;
@@ -47,16 +42,8 @@ public class TravelCrawlController {
         // Prone firing owns the shared pose; leave it alone entirely.
         if (soldier.isFiringProne()) return;
 
-        // Goals re-path with their own speed modifier (moveTo overwrites it);
-        // re-assert the crawl speed every tick while engaged. The modifier is
-        // expressed against the BASE attribute so TaCZ's weight/aim taxes
-        // (which vanilla multiplies in later) cannot compound the crawl into
-        // a sneak-pace crawl — same absolute-pace semantics as the caution
-        // caps.
-        if (crawlActive) {
-            activeCrawlModifier = crawlSpeedModifier();
-            soldier.getNavigation().setSpeedModifier(activeCrawlModifier);
-        }
+        // Posture/state only. SoldierSpeedController resolves the crawl cap at
+        // movement consumption time, using the current attribute and raw goal request.
 
         if (--checkTimer > 0) return;
         checkTimer = CHECK_INTERVAL_TICKS;
@@ -88,26 +75,9 @@ public class TravelCrawlController {
                 .wasRecentlySuppressed();
     }
 
-    /**
-     * The crawl pace against the UNBURDENED attribute, expressed as a nav
-     * modifier: vanilla multiplies it by the CURRENT attribute downstream, so
-     * dividing out the gun taxes keeps the final pace at
-     * {@code CRAWL_TRAVEL_SPEED * base} regardless of aim/reload/weight state.
-     */
-    private double crawlSpeedModifier() {
-        var instance = soldier.getAttribute(net.minecraft.world.entity.ai.attributes.Attributes.MOVEMENT_SPEED);
-        double base = instance != null ? instance.getBaseValue()
-            : soldier.getAttributeValue(net.minecraft.world.entity.ai.attributes.Attributes.MOVEMENT_SPEED);
-        double attr = soldier.getAttributeValue(net.minecraft.world.entity.ai.attributes.Attributes.MOVEMENT_SPEED);
-        return attr > 1.0e-6 ? CRAWL_TRAVEL_SPEED * (base / attr) : CRAWL_TRAVEL_SPEED;
-    }
-
     private void engage() {
         crawlActive = true;
-        restoredSpeedModifier = navSpeed();
-        activeCrawlModifier = crawlSpeedModifier();
         soldier.setLowCrouching(true);
-        soldier.getNavigation().setSpeedModifier(activeCrawlModifier);
         if (DiagnosticLogManager.isCoverLoggingEnabled()) {
             StevesArmyMod.LOGGER.info("[TravelResponse] Soldier {} going low - crawling hides here (suppression={})",
                 soldier.getId(), String.format("%.2f", soldier.getCoverBehaviorManager().getSuppressionLevel()));
@@ -120,14 +90,6 @@ public class TravelCrawlController {
         if (!soldier.isFiringProne()) {
             soldier.setLowCrouching(false);
         }
-        // Restore the pre-crawl speed only if nothing else claimed the modifier
-        // meanwhile (a goal's own moveTo already carries its intended speed).
-        if (restoredSpeedModifier >= 0.0D
-                && Math.abs(navSpeed() - activeCrawlModifier) < 1.0e-4D) {
-            soldier.getNavigation().setSpeedModifier(restoredSpeedModifier);
-        }
-        restoredSpeedModifier = -1.0D;
-        activeCrawlModifier = -1.0D;
         if (DiagnosticLogManager.isCoverLoggingEnabled()) {
             StevesArmyMod.LOGGER.info("[TravelResponse] Soldier {} standing back up ({})",
                 soldier.getId(), reason);
@@ -147,11 +109,6 @@ public class TravelCrawlController {
 
     public boolean isCrawlActive() {
         return crawlActive;
-    }
-
-    private double navSpeed() {
-        return soldier.getNavigation() instanceof SoldierGroundNavigation nav
-            ? nav.getNavSpeedModifier() : 1.0D;
     }
 
     public boolean isCrawlHidingHere() {

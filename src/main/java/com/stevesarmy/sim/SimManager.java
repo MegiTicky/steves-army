@@ -369,10 +369,12 @@ public final class SimManager {
             String moveSource = null;
             String cautionReason = null;
             Double appliedSpeed = null;
+            com.stevesarmy.entity.ai.SoldierSpeedController.Telemetry movementSpeed = null;
             if (soldier.getMoveControl() instanceof com.stevesarmy.entity.ai.CoverPositionController ctrl) {
                 anchorPulls = ctrl.getDebugAnchorPulls();
                 moveSource = ctrl.debugMoveSource();
                 cautionReason = ctrl.cautionReason();
+                movementSpeed = ctrl.getSpeedController().snapshot();
                 if (soldier.getSpeed() > 0.0f) {
                     appliedSpeed = (double) soldier.getSpeed();
                 }
@@ -432,7 +434,7 @@ public final class SimManager {
                 clearingView == null ? -1 : clearingView.checkedCount(),
                 clearingView != null && clearingView.secureAssemble(),
                 soldier.getCoverTacticalGoal().isClearingAdvancing(),
-                moveSource, cautionReason, appliedSpeed));
+                moveSource, cautionReason, appliedSpeed, movementSpeed));
             recorder.soldier(label, snap, los, nearestX, nearestZ,
                 shotCounts.getOrDefault(soldier.getUUID(), 0),
                 hasGun,
@@ -444,7 +446,7 @@ public final class SimManager {
                 soldier.getPose().name(), soldier.isHalfCoverRising(),
                 snap.currentCover != null ? soldier.getSyncedCoverCurrentHeight() : -1f,
                 dangerAtSoldier, dangerLegExposed,
-                moveSource, cautionReason, appliedSpeed);
+                moveSource, cautionReason, appliedSpeed, movementSpeed);
         }
         recorder.endFrame(context.enemies);
     }

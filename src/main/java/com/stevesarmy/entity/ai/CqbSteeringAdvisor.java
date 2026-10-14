@@ -23,10 +23,9 @@ import java.util.UUID;
  * hugs the side of the path that keeps cover
  * between it and the enemy (continuous corner-pie, never stopping).
  *
- * The advisor never owns navigation; it only suggests a steer target, a speed
- * cap, and whether caution should be active at all. The move controller feeds
- * the suggestions into its normal steering. Automatic caution keeps the requested
- * pace; only manual CQB applies the deliberate speed cap.
+ * The advisor suggests a steer target and caution activation. Speed is resolved
+ * independently by SoldierSpeedController; automatic caution keeps the requested
+ * pace and manual CQB applies its deliberate cap there.
  */
 public class CqbSteeringAdvisor {
 
@@ -34,7 +33,6 @@ public class CqbSteeringAdvisor {
     private static final int CAUTION_DEBOUNCE_TICKS = 40;
     private static final int PATH_SAMPLE_NODE_COUNT = 8;
     private static final double LATERAL_OFFSET = 0.35;
-    private static final double CAUTION_SPEED_CAP = 0.24;
     private static final long CAUTION_OBSERVATION_MAX_AGE_MS = 120L * 50L;
     private static final double BODY_SAMPLE_HEIGHT = 0.9;
     private static final double ENEMY_EYE_HEIGHT = 1.2;
@@ -45,7 +43,6 @@ public class CqbSteeringAdvisor {
     private boolean cautionActive = false;
     private int lastCautionChangeTick = 0;
     private String cautionReason = NO_CAUTION_REASON;
-    private double currentSpeedFactor = 0.0;
 
     /** True while an enemy is within the caution radius of the remaining path. */
     public boolean isCautionActive(SoldierEntity soldier) {
@@ -76,9 +73,6 @@ public class CqbSteeringAdvisor {
         lastCautionChangeTick = soldier.tickCount;
         cautionReason = nextReason;
         logCautionTransition(soldier, nearest);
-        if (!cautionActive) {
-            currentSpeedFactor = 0.0;
-        }
         return cautionActive;
     }
 
@@ -313,23 +307,6 @@ public class CqbSteeringAdvisor {
             }
         }
         return positions;
-    }
-
-    /**
-     * Manual CQB retains its original cautious pace. Automatic path caution
-     * keeps its lateral steering but travels at the requested movement pace when
-     * the CQB toggle is off.
-     */
-    public double getCautionSpeed(SoldierEntity soldier, double requestedSpeed) {
-        if (!soldier.isCQB()) {
-            currentSpeedFactor = 0.0;
-            return requestedSpeed;
-        }
-
-        // Ramp into the cap so entering CQB does not look like an abrupt sprint
-        // or an abrupt velocity override.
-        currentSpeedFactor = Math.min(CAUTION_SPEED_CAP, currentSpeedFactor + 0.02);
-        return Math.min(requestedSpeed, currentSpeedFactor);
     }
 
     private double nearestEnemyDistance(SoldierEntity soldier) {

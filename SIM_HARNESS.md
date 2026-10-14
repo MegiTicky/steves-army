@@ -436,6 +436,14 @@ Recording: frames now carry `yh` (head yaw) for aim-orientation assertions.
 
 ## Detectors (all run in every scenario)
 
+`movement_speed_transitions` is a core real-controller probe for stale crawl
+compensation after ADS release, preservation of raw navigation requests, bounded
+docking with sideways momentum, preservation of unanchored external impulses,
+ordinary acceleration/steady pace, immediate idle stop, pinned escape dash and
+firing-prone priority. Baseline reproduces the first two speed-burst mechanisms.
+Recording inspect panels expose speed request, target/applied intent, limiting
+reason and measured last-tick displacement; these values are also in recording JSON.
+
 `caution_freshness_and_pace` is a core server-level input/controller probe with AI
 disabled so observations cannot renew accidentally. It checks fresh and expired
 position pings, squad intel and retained living references; corner-watch freshness;

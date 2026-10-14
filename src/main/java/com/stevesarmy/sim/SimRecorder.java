@@ -106,7 +106,8 @@ public final class SimRecorder {
                         int probedRays, boolean reloading,
                         String posture, boolean rising, float syncedCoverHeight,
                         double dangerAtSoldier, boolean dangerLegExposed,
-                        String moveSource, String cautionReason, Double appliedSpeed) {
+                        String moveSource, String cautionReason, Double appliedSpeed,
+                        com.stevesarmy.entity.ai.SoldierSpeedController.Telemetry movementSpeed) {
         if (current == null) return;
         if (!firstSoldier) current.append(',');
         firstSoldier = false;
@@ -206,6 +207,13 @@ public final class SimRecorder {
         }
         if (appliedSpeed != null && appliedSpeed > 0.0) {
             current.append(",\"sp\":").append(num(appliedSpeed));
+        }
+        if (movementSpeed != null) {
+            current.append(",\"speedRequest\":").append(movementSpeed.requestedModifier())
+                .append(",\"speedTarget\":").append(movementSpeed.targetSpeed())
+                .append(",\"speedApplied\":").append(movementSpeed.appliedSpeed())
+                .append(",\"movedPerTick\":").append(movementSpeed.displacement())
+                .append(",\"speedLimit\":").append(quote(movementSpeed.limitingReason()));
         }
         current.append('}');
     }

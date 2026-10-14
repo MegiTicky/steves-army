@@ -1,0 +1,118 @@
+package com.stevesarmy.entity.ai;
+
+import com.stevesarmy.StevesArmyMod;
+import com.stevesarmy.debug.DiagnosticLogManager;
+import com.stevesarmy.entity.SoldierEntity;
+import net.minecraft.world.entity.Mob;
+import net.minecraft.world.entity.ai.attributes.Attributes;
+import net.minecraft.world.phys.Vec3;
+
+/** Resolves raw goal modifiers at consumption time. Never stores attribute compensation in navigation. */
+public final class SoldierSpeedController {
+    public record Telemetry(double requestedModifier, double targetSpeed, double appliedSpeed,
+                            double displacement, String limitingReason) {}
+    public static final double MAX_SPEED_INCREASE = 0.06;
+    private static final double CRAWL_FACTOR = 0.65;
+    private static final double MANUAL_CQB_FACTOR = 0.24;
+    private static final double ANCHOR_ACCELERATION = 0.04;
+    private final Mob mob;
+    private double manualRamp;
+    private double requestedModifier;
+    private double targetSpeed;
+    private double appliedSpeed;
+    private double displacement;
+    private Vec3 lastPosition;
+    private String limitingReason = "stopped";
+    private String previousReason = "";
+
+    public SoldierSpeedController(Mob mob) { this.mob = mob; }
+
+    public void beginTick() {
+        Vec3 position = mob.position();
+        displacement = lastPosition == null ? 0 : Math.hypot(position.x - lastPosition.x, position.z - lastPosition.z);
+        lastPosition = position;
+    }
+
+    /** Absolute movement-speed intent, not a velocity clamp or a measured blocks/tick value. */
+    public double resolve(double request, boolean moving, boolean doorway) {
+        requestedModifier = Double.isFinite(request) ? Math.max(0, request) : 0;
+        double attribute = Math.max(0, mob.getAttributeValue(Attributes.MOVEMENT_SPEED));
+        var instance = mob.getAttribute(Attributes.MOVEMENT_SPEED);
+        double base = instance == null ? attribute : Math.max(0, instance.getBaseValue());
+        SoldierEntity soldier = mob instanceof SoldierEntity s ? s : null;
+        boolean manual = soldier != null && soldier.isCQB();
+        if (!manual) manualRamp = 0;
+        targetSpeed = moving ? requestedModifier * attribute : 0;
+        limitingReason = moving ? "requested" : "stopped";
+        boolean crawl = soldier != null && !soldier.isFiringProne()
+            && soldier.getTravelCrawlController().isCrawlActive();
+        if (crawl && targetSpeed > CRAWL_FACTOR * base) {
+            targetSpeed = CRAWL_FACTOR * base;
+            limitingReason = "crawl";
+        }
+        if (manual && moving) {
+            manualRamp = Math.min(MANUAL_CQB_FACTOR, manualRamp + 0.02);
+            if (targetSpeed > manualRamp * base) {
+                targetSpeed = manualRamp * base;
+                limitingReason = "manual-cqb";
+            }
+        }
+        if (doorway && targetSpeed > 0.03 * attribute) {
+            targetSpeed = 0.03 * attribute;
+            limitingReason = "doorway";
+        }
+        // Pinned soldiers escaping toward protection retain an immediate dash.
+        boolean emergencyDash = soldier != null && !crawl && !manual && !doorway
+            && !soldier.isLowCrouching()
+            && soldier.getCoverBehaviorManager().getSuppressionTracker().isPinned()
+            && soldier.getCoverBehaviorManager().getCurrentCover() == null
+            && soldier.getCoverBehaviorManager().getTargetCover() != null;
+        if (!emergencyDash && targetSpeed > appliedSpeed + MAX_SPEED_INCREASE) {
+            appliedSpeed += MAX_SPEED_INCREASE;
+            limitingReason += "+acceleration";
+        } else {
+            appliedSpeed = targetSpeed; // slowing and stopping take effect immediately
+        }
+        if (DiagnosticLogManager.isCoverLoggingEnabled()
+            && (!limitingReason.equals(previousReason) || mob.tickCount % 40 == 0)) {
+            StevesArmyMod.LOGGER.info("[MovementSpeed] S{} request={} attr={} target={} applied={} moved={} limit={}",
+                mob.getId(), requestedModifier, attribute, targetSpeed, appliedSpeed, displacement, limitingReason);
+        }
+        previousReason = limitingReason;
+        return appliedSpeed;
+    }
+
+    public void stop() {
+        requestedModifier = targetSpeed = appliedSpeed = 0;
+        limitingReason = "stopped";
+    }
+
+    /**
+     * Only budget the anchor's correction. Existing excess momentum is never globally clipped;
+     * vertical motion is untouched. Radial stabilization retains the dock's existing hold policy.
+     */
+    public Vec3 anchorVelocity(Vec3 velocity, double nx, double nz, double desired, boolean insideDeadzone) {
+        double incoming = velocity.horizontalDistance();
+        double toward = velocity.x * nx + velocity.z * nz;
+        if (toward < 0 || (insideDeadzone && toward > 0)) {
+            velocity = velocity.subtract(nx * toward, 0, nz * toward);
+            toward = 0;
+        }
+        double tangentSq = Math.max(0, velocity.horizontalDistanceSqr() - toward * toward);
+        double correctionBudget = appliedSpeed > 0 ? Math.min(0.18, appliedSpeed) : 0.18;
+        double budget = Math.max(incoming, correctionBudget);
+        double radialRoom = Math.sqrt(Math.max(0, budget * budget - tangentSq));
+        double bounded = Math.min(desired, Math.min(radialRoom, toward + ANCHOR_ACCELERATION));
+        if (toward < bounded) velocity = velocity.add(nx * (bounded - toward), 0, nz * (bounded - toward));
+        return velocity;
+    }
+
+    public double requestedModifier() { return requestedModifier; }
+    public double targetSpeed() { return targetSpeed; }
+    public double appliedSpeed() { return appliedSpeed; }
+    public double displacement() { return displacement; }
+    public String limitingReason() { return limitingReason; }
+    public Telemetry snapshot() {
+        return new Telemetry(requestedModifier, targetSpeed, appliedSpeed, displacement, limitingReason);
+    }
+}
