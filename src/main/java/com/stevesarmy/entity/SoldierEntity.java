@@ -1473,6 +1473,7 @@ public class SoldierEntity extends PathfinderMob implements Container {
         super.tick();
         if (this.level().isClientSide) {
             com.stevesarmy.network.SyncSoldierInventoryPacket.applyPendingInventory(this);
+            tickCrawlRenderAmount();
         }
         
         if (!this.level().isClientSide) {
@@ -2416,6 +2417,32 @@ public BlockPos getPingMoveTarget() {
     
     public boolean isLowCrouching() {
         return entityData.get(LOW_CROUCHING);
+    }
+
+    /**
+     * Render-side crawl amount (0..1, client tick maintained) so the prone
+     * pose/rotation path lights up on LAND: vanilla only feeds swimAmount in
+     * water, which left every land crawler rendering as a standing walk no
+     * matter what SoldierModel's prone pose wanted to draw.
+     */
+    private float crawlRenderAmount = 0.0F;
+    private float oldCrawlRenderAmount = 0.0F;
+
+    @Override
+    public float getSwimAmount(float partialTick) {
+        float vanilla = super.getSwimAmount(partialTick);
+        float crawl = net.minecraft.util.Mth.lerp(partialTick, oldCrawlRenderAmount, crawlRenderAmount);
+        return Math.max(vanilla, crawl);
+    }
+
+    private void tickCrawlRenderAmount() {
+        oldCrawlRenderAmount = crawlRenderAmount;
+        float target = isLowCrouching() ? 1.0F : 0.0F;
+        if (crawlRenderAmount < target) {
+            crawlRenderAmount = Math.min(target, crawlRenderAmount + 0.25F);
+        } else if (crawlRenderAmount > target) {
+            crawlRenderAmount = Math.max(target, crawlRenderAmount - 0.25F);
+        }
     }
 
     /** True while low-crouching movement has a stable horizontal travel direction. */

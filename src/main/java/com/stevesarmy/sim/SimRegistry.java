@@ -102,6 +102,7 @@ public final class SimRegistry {
             goToVolleyStrandDirectWalk(),
             goToVolleyStreet(),
             cautionAdsTravelFloor(),
+            suppressedCrawlPace(),
             clearCheckerDeath());
     }
 
@@ -1824,6 +1825,83 @@ public final class SimRegistry {
                     speeds.sort(Double::compare);
                     double median = speeds.get(speeds.size() / 2);
                     return median >= 0.120 && median <= 0.139;
+                })
+            .build();
+    }
+
+    /**
+     * Suppressed-traveler crawl gate: sustained near-miss fire pins a rifleman
+     * marching (GO_TO) along a 1-high wall row with a low shooter north of it —
+     * the lane cells read eye-exposed / leg-shielded, so the crawl engages.
+     * The soldier must go low AND keep the tuned crawl pace — 0.65 of the BASE
+     * attribute — regardless of the gun's TaCZ taxes. appliedSpeed discriminates
+     * against both the unnormalized aim-taxed crawl (0.172) and the untaxed
+     * non-aiming crawl (0.216).
+     */
+    private static SimScenario suppressedCrawlPace() {
+        return SimScenario.builder("suppressed_crawl_pace")
+            .description("GO_TO march under sustained scripted near-miss fire: the crawl "
+                + "engages in crawl-hidden cells and the soldier must go low (SWIMMING "
+                + "posture) at 0.65 x base attribute instead of the gun-taxed crawl pace.")
+            .duration(400)
+            .armed()
+            .terrain(t -> {
+                t.platform();
+                // east-west 1-high wall north of the march lane (z=20): south-face
+                // cells are eye-exposed / leg-shielded against the low northern shooter
+                t.coverRow(10, 20, 30, 20, 1);
+            })
+            .setup(ctx -> {
+                ctx.spawnAnchor(6, 0, 42);
+                ctx.spawnFriendly(ModEntities.SOLDIER.get(), "mover", 30, 0, 26, SquadMode.HOLD);
+                ctx.setDangerSweepEnabled(false);
+                ctx.issueGoTo(12, 26);
+            })
+            .action(15, "near-miss pressure", ctx -> ctx.injectSuppressionFromGround("mover", 3, 20.5, 8.5, 1.0, 3.0f))
+            .action(30, "near-miss pressure", ctx -> ctx.injectSuppressionFromGround("mover", 3, 20.5, 8.5, 1.0, 3.0f))
+            .action(45, "near-miss pressure", ctx -> ctx.injectSuppressionFromGround("mover", 3, 20.5, 8.5, 1.0, 3.0f))
+            .action(60, "near-miss pressure", ctx -> ctx.injectSuppressionFromGround("mover", 3, 20.5, 8.5, 1.0, 3.0f))
+            .action(75, "near-miss pressure", ctx -> ctx.injectSuppressionFromGround("mover", 3, 20.5, 8.5, 1.0, 3.0f))
+            .action(90, "near-miss pressure", ctx -> ctx.injectSuppressionFromGround("mover", 3, 20.5, 8.5, 1.0, 3.0f))
+            .action(105, "near-miss pressure", ctx -> ctx.injectSuppressionFromGround("mover", 3, 20.5, 8.5, 1.0, 3.0f))
+            .action(120, "near-miss pressure", ctx -> ctx.injectSuppressionFromGround("mover", 3, 20.5, 8.5, 1.0, 3.0f))
+            .assertThat("march completes (closest approach to the ping <= 3)",
+                view -> {
+                    double best = Double.MAX_VALUE;
+                    for (SimSample s : view.timeline().series("mover")) {
+                        double d = Math.hypot(
+                            s.state.position.x - 12.5, s.state.position.z - 26.5);
+                        if (d < best) best = d;
+                    }
+                    return best <= 3.0;
+                })
+            .assertThat("goes low while marching under fire "
+                    + "(SWIMMING posture observed with suppression >= 0.5)",
+                view -> {
+                    for (SimSample s : view.timeline().series("mover")) {
+                        if ("SWIMMING".equals(s.posture)
+                            && s.state.suppressionLevel >= 0.5f) {
+                            return true;
+                        }
+                    }
+                    return false;
+                })
+            .assertThat("crawl pace stays at 0.65 x base attribute "
+                    + "(median crawl-window appliedSpeed in [0.222, 0.234])",
+                view -> {
+                    java.util.List<Double> speeds = new java.util.ArrayList<>();
+                    for (SimSample s : view.timeline().series("mover")) {
+                        if (!"SWIMMING".equals(s.posture)) continue;
+                        Double sp = s.appliedSpeed;
+                        if (sp == null || sp <= 0.05) continue;
+                        speeds.add(sp);
+                    }
+                    if (speeds.size() < 4) {
+                        return false; // not enough crawl travel observed to judge
+                    }
+                    speeds.sort(Double::compare);
+                    double median = speeds.get(speeds.size() / 2);
+                    return median >= 0.222 && median <= 0.234;
                 })
             .build();
     }
