@@ -3,9 +3,7 @@ package com.stevesarmy.squad;
 import com.stevesarmy.StevesArmyConfig;
 import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.combat.VisibilityRay;
-import com.stevesarmy.combat.cover.CoverBehaviorManager;
 import com.stevesarmy.entity.SoldierEntity;
-import com.stevesarmy.entity.ai.ExposedCombatController;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.network.chat.Component;
@@ -45,8 +43,8 @@ import java.util.UUID;
  * dwell. The order completes as "Area secured" only when the squad has
  * physically entered the space (strict area cells), checked its blind
  * spots, resolved known contact — a check made before the enemy's last
- * sighting does not count — and stayed settled throughout the settle
- * window — never on proximity alone. A stalled attack (a full window with
+ * sighting does not count — without an additional settling delay. A stalled
+ * attack (a full window with
  * neither a new check nor net displacement) is reported once and then
  * persists until the player replaces or cancels it; it is a report, not a
  * hold, so the squad keeps trying while it shows.
@@ -84,13 +82,6 @@ public final class ClearingCoordinator {
     private static final int RECENT_CONTACT_TICKS = 40;
     private static final int CLAIM_REFRESH_TICKS = 40;
     private static final int HEAVY_INTERVAL_TICKS = 10;
-    /**
-     * A soldier whose navigation never reports done but who stands still this
-     * many consecutive observe samples (≈40t) counts as settled — vanilla
-     * paths can end a fraction short of the goal and never fire isDone, which
-     * would otherwise block the SECURE settle forever.
-     */
-    private static final int NAV_ZOMBIE_SETTLE_SAMPLES = 4;
     /**
      * A check target needs this much wall-clock attention after first real
      * line of sight before it counts as observed — glancing a corner through
@@ -134,17 +125,12 @@ public final class ClearingCoordinator {
 
         ClearingStage stage = ClearingStage.APPROACH;
         boolean stalled;
-        long settledSinceTick = -1;
         long stallAnnouncedTick = Long.MIN_VALUE;
         /** Stall approach-anchor: centroid distance to the objective at anchor time (-1 unanchored). */
         long stallAnchorTick = -1;
         double stallAnchorDist = 0;
         long completedAtTick = Long.MIN_VALUE;
         boolean completeRequested;
-        /** Zombie-path settle: last position of a soldier whose navigation is stuck "in progress". */
-        final Map<UUID, double[]> navStillPos = new HashMap<>();
-        /** Zombie-path settle: consecutive stationary observe samples per such soldier. */
-        final Map<UUID, Integer> navStillTicks = new HashMap<>();
         /** TEMP DIAGNOSTIC (wave A validation): last stall-eligibility value, for transition logs. */
         boolean diagStallEligible;
     }
@@ -184,10 +170,18 @@ public final class ClearingCoordinator {
             refreshObjectiveClocks(squad);
             boolean heavy = gameTime % HEAVY_INTERVAL_TICKS == 0;
             if (heavy) {
+                int previousStage = stageOrdinal(activity.ownerId(), activity.fireTeam());
                 observe(state, squad);
                 updateContactPoints(state, squad, gameTime);
                 updateStageAndCompletion(server, state, activity, squad);
                 tickContactPlan(state.level, squad);
+                if (!state.completeRequested
+                    && previousStage != stageOrdinal(activity.ownerId(), activity.fireTeam())) {
+                    ServerPlayer owner = server.getPlayerList().getPlayer(activity.ownerId());
+                    if (owner != null) {
+                        SquadActivityManager.sync(owner);
+                    }
+                }
             }
             // Claims reassign on the observe cadence, not their own: consuming a
             // claim frees its owner, and a claim-less soldier falls back to a
@@ -266,7 +260,6 @@ public final class ClearingCoordinator {
         state.claims.clear();
         state.stage = ClearingStage.APPROACH;
         state.stalled = false;
-        state.settledSinceTick = -1;
         state.stallAnnouncedTick = Long.MIN_VALUE;
         state.stallAnchorTick = -1;
         state.stallAnchorDist = 0;
@@ -813,104 +806,24 @@ public final class ClearingCoordinator {
         boolean areaHealth = allChecked && contactResolved && !recentContact;
 
         boolean allInside = true;
-        boolean allSettled = true;
+        boolean anyInside = false;
         double cx = 0;
         double cz = 0;
         for (SoldierEntity soldier : squad) {
             BlockPos at = soldier.blockPosition();
-            // Strict: a feet block that is not a walkable area cell is outside,
-            // however close. A 3-block tolerance read the sidewalk through the
-            // wall as "inside" and could complete a clearing without entry.
-            if (!state.areaCells.contains(at.asLong())) {
-                allInside = false;
-                // An outside soldier's motion still feeds the still-tracking
-                // bookkeeping below; an inside soldier's does not need to —
-                // see the idle-restlessness exemption further down.
-            }
-            // Idle restlessness must not block completion: once every soldier
-            // is physically inside a fully healthy area (all checks done,
-            // contacts resolved, no recent contact — the gate below), there is
-            // nothing left to fight. Idle cover re-searches otherwise keep a
-            // soldier pacing between two anchors forever (navWalking every
-            // sample), so an order that had already won never settled, never
-            // reported "Area secured", and never converted to HOLD (user
-            // report 2026-10-14). hasValidAttackTarget cannot discriminate —
-            // it is the order-objective clock and reads true for every
-            // soldier until completion.
-            if (state.areaCells.contains(at.asLong())) {
-                state.navStillPos.remove(soldier.getUUID());
-                state.navStillTicks.remove(soldier.getUUID());
-                continue;
-            }
-            CoverBehaviorManager.CoverState coverState = soldier.getCoverBehaviorManager().getState();
-            boolean coverWalking = coverState == CoverBehaviorManager.CoverState.SEEKING_COVER
-                || coverState == CoverBehaviorManager.CoverState.REPOSITIONING
-                || ExposedCombatController.hasActiveMove(soldier);
-            boolean navWalking = !soldier.getNavigation().isDone();
-            // A zombie path — navigation "in progress" while the soldier
-            // stands still — used to block the settle window forever: a dock
-            // walk that ends a fraction short of an occupied slot leaves an
-            // unfinished path, allSettled never reads true, and an order with
-            // every check done and everyone parked never completes (the
-            // house-stuck completion form). Standing still for a full stall
-            // of observe cycles IS settled however the path object feels;
-            // only genuine cover-system legs or an actually-moving soldier
-            // keep the squad unsettled.
-            if (navWalking && !coverWalking) {
-                Vec3 pos = soldier.position();
-                double[] still = state.navStillPos.get(soldier.getUUID());
-                int ticks = state.navStillTicks.getOrDefault(soldier.getUUID(), 0);
-                // Half a block between observe samples: a real walk covers
-                // ~2.5 blocks per 10t sample, while a docked soldier whose
-                // cover re-search re-paths him in place jitters well under
-                // this — the tight 0.1 threshold never accumulated samples
-                // against that shuffle and the settle blocked forever.
-                if (still != null
-                    && (pos.x - still[0]) * (pos.x - still[0])
-                        + (pos.z - still[2]) * (pos.z - still[2]) > 0.25D) {
-                    ticks = 0;
-                }
-                state.navStillPos.put(soldier.getUUID(),
-                    new double[] {pos.x, pos.y, pos.z});
-                ticks++;
-                state.navStillTicks.put(soldier.getUUID(), ticks);
-                if (ticks < NAV_ZOMBIE_SETTLE_SAMPLES) {
-                    allSettled = false;
-                }
-            } else {
-                state.navStillPos.remove(soldier.getUUID());
-                state.navStillTicks.remove(soldier.getUUID());
-                // Plain navigation counts as movement too: the cover states
-                // and ExposedCombatController do not own every leg (fallback
-                // advances, the SECURE assemble walk ride raw navigation),
-                // and a soldier mid-walk is not settled however calm his
-                // cover state reads.
-                if (coverWalking || navWalking) {
-                    allSettled = false;
-                }
-            }
+            // Strict walkable-cell membership: proximity through a wall is not entry.
+            boolean inside = state.areaCells.contains(at.asLong());
+            allInside &= inside;
+            anyInside |= inside;
             cx += at.getX();
             cz += at.getZ();
         }
         cx /= squad.size();
         cz /= squad.size();
 
-        // The settle interval must be CONTINUOUSLY quiet: soldiers moving,
-        // seeking, or repositioning at any sample restarts the clock, so a
-        // squad that wandered through the whole window cannot complete by
-        // standing still for the final tick.
-        if (areaHealth && allInside && allSettled) {
-            if (state.settledSinceTick < 0) {
-                state.settledSinceTick = now;
-            }
-        } else {
-            state.settledSinceTick = -1;
-        }
-
-        boolean settled = state.settledSinceTick >= 0
-            && now - state.settledSinceTick >= StevesArmyConfig.getAttackClearSettleTicks();
-
-        if (settled) {
+        // Checks and contact safety already prove the clear. Idle cover movement
+        // must not delay the announcement or keep the attack order alive.
+        if (areaHealth && allInside) {
             state.stage = ClearingStage.SECURED;
             state.stalled = false;
             if (!state.completeRequested) {
@@ -921,37 +834,8 @@ public final class ClearingCoordinator {
             return;
         }
 
-        // TEMP Wave-A diagnostics: a squad parked inside a healthy area that
-        // still cannot settle is the completion deadlock family — name the
-        // blocker per soldier, rate-limited to one line per 200t.
-        if (areaHealth && allInside) {
-            Long last = NO_SETTLE_DIAG_LAST.get(state);
-            if (last == null || now - last >= 200) {
-                NO_SETTLE_DIAG_LAST.put(state, now);
-                StringBuilder blockers = new StringBuilder();
-                for (SoldierEntity soldier : squad) {
-                    CoverBehaviorManager.CoverState cs = soldier.getCoverBehaviorManager().getState();
-                    boolean moving = cs == CoverBehaviorManager.CoverState.SEEKING_COVER
-                        || cs == CoverBehaviorManager.CoverState.REPOSITIONING
-                        || ExposedCombatController.hasActiveMove(soldier)
-                        || !soldier.getNavigation().isDone();
-                    if (moving) {
-                        blockers.append(' ').append(soldier.getStringUUID(), 0, 8)
-                            .append('=').append(cs)
-                            .append("/move=").append(ExposedCombatController.hasActiveMove(soldier))
-                            .append("/nav=").append(!soldier.getNavigation().isDone());
-                    }
-                }
-                StevesArmyMod.LOGGER.info("[AttackClear][diag] no-settle squad {} area={} inside={} "
-                    + "settledSince={} blockers:{}", activity.objective(), areaHealth, allInside,
-                    state.settledSinceTick,
-                    blockers.isEmpty() ? "none(static)" : blockers.toString());
-            }
-        }
-
-        // SECURE means the squad is inside a healthy space; on approach the
-        // job is still CLEAR (advance) even when nothing is left to check.
-        state.stage = areaHealth && allInside ? ClearingStage.SECURE : ClearingStage.CLEAR;
+        // Squad display follows entry; individual views still own movement decisions.
+        state.stage = anyInside ? ClearingStage.CLEAR : ClearingStage.APPROACH;
 
         // Stall: quiet for a full stall window (no new observation, no live
         // contact) AND no net approach toward the objective across a second
@@ -972,7 +856,8 @@ public final class ClearingCoordinator {
             lastContactActivity = Math.max(lastContactActivity, seen);
         }
         long quietFor = Math.min(now - state.lastCheckTick, now - lastContactActivity);
-        boolean stallEligible = state.stage == ClearingStage.CLEAR
+        boolean stallEligible = (state.stage == ClearingStage.CLEAR
+            || state.stage == ClearingStage.APPROACH)
             && quietFor >= StevesArmyConfig.getAttackClearStallTicks();
         // TEMP DIAGNOSTIC (wave A validation): stall-clock visibility.
         if (stallEligible != state.diagStallEligible) {
@@ -1385,12 +1270,7 @@ public final class ClearingCoordinator {
 
     public static void clearAll() {
         STATES.clear();
-        NO_SETTLE_DIAG_LAST.clear();
     }
-
-    /** TEMP Wave-A diagnostic: per-state rate-limit clock for the no-settle diag. */
-    private static final java.util.IdentityHashMap<ClearingState, Long> NO_SETTLE_DIAG_LAST =
-        new java.util.IdentityHashMap<>();
 
     private static ClearingState stateFor(UUID ownerId, FireTeam team) {
         EnumMap<FireTeam, ClearingState> byTeam = STATES.get(ownerId);

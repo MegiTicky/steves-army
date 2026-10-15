@@ -744,8 +744,8 @@ BUILDER.pop();
             .defineInRange("attackClearRayBudget", 24, 0, 128);
 
         ATTACK_CLEAR_SETTLE_TICKS = BUILDER
-            .comment("Once the area is reached, checked, and free of unresolved threats, the squad",
-                     "must stay settled this long before the order completes as Area secured.",
+            .comment("Deprecated compatibility setting; ignored. Attack orders complete immediately",
+                     "once the area is reached, checked, and free of unresolved threats.",
                      "Default: 80 ticks (4 s)")
             .defineInRange("attackClearSettleTicks", 80, 20, 400);
 
