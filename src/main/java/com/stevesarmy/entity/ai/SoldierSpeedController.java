@@ -12,6 +12,8 @@ public final class SoldierSpeedController {
     public record Telemetry(double requestedModifier, double targetSpeed, double appliedSpeed,
                             double displacement, String limitingReason) {}
     public static final double MAX_SPEED_INCREASE = 0.06;
+    /** Normal vanilla ground sprint; fixed even when jumping or carrying speed buffs. */
+    public static final double MAX_LOCOMOTION_SPEED = 0.28;
     private static final double CRAWL_FACTOR = 0.65;
     private static final double MANUAL_CQB_FACTOR = 0.24;
     private static final double ANCHOR_ACCELERATION = 0.04;
@@ -28,6 +30,8 @@ public final class SoldierSpeedController {
     private double incomingSpeedThisTick;
     private double spentBudgetThisTick;
     private boolean impulseBypassThisTick;
+    private boolean externalImpulsePending;
+    private boolean externalMomentum;
     private Vec3 lastPosition;
     private String limitingReason = "stopped";
     private String previousReason = "";
@@ -77,6 +81,10 @@ public final class SoldierSpeedController {
         if (doorway && targetSpeed > 0.03 * attribute) {
             targetSpeed = 0.03 * attribute;
             limitingReason = "doorway";
+        }
+        if (targetSpeed > MAX_LOCOMOTION_SPEED) {
+            targetSpeed = MAX_LOCOMOTION_SPEED;
+            limitingReason = "sprint-ceiling";
         }
         // Pinned soldiers escaping toward protection retain an immediate dash.
         boolean emergencyDash = soldier != null && !crawl && !manual && !doorway
@@ -140,14 +148,21 @@ public final class SoldierSpeedController {
             spentBudgetThisTick = 0;
             impulseBypassThisTick = false;
         }
-        double budget = Math.max(0, appliedSpeed);
-        if (budget <= 1.0e-6 || externalImpulseThisTick || requested.horizontalDistanceSqr() <= 1.0e-10) {
+        // Zero intent still permits friction/anchor settling, but never an unlimited coast.
+        double budget = appliedSpeed > 1.0e-6 ? Math.min(MAX_LOCOMOTION_SPEED, appliedSpeed)
+            : MAX_LOCOMOTION_SPEED;
+        if (requested.horizontalDistanceSqr() <= 1.0e-10) {
             return requested;
         }
-        if (incomingVelocity.horizontalDistance() > budget * 1.5 + 0.08) {
+        if (externalImpulseThisTick) return preserveImpulseMovement(requested);
+        // Do not lower the impulse threshold when a controller slows down. Ordinary
+        // carried walking velocity is not knockback just because the new intent is low.
+        if (externalImpulsePending || (externalMomentum && incomingVelocity.horizontalDistance() > MAX_LOCOMOTION_SPEED)
+            || incomingVelocity.horizontalDistance() > MAX_LOCOMOTION_SPEED * 1.5 + 0.08) {
+            externalImpulsePending = false;
             externalImpulseThisTick = true;
             impulseBypassThisTick = true;
-            return requested;
+            return preserveImpulseMovement(requested);
         }
         double remaining = Math.max(0, budget - locomotionDistance);
         double horizontal = requested.horizontalDistance();
@@ -160,6 +175,33 @@ public final class SoldierSpeedController {
         locomotionDistance = budget;
         spentBudgetThisTick = locomotionDistance;
         return new Vec3(requested.x * scale, requested.y, requested.z * scale);
+    }
+
+    /** Explicit knockback provenance also preserves impulses below the fallback threshold. */
+    public void markExternalImpulse() { externalImpulsePending = true; }
+
+    private Vec3 preserveImpulseMovement(Vec3 requested) {
+        // Preserve the incoming impulse, but do not let steering accelerate it
+        // indefinitely and keep the exemption alive after knockback should decay.
+        double allowed = Math.max(MAX_LOCOMOTION_SPEED, incomingSpeedThisTick);
+        double horizontal = requested.horizontalDistance();
+        if (horizontal <= allowed) return requested;
+        double scale = allowed / horizontal;
+        return new Vec3(requested.x * scale, requested.y, requested.z * scale);
+    }
+
+    /**
+     * travel() retains its accelerated velocity even when move() clips displacement.
+     * Bound that ordinary carry-over so high attributes cannot manufacture a false
+     * external impulse next tick. Actual impulses keep their momentum until it settles.
+     */
+    public Vec3 finishTravel(Vec3 velocity) {
+        if (telemetryTick != mob.tickCount) return velocity;
+        double horizontal = velocity.horizontalDistance();
+        externalMomentum = impulseBypassThisTick && horizontal > MAX_LOCOMOTION_SPEED;
+        if (impulseBypassThisTick || externalImpulsePending || horizontal <= MAX_LOCOMOTION_SPEED) return velocity;
+        double scale = MAX_LOCOMOTION_SPEED / horizontal;
+        return new Vec3(velocity.x * scale, velocity.y, velocity.z * scale);
     }
 
     public double requestedModifier() { return requestedModifier; }

@@ -1537,8 +1537,21 @@ public class SoldierEntity extends PathfinderMob implements Container {
         velocityBeforeTravel = getDeltaMovement();
         try {
             super.travel(input);
+            if (moveControl instanceof com.stevesarmy.entity.ai.CoverPositionController ctrl) {
+                setDeltaMovement(ctrl.getSpeedController().finishTravel(getDeltaMovement()));
+            }
         } finally {
             velocityBeforeTravel = Vec3.ZERO;
+        }
+    }
+
+    @Override
+    public void knockback(double strength, double x, double z) {
+        Vec3 before = getDeltaMovement();
+        super.knockback(strength, x, z);
+        if (moveControl instanceof com.stevesarmy.entity.ai.CoverPositionController ctrl
+            && getDeltaMovement().subtract(before).horizontalDistanceSqr() > 1.0e-10) {
+            ctrl.getSpeedController().markExternalImpulse();
         }
     }
 
@@ -1546,7 +1559,15 @@ public class SoldierEntity extends PathfinderMob implements Container {
     public void move(net.minecraft.world.entity.MoverType type, Vec3 movement) {
         if (type == net.minecraft.world.entity.MoverType.SELF
             && moveControl instanceof com.stevesarmy.entity.ai.CoverPositionController ctrl) {
+            Vec3 velocity = getDeltaMovement();
+            boolean velocityMove = movement.distanceToSqr(velocity) < 1.0e-12;
             movement = ctrl.getSpeedController().limitSelfMovement(movement, velocityBeforeTravel);
+            if (velocityMove) {
+                // Vanilla travel applies drag to getDeltaMovement after move returns.
+                // Feed it the bounded velocity, rather than retaining acceleration
+                // that was never physically applied (including during knockback).
+                setDeltaMovement(movement.x, velocity.y, movement.z);
+            }
         }
         super.move(type, movement);
     }

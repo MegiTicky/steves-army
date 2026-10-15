@@ -14,6 +14,24 @@ update every five ticks. The displayed blocks/second values assume 20 TPS;
 blocks/tick is the underlying measurement. It is independent of client movement
 interpolation, animation playback, and `Mob.getSpeed()` movement intent.
 
+Soldier locomotion has a fixed horizontal ceiling of **0.28 blocks/tick**
+(**5.6 blocks/second at 20 TPS**, approximately normal player ground sprint).
+It also applies to jumping, speed buffs, automatic enemy-near-path caution,
+and pinned escapes. Crawl, manual CQB, doorways, and final approaches can be
+slower. Pinned escapes can accelerate immediately but cannot exceed the ceiling.
+The limit reason is `sprint-ceiling` when this policy constrains the request.
+
+The physical limit is shared across self-movement calls within each entity tick,
+including anchor correction and coasting with zero movement intent. Ordinary
+walking velocity carried into the next tick is bounded too, so acceleration
+cannot be mistaken for an external impulse after a controller handoff.
+Explicit knockback and its excess momentum remain exempt, as do large incoming
+impulses detected before walking acceleration. Other mods' direct velocity
+changes have no provenance; the fallback detects incoming speeds above 0.50
+blocks/tick. Vehicle/platform displacement outside self-locomotion, teleports,
+and vertical physics are not capped. Actual total displacement can therefore
+exceed the ceiling when external movement is involved.
+
 - **Actual:** physical horizontal displacement during the latest server tick.
 - **Average:** horizontal speed over the most recent ten sampled ticks.
 - **Peak:** largest per-tick speed over the last 100 sampled ticks (five seconds
