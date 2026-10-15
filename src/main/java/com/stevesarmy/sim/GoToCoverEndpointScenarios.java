@@ -34,7 +34,14 @@ public final class GoToCoverEndpointScenarios {
             .core()
             .field(72, 48)
             .terrain(t -> {
-                t.floorOnly();
+                if (crossesCenter) {
+                    // Only this lane has footing: danger costs cannot steer
+                    // the route around the raw arrival radius in a full suite.
+                    t.fill(t.at(18, -1, 23), t.at(65, -1, 25),
+                        net.minecraft.world.level.block.Blocks.SMOOTH_STONE.defaultBlockState());
+                } else {
+                    t.floorOnly();
+                }
                 t.coverRow(44, 21, 44, 27, 1);
             })
             .setup(ctx -> {
