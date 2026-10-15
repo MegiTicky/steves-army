@@ -1399,9 +1399,9 @@ combat target means continuous Traverse. New close contact and short-cover
 commitment can shorten a phase; standing pinned escapes switch immediately.
 
 Standing Traverse has a fixed horizontal ceiling of 0.28 blocks/tick (5.6 blocks/s).
-Tactical resolves 60% of Traverse speed before applying the weapon's ADS penalty
-once: a saturated M4 with a 15% ADS penalty is limited to 0.1428 blocks/tick
-(2.856 blocks/s). Equipment, weight, debuffs, crawl, manual CQB, doorway, and
+Tactical resolves 40% of Traverse speed before applying the weapon's ADS penalty
+once: a saturated M4 with a 15% ADS penalty is limited to 0.0952 blocks/tick
+(1.904 blocks/s). Equipment, weight, debuffs, crawl, manual CQB, doorway, and
 approach constraints still apply. Repeated SELF movement calls share one tick
 budget; external impulses, vehicle/platform motion, and vertical physics retain
 their existing exceptions. Diagnostics identify unavailable weapon normalization.

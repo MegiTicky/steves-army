@@ -42,9 +42,9 @@ multiply pace twice. Physical ground Traverse now reaches the resolved ceiling
 on an unobstructed route. Recorded velocity is after drag, while displacement
 measures actual movement; compare horizontal vector lengths, not one axis.
 
-Tactical pace is the resolved Traverse pace times 0.60 times the weapon ADS
+Tactical pace is the resolved Traverse pace times 0.40 times the weapon ADS
 ratio, applied once. For a saturated M4 with a 15% ADS penalty this is
-0.1428 blocks/tick (2.856 blocks/second). The speed limit reads `tactical-ads`.
+0.0952 blocks/tick (1.904 blocks/second). The speed limit reads `tactical-ads`.
 The owner label includes the effective movement and fire modes. Flight-recorder
 frames additionally include `movement.policy`: preferred/effective mode,
 phase timing, contextual shares, target visibility, crawl and facing ownership,

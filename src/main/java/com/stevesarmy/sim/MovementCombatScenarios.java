@@ -283,7 +283,7 @@ public final class MovementCombatScenarios {
                 SimGunHandler.enableNativeScatterForScenario();
                 ctx.issueGoTo(48, 22);
             })
-            .assertThat("PROFILE: saturated and low Tactical requests apply 0.60 x 0.85 exactly once",
+            .assertThat("PROFILE: saturated and low Tactical requests apply 0.40 x 0.85 exactly once",
                 view -> resolvesTacticalSpeed(frames))
             .assertThat("NATIVE SPREAD: accepted hip and ADS shots stay inside their live envelopes",
                 view -> hasHipAndAdsWithinSpread(shooterId[0]))
@@ -293,7 +293,7 @@ public final class MovementCombatScenarios {
                 view -> hasAcceptedHipAndAds(shooterId[0]))
             .assertThat("CONTROLLER FIRE: accepted shots match the sampled HIP/ADS state",
                 view -> shotsMatchFireModes(frames, shooterId[0]))
-            .assertThat("PHYSICAL SPEED: Traverse stays at or below 0.28 and Tactical at or below 0.14281 blocks/tick",
+            .assertThat("PHYSICAL SPEED: Traverse stays at or below 0.28 and Tactical at or below 0.09521 blocks/tick",
                 view -> hasPhysicalStepBounds(frames));
         for (int tick = 1; tick <= 290; tick++) {
             builder.action(tick, "sample live movement profile", ctx -> sample(ctx, "rifle", frames));
@@ -409,7 +409,7 @@ public final class MovementCombatScenarios {
                 && current.controller().mode() == SoldierMovementController.Mode.TACTICAL;
             if (!tactical) continue;
             tacticalSteps++;
-            if (step > 0.14281) return false;
+            if (step > 0.09521) return false;
         }
         return tacticalSteps >= 10;
     }
@@ -479,8 +479,8 @@ public final class MovementCombatScenarios {
             if (frame.controller().mode() != SoldierMovementController.Mode.TACTICAL) continue;
             double neutral = frame.controller().adsNeutralAttribute();
             double ratio = frame.controller().adsRatio();
-            double highExpected = Math.min(1.2 * neutral, 0.28) * 0.60 * ratio;
-            double lowExpected = Math.min(0.12 * neutral, 0.28) * 0.60 * ratio;
+            double highExpected = Math.min(1.2 * neutral, 0.28) * 0.40 * ratio;
+            double lowExpected = Math.min(0.12 * neutral, 0.28) * 0.40 * ratio;
             if (Math.abs(frame.saturatedTacticalSpeed() - highExpected) > 1e-6
                 || Math.abs(frame.lowTacticalSpeed() - lowExpected) > 1e-6
                 || Math.abs(neutral - expectedNeutral) > 1e-5

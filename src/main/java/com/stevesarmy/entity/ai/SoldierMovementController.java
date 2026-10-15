@@ -432,14 +432,14 @@ public final class SoldierMovementController {
         GunIntegration.MovementProfile profile = GunIntegration.getMovementProfile(soldier);
         double neutral = Math.min(Math.max(0, rawRequest) * profile.adsNeutralAttribute(),
             SoldierSpeedController.MAX_LOCOMOTION_SPEED);
-        return mode() == Mode.TRAVERSE ? neutral : neutral * 0.60 * Math.max(0, profile.adsRatio());
+        return mode() == Mode.TRAVERSE ? neutral : neutral * 0.40 * Math.max(0, profile.adsRatio());
     }
 
     /** Residual self-motion and anchor settling retain a ceiling from the active pace mode. */
     public double coastingCeiling() {
         return mode() == Mode.TRAVERSE ? SoldierSpeedController.MAX_LOCOMOTION_SPEED
             : Math.min(SoldierSpeedController.MAX_LOCOMOTION_SPEED,
-                SoldierSpeedController.MAX_LOCOMOTION_SPEED * 0.60 * Math.max(0, adsRatio));
+                SoldierSpeedController.MAX_LOCOMOTION_SPEED * 0.40 * Math.max(0, adsRatio));
     }
 
     public void setMandatoryCrawl(boolean required, String reason) {
