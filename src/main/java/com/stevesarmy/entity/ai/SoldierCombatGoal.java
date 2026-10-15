@@ -630,6 +630,7 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
         }
         if (trackedTargetUUID == null || !trackedTargetUUID.equals(newTarget.getUUID())) {
             resetAimPatience();
+            aimPatienceTargetUUID = newTarget.getUUID();
             trackedTargetUUID = newTarget.getUUID();
             float switchReset = StevesArmyConfig.getAimQualitySwitchReset();
             aimQuality *= switchReset;
@@ -1951,36 +1952,36 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
                 }
             }
             if (!imperfectAttempt) {
-            noteEngagementGate(EngagementGateReason.AIM_QUALITY);
-            targetReevaluateCounter++;
-            int reevaluateInterval = StevesArmyConfig.getTargetReevaluateInterval();
-            if (soldier.isInCloseCombatContext()) {
-                // Close quarters change faster than open-field fights.
-                reevaluateInterval = Math.min(reevaluateInterval,
-                    StevesArmyConfig.getCloseCombatReevalIntervalTicks());
-            }
-            if (dynamicFiringEnabled() && ineffectiveBurstStreak >= 2) {
-                // Repeatedly ineffective against this target: look for a better
-                // answer twice as often instead of hammering the same shot.
-                reevaluateInterval = Math.max(5, reevaluateInterval / 2);
-            }
-            if (!vehicleCombat && targetReevaluateCounter >= reevaluateInterval) {
-                targetReevaluateCounter = 0;
-                Optional<LivingEntity> betterTarget = findBetterTarget(aimQuality);
-                if (betterTarget.isPresent()) {
-                    this.target = betterTarget.get();
-                    soldier.setTarget(target);
-                    threatTracker.reportThreatDirect(target);
-                    detectionSystem.forceDetect(target);
-                    resetAim(target);
-                    if (isDamageDebugLogging()) {
-                        StevesArmyMod.LOGGER.info("Switched to better target: {} (higher hit probability)", 
-                            target.getName().getString());
-                    }
-                    return;
+                noteEngagementGate(EngagementGateReason.AIM_QUALITY);
+                targetReevaluateCounter++;
+                int reevaluateInterval = StevesArmyConfig.getTargetReevaluateInterval();
+                if (soldier.isInCloseCombatContext()) {
+                    // Close quarters change faster than open-field fights.
+                    reevaluateInterval = Math.min(reevaluateInterval,
+                        StevesArmyConfig.getCloseCombatReevalIntervalTicks());
                 }
-            }
-            return;
+                if (dynamicFiringEnabled() && ineffectiveBurstStreak >= 2) {
+                    // Repeatedly ineffective against this target: look for a better
+                    // answer twice as often instead of hammering the same shot.
+                    reevaluateInterval = Math.max(5, reevaluateInterval / 2);
+                }
+                if (!vehicleCombat && targetReevaluateCounter >= reevaluateInterval) {
+                    targetReevaluateCounter = 0;
+                    Optional<LivingEntity> betterTarget = findBetterTarget(aimQuality);
+                    if (betterTarget.isPresent()) {
+                        this.target = betterTarget.get();
+                        soldier.setTarget(target);
+                        threatTracker.reportThreatDirect(target);
+                        detectionSystem.forceDetect(target);
+                        resetAim(target);
+                        if (isDamageDebugLogging()) {
+                            StevesArmyMod.LOGGER.info("Switched to better target: {} (higher hit probability)",
+                                target.getName().getString());
+                        }
+                        return;
+                    }
+                }
+                return;
             }
             requestedBurstShotLimit = Math.min(2, requestedBurstShotLimit);
         }
@@ -2011,23 +2012,9 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
         
         // Always fire through the aim point with angular deviation.
         // The accuracy model is angular dispersion, not a hit/miss roll.
-        float yawSigma = AimAccuracyManager.getYawSigma(aimQuality);
-        float pitchSigma = AimAccuracyManager.getPitchSigma(aimQuality);
-        // Dynamic firing: suppression shakes the shot; disciplined duty fire
-        // accepts a reduced share of the shake. The ±2.5σ clamp downstream
-        // bounds the extremes.
-        float suppression = effectiveSuppressionLevel();
-        if (suppression > 0.0f) {
-            float shakeShare = discipline == FireDiscipline.SUPPRESSIVE
-                ? StevesArmyConfig.getFiringDutySuppressionFactor() : 1.0f;
-            float shake = 1.0f + suppression * StevesArmyConfig.getSuppressionSigmaScale() * shakeShare;
-            yawSigma *= shake;
-            pitchSigma *= shake;
-        }
-        // Vegetation makes a partly visible target difficult to track rather
-        // than treating every visible silhouette as a clean shooting solution.
-        yawSigma += (float) aimPoint.concealment * 2.00f;
-        pitchSigma += (float) aimPoint.concealment * 0.75f;
+        float[] spread = directFireSpread(aimPoint);
+        float yawSigma = spread[0];
+        float pitchSigma = spread[1];
         float[] deviation = AimAccuracyManager.sampleGaussianDeviation(aimQuality, yawSigma, pitchSigma, soldier.level());
         float pitchDev = deviation[0];
         float yawDev = deviation[1];
@@ -2435,6 +2422,7 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
         GunIntegration.ShootResult result = GunIntegration.shootWithDeviation(
             soldier, aimPoint, deviation[0], deviation[1]);
         if (result == GunIntegration.ShootResult.SUCCESS) {
+            aimWaitTicks = 0;
             lastTacticalReloadShotTime = soldier.level().getGameTime();
             com.stevesarmy.squad.SquadMovementCoordinator.noteShot(soldier);
             soldier.getEngagementTelemetry().noteShot(soldier.tickCount);
@@ -2971,6 +2959,7 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
     }
     
     public void setTarget(LivingEntity newTarget) {
+        resetAim(newTarget);
         this.target = newTarget;
         soldier.setTarget(newTarget);
     }
@@ -4408,6 +4397,7 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
         
         switch (result) {
             case SUCCESS -> {
+                aimWaitTicks = 0;
                 if (movingFire) {
                     // Moving and stationary suppression both count as firing.
                     recordMobileShot(SoldierMovementController.FireMode.ADS, aimQuality,
@@ -4978,6 +4968,7 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
         
         switch (result) {
             case SUCCESS -> {
+                aimWaitTicks = 0;
                 lastTacticalReloadShotTime = soldier.level().getGameTime();
                 order.recordShot();
                 burstShotsFired++;
