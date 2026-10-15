@@ -84,6 +84,12 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
     private int consecutiveFailedSearches = 0;
     private int searchExhaustionCooldown = 0;
     private int goToRelocationTicks = 0;
+    // Distance-scaled ceiling for goToRelocationTicks: the flat 200-tick cap
+    // bounds only search latency, but the clock counts staged walking too, so
+    // any cover farther than ~30 walked blocks force-failed mid-route. Scales
+    // with the request distance beyond the exact-path radius, mirroring the
+    // distance-scaled repositioning budget below it.
+    private int goToRelocationMaxTicks = MAX_GO_TO_RELOCATION_TICKS;
     private Vec3 lastSeekingPosition = null;
     // A prone lane is intentionally not a CoverPoint: no reservation, peek state, or cover bonus.
     private BlockPos proneFiringDestination;
@@ -1345,6 +1351,10 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
         relocationCenter = destination.immutable();
         relocationCommandGeneration = commandGeneration;
         goToRelocationTicks = 0;
+        double requestDistance = Math.hypot(soldier.getX() - (destination.getX() + 0.5),
+            soldier.getZ() - (destination.getZ() + 0.5));
+        double excessBlocks = Math.max(0.0D, requestDistance - RELOCATION_EXACT_PATH_DISTANCE);
+        goToRelocationMaxTicks = MAX_GO_TO_RELOCATION_TICKS + (int) (excessBlocks * 8.0D);
         getCoverManager().setGoToRelocationActive(true);
         return true;
     }
@@ -1531,6 +1541,7 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
         relocationCenter = null;
         relocationCommandGeneration = -1;
         goToRelocationTicks = 0;
+        goToRelocationMaxTicks = MAX_GO_TO_RELOCATION_TICKS;
         getCoverManager().setGoToRelocationActive(false);
     }
 
@@ -2659,7 +2670,7 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
             } else {
                 goToSeekStallTicks = 0;
             }
-            if (++goToRelocationTicks > MAX_GO_TO_RELOCATION_TICKS) {
+            if (++goToRelocationTicks > goToRelocationMaxTicks) {
                 if (DiagnosticLogManager.isCoverLoggingEnabled()) {
                     StevesArmyMod.LOGGER.info("[CoverRelocation] Soldier {} GO_TO relocation timed out after {} ticks",
                         soldier.getId(), goToRelocationTicks);
@@ -3372,8 +3383,20 @@ private void tickRepositioning() {
         // Normal navigation-driven approach
         Vec3 currentPos = soldier.position();
         tryOpenDoorOnPath();
-        
+
         if (navigation.isDone()) {
+            if (relocationType != RelocationType.NONE) {
+                // A staged path has ended. Recalculate immediately: the next route
+                // may now be short enough to require exact cover validation.
+                // (Parity with tickSeekingCover — without this, every leg end
+                // past the single retry idled stuckTicks toward blacklisting a
+                // cover the march was walking to just fine.)
+                moveToCover(targetCover);
+                stuckTicks = 0;
+                noProgressTicks = 0;
+                lastSeekingPosition = currentPos;
+                return;
+            }
             if (movementAttemptCount == 1) {
                 if (DiagnosticLogManager.isCoverLoggingEnabled()) {
                     StevesArmyMod.LOGGER.info("[CoverNav] Soldier {} retrying cover path after it ended before arrival: target={}",

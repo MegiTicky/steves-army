@@ -113,6 +113,8 @@ public final class SimRegistry {
             GoToCoverEndpointScenarios.endpointCompletesAtCover(),
             GoToCoverEndpointScenarios.crossingPingCenterKeepsClaim(),
             GoToArrivalCoverScenario.arrivalCoverDelay(),
+            GoToLongRouteScenarios.longOpenMarch(),
+            GoToLongRouteScenarios.longDetourMarch(),
             cautionAdsTravelFloor(),
             suppressedCrawlPace(),
             clearCheckerDeath(),
