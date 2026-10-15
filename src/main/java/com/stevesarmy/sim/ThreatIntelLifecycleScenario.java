@@ -106,7 +106,7 @@ public final class ThreatIntelLifecycleScenario {
                 setLastSeen(intel, p.oldDeadId, oldSeen);
                 setLastSeen(intel, p.staleLiveId, staleSeen);
             })
-            .action(20, "observe the server cleanup driver", ctx -> {
+            .action(24, "observe the server cleanup driver after a full interval", ctx -> {
                 SquadData squad = SquadManager.get(ctx.level).getSquadByLeader(LEADER_ID).orElseThrow();
                 SquadThreatIntel intel = squad.getThreatIntel();
                 probe[0].cleanupRemovedOldDead = intel.getThreat(probe[0].oldDeadId).isEmpty();

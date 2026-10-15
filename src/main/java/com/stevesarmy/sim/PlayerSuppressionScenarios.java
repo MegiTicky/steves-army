@@ -71,7 +71,12 @@ public final class PlayerSuppressionScenarios {
             .field(48, 48)
             .duration(DURATION)
             .armed()
-            .terrain(terrain -> terrain.floorOnly())
+            .terrain(terrain -> {
+                terrain.floorOnly();
+                // A newly generated world can have terrain above the sky pad.
+                terrain.wall(8, 20, 38, 28, 4,
+                    net.minecraft.world.level.block.Blocks.AIR.defaultBlockState());
+            })
             .setup(ctx -> {
                 Probe p = new Probe();
                 p.shooter = ctx.spawnEnemyLabeled("shooter", 12, 0, 24);
