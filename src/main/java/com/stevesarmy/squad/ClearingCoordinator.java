@@ -3,6 +3,12 @@ package com.stevesarmy.squad;
 import com.stevesarmy.StevesArmyConfig;
 import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.combat.VisibilityRay;
+import com.stevesarmy.combat.TargetAcquisition;
+import com.stevesarmy.entity.TargetEntity;
+import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.monster.Monster;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.phys.AABB;
 import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.entity.ai.SoldierGroundNavigation;
 import com.stevesarmy.combat.cover.CoverReservationManager;
@@ -835,7 +841,8 @@ public final class ClearingCoordinator {
                 recentContact = true;
             }
         }
-        boolean areaHealth = allChecked && contactResolved && !recentContact;
+        boolean areaHealth = allChecked && contactResolved && !recentContact
+            && isActualEnemyAreaClear(state);
 
         boolean anyInside = false;
         double cx = 0;
@@ -934,6 +941,53 @@ public final class ClearingCoordinator {
         }
     }
 
+    /** Completion-only truth check; never reveals unseen entities to perception or targeting. */
+    private static boolean isActualEnemyAreaClear(ClearingState state) {
+        double x = state.objective.getX() + 0.5;
+        double y = state.objective.getY();
+        double z = state.objective.getZ() + 0.5;
+        final int radius = 16;
+        // Fail closed for missing chunks intersecting the cylinder, without loading them.
+        for (int cx = net.minecraft.util.Mth.floor(x - radius) >> 4;
+             cx <= (net.minecraft.util.Mth.floor(x + radius) >> 4); cx++) {
+            for (int cz = net.minecraft.util.Mth.floor(z - radius) >> 4;
+                 cz <= (net.minecraft.util.Mth.floor(z + radius) >> 4); cz++) {
+                double dx = Math.max(Math.max(cx * 16.0 - x, x - (cx + 1) * 16.0), 0);
+                double dz = Math.max(Math.max(cz * 16.0 - z, z - (cz + 1) * 16.0), 0);
+                if (dx * dx + dz * dz <= radius * radius && !state.level.hasChunk(cx, cz)) {
+                    return false;
+                }
+            }
+        }
+        List<SoldierEntity> observers = new ArrayList<>();
+        for (UUID id : state.recipients) {
+            if (state.level.getEntity(id) instanceof SoldierEntity soldier && soldier.isAlive()) {
+                observers.add(soldier);
+            }
+        }
+        if (observers.isEmpty()) return false;
+        for (LivingEntity enemy : state.level.getEntitiesOfClass(LivingEntity.class,
+            new AABB(x - radius, y - 6, z - radius, x + radius, y + 6, z + radius))) {
+            double dx = enemy.getX() - x;
+            double dz = enemy.getZ() - z;
+            if (dx * dx + dz * dz > radius * radius || Math.abs(enemy.getY() - y) > 6) continue;
+            for (SoldierEntity soldier : observers) {
+                if (!TargetAcquisition.isValidTarget(soldier, enemy)
+                    || soldier.isFriendlyTo(enemy) || !soldier.isProactiveTarget(enemy)
+                    || !soldier.canAttack(enemy)) continue;
+                // Same combat categories, without detection or line-of-sight requirements.
+                if (enemy instanceof SoldierEntity || enemy instanceof Player
+                    || (enemy instanceof TargetEntity && soldier.fofCategoryAllows(
+                        FofCategory.TARGET_DUMMIES, StevesArmyConfig.shouldTargetTargetEntities()))
+                    || (enemy instanceof Monster && soldier.fofCategoryAllows(
+                        FofCategory.MONSTERS, StevesArmyConfig.shouldTargetMonsters()))) {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
     /** Continue the same recipient roster even after the activity becomes HOLD. */
     private static void tickRegrouping(MinecraftServer server, ClearingState state,
                                       SquadActivityManager.AttackActivityView activity) {
@@ -992,7 +1046,8 @@ public final class ClearingCoordinator {
 
         int pending = state.recipients.size() - state.arrived.size();
         if (!state.completeRequested && !state.recipients.isEmpty()
-            && state.arrived.size() * 2 > state.recipients.size()) {
+            && state.arrived.size() * 2 > state.recipients.size()
+            && isActualEnemyAreaClear(state)) {
             state.completeRequested = true;
             state.completedAtTick = now;
             state.stage = ClearingStage.SECURED;
