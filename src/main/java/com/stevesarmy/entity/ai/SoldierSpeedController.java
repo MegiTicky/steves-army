@@ -21,6 +21,9 @@ public final class SoldierSpeedController {
     private double targetSpeed;
     private double appliedSpeed;
     private double displacement;
+    private int movementBudgetTick = Integer.MIN_VALUE;
+    private double locomotionDistance;
+    private boolean externalImpulseThisTick;
     private Vec3 lastPosition;
     private String limitingReason = "stopped";
     private String previousReason = "";
@@ -31,6 +34,9 @@ public final class SoldierSpeedController {
         Vec3 position = mob.position();
         displacement = lastPosition == null ? 0 : Math.hypot(position.x - lastPosition.x, position.z - lastPosition.z);
         lastPosition = position;
+        movementBudgetTick = mob.tickCount;
+        locomotionDistance = 0;
+        externalImpulseThisTick = false;
     }
 
     /** Absolute movement-speed intent, not a velocity clamp or a measured blocks/tick value. */
@@ -105,6 +111,32 @@ public final class SoldierSpeedController {
         double bounded = Math.min(desired, Math.min(radialRoom, toward + ANCHOR_ACCELERATION));
         if (toward < bounded) velocity = velocity.add(nx * (bounded - toward), 0, nz * (bounded - toward));
         return velocity;
+    }
+
+    /** Bound controller-owned self movement without clamping external impulses. */
+    public Vec3 limitSelfMovement(Vec3 requested, Vec3 incomingVelocity) {
+        if (movementBudgetTick != mob.tickCount) {
+            movementBudgetTick = mob.tickCount;
+            locomotionDistance = 0;
+            externalImpulseThisTick = false;
+        }
+        double budget = Math.max(0, appliedSpeed);
+        if (budget <= 1.0e-6 || externalImpulseThisTick || requested.horizontalDistanceSqr() <= 1.0e-10) {
+            return requested;
+        }
+        if (incomingVelocity.horizontalDistance() > budget * 1.5 + 0.08) {
+            externalImpulseThisTick = true;
+            return requested;
+        }
+        double remaining = Math.max(0, budget - locomotionDistance);
+        double horizontal = requested.horizontalDistance();
+        if (horizontal <= remaining + 1.0e-6) {
+            locomotionDistance += horizontal;
+            return requested;
+        }
+        double scale = remaining / horizontal;
+        locomotionDistance = budget;
+        return new Vec3(requested.x * scale, requested.y, requested.z * scale);
     }
 
     public double requestedModifier() { return requestedModifier; }

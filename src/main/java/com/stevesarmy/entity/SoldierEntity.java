@@ -1528,6 +1528,15 @@ public class SoldierEntity extends PathfinderMob implements Container {
     }
 
     @Override
+    public void move(net.minecraft.world.entity.MoverType type, Vec3 movement) {
+        if (type == net.minecraft.world.entity.MoverType.SELF
+            && moveControl instanceof com.stevesarmy.entity.ai.CoverPositionController ctrl) {
+            movement = ctrl.getSpeedController().limitSelfMovement(movement, getDeltaMovement());
+        }
+        super.move(type, movement);
+    }
+
+    @Override
     protected void customServerAiStep() {
         // Suppression decay runs from the entity tick, not the cover goal, so it
         // continues while CoverTacticalGoal is preempted or on its restart
