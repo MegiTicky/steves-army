@@ -32,7 +32,9 @@ public final class GoToArrivalCoverScenario {
                 ctx.setDangerSweepEnabled(false);
                 ctx.issueGoTo(38, 24);
             });
-        for (int tick = 25; tick <= 220; tick += 5) {
+        // Keep the arrival trigger live at the capped walking pace; the final
+        // 100 ticks remain available for the unchanged search/docking assertions.
+        for (int tick = 25; tick <= 400; tick += 5) {
             scenario.action(tick, "make nearby cover available on objective arrival", ctx -> {
                 if (coverAdded[0]) return;
                 var soldier = ctx.soldier(SOLDIER);
