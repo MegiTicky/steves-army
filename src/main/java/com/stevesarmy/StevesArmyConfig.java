@@ -262,8 +262,8 @@ public class StevesArmyConfig {
             .defineInRange("moveDecayRate", 0.02, 0.0, 0.1);
         
         AIM_QUALITY_TARGET_MOVE_PENALTY = BUILDER
-            .comment("Additional per-tick aimQuality decay when the target is moving.",
-                     "Makes it harder to track sprinting targets. Default: 0.05.")
+            .comment("Tracking aim penalty when the target is moving, scaled by the effective aim build rate each tick.",
+                     "Lowers settled tracking quality without overwhelming slow aim acquisition. Default: 0.05.")
             .defineInRange("targetMovePenalty", 0.05, 0.0, 0.2);
         
         AIM_QUALITY_SWITCH_RESET = BUILDER

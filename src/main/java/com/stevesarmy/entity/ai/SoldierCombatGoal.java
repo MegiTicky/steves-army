@@ -86,6 +86,14 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
     private boolean wasReloading = false;
     
     private float aimQuality = 0.0f;
+    private int aimWaitTicks;
+    private int aimWaitLastTick = Integer.MIN_VALUE;
+    private UUID aimPatienceTargetUUID;
+    private int aimNoLosTicks;
+    private int aimContactLastTick = Integer.MIN_VALUE;
+    private boolean directBurstImperfect;
+    private boolean directRecoveryImperfect;
+    private static final int IMPERFECT_FIRE_RECOVERY_TICKS = 10;
     private UUID trackedTargetUUID = null;
     private boolean lastShotNeededBolt = false;
     private ExposureCalculator.AimPointResult currentAimPoint = null;
@@ -613,6 +621,7 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
     
     private void resetAim(LivingEntity newTarget) {
         if (newTarget == null) {
+            resetAimPatience();
             aimQuality = 0.0f;
             trackedTargetUUID = null;
             resetDirectFireBurst();
@@ -620,6 +629,7 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
             return;
         }
         if (trackedTargetUUID == null || !trackedTargetUUID.equals(newTarget.getUUID())) {
+            resetAimPatience();
             trackedTargetUUID = newTarget.getUUID();
             float switchReset = StevesArmyConfig.getAimQualitySwitchReset();
             aimQuality *= switchReset;
@@ -682,6 +692,7 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
     @Override
     public void tick() {
         PerformanceMetrics.recordCombatTick(machineGunnerPipeline);
+        updateAimPatienceContact();
         if (soldier.isHealing()) return;
 
         threatTracker.update(soldier);
@@ -1664,6 +1675,8 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
 
     private void tickGunCombat(@javax.annotation.Nullable ArmorThreatScanner.ArmorContact vehicleTarget) {
         boolean vehicleCombat = vehicleTarget != null;
+        updateAimPatienceContact();
+        if (vehicleCombat) resetAimPatience();
         if (!vehicleCombat && (soldier.getMovementController().isStationaryFireConstrained()
             || (soldier.getMovementController().hasMovingIntent()
                 && soldier.getMovementController().fireMode() != SoldierMovementController.FireMode.ADS))) {
@@ -1883,6 +1896,7 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
         }
         if (directBurstCooldownTicks > 0) {
             directBurstCooldownTicks--;
+            if (directBurstCooldownTicks == 0) directRecoveryImperfect = false;
             if (isDebugLogging() && (directBurstCooldownTicks == 0 || directBurstCooldownTicks % 5 == 0)) {
                 StevesArmyMod.LOGGER.info("[DirectBurst] soldier={} recovery_remaining={}",
                     soldier.getId(), directBurstCooldownTicks);
@@ -1907,13 +1921,36 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
         float continuationThreshold = directBurstActive
             ? directBurstContinuationThreshold
             : getDirectBurstContinuationThreshold(shotThreshold);
-        if (directBurstActive && aimQuality < continuationThreshold) {
+        boolean imperfectAllowed = !vehicleCombat && !isSuppressedFireHoldActive();
+        if (directBurstActive && directBurstImperfect && !imperfectAllowed) {
+            finishDirectFireBurst("imperfect_hold");
+            return;
+        }
+        boolean imperfectAttempt = directBurstActive && directBurstImperfect;
+        if (directBurstActive && !imperfectAttempt && aimQuality < continuationThreshold) {
             noteEngagementGate(EngagementGateReason.AIM_QUALITY);
             finishDirectFireBurst("aim_quality");
             return;
         }
 
         if (!directBurstActive && aimQuality < shotThreshold) {
+            // Patience counts only otherwise-fireable ticks, not time spent
+            // reloading, turning, behind geometry, or covering a friendly.
+            if (imperfectAllowed) {
+                if (!isAimWaitLaneReady(aimPoint, mobileFire)) return;
+                if (aimWaitLastTick != soldier.tickCount) {
+                    aimWaitLastTick = soldier.tickCount;
+                    aimWaitTicks = Math.min(60, aimWaitTicks + 1);
+                }
+                imperfectAttempt = aimWaitTicks >= imperfectFireWaitTicks();
+                if (isFiringDebugLogging() && (imperfectAttempt || aimWaitTicks % 10 == 0)) {
+                    StevesArmyMod.LOGGER.info(
+                        "[AimPatience] soldier={} mode={} wait={}/{} quality={} threshold={}",
+                        soldier.getId(), imperfectAttempt ? "imperfect" : "tracking", aimWaitTicks,
+                        imperfectFireWaitTicks(), aimQuality, shotThreshold);
+                }
+            }
+            if (!imperfectAttempt) {
             noteEngagementGate(EngagementGateReason.AIM_QUALITY);
             targetReevaluateCounter++;
             int reevaluateInterval = StevesArmyConfig.getTargetReevaluateInterval();
@@ -1944,6 +1981,8 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
                 }
             }
             return;
+            }
+            requestedBurstShotLimit = Math.min(2, requestedBurstShotLimit);
         }
 
         // Cached perception chooses the aim point; the shot still validates the
@@ -2027,6 +2066,8 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
         result = GunIntegration.shootWithDeviation(soldier, aimPoint, pitchDev, yawDev);
         
         if (result == GunIntegration.ShootResult.SUCCESS) {
+            int waitedTicks = aimWaitTicks;
+            aimWaitTicks = 0;
             lastTacticalReloadShotTime = soldier.level().getGameTime();
             com.stevesarmy.squad.SquadMovementCoordinator.noteShot(soldier);
             noteEngagementGate(EngagementGateReason.NONE);
@@ -2037,6 +2078,13 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
             }
             if (!directBurstActive) {
                 beginDirectFireBurst(directProfile, requestedBurstShotLimit, mobileFire, continuationThreshold);
+                directBurstImperfect = imperfectAttempt;
+            }
+            if (isFiringDebugLogging()) {
+                StevesArmyMod.LOGGER.info(
+                    "[AimPatience] soldier={} shotMode={} waited={} quality={} threshold={} burstLimit={}",
+                    soldier.getId(), directBurstImperfect ? "imperfect" : "normal", waitedTicks,
+                    aimQuality, shotThreshold, directBurstShotLimit);
             }
             directBurstShotsFired++;
             lastShotTick = soldier.tickCount;
@@ -2200,6 +2248,97 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
         }
     }
     
+    private void resetAimPatience() {
+        aimWaitTicks = 0;
+        aimWaitLastTick = Integer.MIN_VALUE;
+        aimPatienceTargetUUID = null;
+        aimNoLosTicks = 0;
+    }
+
+    /** Runs even when hidden contact never reaches the direct-shot pipeline. */
+    private void updateAimPatienceContact() {
+        if (aimContactLastTick == soldier.tickCount) return;
+        aimContactLastTick = soldier.tickCount;
+        if (target == null || !target.isAlive()) {
+            resetAimPatience();
+            return;
+        }
+        if (!target.getUUID().equals(aimPatienceTargetUUID)) {
+            resetAimPatience();
+            aimPatienceTargetUUID = target.getUUID();
+        }
+        if (TargetAcquisition.hasLineOfSight(soldier, target)) {
+            aimNoLosTicks = 0;
+        } else if (++aimNoLosTicks > 5) {
+            aimWaitTicks = 0;
+            if (directBurstImperfect) finishDirectFireBurst("imperfect_lost_contact");
+        }
+    }
+
+    private int imperfectFireWaitTicks() {
+        if (soldier.getFireDiscipline() == FireDiscipline.CONSERVE || lastShotNeededBolt
+            || GunIntegration.isManualBolt(soldier)) return 60;
+        return soldier.getFireDiscipline() == FireDiscipline.SUPPRESSIVE ? 20 : 40;
+    }
+
+    private boolean isSuppressedFireHoldActive() {
+        return dynamicFiringEnabled() && soldier.getFireDiscipline() == FireDiscipline.STANDARD
+            && StevesArmyConfig.getSuppressedFireMode() == StevesArmyConfig.SuppressedFireMode.HOLD
+            && StevesArmyConfig.getSuppressionThresholdTighten() > 0.0f
+            && effectiveSuppressionLevel() > 0.0f;
+    }
+
+    private boolean isAimWaitLaneReady(ExposureCalculator.AimPointResult aimPoint, boolean mobileFire) {
+        if (GunIntegration.getShootCoolDown(soldier) > 0) {
+            noteEngagementGate(EngagementGateReason.BURST_COOLDOWN);
+            return false;
+        }
+        if (!GunIntegration.hasAmmoInBarrel(soldier) && GunIntegration.getCurrentAmmo(soldier) <= 0) {
+            noteEngagementGate(EngagementGateReason.RELOADING);
+            requestReload(false);
+            return false;
+        }
+        if (GunIntegration.isManualBolt(soldier) && !GunIntegration.hasAmmoInBarrel(soldier)) {
+            GunIntegration.bolt(soldier);
+            lastShotNeededBolt = true;
+            noteEngagementGate(EngagementGateReason.BOLTING);
+            return false;
+        }
+        BlockPos coverBlock = getCoverBlockPos();
+        if (!VisibilityRay.traceFresh(soldier.level(), soldier.getEyePosition(), aimPoint.position, soldier,
+            coverBlock, coverBlock == null ? null : coverBlock.above()).hasContact()) {
+            noteEngagementGate(EngagementGateReason.BULLET_PATH_BLOCKED);
+            return false;
+        }
+        float[] sigma = directFireSpread(aimPoint);
+        boolean safe = mobileFire
+            ? FriendlyFireChecker.isSafeToShoot(soldier, aimPoint.position, aimQuality,
+                sigma[0], sigma[1], 0.0f, 0.0f, true)
+            : FriendlyFireChecker.isSafeToShoot(soldier, aimPoint.position, aimQuality);
+        if (!safe) {
+            noteEngagementGate(EngagementGateReason.FF_BLOCK);
+            return false;
+        }
+        return true;
+    }
+
+    /** Same spread for patience eligibility and the actual sampled shot. */
+    private float[] directFireSpread(ExposureCalculator.AimPointResult aimPoint) {
+        float yawSigma = AimAccuracyManager.getYawSigma(aimQuality);
+        float pitchSigma = AimAccuracyManager.getPitchSigma(aimQuality);
+        float suppression = effectiveSuppressionLevel();
+        if (suppression > 0.0f) {
+            float shakeShare = soldier.getFireDiscipline() == FireDiscipline.SUPPRESSIVE
+                ? StevesArmyConfig.getFiringDutySuppressionFactor() : 1.0f;
+            float shake = 1.0f + suppression * StevesArmyConfig.getSuppressionSigmaScale() * shakeShare;
+            yawSigma *= shake;
+            pitchSigma *= shake;
+        }
+        yawSigma += (float) aimPoint.concealment * 2.00f;
+        pitchSigma += (float) aimPoint.concealment * 0.75f;
+        return new float[]{yawSigma, pitchSigma};
+    }
+
     private void updateAimQuality(@javax.annotation.Nullable Vec3 staticVisibleTarget) {
         if (target == null && staticVisibleTarget == null) return;
 
@@ -2235,7 +2374,9 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
                 if (machineGunnerPipeline) {
                     targetMovePenalty *= StevesArmyConfig.getMgTargetMovePenaltyScale();
                 }
-                aimQuality -= mobileFire ? MOBILE_FIRE_TARGET_MOVEMENT_DECAY : targetMovePenalty;
+                // Tracking difficulty must not overwhelm acquisition at low
+                // build rates and create an unreachable firing threshold.
+                aimQuality -= buildRate * (mobileFire ? MOBILE_FIRE_TARGET_MOVEMENT_DECAY : targetMovePenalty);
             }
 
             if (aimQuality < targetAimQuality) {
@@ -3954,6 +4095,11 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
         directBurstActive = false;
         directBurstShotsFired = 0;
         directBurstCooldownTicks = rollDirectRecoveryTicks(directRecoveryTicksFor(profile));
+        if (directBurstImperfect) {
+            directBurstCooldownTicks = Math.max(IMPERFECT_FIRE_RECOVERY_TICKS, directBurstCooldownTicks);
+        }
+        directRecoveryImperfect = directBurstImperfect;
+        directBurstImperfect = false;
         directBurstProfile = null;
         directBurstShotLimit = 0;
         directBurstContinuationThreshold = 0.0f;
@@ -3968,9 +4114,18 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
             StevesArmyMod.LOGGER.info("[DirectBurst] soldier={} cancelled reason=state_change shots={} cooldown={}",
                 soldier.getId(), directBurstShotsFired, directBurstCooldownTicks);
         }
+        // Interrupted imperfect fire still owes its recovery pause. Preserve
+        // an existing pause across repeated lane/readiness failures.
+        int imperfectRecovery = directBurstImperfect
+            ? Math.max(IMPERFECT_FIRE_RECOVERY_TICKS,
+                rollDirectRecoveryTicks(directRecoveryTicksFor(directBurstProfile != null
+                    ? directBurstProfile : getDirectFireWeaponProfile())))
+            : directRecoveryImperfect ? directBurstCooldownTicks : 0;
+        directRecoveryImperfect = imperfectRecovery > 0;
+        directBurstImperfect = false;
         directBurstActive = false;
         directBurstShotsFired = 0;
-        directBurstCooldownTicks = 0;
+        directBurstCooldownTicks = imperfectRecovery;
         directBurstProfile = null;
         directBurstShotLimit = 0;
         directBurstContinuationThreshold = 0.0f;
