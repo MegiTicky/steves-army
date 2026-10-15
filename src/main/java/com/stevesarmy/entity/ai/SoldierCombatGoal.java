@@ -265,6 +265,10 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
     private float burstStartTargetHealth = -1.0f;
     private int ineffectiveBurstStreak = 0;
     private int lastShotTick = Integer.MIN_VALUE;
+    private static final int TACTICAL_RELOAD_QUIET_TICKS = 100;
+    private static final int MG_TACTICAL_RELOAD_QUIET_TICKS = 300;
+    // Independent of per-engagement accuracy state; target changes must not erase this.
+    private long lastTacticalReloadShotTime = Long.MIN_VALUE;
     private int suppressionCadenceTicks = 1;
     private int suppressionBurstTarget = 0;
 
@@ -1150,7 +1154,7 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
         }
 
         if (reloadPending) {
-            if (tacticalReloadPending && isDirectlyEngaging()) {
+            if (tacticalReloadPending && (isDirectlyEngaging() || !hasTacticalReloadQuietTime())) {
                 clearReloadStatus();
                 return false;
             }
@@ -1218,7 +1222,8 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
     private boolean shouldTacticalReload() {
         if (usesInventoryAmmoWithoutReserve()
             || !GunIntegration.canReload(soldier)
-            || !soldier.getCoverBehaviorManager().isInCover() || isDirectlyEngaging()) {
+            || !soldier.getCoverBehaviorManager().isInCover() || isDirectlyEngaging()
+            || !hasTacticalReloadQuietTime()) {
             return false;
         }
 
@@ -1227,6 +1232,13 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
         return magazineSize > 0
             && currentAmmo * 2 < magazineSize
             && getTotalAmmo() > currentAmmo;
+    }
+
+    private boolean hasTacticalReloadQuietTime() {
+        int quietTicks = machineGunnerPipeline
+            ? MG_TACTICAL_RELOAD_QUIET_TICKS : TACTICAL_RELOAD_QUIET_TICKS;
+        return lastTacticalReloadShotTime == Long.MIN_VALUE
+            || soldier.level().getGameTime() - lastTacticalReloadShotTime >= quietTicks;
     }
 
     private boolean usesInventoryAmmoWithoutReserve() {
@@ -1787,6 +1799,7 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
         result = GunIntegration.shootWithDeviation(soldier, aimPoint, pitchDev, yawDev);
         
         if (result == GunIntegration.ShootResult.SUCCESS) {
+            lastTacticalReloadShotTime = soldier.level().getGameTime();
             com.stevesarmy.squad.SquadMovementCoordinator.noteShot(soldier);
             noteEngagementGate(EngagementGateReason.NONE);
             soldier.getEngagementTelemetry().noteShot(soldier.tickCount);
@@ -2053,6 +2066,7 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
         GunIntegration.ShootResult result = GunIntegration.shootWithDeviation(
             soldier, aimPoint, deviation[0], deviation[1]);
         if (result == GunIntegration.ShootResult.SUCCESS) {
+            lastTacticalReloadShotTime = soldier.level().getGameTime();
             com.stevesarmy.squad.SquadMovementCoordinator.noteShot(soldier);
             soldier.getEngagementTelemetry().noteShot(soldier.tickCount);
             noteEngagementGate(EngagementGateReason.NONE);
@@ -3951,10 +3965,12 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
         switch (result) {
             case SUCCESS -> {
                 if (movingFire) {
+                    // Moving and stationary suppression both count as firing.
                     recordMobileShot(SoldierMovementController.FireMode.ADS, aimQuality,
                         AimAccuracyManager.getYawSigma(aimQuality), AimAccuracyManager.getPitchSigma(aimQuality),
                         0.0f, 0.0f, adsProgress, "visible-suppression");
                 }
+                lastTacticalReloadShotTime = soldier.level().getGameTime();
                 if (suppressionFirstShotTick < 0) {
                     suppressionFirstShotTick = soldier.tickCount;
                 }
@@ -4506,6 +4522,7 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
         
         switch (result) {
             case SUCCESS -> {
+                lastTacticalReloadShotTime = soldier.level().getGameTime();
                 order.recordShot();
                 burstShotsFired++;
                 ticksSinceLastBurstShot = 0;
