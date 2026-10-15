@@ -51,6 +51,21 @@ interval to inspect; they do not identify a root cause. In particular, a stable
 target does not prove the soldier was stationary, and a repeated failure may be
 expected under combat pressure or constrained terrain.
 
+## Sharing and analyzing a capture
+
+Share the complete export folder when reporting a bug. A large export does not
+need to be read in full into an AI conversation: scripts can parse the JSON
+locally and extract compact evidence first. Start with `summary.txt` and capture
+metadata, then narrow the selected soldier's transitions, movement failures,
+and suspicious stationary intervals to a small time window. Inspect detailed
+frames, nearby actors, paths, and terrain only as needed for that window.
+
+Avoid pasting the entire `trace.json` or `viewer.html` into a conversation.
+Terrain indices can dominate the raw JSON, and the HTML embeds a copy of the
+bundle. Keeping the complete files available while reading focused excerpts
+reduces input-token use and preserves evidence for later investigation. Agent
+instructions for this workflow are in `AGENTS.md`.
+
 ## Terrain and limits
 
 At export, terrain capture covers loaded chunks intersecting the selected
