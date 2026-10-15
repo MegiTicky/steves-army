@@ -81,11 +81,17 @@ flowchart TD
 
 ### GO_TO movement and cover
 
-`SoldierMoveToPingGoal` first offers the destination to cover relocation. If no
-reachable cover is selected, the direct walk finishes the order. Direct arrival
-permits one fresh cover search without the earlier relocation's restart delay;
-subsequent failed searches retain their normal retry pacing. Arriving at a cover
-dock already completes this handoff without granting another search later.
+`SoldierMoveToPingGoal` first offers the destination to cover relocation. Reaching
+the selected cover within the existing destination search area completes GO_TO,
+even when the dock is outside the ping's centre radius or across a wall. An active
+cover approach keeps movement ownership when its route crosses the ping centre.
+Completed GO_TO orders hold their cover rather than resuming ordinary HOLD
+marching toward the centre after a quiet dwell.
+
+If no reachable cover is selected, the direct walk finishes the order. Direct
+arrival permits one fresh cover search without the earlier relocation's restart
+delay; subsequent failed searches retain their normal retry pacing. Arriving at
+a cover dock consumes this handoff without granting another search later.
 
 ### Entrypoint Flow
 

@@ -71,7 +71,7 @@ public class SoldierHoldPositionGoal extends Goal {
 
     /** True when the hold objective is far enough past the hold radius that
      * resuming the march moves the soldier meaningfully (street-crossing and
-     * GO_TO marches clear this easily; a dock a block outside the radius
+     * SEND marches clear this easily; a dock a block outside the radius
      * does not - see {@link #MARCH_RESUME_DIST_SQ}). */
     private static boolean marchWorthwhile(SoldierEntity soldier) {
         BlockPos hold = soldier.getHoldPosition();
@@ -88,6 +88,9 @@ public class SoldierHoldPositionGoal extends Goal {
      * SoldierHoldPositionGoal can take over.
      */
     public static boolean shouldResumeMarch(SoldierEntity soldier, CoverBehaviorManager coverManager) {
+        // A completed GO_TO holds its selected cover, even outside the raw
+        // hold radius. A new movement command clears this holding state.
+        if (soldier.isGoToHolding()) return false;
         // A live fight owns the soldier - the cover goal keeps him docked and
         // firing, and the hold goal would not take over anyway (its canUse
         // refuses while a target is valid). Yielding here would just bounce
@@ -123,6 +126,7 @@ public class SoldierHoldPositionGoal extends Goal {
      * exemption in CoverTacticalGoal.shouldSeekCover.
      */
     public static boolean isTravelingToObjective(SoldierEntity soldier) {
+        if (soldier.isGoToHolding()) return false;
         BlockPos hold = soldier.getHoldPosition();
         if (hold == null || hold.equals(BlockPos.ZERO)) return false;
         return soldier.distanceToSqr(hold.getX(), hold.getY(), hold.getZ()) > HOLD_RADIUS_SQ;
@@ -130,6 +134,7 @@ public class SoldierHoldPositionGoal extends Goal {
 
     @Override
     public boolean canUse() {
+        if (soldier.isGoToHolding()) return false;
         if (com.stevesarmy.debug.DiagnosticLogManager.isCoverScoreLoggingEnabled()
             && soldier.tickCount % 100 == 0) {
             CoverBehaviorManager cm = soldier.getCoverBehaviorManager();
@@ -193,6 +198,7 @@ public class SoldierHoldPositionGoal extends Goal {
 
     @Override
     public boolean canContinueToUse() {
+        if (soldier.isGoToHolding()) return false;
         if (soldier.hasValidPingSuppressPos()) return false;
         if (soldier.hasValidAttackTarget()) {
             return false;

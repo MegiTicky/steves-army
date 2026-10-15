@@ -35,6 +35,9 @@ public class SoldierMoveToPingGoal extends Goal {
         if (soldier.isGoToHolding()) return false;
         if (!soldier.hasValidPingMoveTarget()) return false;
         captureCommand();
+        // The cover endpoint owns this order, including a route through the
+        // raw ping radius. Centre arrival is only for the direct-walk fallback.
+        if (soldier.getCoverTacticalGoal().isHandlingGoToRelocation(commandGeneration)) return false;
         if (soldier.hasGoToNavigationOwnership() && rawTarget != null
             && soldier.distanceToSqr(rawTarget.getX() + 0.5, rawTarget.getY() + 0.5,
                 rawTarget.getZ() + 0.5) <= closeDistance * closeDistance) {

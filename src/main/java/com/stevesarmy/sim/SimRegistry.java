@@ -101,6 +101,8 @@ public final class SimRegistry {
             attackGuideUnreachableConcede(),
             goToVolleyStrandDirectWalk(),
             goToVolleyStreet(),
+            GoToCoverEndpointScenarios.endpointCompletesAtCover(),
+            GoToCoverEndpointScenarios.crossingPingCenterKeepsClaim(),
             GoToArrivalCoverScenario.arrivalCoverDelay(),
             cautionAdsTravelFloor(),
             suppressedCrawlPace(),
@@ -1683,20 +1685,19 @@ public final class SimRegistry {
     /**
      * The realistic GO_TO volley: the streetBlock fixture (two houses, doors,
      * a street between them, waist-high cover rows) instead of a bare floor.
-     * The order is "move into the far room of house B" while the player
-     * re-pings the same spot every 30 ticks — the mashed-ping pattern from
-     * the in-game strand. Docks en route will land short of the far room;
-     * the landing check must hand the remainder to the direct walk instead
-     * of completing the order at a street dock, and the volley must not
-     * restart the seek window. Real maps always have some cover, so this is
-     * the representative case; the coverless volley is the edge case.
+     * The order points into house B while the player re-pings the same spot
+     * every 30 ticks — the mashed-ping pattern from the in-game strand. With
+     * the cover endpoint doctrine, the order may finish at a selected street
+     * dock before entering the room; the volley must not restart its seek
+     * window or strand the soldier there in a prone state.
      */
     private static SimScenario goToVolleyStreet() {
-        return SimScenario.builder("goto_volley_street")
-            .description("Mashed GO_TO pings on the streetBlock fixture: the destination is the "
-                + "far room of house B (two doors deep), with waist-high cover rows in the "
-                + "street. Re-pings must not strand the soldier prone at a street dock — the "
-                + "approach has to keep advancing into the ordered room.")
+        boolean[] holdingAtEnd = {false};
+        boolean[] coverNearSearchAreaAtEnd = {false};
+        SimScenario.Builder scenario = SimScenario.builder("goto_volley_street")
+            .description("Mashed GO_TO pings on the streetBlock fixture toward the far side of house B, "
+                + "with waist-high cover rows in the street. The order may finish at a selected "
+                + "cover endpoint, and repeated pings must preserve its claim and posture.")
             .duration(900)
             .armed()
             .terrain(t -> {
@@ -1737,25 +1738,15 @@ public final class SimRegistry {
                     return at != null && Math.hypot(
                         at.state.position.x - 10.5, at.state.position.z - 34.5) >= 10.0;
                 })
-            .assertThat("enters the ordered far room of house B "
-                    + "(closest approach to (34,15) <= 5)",
-                view -> {
-                    double best = Double.MAX_VALUE;
-                    for (SimSample s : view.timeline().series("mover")) {
-                        double d = Math.hypot(
-                            s.state.position.x - 34.5, s.state.position.z - 15.5);
-                        if (d < best) best = d;
-                    }
-                    return best <= 5.0;
-                })
-            .assertThat("never strands prone away from the destination "
-                    + "(at t450: not prone, or already within 8 of the ping)",
+            .assertThat("prone posture at t450 is either near the ping or docked in selected cover",
                 view -> {
                     SimSample at = sampleAt(view, "mover", 450);
                     if (at == null) return false;
                     boolean near = Math.hypot(
                         at.state.position.x - 34.5, at.state.position.z - 15.5) <= 8.0;
-                    return near || !"SWIMMING".equals(at.posture);
+                    boolean docked = at.state.currentCover != null && at.coverSlotOffset >= 0.0
+                        && at.coverSlotOffset <= 3.0;
+                    return near || docked || !"SWIMMING".equals(at.posture);
                 })
             .assertThat("state flash stays bounded once the walk owns the legs "
                     + "(<= 8 SEEKING/NO_COVER transitions after t200)",
@@ -1772,7 +1763,21 @@ public final class SimRegistry {
                         prev = flash ? s.state.coverState : null;
                     }
                     return flips <= 8;
-                })
+                });
+        scenario.action(870, "record completed order and retained cover endpoint", ctx -> {
+            SoldierEntity mover = ctx.soldier("mover");
+            if (mover == null || !mover.isAlive()) return;
+            holdingAtEnd[0] = mover.isGoToHolding();
+            var cover = mover.getCoverBehaviorManager().getCurrentCover();
+            if (cover != null) {
+                var pos = cover.getPosition();
+                coverNearSearchAreaAtEnd[0] = Math.hypot(pos.getX() + 0.5 - 34.5,
+                    pos.getZ() + 0.5 - 15.5) <= 20.0;
+            }
+        });
+        return scenario
+            .assertThat("completed GO_TO retains its selected cover near the search area",
+                view -> holdingAtEnd[0] && coverNearSearchAreaAtEnd[0])
             .build();
     }
 
@@ -1783,7 +1788,9 @@ public final class SimRegistry {
      * Exact modifier/ADS/slow-request behavior is covered by CautionSteeringScenarios.
      */
     private static SimScenario cautionAdsTravelFloor() {
-        return SimScenario.builder("caution_ads_travel_floor")
+        boolean[] holdingAtEnd = {false};
+        boolean[] coverNearSearchAreaAtEnd = {false};
+        SimScenario.Builder scenario = SimScenario.builder("caution_ads_travel_floor")
             .description("GO_TO across the streetBlock with a threat near the path and the "
                 + "sim gun's TaCZ speed emulation engaged: automatic caution retains "
                 + "the requested GO_TO pace with the normal weapon weight tax.")
@@ -1817,16 +1824,6 @@ public final class SimRegistry {
                         unaimed, aimed, restored));
                 }
             })
-            .assertThat("reaches the far room (closest approach to (34,15) <= 5)",
-                view -> {
-                    double best = Double.MAX_VALUE;
-                    for (SimSample s : view.timeline().series("mover")) {
-                        double d = Math.hypot(
-                            s.state.position.x - 34.5, s.state.position.z - 15.5);
-                        if (d < best) best = d;
-                    }
-                    return best <= 5.0;
-                })
             .assertThat("automatic caution retains requested GO_TO pace "
                     + "(median caution-window speed in [0.38, 0.41] b/t)",
                 view -> {
@@ -1844,7 +1841,21 @@ public final class SimRegistry {
                     speeds.sort(Double::compare);
                     double median = speeds.get(speeds.size() / 2);
                     return median >= 0.38 && median <= 0.41;
-                })
+                });
+        scenario.action(580, "record completed order and retained cover endpoint", ctx -> {
+            SoldierEntity mover = ctx.soldier("mover");
+            if (mover == null || !mover.isAlive()) return;
+            holdingAtEnd[0] = mover.isGoToHolding();
+            var cover = mover.getCoverBehaviorManager().getCurrentCover();
+            if (cover != null) {
+                var pos = cover.getPosition();
+                coverNearSearchAreaAtEnd[0] = Math.hypot(pos.getX() + 0.5 - 34.5,
+                    pos.getZ() + 0.5 - 15.5) <= 20.0;
+            }
+        });
+        return scenario
+            .assertThat("completed GO_TO retains its selected cover near the search area",
+                view -> holdingAtEnd[0] && coverNearSearchAreaAtEnd[0])
             .build();
     }
 

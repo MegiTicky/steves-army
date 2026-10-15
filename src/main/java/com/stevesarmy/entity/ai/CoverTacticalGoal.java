@@ -512,11 +512,6 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
     private BlockPos goToStallDestination = null;
     private int goToSeekStallTicks = 0;
 
-    // The generation whose cover relocation LANDED on a dock that is not the
-    // pinged destination (side cover on the route can sit past the target).
-    // requestGoToRelocation declines it so the direct walk finishes the
-    // approach instead of re-capturing the ping into the same dock loop.
-    private int goToRelocationLandedGeneration = -1;
     /** Consume the direct-walk arrival once; failed searches must retain their retry pacing. */
     private int handledGoToArrivalGeneration = -1;
     private BlockPos lastGoToArrivalObjective;
@@ -1330,18 +1325,13 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
     public boolean requestGoToRelocation(BlockPos destination, int commandGeneration) {
         if (destination == null || !soldier.hasValidPingMoveTarget()
             || soldier.getPingMoveGeneration() != commandGeneration
-            || failedGoToRelocationGeneration == commandGeneration
-            || goToRelocationLandedGeneration == commandGeneration) {
+            || failedGoToRelocationGeneration == commandGeneration) {
             return false;
         }
         if (relocationType == RelocationType.GO_TO
             && relocationCommandGeneration == commandGeneration) {
             return true;
         }
-        if (relocationCommandGeneration != commandGeneration) {
-            goToRelocationLandedGeneration = -1;
-        }
-
         clearRelocationTarget();
         relocationType = RelocationType.GO_TO;
         relocationCenter = destination.immutable();
@@ -8906,25 +8896,16 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
         }
 
         if (relocationType == RelocationType.GO_TO) {
-            // The dock must actually BE the pinged destination to complete
-            // the move: side cover on the route can sit past the target, and
-            // completing there strands the player's order 10 blocks early.
-            // A short/past dock marks the generation landed — the direct
-            // walk finishes the remaining approach.
-            if (relocationCenter != null
-                && soldier.blockPosition().distSqr(relocationCenter) <= 4 * 4) {
-                // Already protected: do not grant a delayed extra retry if this
-                // occupied cover is abandoned or its goal is interrupted later.
-                handledGoToArrivalGeneration = relocationCommandGeneration;
-                soldier.completeGoToIfGeneration(relocationCommandGeneration);
-            } else {
-                goToRelocationLandedGeneration = relocationCommandGeneration;
-            }
+            // The cover selected in the destination search area is the GO_TO
+            // endpoint. Requiring a centre visit would pull him out of this
+            // occupied dock and then send him straight back to cover.
+            handledGoToArrivalGeneration = relocationCommandGeneration;
+            soldier.completeGoToIfGeneration(relocationCommandGeneration);
         }
         if (relocationType != RelocationType.NONE) {
-            relocationType = RelocationType.NONE;
-            relocationCenter = null;
-            relocationCommandGeneration = -1;
+            // Promotion above cleared the target; keep the current dock and
+            // its reservation while releasing relocation ownership.
+            clearRelocationTarget();
         }
     }
 

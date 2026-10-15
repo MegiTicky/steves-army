@@ -107,6 +107,14 @@ rerun that scenario with `-Psim.fastticks=false` before chasing it.
 
 ### GO_TO arrival timing
 
+`goto_cover_endpoint_completion` and `goto_cross_cover_center_keeps_claim` put
+static cover in the destination search area before issuing GO_TO. The selected
+dock completes the command even outside the ping centre radius. The probes
+check that a route crossing the centre keeps its cover approach, that arrival
+clears relocation ownership, and that the completed order retains the dock
+through the ordinary HOLD march dwell. Run both with fast ticks and
+`-Psim.fastticks=false`.
+
 `goto_arrival_cover_delay` forces an initial cover relocation failure, then adds
 reachable half cover when the direct walk reaches its objective, with a known
 enemy 30 blocks beyond it. It checks search initiation within 20 ticks, selection
