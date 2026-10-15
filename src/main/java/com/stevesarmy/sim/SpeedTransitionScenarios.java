@@ -16,7 +16,7 @@ public final class SpeedTransitionScenarios {
     private SpeedTransitionScenarios() {}
 
     public static SimScenario transitions() {
-        boolean[] ok = new boolean[27];
+        boolean[] ok = new boolean[28];
         var scenario = SimScenario.builder("movement_speed_transitions").core().duration(200)
             .description("ADS-release during crawl must not amplify a stored modifier; docking "
                 + "must not add a diagonal burst; ordinary acceleration is bounded; external impulses survive.")
@@ -315,6 +315,7 @@ public final class SpeedTransitionScenarios {
             .assertThat("vanilla WAIT handoff clears stale tactical lateral input", v -> ok[24])
             .assertThat("vanilla MOVE_TO handoff clears stale tactical lateral input", v -> ok[25])
             .assertThat("MOVE_TO physical displacement follows its requested route", v -> ok[26])
+            .assertThat("standing vanilla Traverse reaches physical sprint pace", v -> ok[27])
             .assertThat("movement debug telemetry survives packet round trip without field misalignment", v -> ok[11])
             .assertThat("movement debug disable clears with an empty packet", v -> ok[12])
             .assertThat("walking acceleration and repeated controller ticks share one physical movement budget", v -> ok[9])
@@ -401,6 +402,34 @@ public final class SpeedTransitionScenarios {
             com.stevesarmy.StevesArmyMod.LOGGER.info(
                 "[MovementHandoff] waitCleared={} moveCleared={} dx={} dz={}",
                 ok[24], ok[25], dx, dz);
+        });
+        scenario.action(105, "measure steady vanilla Traverse physical pace", ctx -> {
+            var s = ctx.soldier("probe");
+            var ctrl = (CoverPositionController) s.getMoveControl();
+            ctrl.clear();
+            s.setDeltaMovement(Vec3.ZERO);
+            s.setYRot(-90);
+            double last = 0;
+            s.setNoAi(false);
+            try {
+                for (int n = 0; n < 20; n++) {
+                    s.tickCount++;
+                    ctrl.getSpeedController().beginTick();
+                    s.setOnGround(true);
+                    ctrl.setWantedPosition(s.getX() + 8, s.getY(), s.getZ(), 1.2);
+                    ctrl.tick();
+                    Vec3 start = s.position();
+                    s.travel(new Vec3(s.xxa, s.yya, s.zza));
+                    last = s.position().subtract(start).horizontalDistance();
+                }
+                ok[27] = last >= 0.275 && last <= 0.28001;
+                com.stevesarmy.StevesArmyMod.LOGGER.info("[TraversePhysicalPace] actual={} intent={} forward={}",
+                    last, ctrl.getSpeedController().appliedSpeed(), s.zza);
+            } finally {
+                s.setNoAi(true);
+                ctrl.clear();
+                s.setDeltaMovement(Vec3.ZERO);
+            }
         });
         return scenario.build();
     }

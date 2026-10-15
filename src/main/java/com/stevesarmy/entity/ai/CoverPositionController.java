@@ -32,7 +32,16 @@ public class CoverPositionController extends MoveControl {
         double attribute = this.mob.getAttributeValue(Attributes.MOVEMENT_SPEED);
         this.speedModifier = attribute > 1.0e-6 ? absolute / attribute : 0;
         try {
+            Operation consumedOperation = this.operation;
             super.tick();
+            // Mob.setSpeed also writes zza=speed. Treating our absolute pace
+            // as input strength applies it twice and makes Traverse crawl.
+            // Keep vanilla steering/jumping, but use full forward input;
+            // SoldierSpeedController still bounds actual SELF displacement.
+            if ((consumedOperation == Operation.MOVE_TO || consumedOperation == Operation.JUMPING)
+                && this.mob.zza > 0.0F) {
+                this.mob.setZza(1.0F);
+            }
         } finally {
             this.speedModifier = raw;
         }
