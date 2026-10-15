@@ -29,6 +29,13 @@ Traverse; ATTACK and nearby visible enemies favor Tactical. No visible combat
 target means continuous Traverse. Terrain, docking, crawl and stationary
 combat still take priority; overrides can extend the elapsed cycle.
 
+Tactical steering translates the world-space route into local forward/sideways
+input while facing the enemy. Returning to vanilla route steering clears the
+old sideways input, including terrain, docking and stopped-controller handoffs.
+Vanilla forward navigation does not clear that input itself; retaining it can
+bend the route as the soldier turns. This reset does not clear physical velocity
+or external impulses.
+
 Tactical pace is the resolved Traverse pace times 0.60 times the weapon ADS
 ratio, applied once. For a saturated M4 with a 15% ADS penalty this is
 0.1428 blocks/tick (2.856 blocks/second). The speed limit reads `tactical-ads`.

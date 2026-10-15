@@ -16,7 +16,7 @@ public final class SpeedTransitionScenarios {
     private SpeedTransitionScenarios() {}
 
     public static SimScenario transitions() {
-        boolean[] ok = new boolean[24];
+        boolean[] ok = new boolean[27];
         var scenario = SimScenario.builder("movement_speed_transitions").core().duration(200)
             .description("ADS-release during crawl must not amplify a stored modifier; docking "
                 + "must not add a diagonal burst; ordinary acceleration is bounded; external impulses survive.")
@@ -312,6 +312,9 @@ public final class SpeedTransitionScenarios {
             .assertThat("automatic caution obeys sprint ceiling", v -> ok[21])
             .assertThat("movement input cannot indefinitely sustain external impulse exemption", v -> ok[22])
             .assertThat("knockback after ordinary movement remains exempt", v -> ok[23])
+            .assertThat("vanilla WAIT handoff clears stale tactical lateral input", v -> ok[24])
+            .assertThat("vanilla MOVE_TO handoff clears stale tactical lateral input", v -> ok[25])
+            .assertThat("MOVE_TO physical displacement follows its requested route", v -> ok[26])
             .assertThat("movement debug telemetry survives packet round trip without field misalignment", v -> ok[11])
             .assertThat("movement debug disable clears with an empty packet", v -> ok[12])
             .assertThat("walking acceleration and repeated controller ticks share one physical movement budget", v -> ok[9])
@@ -372,6 +375,33 @@ public final class SpeedTransitionScenarios {
                 if (sample == 184) ok[22] &= moved <= 0.28001 && !ctrl.getSpeedController().impulseBypass();
             });
         }
+        scenario.action(100, "stale tactical strafe input is cleared on vanilla wait and route handoff", ctx -> {
+            SoldierEntity s = ctx.soldier("probe");
+            CoverPositionController ctrl = (CoverPositionController) s.getMoveControl();
+            s.moveTo(20.5, s.getY(), 20.5, -90.0F, s.getXRot());
+            s.setDeltaMovement(Vec3.ZERO);
+            s.setOnGround(true);
+            s.setYRot(-90.0F);
+
+            ctrl.clear();
+            s.setXxa(0.8F);
+            ctrl.tick();
+            ok[24] = s.xxa == 0.0F;
+
+            double startX = s.getX();
+            double startZ = s.getZ();
+            ctrl.setWantedPosition(startX + 8.0, s.getY(), startZ, 1.0);
+            s.setXxa(0.8F);
+            ctrl.tick();
+            ok[25] = s.xxa == 0.0F;
+            travel(s, new Vec3(s.xxa, s.yya, s.zza));
+            double dx = s.getX() - startX;
+            double dz = s.getZ() - startZ;
+            ok[26] = dx > 0.0001 && Math.abs(dz) <= dx * 0.20;
+            com.stevesarmy.StevesArmyMod.LOGGER.info(
+                "[MovementHandoff] waitCleared={} moveCleared={} dx={} dz={}",
+                ok[24], ok[25], dx, dz);
+        });
         return scenario.build();
     }
 

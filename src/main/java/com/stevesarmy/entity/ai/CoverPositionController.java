@@ -21,6 +21,11 @@ public class CoverPositionController extends MoveControl {
 
     /** Vanilla consumes a transient resolved modifier; the raw goal request stays intact. */
     private void tickVanillaMovement() {
+        // Tactical steering writes local sideways input. Vanilla MOVE_TO,
+        // JUMPING and WAIT only replace forward input, so retaining that
+        // strafe would rotate it with the route-facing yaw and bend the path.
+        // A genuine vanilla STRAFE operation installs its own input below.
+        this.mob.setXxa(0.0F);
         double raw = this.speedModifier;
         double absolute = movementSpeed.resolve(raw, this.operation != Operation.WAIT, false);
         if (this.operation == Operation.WAIT) this.mob.setSpeed(0.0F);
