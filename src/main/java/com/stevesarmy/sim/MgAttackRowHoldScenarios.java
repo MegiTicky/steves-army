@@ -10,10 +10,8 @@ import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.entity.ai.CoverPositionController;
 import com.stevesarmy.entity.ai.CoverTacticalGoal;
 import com.stevesarmy.entity.ai.MachineGunnerSupportGoal;
-import com.stevesarmy.entity.ai.MgAttackMovementPolicy;
 import com.stevesarmy.registry.ModEntities;
 import com.stevesarmy.sim.scenario.SimScenario;
-import com.stevesarmy.squad.ContactPlan;
 import com.stevesarmy.squad.SquadMode;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -39,10 +37,7 @@ public final class MgAttackRowHoldScenarios {
         int rifleX = crossed ? 38 : 20;
         int rifleZ = crossed ? 13 : 25;
         boolean[] seeded = {false};
-        boolean[] formationMeasured = {false};
-        boolean[] falseHold = {false};
         boolean[] newSearch = {false};
-        double[] maxDeparture = {0};
         double[] minimumGap = {Double.MAX_VALUE};
         long[] acceptedShots = {0};
         int[] seedEntityTick = {-1};
@@ -50,8 +45,8 @@ public final class MgAttackRowHoldScenarios {
 
         SimScenario.Builder scenario = SimScenario.builder(name)
             .description("Reduced trace reconstruction: occupied HALF dock with an obstructed lane; "
-                + (crossed ? "rifle line past objective must not hold a distant MG."
-                           : "aligned rifle line must permit a fresh catch-up search."))
+                + (crossed ? "crossed rifle line tests physical gap recovery."
+                           : "aligned rifle line is the control for physical gap recovery."))
             .duration(END_TICK).field(80, 80).armed()
             // The invulnerable, disarmed actors establish geometry, not damage.
             .suppressDetectors("FireStarvation")
@@ -78,7 +73,7 @@ public final class MgAttackRowHoldScenarios {
                 enemy.setInvulnerable(true);
                 ctx.disarmSoldier("defender");
                 gunner.setInvulnerable(true);
-                // No registered clearing job: isolate formation hold from clearing stages.
+                // No registered clearing job: isolate the hold order from clearing stages.
                 BlockPos objective = ctx.terrain.at(19, 0, 20);
                 gunner.setAttackTarget(objective);
                 gunner.setHoldPosition(objective);
@@ -96,24 +91,23 @@ public final class MgAttackRowHoldScenarios {
                     seeded[0] = true;
                     seedEntityTick[0] = gunner.tickCount;
                 }
-                Vec3 average = ContactPlan.riflemanAveragePosition(gunner);
+                SoldierEntity rifle0 = ctx.soldier("rifle_0");
+                SoldierEntity rifle1 = ctx.soldier("rifle_1");
+                Vec3 average = new Vec3(
+                    (rifle0.getX() + rifle1.getX()) * 0.5,
+                    (rifle0.getY() + rifle1.getY()) * 0.5,
+                    (rifle0.getZ() + rifle1.getZ()) * 0.5);
                 double gap = Math.hypot(gunner.getX() - average.x, gunner.getZ() - average.z);
                 minimumGap[0] = Math.min(minimumGap[0], gap);
                 acceptedShots[0] = SimGunHandler.acceptedShots().stream().filter(shot -> gunner.getUUID().equals(shot.shooterId())).count();
-                double lag = MgAttackMovementPolicy.rifleLineLag(gunner, dock);
-                double departure = Math.hypot(gunner.getX() - dock.getX() - .5, gunner.getZ() - dock.getZ() - .5);
-                maxDeparture[0] = Math.max(maxDeparture[0], departure);
-                boolean rowHold = CoverTacticalGoal.mgRowHoldActive(gunner);
                 var state = goal.captureStateSnapshot();
                 if (at == SEED_TICK + 1) {
-                    formationMeasured[0] = gunner.hasValidAttackTarget()
-                        && MgAttackMovementPolicy.attackFormationActive(gunner)
+                    seeded[0] = seeded[0] && gunner.hasValidAttackTarget()
                         && gunner.getCoverBehaviorManager().getCurrentCover() != null
                         && goal.getAttackPhaseOrdinal() == CoverTacticalGoal.AttackPhase.OCCUPYING_COVER.ordinal()
                         && gap > 30 && !gunner.hasLineOfSight(ctx.soldier("defender"))
                         && gunner.getCoverBehaviorManager().getSuppressionLevel() == 0;
                 }
-                if (at >= SEED_TICK + 180 && gap > 30 && rowHold) falseHold[0] = true;
                 if (at > SEED_TICK && state.lastSearch != null
                     && "ATTACK_SELECTING".equals(state.lastSearch.mode)
                     && state.lastSearch.tick > seedEntityTick[0]) {
@@ -123,20 +117,19 @@ public final class MgAttackRowHoldScenarios {
                 if (at == SEED_TICK + 1 || at == 200 || at == 400 || at == END_TICK) {
                     long shots = SimGunHandler.acceptedShots().stream().filter(s -> gunner.getUUID().equals(s.shooterId())).count();
                     StevesArmyMod.LOGGER.info(
-                        "[MgAttackRowHold] scenario={} tick={} validSetup={} gap={} lag={} rowHold={} formation={} phase={} current={} target={} search={} firstSearch={} maxDeparture={} actualLos={} suppression={} reload={} shots={}",
-                        name, at, formationMeasured[0], gap, lag, rowHold, MgAttackMovementPolicy.attackFormationActive(gunner),
+                        "[MgAttackRowHold] scenario={} tick={} validSetup={} gap={} phase={} current={} target={} search={} firstSearch={} actualLos={} suppression={} reload={} shots={}",
+                        name, at, seeded[0], gap,
                         CoverTacticalGoal.AttackPhase.values()[goal.getAttackPhaseOrdinal()],
                         gunner.getCoverBehaviorManager().getCurrentCover() == null ? null : gunner.getCoverBehaviorManager().getCurrentCover().getPosition(),
                         gunner.getCoverBehaviorManager().getTargetCover() == null ? null : gunner.getCoverBehaviorManager().getTargetCover().getPosition(),
                         state.lastSearch == null ? null : state.lastSearch.mode + "/" + state.lastSearch.result + ":" + state.lastSearch.tick,
-                        firstSearch[0], maxDeparture[0], gunner.hasLineOfSight(ctx.soldier("defender")),
+                        firstSearch[0], gunner.hasLineOfSight(ctx.soldier("defender")),
                         gunner.getCoverBehaviorManager().getSuppressionLevel(), gunner.isPreparingOrReloading(), shots);
                 }
             });
         }
         return scenario
-            .assertThat("reconstructed unsuppressed occupied HALF dock has active formation, >30-block gap and blocked LOS", v -> seeded[0] && formationMeasured[0])
-            .assertThat("a distant MG is not row-held after the ordinary dock pause", v -> !falseHold[0])
+            .assertThat("reconstructed unsuppressed occupied HALF dock has a >30-block gap and blocked LOS", v -> seeded[0])
             .assertThat("real attack state machine starts a fresh catch-up cover search", v -> newSearch[0])
             .assertThat("MG physically closes the squad gap below 30 blocks", v -> minimumGap[0] < 30)
             .assertThat("MG restores a firing opportunity", v -> acceptedShots[0] > 0)

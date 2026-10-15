@@ -7,6 +7,7 @@ import com.stevesarmy.combat.cover.FiringPosition;
 import com.stevesarmy.combat.cover.FiringPositionFinder;
 import com.stevesarmy.entity.MachineGunnerEntity;
 import com.stevesarmy.entity.SoldierEntity;
+import com.stevesarmy.squad.ContactPlan;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.phys.Vec3;
 
@@ -20,16 +21,25 @@ import java.util.Optional;
  * selection uses (the cover's precomputed shielded directions). Among covers
  * that are competitive on the base rifleman score (which encodes objective
  * progress, proximity, and protection), the best confirmed firing lane wins.
- * Returning empty defers to the base selection, so a missing lane can
+ * Returning empty defers to the rifleman selection, so a missing lane can
  * never stall the MG.
  *
- * Prefer useful protected lanes in the rear band, then any useful protected
- * lane. Formation restrictions yield while the gunner is distant or blind;
- * a rear slot without firing access must not outbid a working lane.
+ * Row discipline gates the lane preference during ATTACK: the gunner is the
+ * squad's base of fire, not its point man. Candidates closer to the lane
+ * target than the squad's frontmost rifleman are rejected outright, not
+ * de-scored — forward covers have the best firing lanes by construction, so
+ * the lane weight would outbid the row discipline every time. When every
+ * lane-competitive candidate sat ahead of the line, the search re-runs without
+ * the score cutoff so a lower-scoring cover BEHIND the line wins; a search
+ * radius that holds nothing behind the gunner at all defers to the base
+ * selection (the ContactPlan spine-hop row gate still holds the legs back).
  */
 public final class MachineGunnerLaneFirstSelection implements CoverSelectionStrategy {
     private static final float SCORE_MARGIN = 0.15f;
     private static final float LANE_WEIGHT = 0.5f;
+    /** Matches ContactPlan.MG_BACK_ROW_LAG_BLOCKS: absorb threshold jitter. */
+    private static final double LAG_MARGIN_BLOCKS = 1.0;
+
     private final MachineGunnerEntity gunner;
 
     public MachineGunnerLaneFirstSelection(MachineGunnerEntity gunner) {
@@ -54,10 +64,10 @@ public final class MachineGunnerLaneFirstSelection implements CoverSelectionStra
             laneTarget.getX() + 0.5, laneTarget.getY(), laneTarget.getZ() + 0.5);
         // MAX_VALUE with no non-MG mates (solo gunner) or outside ATTACK —
         // the filter is inactive and backRowFloor is -infinity.
-        boolean backRowActive = soldier.hasValidAttackTarget()
-            && MgAttackMovementPolicy.active(soldier);
-        boolean preferRearBand = backRowActive
-            && MgAttackMovementPolicy.attackFormationActive(soldier);
+        double frontDist = soldier.hasValidAttackTarget()
+            ? ContactPlan.frontAssaultDistance(soldier, reference)
+            : Double.MAX_VALUE;
+        double backRowFloor = frontDist - LAG_MARGIN_BLOCKS;
 
         float bestBaseScore = Float.NEGATIVE_INFINITY;
         for (CoverFinder.ScoredCover sc : candidates) {
@@ -67,47 +77,33 @@ public final class MachineGunnerLaneFirstSelection implements CoverSelectionStra
         }
         float scoreCutoff = bestBaseScore - SCORE_MARGIN;
 
-        Optional<CoverPoint> best;
-        if (preferRearBand) {
-            best = selectLaneFirst(soldier, reference, candidates, scoreCutoff, true, true, true);
-            if (best.isEmpty()) best = selectLaneFirst(soldier, reference, candidates,
-                Float.NEGATIVE_INFINITY, true, true, true);
-            if (best.isEmpty()) best = selectLaneFirst(soldier, reference, candidates,
-                scoreCutoff, true, true, false);
-            if (best.isEmpty()) best = selectLaneFirst(soldier, reference, candidates,
-                Float.NEGATIVE_INFINITY, true, true, false);
-        } else if (backRowActive) {
-            best = selectLaneFirst(soldier, reference, candidates, scoreCutoff, true, false, false);
-        } else {
-            best = selectLaneFirst(soldier, reference, candidates, scoreCutoff, false, false, false);
+        Optional<CoverPoint> best = selectLaneFirst(soldier, reference, candidates,
+            scoreCutoff, backRowFloor);
+        if (best.isEmpty() && backRowFloor > Double.NEGATIVE_INFINITY) {
+            best = selectLaneFirst(soldier, reference, candidates,
+                Float.NEGATIVE_INFINITY, backRowFloor);
         }
         if (com.stevesarmy.debug.DiagnosticLogManager.isAttackLoggingEnabled()) {
             int rejected = 0;
             for (CoverFinder.ScoredCover sc : candidates) {
-                if (backRowActive && MgAttackMovementPolicy.aheadOfRifleLine(soldier,
-                    soldier.getAttackTargetPos(), sc.cover.getPosition())) {
+                if (backRowFloor > Double.NEGATIVE_INFINITY
+                    && net.minecraft.world.phys.Vec3.atCenterOf(sc.cover.getPosition())
+                        .distanceTo(reference) < backRowFloor) {
                     rejected++;
                 }
             }
             com.stevesarmy.StevesArmyMod.LOGGER.info(
                 "[MGRow] t{} candidates={} rejectedAhead={} frontDist={} best={} at {}",
                 soldier.tickCount, candidates.size(), rejected,
-                backRowActive ? "active" : "none",
+                frontDist == Double.MAX_VALUE ? "none" : String.format("%.1f", frontDist),
                 best.isPresent(), best.map(c -> c.getPosition().toShortString()).orElse("-"));
         }
         return best;
     }
 
-    private boolean preferCatchUp(SoldierEntity soldier) {
-        return MgAttackMovementPolicy.active(soldier)
-            && MgAttackMovementPolicy.rifleLineLag(soldier, soldier.blockPosition()) >= MgAttackMovementPolicy.CATCH_UP_LAG;
-    }
-
     private Optional<CoverPoint> selectLaneFirst(SoldierEntity soldier, Vec3 reference,
                                                  List<CoverFinder.ScoredCover> candidates,
-                                                 float scoreCutoff, boolean backRowActive,
-                                                 boolean filterRearBand,
-                                                 boolean preferredRearBand) {
+                                                 float scoreCutoff, double backRowFloor) {
         Optional<CoverPoint> best = Optional.empty();
         float bestCombined = Float.NEGATIVE_INFINITY;
         for (CoverFinder.ScoredCover sc : candidates) {
@@ -116,12 +112,8 @@ public final class MachineGunnerLaneFirstSelection implements CoverSelectionStra
             if (sc.score < scoreCutoff) {
                 continue;
             }
-            if (backRowActive && MgAttackMovementPolicy.aheadOfRifleLine(soldier,
-                soldier.getAttackTargetPos(), pos)) {
-                continue;
-            }
-            if (filterRearBand && MgAttackMovementPolicy.inPreferredRearBand(soldier,
-                soldier.getAttackTargetPos(), pos) != preferredRearBand) {
+            if (backRowFloor > Double.NEGATIVE_INFINITY
+                && Vec3.atCenterOf(pos).distanceTo(reference) < backRowFloor) {
                 continue;
             }
             if (!CoverReservationManager.isAvailableFor(pos, soldier)) {
@@ -138,15 +130,7 @@ public final class MachineGunnerLaneFirstSelection implements CoverSelectionStra
             }
             float access = FiringPositionFinder.evaluateFiringAccess(
                 soldier, BlockPos.containing(reference), pos, FiringPosition.FiringPosture.COVER_PEEK);
-            if (access <= 0.0f) {
-                continue;
-            }
             float combined = sc.score + LANE_WEIGHT * access;
-            if (preferCatchUp(soldier)) {
-                // A useful lane nearer the riflemen beats a sideways orbit on
-                // the old cover row while recovering formation separation.
-                combined -= (float) (0.025 * MgAttackMovementPolicy.rifleLineLag(soldier, pos));
-            }
             if (best.isEmpty() || combined > bestCombined) {
                 best = Optional.of(cover);
                 bestCombined = combined;

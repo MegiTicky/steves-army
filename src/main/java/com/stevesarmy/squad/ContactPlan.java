@@ -5,7 +5,6 @@ import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.combat.VisibilityRay;
 import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.entity.SoldierRole;
-import com.stevesarmy.entity.ai.MgAttackMovementPolicy;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
@@ -88,7 +87,7 @@ public final class ContactPlan {
      * through a doorway dips a block behind his row) without letting the gun
      * creep into the assault line.
      */
-    private static final double MG_BACK_ROW_LAG_BLOCKS = MgAttackMovementPolicy.ROW_MARGIN;
+    private static final double MG_BACK_ROW_LAG_BLOCKS = 1.0;
     /**
      * Casualty emergency window: a squadmate death counts as "the fight is
      * here" for this long after the plan first observed the soldier gone.
@@ -409,22 +408,6 @@ public final class ContactPlan {
         return frontAssaultDistance(mates, reference);
     }
 
-    /** Average position of living non-MG, non-support squadmates. */
-    @Nullable
-    public static Vec3 riflemanAveragePosition(SoldierEntity soldier) {
-        if (!(soldier.level() instanceof ServerLevel level) || soldier.getSquadId() == null) return null;
-        double x = 0.0, y = 0.0, z = 0.0;
-        int count = 0;
-        for (UUID id : squadMembers(level, soldier.getSquadId())) {
-            if (id.equals(soldier.getUUID())) continue;
-            if (level.getEntity(id) instanceof SoldierEntity mate && mate.isAlive()
-                && mate.getRole() == SoldierRole.RIFLEMAN) {
-                x += mate.getX(); y += mate.getY(); z += mate.getZ(); count++;
-            }
-        }
-        return count == 0 ? null : new Vec3(x / count, y / count, z / count);
-    }
-
     private static double frontAssaultDistance(List<SoldierEntity> mates, Vec3 reference) {
         double front = Double.MAX_VALUE;
         for (SoldierEntity mate : mates) {
@@ -601,13 +584,7 @@ public final class ContactPlan {
         if (contact == null && soldier.getRole() == SoldierRole.MACHINE_GUNNER) {
             Vec3 rowReference = soldier.hasValidAttackTarget()
                 ? Vec3.atCenterOf(soldier.getAttackTargetPos()) : null;
-            if (rowReference != null && MgAttackMovementPolicy.active(soldier)) {
-                if (MgAttackMovementPolicy.aheadOfRifleLine(soldier,
-                    soldier.getAttackTargetPos(), dest)) {
-                    gateDiag(soldier, "mg back row");
-                    return MovePermission.deny("mg back row");
-                }
-            } else if (rowReference != null) {
+            if (rowReference != null) {
                 double frontDist = frontAssaultDistance(soldier, rowReference);
                 if (frontDist < Double.MAX_VALUE
                     && Vec3.atCenterOf(dest).distanceTo(rowReference)
@@ -708,20 +685,12 @@ public final class ContactPlan {
         // squad's support weapon, not its point man, and the emergencies
         // above are the only things that excuse charging.
         if (soldier.getRole() == SoldierRole.MACHINE_GUNNER) {
-            if (MgAttackMovementPolicy.active(soldier)) {
-                if (MgAttackMovementPolicy.aheadOfRifleLine(soldier,
-                    soldier.getAttackTargetPos(), dest)) {
-                    gateDiag(soldier, "mg back row");
-                    return MovePermission.deny("mg back row");
-                }
-            } else {
-                double frontDist = frontAssaultDistance(mates, threat);
-                if (frontDist < Double.MAX_VALUE
+            double frontDist = frontAssaultDistance(mates, threat);
+            if (frontDist < Double.MAX_VALUE
                 && Vec3.atCenterOf(dest).distanceTo(threat)
                     < frontDist - MG_BACK_ROW_LAG_BLOCKS) {
-                    gateDiag(soldier, "mg back row");
-                    return MovePermission.deny("mg back row");
-                }
+                gateDiag(soldier, "mg back row");
+                return MovePermission.deny("mg back row");
             }
         }
 

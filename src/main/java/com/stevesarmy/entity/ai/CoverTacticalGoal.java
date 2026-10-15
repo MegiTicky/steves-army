@@ -191,11 +191,12 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
     private static final long ATTACK_MAX_DWELL_MS = 8000;
     private static final long ATTACK_HARD_OCCUPANCY_TIMEOUT_MS = 15000;
     private static final double ATTACK_OBJECTIVE_RADIUS = 4.0;
-    /** Small horizontal margin before rejecting cover ahead of the rifle line. */
-    private static final double MG_BACK_ROW_LAG_BLOCKS = MgAttackMovementPolicy.ROW_MARGIN;
+    /** Matches ContactPlan.MG_BACK_ROW_LAG_BLOCKS: absorb threshold jitter. */
+    private static final double MG_BACK_ROW_LAG_BLOCKS = 1.0;
     /**
-     * Legacy leapfrog margin for non-ATTACK role cases. MG ATTACK uses the
-     * shared average-line catch-up threshold instead.
+     * How far past the MG's dock the frontmost rifleman must be before the
+     * gunner abandons it and leapfrogs to a cover behind the new line. One
+     * spine hop — a shorter lead makes the dock cycle at dwell cadence.
      */
     private static final double MG_LEAPFROG_MARGIN_BLOCKS = 5.0;
 
@@ -4427,9 +4428,6 @@ private void tickRepositioning() {
         // dock changes are coordinator-driven, and marginal hops around an
         // unobservable job orbit the building as cover churn.
         if (clearingView == null
-            // MG ATTACK pacing/lane recovery owns dock changes; quality-only
-            // hops reset its dwell clock and can prevent catch-up indefinitely.
-            && !(soldier instanceof MachineGunnerEntity && soldier.hasValidAttackTarget())
             && canLeaveCoverNow() && !soldier.isPeekDisabled() && !soldier.isInVehicleEngagement()) {
             Optional<CoverPoint> betterCover = findBetterCover();
             if (betterCover.isPresent()) {
@@ -5334,13 +5332,6 @@ private boolean shouldExitCoverForFollow() {
         CoverPoint starvedCandidate = null;
         for (CoverFinder.ScoredCover candidate : pool) {
             CoverPoint candidateCover = candidate.cover;
-            if (soldier instanceof MachineGunnerEntity && MgAttackMovementPolicy.attackFormationActive(soldier)
-                && !getCoverManager().isSuppressed()) {
-                double gap = MgAttackMovementPolicy.rifleLineLag(soldier, soldier.blockPosition());
-                if (gap >= MgAttackMovementPolicy.CATCH_UP_LAG
-                    && MgAttackMovementPolicy.rifleLineLag(soldier, candidateCover.getPosition())
-                        > gap - ATTACK_MIN_FORWARD_PROGRESS) continue;
-            }
             if (failedCoverPositions.contains(candidateCover.getPosition())) {
                 if (attackDebugLog()) {
                     StevesArmyMod.LOGGER.info("[ReservePool] {} skip {} blacklisted",
@@ -5881,16 +5872,6 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
 
     private boolean isAttackCorridorCandidate(CoverPoint candidate, BlockPos objective, Vec3 objectiveDir) {
         BlockPos candidatePos = candidate.getPosition();
-        if (soldier instanceof MachineGunnerEntity && MgAttackMovementPolicy.attackFormationActive(soldier)
-            && MgAttackMovementPolicy.rifleLineLag(soldier, soldier.blockPosition()) >= MgAttackMovementPolicy.CATCH_UP_LAG) {
-            // Catch-up follows the squad, which can be lateral to or past the
-            // objective. The rifleman's narrow assault corridor must not veto
-            // reachable stepping-stone cover toward that squad.
-            double currentGap = MgAttackMovementPolicy.rifleLineLag(soldier, soldier.blockPosition());
-            return MgAttackMovementPolicy.rifleLineLag(soldier, candidatePos) <= currentGap - ATTACK_MIN_FORWARD_PROGRESS
-                && candidatePos.getCenter().subtract(soldier.position()).horizontalDistanceSqr()
-                    <= ATTACK_CORRIDOR_FORWARD_LENGTH * ATTACK_CORRIDOR_FORWARD_LENGTH;
-        }
         if (!isForwardCoverCandidate(candidate, objective, objectiveDir)) return false;
 
         // Spine frame: the corridor is a band along the route, and the next
@@ -6023,13 +6004,19 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
     /** True when this cover position sits ahead of the squad's rifleman line. */
     private boolean violatesMgBackRow(BlockPos coverPos) {
         if (!mgBackRowRuleActive()) return false;
-        return MgAttackMovementPolicy.aheadOfRifleLine(soldier,
-            soldier.getAttackTargetPos(), coverPos);
+        Vec3 reference = Vec3.atCenterOf(soldier.getAttackTargetPos());
+        double frontDist = ContactPlan.frontAssaultDistance(soldier, reference);
+        return Vec3.atCenterOf(coverPos).distanceTo(reference)
+            < frontDist - MG_BACK_ROW_LAG_BLOCKS;
     }
 
     /**
-     * Hold a useful firing dock only while the MG remains near the rifle line.
-     * Blind docks and excessive lateral/rear separation yield to recovery.
+     * Base-of-fire row hold for a DOCKED machine gunner: true while the
+     * squad's rifleman line has not yet passed his current cover by the
+     * leapfrog margin — the dock is still the back row, so his job there is
+     * holding the firing lane, and the peek system's "blind dock is useless"
+     * eviction and the dwell clock's cover-cycling do not apply. Static so
+     * PeekController can consult it without a goal reference.
      */
     public static boolean mgRowHoldActive(SoldierEntity soldier) {
         if (soldier.getRole() != SoldierRole.MACHINE_GUNNER
@@ -6040,13 +6027,13 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
         if (manager == null || manager.getCurrentCover() == null) {
             return false;
         }
-        if (MgAttackMovementPolicy.attackFormationActive(soldier)) {
-            return !MgAttackMovementPolicy.needsRecovery(soldier);
-        }
         Vec3 reference = Vec3.atCenterOf(soldier.getAttackTargetPos());
         double frontDist = ContactPlan.frontAssaultDistance(soldier, reference);
-        if (frontDist == Double.MAX_VALUE) return false;
-        double dockDist = Vec3.atCenterOf(manager.getCurrentCover().getPosition()).distanceTo(reference);
+        if (frontDist == Double.MAX_VALUE) {
+            return false;
+        }
+        double dockDist = Vec3.atCenterOf(manager.getCurrentCover().getPosition())
+            .distanceTo(reference);
         return frontDist > dockDist - MG_LEAPFROG_MARGIN_BLOCKS;
     }
 
@@ -7327,13 +7314,10 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
                 long flowDwellMs = spineFlow
                     ? StevesArmyConfig.getAttackSpineFlowDwellMs() : ATTACK_MIN_DWELL_MS;
                 long minDwell = (long)(flowDwellMs * dwellMult);
-                if (soldier instanceof MachineGunnerEntity && MgAttackMovementPolicy.attackFormationActive(soldier)) {
-                    minDwell = Math.max(minDwell, MgAttackMovementPolicy.MIN_DOCK_DWELL_MS);
-                }
                 long maxDwell = (long)((spineFlow ? flowDwellMs * 2L : ATTACK_MAX_DWELL_MS)
                     * dwellMult) + (attackAdvanceStaggerTicks * 50L);
                 boolean dwellMet = dwellTime >= minDwell;
-                boolean maxDwellReached = dwellMet && dwellTime >= maxDwell && (recovered || smokeAdvance)
+                boolean maxDwellReached = dwellTime >= maxDwell && (recovered || smokeAdvance)
                     && !peeking && (!fireteamPinned || smokeAdvance);
                 boolean hardTimeout = dwellTime >= ATTACK_HARD_OCCUPANCY_TIMEOUT_MS;
                 boolean heavyHold = StevesArmyConfig.isFireteamHeavyHoldReposition()
@@ -7349,17 +7333,13 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
                 // across a cover row (4 docks of 25t on one row: every
                 // re-search's best behind-line candidate was the next spot on
                 // the same row). He leaves a dock only when the rifleman line
-                // has opened the catch-up gap — the row gate then
+                // has passed it by the leapfrog margin — the row gate then
                 // hands him a cover behind the NEW line — or through the
                 // repair paths below (reposition request, hard timeout).
                 if (mgRowHoldActive(soldier)) {
                     canAdvance = false;
                     maxDwellReached = false;
                 }
-                boolean mgRoutineAdvanceHeld = soldier instanceof MachineGunnerEntity
-                    && MgAttackMovementPolicy.attackFormationActive(soldier)
-                    && (dwellTime < MgAttackMovementPolicy.MIN_DOCK_DWELL_MS
-                        || mgRowHoldActive(soldier));
 
                 // Secured area: this soldier's job is to hold a watch position,
                 // not to keep advancing — every advance trigger below is a
@@ -7429,7 +7409,7 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
 
                 // Hard watchdog: if stuck with all gates passed for >10s, force
                 // advance regardless of peek state or any flickering conditions.
-                if (dwellMet && canAdvance && !mgRoutineAdvanceHeld && dwellTime > 10000) {
+                if (dwellMet && canAdvance && dwellTime > 10000) {
                     lastAdvanceTriggerTime = GameClock.nowMs();
                     if (attackDebugLog()) {
                         StevesArmyMod.LOGGER.info("[AttackPhase] Soldier {} OCCUPYING watchdog: stuck {}ms with all gates pass, forcing advance",
@@ -7461,18 +7441,11 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
                 //  3. canAdvance && peekCompletedThisCover: normal path — peeked first
                 //  4. canAdvance && dwellTime >= minDwell * 2: peek-latch bypass —
                 //     for soldiers who never completed a peek (no threat, non-peekable cover)
-                boolean peekLatchBypass = dwellMet && !mgRoutineAdvanceHeld && (recovered || smokeAdvance)
+                boolean peekLatchBypass = dwellMet && (recovered || smokeAdvance)
                     && (!fireteamPinned || smokeAdvance) && (!heavyHold || smokeAdvance)
                     && !peekCompletedThisCover && dwellTime >= (long)(minDwell * 2);
-                if (!mgRoutineAdvanceHeld && (hardTimeout || maxDwellReached || (canAdvance && peekCompletedThisCover) || peekLatchBypass)) {
+                if (hardTimeout || maxDwellReached || (canAdvance && peekCompletedThisCover) || peekLatchBypass) {
                     lastAdvanceTriggerTime = GameClock.nowMs();
-                    if (soldier instanceof MachineGunnerEntity
-                        && MgAttackMovementPolicy.attackFormationActive(soldier)) {
-                        // Routine catch-up must reacquire the rear anchor from
-                        // the rifle line's new position after this dock dwell.
-                        latchedMachineGunnerSearchCenter = null;
-                        latchedMachineGunnerSearchCenterTick = 0;
-                    }
                     if (attackDebugLog() && hardTimeout) {
                         StevesArmyMod.LOGGER.info("[AttackPhase] Soldier {} hard occupancy timeout after {}ms, forcing advance",
                             soldier.getId(), dwellTime);
@@ -7907,16 +7880,8 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
                 }
                 return;
             }
-            double spineLegLength = soldier instanceof MachineGunnerEntity && MgAttackMovementPolicy.attackFormationActive(soldier)
-                ? MgAttackMovementPolicy.SPINE_LEG : ATTACK_SPINE_LEG_LENGTH;
-            double legEnd = Math.min(attackSpine.length(), soldierProg + spineLegLength);
-            BlockPos destBlock = soldier instanceof MachineGunnerEntity && MgAttackMovementPolicy.attackFormationActive(soldier)
-                ? MgAttackMovementPolicy.capSpineDestination(soldier, attackSpine,
-                    soldierProg, legEnd, soldier.blockPosition().getY())
-                : attackSpine.pointAt(legEnd, soldier.blockPosition().getY());
-            if (soldier instanceof MachineGunnerEntity && MgAttackMovementPolicy.attackFormationActive(soldier)) {
-                if (destBlock.equals(soldier.blockPosition())) return;
-            }
+            double legEnd = Math.min(attackSpine.length(), soldierProg + ATTACK_SPINE_LEG_LENGTH);
+            BlockPos destBlock = attackSpine.pointAt(legEnd, soldier.blockPosition().getY());
             Path path = soldier.getNavigation().createPath(
                 destBlock.getX() + 0.5, destBlock.getY(), destBlock.getZ() + 0.5, 1);
             if (path != null && path.canReach()) {
@@ -7947,17 +7912,12 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
                 if ("mg back row".equals(permission.reason)) {
                     for (double frac : CATCHUP_LEG_FRACTIONS) {
                         double shortEnd = Math.min(attackSpine.length(),
-                            soldierProg + spineLegLength * frac);
+                            soldierProg + ATTACK_SPINE_LEG_LENGTH * frac);
                         if (shortEnd <= soldierProg + 1.0D) {
                             continue;
                         }
                         BlockPos shortDest = attackSpine.pointAt(shortEnd,
                             soldier.blockPosition().getY());
-                        if (soldier instanceof MachineGunnerEntity && MgAttackMovementPolicy.attackFormationActive(soldier)) {
-                            shortDest = MgAttackMovementPolicy.capSpineDestination(soldier, attackSpine,
-                                soldierProg, shortEnd, soldier.blockPosition().getY());
-                            if (shortDest.equals(soldier.blockPosition())) continue;
-                        }
                         if (!ContactPlan.checkAdvance(soldier, shortDest).allowed) {
                             continue;
                         }
@@ -7984,16 +7944,11 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
         }
 
         Vec3 dir = toTarget.normalize();
-        double stepLength = soldier instanceof MachineGunnerEntity && MgAttackMovementPolicy.attackFormationActive(soldier)
-            ? MgAttackMovementPolicy.FALLBACK_STEP : ATTACK_FALLBACK_ADVANCE_LENGTH;
-        double advanceLen = Math.min(stepLength, dist - stopRadius);
+        double advanceLen = Math.min(ATTACK_FALLBACK_ADVANCE_LENGTH, dist - stopRadius);
         if (advanceLen < 1.0) return;
 
         Vec3 dest = soldier.position().add(dir.x * advanceLen, 0, dir.z * advanceLen);
         BlockPos destBlock = new BlockPos((int)Math.floor(dest.x), soldier.blockPosition().getY(), (int)Math.floor(dest.z));
-        if (soldier instanceof MachineGunnerEntity && MgAttackMovementPolicy.attackFormationActive(soldier)) {
-            destBlock = MgAttackMovementPolicy.capRearDestination(soldier, destBlock);
-        }
 
         Path path = soldier.getNavigation().createPath(destBlock.getX() + 0.5, destBlock.getY(), destBlock.getZ() + 0.5, 1);
         if (path == null || !path.canReach()) {
@@ -8010,20 +7965,6 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
             var end = fullRoute.getNode(fullRoute.getNodeCount() - 1);
             destBlock = new BlockPos(end.x, end.y, end.z);
             path = fullRoute;
-        }
-
-        if (soldier instanceof MachineGunnerEntity && MgAttackMovementPolicy.attackFormationActive(soldier)) {
-            BlockPos capped = MgAttackMovementPolicy.capRearDestination(soldier, destBlock);
-            if (capped.equals(soldier.blockPosition())) return;
-            if (!capped.equals(destBlock)) {
-                destBlock = capped;
-                path = soldier.getNavigation().createPath(
-                    destBlock.getX() + 0.5, destBlock.getY(), destBlock.getZ() + 0.5, 1);
-                if (path == null || !path.canReach()) {
-                    fallbackAdvanceTarget = null;
-                    return;
-                }
-            }
         }
 
         // Contact plan: no unsupported soldier crosses the threat's danger
