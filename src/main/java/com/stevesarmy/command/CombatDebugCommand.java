@@ -14,6 +14,7 @@ import com.stevesarmy.combat.ArmorDoctrineDebugManager;
 import com.stevesarmy.combat.ArmorRoleManager;
 import com.stevesarmy.combat.ArmorThreatScanner;
 import com.stevesarmy.combat.CoverStateDebugManager;
+import com.stevesarmy.combat.MovementSpeedDebugManager;
 import com.stevesarmy.combat.GunIntegration;
 import com.stevesarmy.combat.SidearmDebugManager;
 import com.stevesarmy.combat.SuppressPingDebugManager;
@@ -114,6 +115,14 @@ public class CombatDebugCommand {
                     .executes(ctx -> setDangerMapDebug(ctx, true, true)))
                 .then(Commands.literal("off")
                     .executes(ctx -> setDangerMapDebug(ctx, false, false))))
+
+            // === MOVEMENT SPEED ===
+            .then(Commands.literal("speed")
+                .executes(ctx -> setMovementSpeedDebug(ctx, true))
+                .then(Commands.literal("on")
+                    .executes(ctx -> setMovementSpeedDebug(ctx, true)))
+                .then(Commands.literal("off")
+                    .executes(ctx -> setMovementSpeedDebug(ctx, false))))
 
             // === COVER STATE MACHINE ===
             .then(Commands.literal("coverstate")
@@ -384,6 +393,7 @@ public class CombatDebugCommand {
              "  mg evaluate [entity] - Evaluate MG firing-position pipeline (read-only)\n" +
              "  armor [off|minimal|verbose] - Toggle armor-doctrine debug render\n" +
             "  suppressping [on|off] - Toggle the suppress-ping debug render\n" +
+            "  speed [on|off]      - Server-measured soldier speeds, recent peaks and movement limits\n" +
             "  dangermap [on|off|all] - Danger-map overlay for YOUR squads ('all' includes enemy/other players'): baked cells (red=eye-exposed, orange=leg-only, green=shadow), blue=path corridors, threat markers, bake stats\n" +
              "  armor <entity>      - Print one soldier's armor-doctrine role/gates\n" +
              "  metrics [on|off|reset] - Collect/show opt-in performance counters\n" +
@@ -440,6 +450,7 @@ public class CombatDebugCommand {
         DiagnosticLogManager.enableAll();
         if (context.getSource().getEntity() instanceof ServerPlayer player) {
             CoverStateDebugManager.setEnabled(player, true);
+            MovementSpeedDebugManager.setEnabled(player, true);
             com.stevesarmy.combat.DangerMapDebugManager.setEnabled(player, true);
         }
 
@@ -474,6 +485,7 @@ public class CombatDebugCommand {
         CoverDebugManager.setShowSolidBlocks(false);
         if (context.getSource().getEntity() instanceof ServerPlayer player) {
             CoverStateDebugManager.setEnabled(player, false);
+            MovementSpeedDebugManager.setEnabled(player, false);
             com.stevesarmy.combat.DangerMapDebugManager.setEnabled(player, false);
         }
 
@@ -1197,6 +1209,18 @@ public class CombatDebugCommand {
         return 1;
     }
 
+    private static int setMovementSpeedDebug(CommandContext<CommandSourceStack> context, boolean enabled) {
+        CommandSourceStack source = context.getSource();
+        if (!(source.getEntity() instanceof ServerPlayer player)) {
+            source.sendFailure(Component.literal("Player only command"));
+            return 0;
+        }
+        MovementSpeedDebugManager.setEnabled(player, enabled);
+        source.sendSuccess(() -> Component.literal("Movement speed overlay: "
+            + (enabled ? "ON — aim at a soldier for details; blocks/s assumes 20 TPS" : "OFF")), false);
+        return 1;
+    }
+
     private static int setCoverStateDebug(CommandContext<CommandSourceStack> context, boolean enabled) {
         CommandSourceStack source = context.getSource();
         if (!(source.getEntity() instanceof ServerPlayer player)) {
@@ -1842,6 +1866,8 @@ public class CombatDebugCommand {
             "  Peek trace: " + (DiagnosticLogManager.getPeekTraceSoldierId() == null
                 ? "OFF" : "ON (" + DiagnosticLogManager.getPeekTraceSoldierId() + ")") + "\n" +
             "  Combat overlay: " + CombatDebugRenderer.getDebugModeName() + "\n" +
+            "  Movement speed overlay: " + (context.getSource().getEntity() instanceof ServerPlayer speedPlayer
+                && MovementSpeedDebugManager.isEnabled(speedPlayer.getUUID()) ? "ON" : "OFF") + "\n" +
              "  Soldier viz: " + (CoverDebugManager.isShowSoldierCover() ? "ON" : "OFF") + "\n" +
              "  Machine gunner viz: " + (CoverDebugManager.isShowMachineGunners() ? "ON" : "OFF") + "\n" +
              "  MG protection viz: " + (CoverDebugManager.isShowMachineGunnerProtection() ? "ON" : "OFF") + "\n" +

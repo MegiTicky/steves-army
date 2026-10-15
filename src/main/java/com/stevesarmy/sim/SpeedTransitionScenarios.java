@@ -15,7 +15,7 @@ public final class SpeedTransitionScenarios {
     private SpeedTransitionScenarios() {}
 
     public static SimScenario transitions() {
-        boolean[] ok = new boolean[11];
+        boolean[] ok = new boolean[13];
         return SimScenario.builder("movement_speed_transitions").core().duration(100)
             .description("ADS-release during crawl must not amplify a stored modifier; docking "
                 + "must not add a diagonal burst; ordinary acceleration is bounded; external impulses survive.")
@@ -161,6 +161,30 @@ public final class SpeedTransitionScenarios {
                     s.setNoAi(true);
                 }
             })
+            .action(98, "movement debug packets preserve telemetry and explicit disable across the wire", ctx -> {
+                var s = ctx.soldier("probe");
+                var entry = new com.stevesarmy.network.MovementSpeedDebugPacket.Entry(s.getId(), s.getUUID(),
+                    "Speed probe", s.position(), new Vec3(0.2, 0.4, -0.1),
+                    0.224, 0.123, 0.456, 1.2, 0.398, 0.338, 0.332,
+                    0.25, 0.338, true, "crawl", "controller: cover handoff",
+                    "SEEKING_COVER", "CROUCHING", true, false);
+                var packet = new com.stevesarmy.network.MovementSpeedDebugPacket(true, java.util.List.of(entry));
+                var buf = new net.minecraft.network.FriendlyByteBuf(io.netty.buffer.Unpooled.buffer());
+                try {
+                    com.stevesarmy.network.MovementSpeedDebugPacket.encode(packet, buf);
+                    ok[11] = packet.equals(new com.stevesarmy.network.MovementSpeedDebugPacket(buf))
+                        && !buf.isReadable();
+                    buf.clear();
+                    var disabled = new com.stevesarmy.network.MovementSpeedDebugPacket(false, java.util.List.of());
+                    com.stevesarmy.network.MovementSpeedDebugPacket.encode(disabled, buf);
+                    ok[12] = disabled.equals(new com.stevesarmy.network.MovementSpeedDebugPacket(buf))
+                        && !buf.isReadable();
+                } finally {
+                    buf.release();
+                }
+            })
+            .assertThat("movement debug telemetry survives packet round trip without field misalignment", v -> ok[11])
+            .assertThat("movement debug disable clears with an empty packet", v -> ok[12])
             .assertThat("walking acceleration and repeated controller ticks share one physical movement budget", v -> ok[9])
             .assertThat("physical external impulse survives travel and movement limiting", v -> ok[10])
             .assertThat("crawl pace survives ADS release", v -> ok[0])

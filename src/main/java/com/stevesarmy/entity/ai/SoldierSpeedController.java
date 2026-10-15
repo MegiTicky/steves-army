@@ -24,6 +24,10 @@ public final class SoldierSpeedController {
     private int movementBudgetTick = Integer.MIN_VALUE;
     private double locomotionDistance;
     private boolean externalImpulseThisTick;
+    private int telemetryTick = Integer.MIN_VALUE;
+    private double incomingSpeedThisTick;
+    private double spentBudgetThisTick;
+    private boolean impulseBypassThisTick;
     private Vec3 lastPosition;
     private String limitingReason = "stopped";
     private String previousReason = "";
@@ -122,10 +126,19 @@ public final class SoldierSpeedController {
 
     /** Bound controller-owned self movement without clamping external impulses. */
     public Vec3 limitSelfMovement(Vec3 requested, Vec3 incomingVelocity) {
+        if (telemetryTick != mob.tickCount) {
+            telemetryTick = mob.tickCount;
+            incomingSpeedThisTick = 0;
+            spentBudgetThisTick = 0;
+            impulseBypassThisTick = false;
+        }
+        incomingSpeedThisTick = Math.max(incomingSpeedThisTick, incomingVelocity.horizontalDistance());
         if (movementBudgetTick != mob.tickCount) {
             movementBudgetTick = mob.tickCount;
             locomotionDistance = 0;
             externalImpulseThisTick = false;
+            spentBudgetThisTick = 0;
+            impulseBypassThisTick = false;
         }
         double budget = Math.max(0, appliedSpeed);
         if (budget <= 1.0e-6 || externalImpulseThisTick || requested.horizontalDistanceSqr() <= 1.0e-10) {
@@ -133,16 +146,19 @@ public final class SoldierSpeedController {
         }
         if (incomingVelocity.horizontalDistance() > budget * 1.5 + 0.08) {
             externalImpulseThisTick = true;
+            impulseBypassThisTick = true;
             return requested;
         }
         double remaining = Math.max(0, budget - locomotionDistance);
         double horizontal = requested.horizontalDistance();
         if (horizontal <= remaining + 1.0e-6) {
             locomotionDistance += horizontal;
+            spentBudgetThisTick = locomotionDistance;
             return requested;
         }
         double scale = remaining / horizontal;
         locomotionDistance = budget;
+        spentBudgetThisTick = locomotionDistance;
         return new Vec3(requested.x * scale, requested.y, requested.z * scale);
     }
 
@@ -151,6 +167,9 @@ public final class SoldierSpeedController {
     public double appliedSpeed() { return appliedSpeed; }
     public double displacement() { return displacement; }
     public String limitingReason() { return limitingReason; }
+    public double incomingSpeed() { return telemetryTick == mob.tickCount ? incomingSpeedThisTick : 0; }
+    public double spentBudget() { return telemetryTick == mob.tickCount ? spentBudgetThisTick : 0; }
+    public boolean impulseBypass() { return telemetryTick == mob.tickCount && impulseBypassThisTick; }
     public Telemetry snapshot() {
         return new Telemetry(requestedModifier, targetSpeed, appliedSpeed, displacement, limitingReason);
     }

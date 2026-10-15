@@ -1,0 +1,45 @@
+# Soldier movement speed overlay
+
+Enable with `/stevesarmy_debug speed on` (operator permission required).
+Disable with `/stevesarmy_debug speed off`, or `/stevesarmy_debug none`.
+`/stevesarmy_debug all` also enables it. It does not change soldier speed.
+
+Nearby friendly and enemy soldiers show compact world labels. Aim at a soldier
+for a detailed HUD and recent speed graph. The overlay covers up to 32 nearest
+soldiers within 64 blocks of the observer. To limit clutter, world labels show
+the nearest 16 within 32 blocks; the focused HUD also uses a 32-block range.
+
+The server samples actual horizontal position changes every tick and sends an
+update every five ticks. The displayed blocks/second values assume 20 TPS;
+blocks/tick is the underlying measurement. It is independent of client movement
+interpolation, animation playback, and `Mob.getSpeed()` movement intent.
+
+- **Actual:** physical horizontal displacement during the latest server tick.
+- **Average:** horizontal speed over the most recent ten sampled ticks.
+- **Peak:** largest per-tick speed over the last 100 sampled ticks (five seconds
+  at 20 TPS), including brief bursts between network updates.
+- **Request / attribute:** the goal's raw speed multiplier and effective movement
+  attribute, including weapon movement penalties.
+- **Target / applied:** resolved controller intent and current locomotion budget.
+  A stopped controller can still allow anchor correction or external movement;
+  an above-budget reading is diagnostic evidence, not proof of a bug.
+- **Incoming / spent / impulse:** velocity before walking acceleration, the
+  self-movement budget consumed, and whether the impulse exemption was active.
+- **Owner / limit / posture:** the movement source, active speed constraint, cover
+  state, pose, grounded status, and collision status.
+
+Green world labels indicate speed within the displayed budget; red indicates
+an above-budget sample, and magenta marks the impulse exemption. The HUD chart
+shows received actual speeds in green and their corresponding caps in yellow
+over up to nine seconds. Its points arrive every five ticks; the server's
+five-second peak is the value that preserves bursts between updates.
+
+To investigate a burst, enable the overlay, issue the ATTACK ping, and aim at
+the affected soldier. Record its name, actual/peak speed, target/applied speed,
+owner, limit reason, and impulse status. A high **applied** speed points toward
+pace policy; physical movement above that budget calls for investigating
+impulses, non-locomotion movement, or controller handoffs.
+
+The diagnostic is opt-in. Sampling stops when nobody subscribes, stale client
+snapshots expire, and leaving the world clears the overlay. Both client and
+server need the updated mod because this adds a network packet (protocol 18).
