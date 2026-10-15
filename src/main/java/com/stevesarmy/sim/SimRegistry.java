@@ -113,7 +113,11 @@ public final class SimRegistry {
             suppressedRelocationSafeRoute(),
             attackAbsolutePinHold(),
             CautionSteeringScenarios.freshnessAndPace(),
-            SpeedTransitionScenarios.transitions());
+            SpeedTransitionScenarios.transitions(),
+            CrowdedAttackRowsScenarios.crowdedAttackRows(),
+            CrowdedAttackRowsScenarios.crowdedAttackTallRows(),
+            AttackRepingTraversalScenarios.repeatedAttackPing(),
+            AttackRepingTraversalScenarios.movedAttackPingChokepoints());
     }
 
     public static SimScenario byName(String name) {

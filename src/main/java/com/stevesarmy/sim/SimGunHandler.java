@@ -79,10 +79,24 @@ public final class SimGunHandler implements GunIntegration.GunHandler {
         long reloadFinishTick;
         boolean reloading;
         boolean aiming;
+        boolean m4a1MovementProfile;
     }
 
     /** Per-entity weapon state; cleared between scenarios by SimIsolation. */
     private static final Map<UUID, GunState> states = new HashMap<>();
+
+    /** Movement attributes from the Test instance's default-pack M4A1 data.
+     * Gun ballistics/cadence remain the harness's hitscan model. */
+    public static void useM4A1MovementProfile(LivingEntity entity) {
+        GunState state = refresh(entity);
+        state.m4a1MovementProfile = true;
+        AttributeInstance attr = entity.getAttribute(Attributes.MOVEMENT_SPEED);
+        if (attr != null) {
+            attr.removeModifier(AIM_MOD_UUID);
+            attr.removeModifier(RELOAD_MOD_UUID);
+        }
+        applySpeedModifiers(entity, state);
+    }
 
     /** Entities stripped via {@link #disarm}: the sim gun layer refuses them
      *  even though the virtual magazine still exists. */
@@ -161,14 +175,16 @@ public final class SimGunHandler implements GunIntegration.GunHandler {
         boolean wantAim = state.aiming;
         if (wantAim && attr.getModifier(AIM_MOD_UUID) == null) {
             attr.addTransientModifier(new AttributeModifier(AIM_MOD_UUID,
-                "Sim gun ADS", AIM_SPEED_MULT, AttributeModifier.Operation.MULTIPLY_TOTAL));
+                "Sim gun ADS", state.m4a1MovementProfile ? -0.15 : AIM_SPEED_MULT,
+                AttributeModifier.Operation.MULTIPLY_TOTAL));
         } else if (!wantAim) {
             attr.removeModifier(AIM_MOD_UUID);
         }
         boolean wantReload = state.reloading;
         if (wantReload && attr.getModifier(RELOAD_MOD_UUID) == null) {
             attr.addTransientModifier(new AttributeModifier(RELOAD_MOD_UUID,
-                "Sim gun reload", RELOAD_SPEED_MULT, AttributeModifier.Operation.MULTIPLY_TOTAL));
+                "Sim gun reload", state.m4a1MovementProfile ? -0.10 : RELOAD_SPEED_MULT,
+                AttributeModifier.Operation.MULTIPLY_TOTAL));
         } else if (!wantReload) {
             attr.removeModifier(RELOAD_MOD_UUID);
         }

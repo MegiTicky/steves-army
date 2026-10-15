@@ -105,6 +105,32 @@ on the 20 TPS baseline with varying reasons). Verdict-level A/B on stable
 scenarios matches exactly. If a fast-run-only signal looks async-related,
 rerun that scenario with `-Psim.fastticks=false` before chasing it.
 
+### Crowded ATTACK traversal probes
+
+The full-only scenarios `crowded_attack_rows`, `crowded_attack_tall_rows`,
+`attack_reping_low_cover_12v12`, and `attack_reping_moved_chokepoints_12v12`
+exercise 12 friendly riflemen and 12 defenders with successive cover rows,
+reissued objectives, or moved objectives. Run them together with:
+
+```powershell
+.\gradlew runServer -Psim.autorun=true -Psim.scenario=crowded_attack_rows,crowded_attack_tall_rows,attack_reping_low_cover_12v12,attack_reping_moved_chokepoints_12v12
+```
+
+`TraversalSpeedProbe` independently measures physical displacement every server
+tick, including collisions and rescue teleports; its first tick establishes the
+spawn baseline. `[SimTraversalSpeed]` log lines summarize the distribution and
+largest movements with height changes, velocity, movement owner, cover/peek
+state, movement attributes, and controller intent. Intent is not measured
+blocks per tick. Investigation thresholds are >=1 horizontal block in one tick,
+or >=0.60 blocks per tick for three consecutive ticks. These are candidate
+signatures, not proof of a controller fault; jumps, shoves, and rescue teleports
+remain in the evidence. Progress/combat assertions guard against vacant probes.
+
+The gun handler uses the Test instance's default-pack M4A1 movement profile
+(weight 3.5, aim -0.15, reload -0.10). Firing still uses the harness's hitscan gun
+model, not the actual M4A1 implementation or its 810 RPM cadence. Confirm any
+fast-run signal with `-Psim.fastticks=false` before drawing timing conclusions.
+
 ### Watching the simulation
 
 Every scenario also produces `<scenario>_<timestamp>_sim.html` — a
