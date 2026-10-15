@@ -26,7 +26,7 @@ import java.util.Set;
 /** Reduced trace reconstruction: seed one occupied dock, then run the real MG AI. */
 public final class MgAttackRowHoldScenarios {
     private static final int SEED_TICK = 10;
-    private static final int END_TICK = 600;
+    private static final int END_TICK = 1200;
 
     private MgAttackRowHoldScenarios() {}
 
@@ -43,6 +43,8 @@ public final class MgAttackRowHoldScenarios {
         boolean[] falseHold = {false};
         boolean[] newSearch = {false};
         double[] maxDeparture = {0};
+        double[] minimumGap = {Double.MAX_VALUE};
+        long[] acceptedShots = {0};
         int[] seedEntityTick = {-1};
         int[] firstSearch = {-1};
 
@@ -57,7 +59,9 @@ public final class MgAttackRowHoldScenarios {
                 t.platform();
                 t.coverRow(19, 59, 21, 59, 1);
                 t.wall(12, 55, 28, 55, 2, Blocks.STONE_BRICKS.defaultBlockState());
-                t.coverRow(32, 40, 42, 40, 1);
+                // Long low cover gives a protected crouch and standing lane;
+                // endpoints do not expose the intended successor dock obliquely.
+                t.coverRow(28, 40, 44, 40, 1);
             })
             .setup(ctx -> {
                 ctx.spawnAnchor(23, 0, 63);
@@ -84,6 +88,7 @@ public final class MgAttackRowHoldScenarios {
             int at = tick;
             scenario.action(at, "observe reconstructed occupied-dock state", ctx -> {
                 SoldierEntity gunner = ctx.soldier("gunner");
+                gunner.refreshAttackOrderClock();
                 CoverTacticalGoal goal = ((MachineGunnerSupportGoal) gunner.getCoverTacticalGoal()).getCoverController();
                 BlockPos dock = ctx.terrain.at(20, 0, 60);
                 if (at == SEED_TICK) {
@@ -93,6 +98,8 @@ public final class MgAttackRowHoldScenarios {
                 }
                 Vec3 average = ContactPlan.riflemanAveragePosition(gunner);
                 double gap = Math.hypot(gunner.getX() - average.x, gunner.getZ() - average.z);
+                minimumGap[0] = Math.min(minimumGap[0], gap);
+                acceptedShots[0] = SimGunHandler.acceptedShots().stream().filter(shot -> gunner.getUUID().equals(shot.shooterId())).count();
                 double lag = MgAttackMovementPolicy.rifleLineLag(gunner, dock);
                 double departure = Math.hypot(gunner.getX() - dock.getX() - .5, gunner.getZ() - dock.getZ() - .5);
                 maxDeparture[0] = Math.max(maxDeparture[0], departure);
@@ -131,6 +138,8 @@ public final class MgAttackRowHoldScenarios {
             .assertThat("reconstructed unsuppressed occupied HALF dock has active formation, >30-block gap and blocked LOS", v -> seeded[0] && formationMeasured[0])
             .assertThat("a distant MG is not row-held after the ordinary dock pause", v -> !falseHold[0])
             .assertThat("real attack state machine starts a fresh catch-up cover search", v -> newSearch[0])
+            .assertThat("MG physically closes the squad gap below 30 blocks", v -> minimumGap[0] < 30)
+            .assertThat("MG restores a firing opportunity", v -> acceptedShots[0] > 0)
             .build();
     }
 

@@ -23,13 +23,9 @@ import java.util.Optional;
  * Returning empty defers to the base selection, so a missing lane can
  * never stall the MG.
  *
- * Row discipline gates the lane preference during ATTACK: the gunner is the
- * squad's base of fire, not its point man. Candidates ahead of the
- * frontmost rifleman along the attack bearing are rejected outright, not
- * de-scored — forward covers have the best firing lanes by construction, so
- * the lane weight would outbid the row discipline every time. The selector
- * checks lane-valid, protected covers in the preferred 8-10 block rear band
- * first, then any such cover behind the front line.
+ * Prefer useful protected lanes in the rear band, then any useful protected
+ * lane. Formation restrictions yield while the gunner is distant or blind;
+ * a rear slot without firing access must not outbid a working lane.
  */
 public final class MachineGunnerLaneFirstSelection implements CoverSelectionStrategy {
     private static final float SCORE_MARGIN = 0.15f;
@@ -102,6 +98,11 @@ public final class MachineGunnerLaneFirstSelection implements CoverSelectionStra
         return best;
     }
 
+    private boolean preferCatchUp(SoldierEntity soldier) {
+        return MgAttackMovementPolicy.active(soldier)
+            && MgAttackMovementPolicy.rifleLineLag(soldier, soldier.blockPosition()) >= MgAttackMovementPolicy.CATCH_UP_LAG;
+    }
+
     private Optional<CoverPoint> selectLaneFirst(SoldierEntity soldier, Vec3 reference,
                                                  List<CoverFinder.ScoredCover> candidates,
                                                  float scoreCutoff, boolean backRowActive,
@@ -137,10 +138,15 @@ public final class MachineGunnerLaneFirstSelection implements CoverSelectionStra
             }
             float access = FiringPositionFinder.evaluateFiringAccess(
                 soldier, BlockPos.containing(reference), pos, FiringPosition.FiringPosture.COVER_PEEK);
-            if (filterRearBand && preferredRearBand && access <= 0.0f) {
+            if (access <= 0.0f) {
                 continue;
             }
             float combined = sc.score + LANE_WEIGHT * access;
+            if (preferCatchUp(soldier)) {
+                // A useful lane nearer the riflemen beats a sideways orbit on
+                // the old cover row while recovering formation separation.
+                combined -= (float) (0.025 * MgAttackMovementPolicy.rifleLineLag(soldier, pos));
+            }
             if (best.isEmpty() || combined > bestCombined) {
                 best = Optional.of(cover);
                 bestCombined = combined;
