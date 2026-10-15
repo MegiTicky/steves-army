@@ -1239,6 +1239,8 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
                 // dock releases only once its searches have starved (stalled).
                 if (getCoverManager().isSuppressed()
                     || ContactPlan.hasLiveContact(soldier)
+                    || (!isBackwardAttackDock(dock)
+                        && soldier.level().canSeeSky(BlockPos.containing(soldier.getEyePosition())))
                     || (!isBackwardAttackDock(dock) && !stalled)) {
                     attackPhase = AttackPhase.OCCUPYING_COVER;
                     return;
@@ -4983,7 +4985,7 @@ private boolean shouldExitCoverForFollow() {
                 // himself still holds ahead-of-line covers; they never dock.
                 if (violatesMgBackRow(cover.getPosition())) continue;
 
-                if (!isAttackCorridorCandidate(cover.getPosition(), soldier.getAttackTargetPos(), objectiveDir)) {
+                if (!isAttackCorridorCandidate(cover, soldier.getAttackTargetPos(), objectiveDir)) {
                     logRejectedAttackCover(cover, soldier.getAttackTargetPos(), objectiveDir);
                     continue;
                 }
@@ -5011,7 +5013,7 @@ private boolean shouldExitCoverForFollow() {
                     if (currentCover != null && cover.getPosition().equals(currentCover.getPosition())) continue;
                     if (failedCoverPositions.contains(cover.getPosition())) continue;
 
-                    if (!isAttackCorridorCandidate(cover.getPosition(), soldier.getAttackTargetPos(), objectiveDir)) {
+                    if (!isAttackCorridorCandidate(cover, soldier.getAttackTargetPos(), objectiveDir)) {
                         logRejectedAttackCover(cover, soldier.getAttackTargetPos(), objectiveDir);
                         continue;
                     }
@@ -5802,7 +5804,8 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
      * A candidate is valid only if it moves the soldier toward the objective
      * and does not regress behind the best progress made this command.
      */
-    private boolean isForwardCoverCandidate(BlockPos candidatePos, BlockPos objective, Vec3 objectiveDir) {
+    private boolean isForwardCoverCandidate(CoverPoint candidate, BlockPos objective, Vec3 objectiveDir) {
+        BlockPos candidatePos = candidate.getPosition();
         if (objectiveDir == null) return false;
 
         // Path-based frame: progress is walked distance gained along the
@@ -5824,7 +5827,15 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
             double candProg = attackSpine.progress(candidatePos);
             double frontier = Math.max(attackSpineProgressFrontier,
                 attackSpine.progress(soldier.blockPosition()));
-            if (candProg < frontier + ATTACK_SPINE_HOP_LENGTH) {
+            // The long interior hop prevents relaying around the same house
+            // wall. In an open street it instead rejected the next cover row
+            // (often only five blocks away), forcing uncovered fallback legs.
+            boolean openLowCover = soldier.level().canSeeSky(BlockPos.containing(soldier.getEyePosition()))
+                && soldier.level().canSeeSky(candidatePos.above(2))
+                && candidate.getType() == CoverType.HALF;
+            double minimumGain = openLowCover
+                ? ATTACK_MIN_FORWARD_PROGRESS : ATTACK_SPINE_HOP_LENGTH;
+            if (candProg < frontier + minimumGain) {
                 return false;
             }
             if (attackSpineProgressFrontier > -Double.MAX_VALUE / 2.0D
@@ -5857,8 +5868,9 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
         return true;
     }
 
-    private boolean isAttackCorridorCandidate(BlockPos candidatePos, BlockPos objective, Vec3 objectiveDir) {
-        if (!isForwardCoverCandidate(candidatePos, objective, objectiveDir)) return false;
+    private boolean isAttackCorridorCandidate(CoverPoint candidate, BlockPos objective, Vec3 objectiveDir) {
+        BlockPos candidatePos = candidate.getPosition();
+        if (!isForwardCoverCandidate(candidate, objective, objectiveDir)) return false;
 
         // Spine frame: the corridor is a band along the route, and the next
         // dock may not be more than one corridor-length of route ahead.
@@ -6043,7 +6055,7 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
             if (currentCover != null && cover.getPosition().equals(currentCover.getPosition())) continue;
             if (failedCoverPositions.contains(cover.getPosition())) continue;
             if (violatesMgBackRow(cover.getPosition())) continue;
-            if (!isForwardCoverCandidate(cover.getPosition(), objective, objectiveDir)) continue;
+            if (!isForwardCoverCandidate(cover, objective, objectiveDir)) continue;
             if (cover.getPosition().distSqr(objective) <= ATTACK_OBJECTIVE_RADIUS * ATTACK_OBJECTIVE_RADIUS) continue;
 
             Vec3 displacement = cover.getPosition().getCenter().subtract(soldier.position());
@@ -6554,7 +6566,11 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
         if (probe == null) {
             probe = Vec3.atCenterOf(objective);
         }
+        // A blocked horizontal ray is not evidence of being indoors: low
+        // street rows and rubble can occlude it. Sky above the current eye
+        // is affirmative open-street evidence, independent of the objective.
         attackSpineExposed = attackSpineExposed
+            || soldier.level().canSeeSky(BlockPos.containing(soldier.getEyePosition()))
             || nearObjective
             || VisibilityRay.trace(soldier.level(),
                 soldier.getEyePosition(), probe, soldier).clear();
@@ -6841,6 +6857,11 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
                     > CLEARING_INVESTIGATE_BAND_SQ;
             if (StevesArmyConfig.isAttackClearDirectEgress()
                 && clearingPoiTarget == null
+                // A forward street dock uses the normal successor search;
+                // the interior escape timer must not strip that protection.
+                && !(dockedForSearch()
+                    && !isBackwardAttackDock(getCoverManager().getCurrentCover().getPosition())
+                    && soldier.level().canSeeSky(BlockPos.containing(soldier.getEyePosition())))
                 && (clearingView.stage() == ClearingCoordinator.ClearingStage.APPROACH
                     || joblessDockless)
                 && (!clearingView.insideArea() || joblessDockless)
@@ -7030,8 +7051,20 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
 
         switch (attackPhase) {
             case SELECTING_COVER: {
+                // Fallback walks retain their origin claim for a possible
+                // return under fire. Once the leg ends, NO_COVER cannot use
+                // that old claim as protection at its exposed endpoint.
+                if (getCoverManager().getState() == CoverBehaviorManager.CoverState.NO_COVER
+                    && fallbackAdvanceTarget == null && getCoverManager().getTargetCover() == null
+                    && currentCover != null) {
+                    getCoverManager().clearCover();
+                    currentCover = null;
+                }
                 // If suppressed or not recovered, don't start a new move yet
-                if (!canLeaveCoverNow() && currentCover != null) {
+                // A retained origin claim is not an occupied dock. Holding
+                // NO_COVER here alternated SELECTING/OCCUPYING until recovery,
+                // suppressing both cover searches and the next advance leg.
+                if (!canLeaveCoverNow() && dockedForSearch()) {
                     attackPhase = AttackPhase.OCCUPYING_COVER;
                     attackCoverArrivalTime = GameClock.nowMs();
                     if (attackDebugLog()) {
@@ -7676,7 +7709,7 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
             // Hard forward progress filter
             Vec3 candidateDisp = cover.getPosition().getCenter().subtract(soldierPos);
             double forwardProgress = candidateDisp.x * objectiveDir.x + candidateDisp.z * objectiveDir.z;
-            if (!isAttackCorridorCandidate(cover.getPosition(), objective, objectiveDir)) continue;
+            if (!isAttackCorridorCandidate(cover, objective, objectiveDir)) continue;
 
             // Don't go beyond the objective
             double distToObj = cover.getPosition().distSqr(objective);

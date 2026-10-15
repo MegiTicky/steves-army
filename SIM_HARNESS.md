@@ -148,6 +148,20 @@ The gun handler uses the Test instance's default-pack M4A1 movement profile
 model, not the actual M4A1 implementation or its 810 RPM cadence. Confirm any
 fast-run signal with `-Psim.fastticks=false` before drawing timing conclusions.
 
+### Machine-gunner ATTACK continuity
+
+`mg_advance_continuity` advances an MG and rifleman through half-cover rows
+five blocks apart with distant stationary enemies. It checks physical docking,
+successor-cover ownership when leaving a dock, and unexplained exposed pauses;
+peek excursions and completed orders do not count as departures.
+
+`mg_stale_claim_endpoint` first waits for a real MG dock, then reconstructs the
+trace's endpoint state: navigation stopped away from that dock, `NO_COVER`, a
+retained origin claim, and recent sub-threshold suppression. It checks recovery
+within 20 ticks and release of the remote claim. The relocation is an explicit
+fault-state injection, not a claim of deterministic replay of the original trace.
+Run both with fast ticks and `-Psim.fastticks=false`.
+
 ### Watching the simulation
 
 Every scenario also produces `<scenario>_<timestamp>_sim.html` — a

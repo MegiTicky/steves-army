@@ -96,6 +96,8 @@ public final class SimRegistry {
             clearLongEgress(),
             mgAttackCoverSkip(),
             mgAttackHalfRows(),
+            MgAdvanceContinuityScenarios.advanceContinuity(),
+            MgAdvanceContinuityScenarios.dockedEndpointRecovery(),
             mgAttackScatteredBlocks(),
             cqbDoorContact(),
             attackGuideUnreachableConcede(),
