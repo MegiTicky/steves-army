@@ -24,6 +24,10 @@ public final class SimRegistry {
 
     public static List<SimScenario> all() {
         return List.of(
+            PlayerSuppressionScenarios.freshPlayer(),
+            PlayerSuppressionScenarios.npcControl(),
+            PlayerSuppressionScenarios.respawnedPlayer(),
+            ThreatIntelLifecycleScenario.create(),
             suppressedFollowEscape(),
             holdEnclosedPocket(),
             persistentPingRelocation(),

@@ -128,6 +128,14 @@ public class SquadSyncHandler {
             registry.pruneGoneEntries(event.getServer());
 
             for (net.minecraft.server.level.ServerLevel level : event.getServer().getAllLevels()) {
+                var manager = com.stevesarmy.squad.SquadManager.get(level);
+                boolean intelExpired = false;
+                for (var squad : manager.getAllSquads()) {
+                    int before = squad.getThreatIntel().getThreatCount();
+                    squad.tickIntelCleanup(level.getGameTime());
+                    intelExpired |= squad.getThreatIntel().getThreatCount() != before;
+                }
+                if (intelExpired) manager.setDirty();
                 for (var entity : level.getEntities().getAll()) {
                     if (entity instanceof SoldierEntity soldier && !soldier.level().isClientSide) {
                         if (soldier.isAlive() && !soldier.isRemoved()) {

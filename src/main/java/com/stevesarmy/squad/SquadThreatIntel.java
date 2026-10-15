@@ -8,6 +8,7 @@ import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.Tag;
 import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.Vec3;
 
@@ -192,10 +193,18 @@ public class SquadThreatIntel {
 
     public void reportThreat(UUID reporterId, LivingEntity threat, BlockPos pos,
                              @Nullable Vec3 aimPoint, @Nullable Vec3 headPoint, float accuracy) {
+        if (!threat.isAlive() || threat.isSpectator()
+            || (threat instanceof Player player && player.isCreative())) {
+            return;
+        }
         UUID threatId = threat.getUUID();
         ThreatKnowledge knowledge = knownThreats.get(threatId);
         if (knowledge != null && !knowledge.isAlive) {
-            return;
+            // Players retain their UUID across respawns (and saved sessions).
+            // A new living sighting proves this contact is back; anonymous
+            // position reports cannot provide that proof and keep their guard.
+            if (!(threat instanceof Player)) return;
+            knowledge = null;
         }
         if (knowledge == null) {
             knowledge = new ThreatKnowledge(threatId);
