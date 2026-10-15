@@ -142,6 +142,7 @@ public final class MovementCombatScenarios {
                 SoldierEntity soldier = ctx.spawnFriendly(ModEntities.SOLDIER.get(), "strafer", 14, 0, 24, SquadMode.HOLD);
                 ctx.harden("strafer");
                 var enemy = ctx.spawnEnemyLabeled("enemy", 14, 0, 8);
+                makePassiveDurableTarget(enemy);
                 soldier.setTarget(enemy);
                 ctx.issueGoTo(46, 24);
             });

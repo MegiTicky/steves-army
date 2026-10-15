@@ -1874,16 +1874,16 @@ public final class SimRegistry {
      * Suppressed-traveler crawl gate: sustained near-miss fire pins a rifleman
      * marching (GO_TO) along a 1-high wall row with a low shooter north of it —
      * the lane cells read eye-exposed / leg-shielded, so the crawl engages.
-     * The soldier must go low AND keep the tuned crawl pace — 0.65 of the BASE
-     * attribute — regardless of the gun's TaCZ taxes. appliedSpeed discriminates
-     * against both the unnormalized aim-taxed crawl (0.172) and the untaxed
-     * non-aiming crawl (0.216).
+     * The soldier must go low and respect the 0.65 x BASE crawl ceiling while
+     * retaining slower route requests and weapon weight. A normal march reaches
+     * the 0.2275 base cap; an explicit 0.65 crawl route requests 0.21555625 after
+     * weapon weight. Neither should acquire an extra ADS tax (about 0.172).
      */
     private static SimScenario suppressedCrawlPace() {
         return SimScenario.builder("suppressed_crawl_pace")
             .description("GO_TO march under sustained scripted near-miss fire: the crawl "
                 + "engages in crawl-hidden cells and the soldier must go low (SWIMMING "
-                + "posture) at 0.65 x base attribute instead of the gun-taxed crawl pace.")
+                + "posture), preserving slower weighted route requests under the 0.65 x base cap.")
             .duration(400)
             .armed()
             .terrain(t -> {
@@ -1927,8 +1927,8 @@ public final class SimRegistry {
                     }
                     return false;
                 })
-            .assertThat("crawl pace stays at 0.65 x base attribute "
-                    + "(median crawl-window appliedSpeed in [0.222, 0.234])",
+            .assertThat("crawl preserves slower weighted route requests under its base cap "
+                    + "(median crawl-window appliedSpeed in [0.210, 0.234])",
                 view -> {
                     java.util.List<Double> speeds = new java.util.ArrayList<>();
                     for (SimSample s : view.timeline().series("mover")) {
@@ -1942,7 +1942,7 @@ public final class SimRegistry {
                     }
                     speeds.sort(Double::compare);
                     double median = speeds.get(speeds.size() / 2);
-                    return median >= 0.222 && median <= 0.234;
+                    return median >= 0.210 && median <= 0.234;
                 })
             .build();
     }
