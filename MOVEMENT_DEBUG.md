@@ -21,6 +21,22 @@ and pinned escapes. Crawl, manual CQB, doorways, and final approaches can be
 slower. Pinned escapes can accelerate immediately but cannot exceed the ceiling.
 The limit reason is `sprint-ceiling` when this policy constrains the request.
 
+Movement alternates between **Traverse** (route facing, ADS off, optional forward
+hip bursts) and **Tactical** (target facing, moving ADS fire). A cycle lasts
+72–88 ticks, about four seconds, with at least 20 ticks per phase. GO_TO,
+long routes, distant enemies, and short protective-cover approaches favor
+Traverse; ATTACK and nearby visible enemies favor Tactical. No visible combat
+target means continuous Traverse. Terrain, docking, crawl and stationary
+combat still take priority; overrides can extend the elapsed cycle.
+
+Tactical pace is the resolved Traverse pace times 0.60 times the weapon ADS
+ratio, applied once. For a saturated M4 with a 15% ADS penalty this is
+0.1428 blocks/tick (2.856 blocks/second). The speed limit reads `tactical-ads`.
+The owner label includes the effective movement and fire modes. Flight-recorder
+frames additionally include `movement.policy`: preferred/effective mode,
+phase timing, contextual shares, target visibility, crawl and facing ownership,
+weapon normalization availability, and transition reason. See `SOLDIER_TRACE.md`.
+
 The physical limit is shared across self-movement calls within each entity tick,
 including anchor correction and coasting with zero movement intent. Ordinary
 walking velocity carried into the next tick is bounded too, so acceleration

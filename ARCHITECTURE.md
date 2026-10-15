@@ -1382,6 +1382,45 @@ flowchart TD
     KB --> PH
 ```
 
+## Movement and moving fire
+
+`SoldierMovementController` coordinates moving speed, posture, facing, and fire
+permission. Navigation and tactical goals still choose destinations and danger-costed
+routes. Traverse follows the route with ADS off; Tactical follows that same route
+while aiming at the selected visible enemy, including strafing and backpedaling.
+Terrain traversal, doorway queues, docking, stationary cover/peek/prone, squad
+movement permissions, reload/healing, and mounted duties take priority.
+
+Cycles last 72–88 game ticks (about four seconds at 20 TPS), with at least 20 ticks
+in each active phase. GO_TO favors Traverse more than ATTACK. Nearby visible
+hostiles increase Tactical time; long routes and short committed protective-cover
+approaches favor Traverse. Soldiers use independent seeded variation. No visible
+combat target means continuous Traverse. New close contact and short-cover
+commitment can shorten a phase; standing pinned escapes switch immediately.
+
+Standing Traverse has a fixed horizontal ceiling of 0.28 blocks/tick (5.6 blocks/s).
+Tactical resolves 60% of Traverse speed before applying the weapon's ADS penalty
+once: a saturated M4 with a 15% ADS penalty is limited to 0.1428 blocks/tick
+(2.856 blocks/s). Equipment, weight, debuffs, crawl, manual CQB, doorway, and
+approach constraints still apply. Repeated SELF movement calls share one tick
+budget; external impulses, vehicle/platform motion, and vertical physics retain
+their existing exceptions. Diagnostics identify unavailable weapon normalization.
+
+Protective crawling remains independent of the preferred phase. Suppression plus
+the danger map can request crawl; classifier-approved crawl routes require it
+until their owner releases that constraint. A quick cover approach cannot stand
+a soldier up on a route approved only for crawling. Phase changes never request
+a new path or bypass danger costs.
+
+Traverse may fire occasional forward hip bursts with ADS off, broad dispersion,
+and a separate readiness gate; CONSERVE disables these optional bursts. Tactical
+uses moving ADS fire. Friendly-fire checks include custom and native weapon spread.
+The native spread estimate covers standard TaCZ dispersion; arbitrary gun-pack
+scripts can supply a different spread model that this reflection API cannot inspect.
+Stationary firing keeps its existing doctrine. The controller latches preferred
+policy before AI using the previous published context; live safety checks can
+restrict it immediately before firing and movement.
+
 ## Danger map (per-squad LoS exposure intelligence)
 
 `squad/SquadDangerMap` (one per `SquadData`, transient, not persisted) scores

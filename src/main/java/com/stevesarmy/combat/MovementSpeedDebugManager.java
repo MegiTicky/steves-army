@@ -119,6 +119,9 @@ public final class MovementSpeedDebugManager {
         if (moveControl != null && !moveControl.debugMoveReason().isBlank()) {
             owner += ": " + moveControl.debugMoveReason();
         }
+        var policy = soldier.getMovementController().snapshot();
+        owner += " | " + policy.mode() + "/" + policy.fireMode()
+            + " " + policy.phaseTicksRemaining() + "t " + policy.transitionReason();
         String posture = soldier.isFiringProne() ? "FIRING_PRONE"
             : soldier.isLowCrouching() ? "LOW_CROUCH" : soldier.getPose().name();
         boolean collision = soldier.horizontalCollision || soldier.verticalCollision;

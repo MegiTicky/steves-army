@@ -53,6 +53,22 @@ expected under combat pressure or constrained terrain.
 
 ## Sharing and analyzing a capture
 
+### Movement modes
+
+Frames include `movement.policy`: Traverse/Tactical preference, effective fire
+permission, phase time and share, route/contact factors, posture constraints, and
+override reasons. The phase cycle is approximately four seconds (72–88 ticks),
+with a one-second minimum per active phase. Inspect these alongside `movement.speed`,
+navigation nodes, actual displacement, ADS progress, and movement ownership.
+
+Traverse permits up to 0.28 horizontal blocks/tick. Tactical is 60% of resolved
+Traverse speed before the weapon ADS penalty (a saturated M4: 0.1428 blocks/tick).
+These are ceilings, not promises of displacement: acceleration, crawl, approach,
+doorway, and other restrictions can be slower. Knockback, moving platforms/vehicles,
+and vertical physics remain external-motion exceptions. A phase label alone does
+not prove that movement or a shot occurred; correlate the per-tick position and
+accepted firing evidence. Protective crawl can override the preferred mode.
+
 Share the complete export folder when reporting a bug. A large export does not
 need to be read in full into an AI conversation: scripts can parse the JSON
 locally and extract compact evidence first. Start with `summary.txt` and capture

@@ -1,6 +1,7 @@
 package com.stevesarmy.entity.ai;
 
 import com.stevesarmy.StevesArmyMod;
+import com.stevesarmy.combat.GunIntegration;
 import com.stevesarmy.debug.DiagnosticLogManager;
 import com.stevesarmy.entity.SoldierEntity;
 import net.minecraft.world.entity.Mob;
@@ -63,13 +64,28 @@ public final class SoldierSpeedController {
         SoldierEntity soldier = mob instanceof SoldierEntity s ? s : null;
         boolean manual = soldier != null && soldier.isCQB();
         if (!manual) manualRamp = 0;
-        targetSpeed = moving ? requestedModifier * attribute : 0;
+        double modeSpeed = soldier != null
+            ? soldier.getMovementController().resolveModeSpeed(requestedModifier, attribute)
+            : requestedModifier * attribute;
+        targetSpeed = moving ? modeSpeed : 0;
         limitingReason = moving ? "requested" : "stopped";
-        boolean crawl = soldier != null && !soldier.isFiringProne()
-            && soldier.getTravelCrawlController().isCrawlActive();
-        if (crawl && targetSpeed > CRAWL_FACTOR * base) {
-            targetSpeed = CRAWL_FACTOR * base;
-            limitingReason = "crawl";
+        if (moving && soldier != null) {
+            if (soldier.getMovementController().mode() == SoldierMovementController.Mode.TACTICAL) {
+                limitingReason = "tactical-ads";
+            } else if (requestedModifier * GunIntegration.getMovementProfile(soldier).adsNeutralAttribute()
+                > MAX_LOCOMOTION_SPEED) {
+                limitingReason = "sprint-ceiling";
+            }
+        }
+        boolean mandatoryCrawl = soldier != null && soldier.getMovementController().isMandatoryCrawl();
+        boolean crawl = soldier != null && (mandatoryCrawl
+            || (!soldier.isFiringProne() && soldier.getTravelCrawlController().isCrawlActive()));
+        if (crawl) {
+            double crawlLimit = CRAWL_FACTOR * base;
+            if (targetSpeed > crawlLimit) {
+                targetSpeed = crawlLimit;
+                limitingReason = mandatoryCrawl ? "mandatory-crawl" : "crawl";
+            }
         }
         if (manual && moving) {
             manualRamp = Math.min(MANUAL_CQB_FACTOR, manualRamp + 0.02);
@@ -149,8 +165,10 @@ public final class SoldierSpeedController {
             impulseBypassThisTick = false;
         }
         // Zero intent still permits friction/anchor settling, but never an unlimited coast.
-        double budget = appliedSpeed > 1.0e-6 ? Math.min(MAX_LOCOMOTION_SPEED, appliedSpeed)
-            : MAX_LOCOMOTION_SPEED;
+        double budget = appliedSpeed > 1.0e-6
+            ? Math.min(MAX_LOCOMOTION_SPEED, appliedSpeed)
+            : Math.min(MAX_LOCOMOTION_SPEED, mob instanceof SoldierEntity soldier
+                ? soldier.getMovementController().coastingCeiling() : MAX_LOCOMOTION_SPEED);
         if (requested.horizontalDistanceSqr() <= 1.0e-10) {
             return requested;
         }

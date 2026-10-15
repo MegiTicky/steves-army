@@ -123,7 +123,15 @@ public final class SimRegistry {
             CrowdedAttackRowsScenarios.crowdedAttackRows(),
             CrowdedAttackRowsScenarios.crowdedAttackTallRows(),
             AttackRepingTraversalScenarios.repeatedAttackPing(),
-            AttackRepingTraversalScenarios.movedAttackPingChokepoints());
+            AttackRepingTraversalScenarios.movedAttackPingChokepoints(),
+            MovementCombatScenarios.traverseProgress(),
+            MovementCombatScenarios.attackPhaseCycle(),
+            MovementCombatScenarios.orderShareContrast(),
+            MovementCombatScenarios.tacticalStrafeFacing(),
+            MovementCombatScenarios.tacticalBackpedalProgress(),
+            MovementCombatScenarios.hipSpreadBlocksLateralFriendly(),
+            MovementCombatScenarios.mandatoryCrawlFireGate(),
+            MovementCombatScenarios.speedAndSpreadContract());
     }
 
     public static SimScenario byName(String name) {
@@ -1785,9 +1793,9 @@ public final class SimRegistry {
     }
 
     /**
-     * Automatic caution retains normal GO_TO pace under TaCZ gun-speed emulation.
-     * With no live target to aim at, this march requests 1.2 times the weight-taxed
-     * attribute (0.39795 b/t), rather than the retired 0.37-base caution cap.
+     * Automatic caution preserves the capped Traverse pace under TaCZ gun-speed emulation.
+     * There is no visible target; injected threat only supplies caution pressure. The
+     * weapon-weight-adjusted request remains capped at 0.28 blocks/tick.
      * Exact modifier/ADS/slow-request behavior is covered by CautionSteeringScenarios.
      */
     private static SimScenario cautionAdsTravelFloor() {
@@ -1796,7 +1804,7 @@ public final class SimRegistry {
         SimScenario.Builder scenario = SimScenario.builder("caution_ads_travel_floor")
             .description("GO_TO across the streetBlock with a threat near the path and the "
                 + "sim gun's TaCZ speed emulation engaged: automatic caution retains "
-                + "the requested GO_TO pace with the normal weapon weight tax.")
+                + "capped Traverse pace with the normal weapon weight tax.")
             .duration(600)
             .armed()
             .terrain(t -> {
@@ -1827,8 +1835,8 @@ public final class SimRegistry {
                         unaimed, aimed, restored));
                 }
             })
-            .assertThat("automatic caution retains requested GO_TO pace "
-                    + "(median caution-window speed in [0.38, 0.41] b/t)",
+            .assertThat("automatic caution preserves capped Traverse pace "
+                    + "(median caution-window speed in [0.275, 0.28001] b/t)",
                 view -> {
                     java.util.List<Double> speeds = new java.util.ArrayList<>();
                     for (SimSample s : view.timeline().series("mover")) {
@@ -1843,7 +1851,7 @@ public final class SimRegistry {
                     }
                     speeds.sort(Double::compare);
                     double median = speeds.get(speeds.size() / 2);
-                    return median >= 0.38 && median <= 0.41;
+                    return median >= 0.275 && median <= 0.28001;
                 });
         scenario.action(580, "record completed order and retained cover endpoint", ctx -> {
             SoldierEntity mover = ctx.soldier("mover");

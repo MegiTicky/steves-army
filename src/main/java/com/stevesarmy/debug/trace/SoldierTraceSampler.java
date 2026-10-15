@@ -83,6 +83,7 @@ public final class SoldierTraceSampler {
             movement.add("speed", TraceJson.GSON.toJsonTree(c.getSpeedController().snapshot()));
         }
         movement.addProperty("attributeSpeed", s.getAttributeValue(Attributes.MOVEMENT_SPEED));
+        movement.add("policy", TraceJson.GSON.toJsonTree(s.getMovementController().snapshot()));
         movement.addProperty("traversalLocked", s.isNavigationTraversalLocked());
         movement.addProperty("traversalLockReason", s.getNavigationTraversalLockReason());
         j.add("movement", movement);

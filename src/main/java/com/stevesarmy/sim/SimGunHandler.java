@@ -40,6 +40,12 @@ import java.util.UUID;
  */
 public final class SimGunHandler implements GunIntegration.GunHandler {
 
+    public record ShotRecord(UUID shooterId, int tick, boolean aiming, float pitchDeviation,
+                             float yawDeviation, float nativePitchDeviation,
+                             float nativeYawDeviation, Vec3 aimPosition,
+                             boolean movingIntent,
+                             com.stevesarmy.entity.ai.SoldierMovementController.FireMode controllerFireMode) {}
+
     private static final int RIFLE_MAG = 30;
     private static final int MG_MAG = 100;
     /** ~600 RPM. */
@@ -72,6 +78,8 @@ public final class SimGunHandler implements GunIntegration.GunHandler {
         java.util.UUID.fromString("7d1a2c40-5e8b-4c1a-9f6d-000000000003");
 
     private static SimGunHandler installed;
+    private static boolean nativeScatterEnabled;
+    private static final java.util.List<ShotRecord> acceptedShots = new java.util.ArrayList<>();
 
     private static final class GunState {
         int ammo;
@@ -121,12 +129,16 @@ public final class SimGunHandler implements GunIntegration.GunHandler {
             installed = new SimGunHandler();
             states.clear();
             disarmed.clear();
+            acceptedShots.clear();
+            nativeScatterEnabled = false;
             GunIntegration.installSimGunHandler(installed);
         } else if (!armed && installed != null) {
             GunIntegration.uninstallSimGunHandler();
             installed = null;
             states.clear();
             disarmed.clear();
+            acceptedShots.clear();
+            nativeScatterEnabled = false;
         }
     }
 
@@ -134,7 +146,13 @@ public final class SimGunHandler implements GunIntegration.GunHandler {
     public static void resetForSim() {
         states.clear();
         disarmed.clear();
+        acceptedShots.clear();
+        nativeScatterEnabled = false;
     }
+
+    public static void enableNativeScatterForScenario() { nativeScatterEnabled = true; }
+
+    public static java.util.List<ShotRecord> acceptedShots() { return java.util.List.copyOf(acceptedShots); }
 
     private static boolean isMg(LivingEntity entity) {
         return entity instanceof MachineGunnerEntity;
@@ -209,6 +227,18 @@ public final class SimGunHandler implements GunIntegration.GunHandler {
         if (shooter.tickCount < state.nextShotTick) return GunIntegration.ShootResult.COOLDOWN;
         if (state.ammo <= 0) return GunIntegration.ShootResult.NO_AMMO;
 
+        float nativePitch = 0.0f;
+        float nativeYaw = 0.0f;
+        if (nativeScatterEnabled) {
+            float halfAngle = getNativeInaccuracy(shooter, state.aiming);
+            double radius = Math.sqrt(shooter.getRandom().nextDouble()) * halfAngle;
+            double angle = shooter.getRandom().nextDouble() * Math.PI * 2.0;
+            nativePitch = (float) (Math.sin(angle) * radius);
+            nativeYaw = (float) (Math.cos(angle) * radius);
+            pitchDeviation += nativePitch;
+            yawDeviation += nativeYaw;
+        }
+
         Vec3 eye = shooter.getEyePosition();
         double dx = aimPosition.x - shooter.getX();
         double dz = aimPosition.z - shooter.getZ();
@@ -233,6 +263,10 @@ public final class SimGunHandler implements GunIntegration.GunHandler {
 
         state.ammo--;
         state.nextShotTick = shooter.tickCount + SHOT_INTERVAL_TICKS;
+        acceptedShots.add(new ShotRecord(shooter.getUUID(), shooter.tickCount, state.aiming,
+            pitchDeviation, yawDeviation, nativePitch, nativeYaw, aimPosition,
+            shooter instanceof SoldierEntity s && s.getMovementController().hasMovingIntent(),
+            shooter instanceof SoldierEntity s ? s.getMovementController().fireMode() : null));
 
         if (entityHit != null) {
             LivingEntity victim = (LivingEntity) entityHit.getEntity();
@@ -317,7 +351,7 @@ public final class SimGunHandler implements GunIntegration.GunHandler {
     }
 
     // The aim-quality model gates shot timing; ADS is instant for the sim gun.
-    @Override public float getAimProgress(LivingEntity entity) { return 1.0f; }
+    @Override public float getAimProgress(LivingEntity entity) { return refresh(entity).aiming ? 1.0f : 0.0f; }
 
     @Override public void aim(LivingEntity entity, boolean isAiming) {
         GunState state = refresh(entity);
@@ -345,6 +379,18 @@ public final class SimGunHandler implements GunIntegration.GunHandler {
     @Override public int getRPM(LivingEntity entity) { return 600; }
     @Override public float getBurstMinInterval(LivingEntity entity) { return 0.8f; }
     @Override public float getAimInaccuracy(LivingEntity entity) { return 0.15f; }
+    @Override public GunIntegration.MovementProfile getMovementProfile(LivingEntity entity) {
+        GunState state = refresh(entity);
+        AttributeInstance attr = entity.getAttribute(Attributes.MOVEMENT_SPEED);
+        if (attr == null) return new GunIntegration.MovementProfile(0.0, state.m4a1MovementProfile ? 0.85 : 0.80, false);
+        double adsNeutral = attr.getValue();
+        if (state.aiming) adsNeutral /= (1.0 + (state.m4a1MovementProfile ? -0.15 : AIM_SPEED_MULT));
+        return new GunIntegration.MovementProfile(adsNeutral,
+            state.m4a1MovementProfile ? 0.85 : 0.80, true);
+    }
+    @Override public float getNativeInaccuracy(LivingEntity entity, boolean aiming) {
+        return aiming ? 0.25f : 3.0f;
+    }
     @Override public float getAimPitch(LivingEntity entity, Vec3 targetPosition) {
         return straightPitch(entity.getEyePosition(), targetPosition);
     }

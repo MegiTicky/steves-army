@@ -25,6 +25,7 @@ public class TravelCrawlController {
 
     private final SoldierEntity soldier;
     private boolean crawlActive;
+    private boolean mandatoryPoseActive;
     private int checkTimer;
     /** Last evaluation result, for the coverstate debug card. */
     private boolean crawlHidesHere;
@@ -35,6 +36,20 @@ public class TravelCrawlController {
     }
 
     public void tick() {
+        if (soldier.getMovementController().isMandatoryCrawl()) {
+            mandatoryPoseActive = true;
+            if (!soldier.isFiringProne()) soldier.setLowCrouching(true);
+            crawlHidesHere = true;
+            return;
+        }
+        if (mandatoryPoseActive) {
+            mandatoryPoseActive = false;
+            checkTimer = 1;
+            if (!crawlActive && !soldier.isFiringProne()
+                && soldier.getCoverBehaviorManager().getCurrentCover() == null) {
+                soldier.setLowCrouching(false);
+            }
+        }
         if (!StevesArmyConfig.isDangerTravelResponseEnabled()) {
             disengage("config-off");
             return;
@@ -87,7 +102,7 @@ public class TravelCrawlController {
     private void disengage(String reason) {
         if (!crawlActive) return;
         crawlActive = false;
-        if (!soldier.isFiringProne()) {
+        if (!soldier.isFiringProne() && !soldier.getMovementController().isMandatoryCrawl()) {
             soldier.setLowCrouching(false);
         }
         if (DiagnosticLogManager.isCoverLoggingEnabled()) {
@@ -108,7 +123,7 @@ public class TravelCrawlController {
     }
 
     public boolean isCrawlActive() {
-        return crawlActive;
+        return crawlActive || soldier.getMovementController().isMandatoryCrawl();
     }
 
     public boolean isCrawlHidingHere() {

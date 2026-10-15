@@ -6,6 +6,7 @@ import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.util.HazardBlockHelper;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.Mob;
+import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.ai.control.MoveControl;
 import net.minecraft.world.phys.AABB;
@@ -99,6 +100,7 @@ public class CoverPositionController extends MoveControl {
         }
         this.coverAnchorTarget = null;
         if (this.mob instanceof SoldierEntity soldier && soldier.cqbHoldFreezeEffective()
+            && !soldier.getMovementController().canBypassCqbHold()
             && !shouldDeferCqbHold()
             && !"PeekController".equals(source)) {
             this.mob.getNavigation().stop();
@@ -409,6 +411,7 @@ public class CoverPositionController extends MoveControl {
         }
 
         if (this.mob instanceof SoldierEntity soldier && soldier.cqbHoldFreezeEffective()
+            && !soldier.getMovementController().canBypassCqbHold()
             && !shouldDeferCqbHold()
             && !soldier.getPeekController().isMovingToPeek()
             && !soldier.getPeekController().isReturning()) {
@@ -438,6 +441,16 @@ public class CoverPositionController extends MoveControl {
         }
 
         if (lastResult != MovementResult.IN_PROGRESS) {
+            if (this.mob instanceof SoldierEntity tacticalSoldier
+                && canUseTacticalSteering(tacticalSoldier)) {
+                Vec3 routeTarget = steeringAdvisor.isCautionActive(tacticalSoldier)
+                    ? steeringAdvisor.getSteerTarget(tacticalSoldier)
+                    : tacticalSoldier.getNavigation().getPath().getNextEntityPos(tacticalSoldier);
+                if (routeTarget != null && !sweptBoxCollidesWithSolid(routeTarget)) {
+                    tickTacticalSteering(tacticalSoldier, routeTarget, anchorTarget);
+                    return;
+                }
+            }
             if (tickCautionSteering(anchorTarget)) {
                 return;
             }
@@ -663,5 +676,93 @@ public class CoverPositionController extends MoveControl {
 
     private boolean isPreparingOrReloading() {
         return this.mob instanceof SoldierEntity soldier && soldier.isPreparingOrReloading();
+    }
+
+    /** Tactical travel keeps the body on its visible contact and translates the path vector into local input. */
+    private boolean canUseTacticalSteering(SoldierEntity soldier) {
+        if (soldier.getMovementController().mode() != SoldierMovementController.Mode.TACTICAL
+            || soldier.getNavigation().isDone() || soldier.isNavigationTraversalLocked()
+            || soldier.horizontalCollision || soldier.minorHorizontalCollision
+            || !soldier.onGround() || soldier.getMovementController().isMandatoryCrawl() || soldier.isLowCrouching()
+            || soldier.isFiringProne()
+            || hasVerticalPathTransition(soldier) || isSharpPathTurn(soldier) || steeringAdvisor.isDoorwayBlocked(soldier)) {
+            return false;
+        }
+        LivingEntity target = soldier.getTarget();
+        return target != null && target.isAlive() && soldier.canAttack(target)
+            && soldier.hasLineOfSight(target);
+    }
+
+    private boolean isSharpPathTurn(SoldierEntity soldier) {
+        var path = soldier.getNavigation().getPath();
+        if (path == null || path.isDone()) return false;
+        int index = path.getNextNodeIndex();
+        if (index < 0 || index + 1 >= path.getNodeCount()) return false;
+        Vec3 current = soldier.position();
+        Vec3 first = path.getNode(index).asBlockPos().getCenter().subtract(current);
+        Vec3 second = path.getNode(index + 1).asBlockPos().getCenter()
+            .subtract(path.getNode(index).asBlockPos().getCenter());
+        first = new Vec3(first.x, 0, first.z);
+        second = new Vec3(second.x, 0, second.z);
+        return first.lengthSqr() > 0.01 && second.lengthSqr() > 0.01
+            && first.normalize().dot(second.normalize()) < 0.5;
+    }
+
+    private void tickTacticalSteering(SoldierEntity soldier, Vec3 routeTarget, Vec3 anchorTarget) {
+        LivingEntity target = soldier.getTarget();
+        if (target == null) return;
+        Vec3 direction = new Vec3(routeTarget.x - soldier.getX(), 0, routeTarget.z - soldier.getZ());
+        Vec3 look = new Vec3(target.getX() - soldier.getX(), 0, target.getZ() - soldier.getZ());
+        if (direction.lengthSqr() < 1.0e-6 || look.lengthSqr() < 1.0e-6) return;
+        direction = direction.normalize();
+        float aimYaw = (float) (Mth.atan2(look.z, look.x) * (180.0F / (float) Math.PI)) - 90.0F;
+        float previousYaw = soldier.getYRot();
+        float previousBodyYaw = soldier.yBodyRot;
+        float previousHeadYaw = soldier.getYHeadRot();
+        float bodyYaw = this.rotlerp(soldier.getYRot(), aimYaw, 30.0F);
+        soldier.setYRot(bodyYaw);
+        soldier.yBodyRot = bodyYaw;
+        soldier.traceRotationWrite("tactical-movement", previousYaw, previousBodyYaw, previousHeadYaw,
+            "route=" + routeTarget + ",target=" + target.getId());
+
+        double radians = bodyYaw * (Math.PI / 180.0);
+        double forwardX = -Math.sin(radians);
+        double forwardZ = Math.cos(radians);
+        double rightX = Math.cos(radians);
+        double rightZ = Math.sin(radians);
+        double forward = direction.x * forwardX + direction.z * forwardZ;
+        double strafe = direction.x * rightX + direction.z * rightZ;
+        double length = Math.hypot(forward, strafe);
+        if (length > 1.0) {
+            forward /= length;
+            strafe /= length;
+        }
+        double absolute = movementSpeed.resolve(this.speedModifier, true, false);
+        soldier.setSpeed((float) absolute);
+        soldier.setZza((float) forward);
+        soldier.setXxa((float) strafe);
+        applyCoverAnchorVelocity(anchorTarget);
+        this.debugLastSetVelocity = soldier.getDeltaMovement();
+        this.debugMoveSource = "tactical-steer";
+        this.debugMoveReason = steeringAdvisor.isCautionActive(soldier)
+            ? steeringAdvisor.getCautionReason() : "visible-contact";
+    }
+
+    public boolean requiresRouteFacing() {
+        if (!(mob instanceof SoldierEntity soldier)) return false;
+        if (soldier.isNavigationTraversalLocked() || lastResult == MovementResult.IN_PROGRESS
+            || soldier.horizontalCollision || soldier.minorHorizontalCollision) return true;
+        return !soldier.getNavigation().isDone()
+            && (steeringAdvisor.isDoorwayBlocked(soldier) || hasVerticalPathTransition(soldier) || isSharpPathTurn(soldier));
+    }
+
+    private boolean hasVerticalPathTransition(SoldierEntity soldier) {
+        var path = soldier.getNavigation().getPath();
+        if (path == null || path.isDone()) return false;
+        int index = path.getNextNodeIndex();
+        if (index < 0 || index >= path.getNodeCount()) return false;
+        int y = soldier.blockPosition().getY();
+        return path.getNode(index).y != y
+            || (index + 1 < path.getNodeCount() && path.getNode(index + 1).y != y);
     }
 }

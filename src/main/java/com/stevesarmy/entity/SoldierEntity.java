@@ -233,6 +233,7 @@ public class SoldierEntity extends PathfinderMob implements Container {
     private boolean vehicleCrewActive;
     private final ThreatAwareness threatAwareness;
     private final com.stevesarmy.entity.ai.TravelCrawlController travelCrawl;
+    private final com.stevesarmy.entity.ai.SoldierMovementController movementController;
     private final GrenadeTacticalController grenadeTacticalController;
     private final SoldierHealController healController;
     
@@ -374,6 +375,10 @@ public class SoldierEntity extends PathfinderMob implements Container {
             return;
         }
 
+        if (movementController != null && movementController.canBypassCqbHold()) {
+            return;
+        }
+
         getNavigation().stop();
         cancelCoverMovement();
         setZza(0.0F);
@@ -491,6 +496,7 @@ public class SoldierEntity extends PathfinderMob implements Container {
         this.peekController = new PeekController();
         this.threatAwareness = new ThreatAwareness();
         this.travelCrawl = new com.stevesarmy.entity.ai.TravelCrawlController(this);
+        this.movementController = new com.stevesarmy.entity.ai.SoldierMovementController(this);
         this.grenadeTacticalController = new GrenadeTacticalController(this);
         this.healController = new SoldierHealController(this);
         this.inventory.setMainHandChangedCallback(stack -> {
@@ -1470,6 +1476,10 @@ public class SoldierEntity extends PathfinderMob implements Container {
     }
 
     public void tick() {
+        if (!this.level().isClientSide) {
+            movementController.beginTick();
+            travelCrawl.tick();
+        }
         super.tick();
         if (this.level().isClientSide) {
             com.stevesarmy.network.SyncSoldierInventoryPacket.applyPendingInventory(this);
@@ -1481,8 +1491,8 @@ public class SoldierEntity extends PathfinderMob implements Container {
             threatAwareness.tick();
             holdMovementForReload();
             updateCrawlFacing();
+            movementController.finishTick();
             tickSquadDangerMap();
-            travelCrawl.tick();
             // Reload and cover helpers may hold navigation and update their own
             // crouch state. A live firing-prone plan remains the authoritative
             // posture until that plan explicitly cancels it.
@@ -2434,6 +2444,12 @@ public BlockPos getPingMoveTarget() {
             return;
         }
 
+        // A route approved only at crawl height cannot be invalidated by a
+        // competing combat/cover stand request. Route owners release this first.
+        if (!lowCrouch && movementController != null && movementController.isMandatoryCrawl()) {
+            lowCrouch = true;
+        }
+
         // Soldiers aboard ships never crawl: the crawl pose re-dimensions a
         // VS2-mounted passenger, breaking seat rendering and ship collision.
         if (lowCrouch && VS2Compat.isOnShip(this)) {
@@ -2698,6 +2714,10 @@ public BlockPos getPingMoveTarget() {
     /** Universal suppressed-movement posture controller (dangerTravelResponse). */
     public com.stevesarmy.entity.ai.TravelCrawlController getTravelCrawlController() {
         return travelCrawl;
+    }
+
+    public com.stevesarmy.entity.ai.SoldierMovementController getMovementController() {
+        return movementController;
     }
     
     public void syncThreatDirection(Vec3 direction) {

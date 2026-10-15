@@ -371,6 +371,7 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
     private List<Vec3> suppressionRouteFiringOrigins = List.of();
     private SuppressionRoutePlan selectedSuppressionRoute = null;
     private RouteMovement activeSuppressionRouteMovement = RouteMovement.NORMAL;
+    private boolean activeRouteCrawlMandatory;
     private int nextSuppressionRouteSearchTick = 0;
     // Suppression rarely comes from one rifle: the goal remembers the last few
     // DISTINCT firing origins that pressured this soldier (CoverBehaviorManager
@@ -427,7 +428,7 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
     private enum RouteMovement { NORMAL, CRAWL }
 
     private record SuppressionRoutePlan(CoverPoint cover, Path path, RouteMovement movement,
-                                        List<Vec3> firingOrigins) {}
+                                        boolean classifierRequiresCrawl, List<Vec3> firingOrigins) {}
 
     private record SuppressionFiringOrigin(Vec3 pos, long recordedMs) {}
 
@@ -1515,6 +1516,10 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
     }
 
     private void clearRelocationTarget() {
+        if (activeRouteCrawlMandatory) {
+            activeRouteCrawlMandatory = false;
+            soldier.getMovementController().setMandatoryCrawl(false, "relocation-released");
+        }
         CoverPoint targetCover = getCoverManager().getTargetCover();
         if (targetCover != null && relocationType != RelocationType.NONE) {
             CoverReservationManager.release(targetCover.getPosition(), soldier);
@@ -2525,6 +2530,10 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
     
     @Override
     public void stop() {
+        if (activeRouteCrawlMandatory) {
+            activeRouteCrawlMandatory = false;
+            soldier.getMovementController().setMandatoryCrawl(false, "cover-owner-stopped");
+        }
         if (com.stevesarmy.debug.trace.SoldierFlightRecorder.isRecording())
             com.stevesarmy.debug.trace.SoldierFlightRecorder.event(soldier, "cover-goal", "stop", getCoverManager().getState().name());
         CoverSearchScheduler.cancel(this);
@@ -4501,6 +4510,8 @@ private boolean shouldExitCoverForFollow() {
         // Normal cover navigation uses standing/crouching dimensions. Do not
         // carry the suppressed half-cover prone posture into full-speed travel.
         activeSuppressionRouteMovement = RouteMovement.NORMAL;
+        activeRouteCrawlMandatory = false;
+        soldier.getMovementController().setMandatoryCrawl(false, "route-released");
         selectedSuppressionRoute = null;
         soldier.setLowCrouching(false);
         getCoverManager().resetPeekState();
@@ -4524,6 +4535,8 @@ private boolean shouldExitCoverForFollow() {
         // This is the ordinary cover-to-cover path, not a protected low-crouch
         // trench shift. Restore normal movement dimensions before pathfinding.
         activeSuppressionRouteMovement = RouteMovement.NORMAL;
+        activeRouteCrawlMandatory = false;
+        soldier.getMovementController().setMandatoryCrawl(false, "route-released");
         selectedSuppressionRoute = null;
         soldier.setLowCrouching(false);
         
@@ -8229,11 +8242,11 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
             RouteNodeExposure exposure = classifySuppressionRoute(path, firingOrigins, exposureCache);
             if (suppressionEscapeSearchActive && escapePlan == null) {
                 escapePlan = new SuppressionRoutePlan(cover, path,
-                    escapeMovementFor(cover, firingOrigins), firingOrigins);
+                    escapeMovementFor(cover, firingOrigins), false, firingOrigins);
             }
             SuppressionRoutePlan plan = new SuppressionRoutePlan(cover, path,
                 exposure == RouteNodeExposure.CRAWL_SAFE ? RouteMovement.CRAWL : RouteMovement.NORMAL,
-                firingOrigins);
+                exposure == RouteNodeExposure.CRAWL_SAFE, firingOrigins);
             if (exposure == RouteNodeExposure.PROTECTED && protectedPlan == null) {
                 protectedPlan = plan;
             } else if (exposure == RouteNodeExposure.CRAWL_SAFE && crawlPlan == null) {
@@ -8405,6 +8418,8 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
             }
             selectedSuppressionRoute = null;
             activeSuppressionRouteMovement = RouteMovement.NORMAL;
+            activeRouteCrawlMandatory = false;
+            soldier.getMovementController().setMandatoryCrawl(false, "route-rejected");
             soldier.setLowCrouching(false);
             PerformanceMetrics.recordRolePathFailure(machineGunnerPipeline);
             PerformanceMetrics.recordCoverPathFailure();
@@ -8477,6 +8492,9 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
         if (isReachable) {
             pendingRetryCover = null; // Clear any pending retry on success
             activeSuppressionRouteMovement = routePlan != null ? routePlan.movement() : RouteMovement.NORMAL;
+            activeRouteCrawlMandatory = routePlan != null && routePlan.classifierRequiresCrawl();
+            soldier.getMovementController().setMandatoryCrawl(activeRouteCrawlMandatory,
+                activeRouteCrawlMandatory ? "suppression-route-classifier" : "route-released");
             soldier.setLowCrouching(activeSuppressionRouteMovement == RouteMovement.CRAWL);
             boolean accepted = navigation.moveTo(path, activeSuppressionRouteMovement == RouteMovement.CRAWL
                 ? CRAWL_ROUTE_SPEED : 1.2D);
@@ -8633,6 +8651,7 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
             CoverPoint escapeCover = getCoverManager().getTargetCover();
             escapeCommitCoverPos = escapeCover.getPosition().immutable();
             escapeCrawlToDashPending = activeSuppressionRouteMovement == RouteMovement.CRAWL
+                && !activeRouteCrawlMandatory
                 && horizontalDistanceToCover(escapeCover) > ESCAPE_DASH_RANGE;
             if (DiagnosticLogManager.isCoverLoggingEnabled()) {
                 StevesArmyMod.LOGGER.info("[CoverSuppression] Soldier {} escape move to {} ({}), commit",
@@ -8702,6 +8721,8 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
         }
         escapeCrawlToDashPending = false;
         activeSuppressionRouteMovement = RouteMovement.NORMAL;
+        activeRouteCrawlMandatory = false;
+        soldier.getMovementController().setMandatoryCrawl(false, "escape-dash-release");
         soldier.setLowCrouching(false);
         Path path = navigation.getPath();
         if (path != null && !path.isDone()) {
@@ -8794,6 +8815,8 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
         suppressionRouteFiringOrigins = suppressionFiringOriginsForRoute();
         suppressionRouteSearchActive = true;
         activeSuppressionRouteMovement = RouteMovement.NORMAL;
+        activeRouteCrawlMandatory = false;
+        soldier.getMovementController().setMandatoryCrawl(false, "route-released");
         selectedSuppressionRoute = null;
         soldier.setLowCrouching(false);
         getCoverManager().resetPeekState();
@@ -8835,6 +8858,8 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
         }
         selectedSuppressionRoute = null;
         activeSuppressionRouteMovement = RouteMovement.NORMAL;
+        activeRouteCrawlMandatory = false;
+        soldier.getMovementController().setMandatoryCrawl(false, "route-released");
         soldier.setLowCrouching(false);
         clearSuppressedEscapeCommit("arrived at dock");
         // Reset search exhaustion state on successful cover acquisition

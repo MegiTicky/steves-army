@@ -30,6 +30,7 @@ import com.stevesarmy.combat.cover.CoverType;
 import com.stevesarmy.combat.cover.SuppressionTracker;
 import com.stevesarmy.debug.DiagnosticLogManager;
 import com.stevesarmy.debug.PerformanceMetrics;
+import com.stevesarmy.debug.trace.SoldierFlightRecorder;
 import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.entity.SoldierRole;
 import com.stevesarmy.entity.TargetEntity;
@@ -93,7 +94,6 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
     private static final float MOBILE_FIRE_MOVEMENT_DECAY = 0.005f;
     private static final float MOBILE_FIRE_TARGET_MOVEMENT_DECAY = 0.008f;
     private static final int MOBILE_FIRE_MAX_BURST_SHOTS = 2;
-    private static final double MOBILE_FIRE_MIN_SPEED_SQR = 0.01D;
     private static final int PATH_BLOCKED_SWITCH_TICKS = 40;
     private static final int CQB_PATH_BLOCKED_SWITCH_TICKS = 10;
     private int pathBlockedCounter = 0;
@@ -255,6 +255,10 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
     private DirectFireWeaponProfile directBurstProfile = null;
     private int directBurstShotLimit = 0;
     private float directBurstContinuationThreshold = 0.0f;
+    private java.util.Random mobileHipRandom;
+    private int mobileHipShotsInBurst;
+    private int mobileHipBurstLimit;
+    private int mobileHipNextBurstTick;
 
     // Dynamic firing: per-engagement personality plus ineffective-burst tracking.
     private FirePersonality firePersonality;
@@ -287,6 +291,8 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
     public SoldierCombatGoal(SoldierEntity soldier, boolean machineGunnerPipeline) {
         this.soldier = soldier;
         this.machineGunnerPipeline = machineGunnerPipeline;
+        this.mobileHipRandom = new java.util.Random(soldier.getUUID().getMostSignificantBits()
+            ^ soldier.getUUID().getLeastSignificantBits() ^ 0x5EEDB17L);
         this.threatTracker = new ThreatTracker();
         this.detectionSystem = new DetectionSystem(soldier.getUUID(), machineGunnerPipeline);
         this.setFlags(EnumSet.noneOf(Flag.class));
@@ -1290,7 +1296,9 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
             double holdRange = soldier.isCQB()
                 ? StevesArmyConfig.getCqbOverrunRange()
                 : StevesArmyConfig.getCqbEmergencyRange();
-            boolean shouldHoldCqbEngagement = target != null && target.isAlive()
+            SoldierMovementController movement = soldier.getMovementController();
+            boolean canLatchCqbHold = !movement.canBypassCqbHold();
+            boolean shouldHoldCqbEngagement = canLatchCqbHold && target != null && target.isAlive()
                 && canSee
                 && GunIntegration.isAnyGunLoaded() && GunIntegration.hasGun(soldier)
                 && !soldier.isPreparingOrReloading()
@@ -1345,7 +1353,9 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
 
         // A valid direct shot from cover must track the target just like an
         // exposed peek. Cover ownership still controls the soldier's position.
-        soldier.getLookControl().setLookAt(target, 30.0F, 30.0F);
+        if (!soldier.getMovementController().hasMovingIntent()) {
+            soldier.getLookControl().setLookAt(target, 30.0F, 30.0F);
+        }
 
         if (hasGun) {
             if (canSee) {
@@ -1414,6 +1424,12 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
 
     private void tickGunCombat(@javax.annotation.Nullable ArmorThreatScanner.ArmorContact vehicleTarget) {
         boolean vehicleCombat = vehicleTarget != null;
+        if (!vehicleCombat && (soldier.getMovementController().isStationaryFireConstrained()
+            || (soldier.getMovementController().hasMovingIntent()
+                && soldier.getMovementController().fireMode() != SoldierMovementController.FireMode.ADS))) {
+            GunIntegration.aim(soldier, false);
+            wasAiming = false;
+        }
         // Doctrine: the launcher only ever fires at a vehicle. If entity combat
         // owns the loop while the launcher is still in hand (swap failed or the
         // launcher is the soldier's only gun), hold fire rather than rocket
@@ -1436,6 +1452,13 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
         // turn and raise the weapon during the rise, but cannot fire until the
         // server-synchronised body transition is complete.
         if (soldier.isHalfCoverRising()) {
+            if (soldier.getMovementController().hasMovingIntent()) {
+                GunIntegration.aim(soldier, false);
+                wasAiming = false;
+                noteEngagementGate(EngagementGateReason.PREPARE_FAILED);
+                resetDirectFireBurst();
+                return;
+            }
             Vec3 risingAim = vehicleCombat ? vehicleSolution
                 : target != null && target.isAlive() ? target.getEyePosition() : null;
             if (risingAim != null && prepareToFire(risingAim, true)) {
@@ -1519,7 +1542,41 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
             return;
         }
 
-        if (!prepareToFire(aimPoint.position, true)) {
+        SoldierMovementController movement = soldier.getMovementController();
+        boolean aimQualityUpdated = false;
+        if (!vehicleCombat && movement.isStationaryFireConstrained()) {
+            GunIntegration.aim(soldier, false);
+            wasAiming = false;
+            noteEngagementGate(EngagementGateReason.PREPARE_FAILED);
+            return;
+        }
+        if (!vehicleCombat && movement.hasMovingIntent()) {
+            updateAimQuality(null);
+            aimQualityUpdated = true;
+            if (movement.fireMode() == SoldierMovementController.FireMode.NONE
+                || !movement.canFireAt(aimPoint.position)) {
+                GunIntegration.aim(soldier, false);
+                wasAiming = false;
+                noteEngagementGate(EngagementGateReason.PREPARE_FAILED);
+                resetDirectFireBurst();
+                return;
+            }
+            if (movement.fireMode() == SoldierMovementController.FireMode.HIP) {
+                if (target == null || !target.isAlive()
+                    || !TargetAcquisition.hasLineOfSight(soldier, target)
+                    || !TargetAcquisition.isValidTarget(soldier, target)) {
+                    noteEngagementGate(EngagementGateReason.NOT_VISIBLE);
+                    return;
+                }
+                tickTraverseHipFire(aimPoint);
+                return;
+            }
+            if (movement.fireMode() != SoldierMovementController.FireMode.ADS
+                || !prepareForMovingFire(aimPoint.position)) {
+                noteEngagementGate(EngagementGateReason.PREPARE_FAILED);
+                return;
+            }
+        } else if (!prepareToFire(aimPoint.position, true)) {
             noteEngagementGate(EngagementGateReason.PREPARE_FAILED);
             resetDirectFireBurst();
             return;
@@ -1531,7 +1588,7 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
         wasAiming = true;
 
         float adsProgress = GunIntegration.getAimProgress(soldier);
-        boolean mobileFire = !vehicleCombat && isMobileSuppressiveFireAllowed();
+        boolean mobileFire = !vehicleCombat && movement.hasMovingIntent();
         float adsThreshold = mobileFire || soldier.getFireDiscipline() == FireDiscipline.SUPPRESSIVE
             ? MOBILE_FIRE_ADS_THRESHOLD : ADS_THRESHOLD;
         if (adsProgress < adsThreshold) {
@@ -1546,7 +1603,7 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
             lastShotTick = soldier.tickCount - StevesArmyConfig.getFiringMissStreakDecayTicks();
         }
 
-        updateAimQuality(vehicleCombat ? vehicleSolution : null);
+        if (!aimQualityUpdated) updateAimQuality(vehicleCombat ? vehicleSolution : null);
 
         float targetAimQ = vehicleCombat ? StevesArmyConfig.getAimQualityBaseAccuracy()
             : AimAccuracyManager.getTargetAimQuality(soldier, target);
@@ -1649,22 +1706,6 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
             return;
         }
 
-        if (!FriendlyFireChecker.isSafeToShoot(soldier, aimPoint.position, aimQuality)) {
-            if (isDamageDebugLogging()) {
-                StevesArmyMod.LOGGER.info("[FriendlyFire] Soldier {} blocked shot - friendly in cone",
-                    soldier.getId());
-            }
-            // "My shot is obstructed" feeds the positioning doctrine: a
-            // permanently blocked lane is a repositioning problem, not just a
-            // skipped burst.
-            if (StevesArmyConfig.isExposedCombatEnabled()) {
-                ExposedCombatController.noteShotBlocked(soldier, aimPoint.position);
-            }
-            noteEngagementGate(EngagementGateReason.FF_BLOCK);
-            resetDirectFireBurst();
-            return;
-        }
-
         // Cached perception chooses the aim point; the shot still validates the
         // exact current firing lane immediately before firing.
         if (vehicleCombat) {
@@ -1711,6 +1752,23 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
         float[] deviation = AimAccuracyManager.sampleGaussianDeviation(aimQuality, yawSigma, pitchSigma, soldier.level());
         float pitchDev = deviation[0];
         float yawDev = deviation[1];
+
+        boolean safeLane = mobileFire
+            ? FriendlyFireChecker.isSafeToShoot(soldier, aimPoint.position, aimQuality,
+                yawSigma, pitchSigma, pitchDev, yawDev, true)
+            : FriendlyFireChecker.isSafeToShoot(soldier, aimPoint.position, aimQuality);
+        if (!safeLane) {
+            if (isDamageDebugLogging()) {
+                StevesArmyMod.LOGGER.info("[FriendlyFire] Soldier {} blocked shot - spread envelope overlaps friendly",
+                    soldier.getId());
+            }
+            if (StevesArmyConfig.isExposedCombatEnabled()) {
+                ExposedCombatController.noteShotBlocked(soldier, aimPoint.position);
+            }
+            noteEngagementGate(EngagementGateReason.FF_BLOCK);
+            resetDirectFireBurst();
+            return;
+        }
         
         if (isDamageDebugLogging()) {
             StevesArmyMod.LOGGER.info("[DAMAGE_DEBUG] tickGunCombat: SHOOT target={}({}) aimPoint=({},{},{}) aimType={} aimQuality={} yawSigma={} pitchSigma={} yawDev={} pitchDev={}",
@@ -1732,6 +1790,10 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
             com.stevesarmy.squad.SquadMovementCoordinator.noteShot(soldier);
             noteEngagementGate(EngagementGateReason.NONE);
             soldier.getEngagementTelemetry().noteShot(soldier.tickCount);
+            if (mobileFire) {
+                recordMobileShot(SoldierMovementController.FireMode.ADS, aimQuality,
+                    yawSigma, pitchSigma, pitchDev, yawDev, adsProgress, "direct-ads");
+            }
             if (!directBurstActive) {
                 beginDirectFireBurst(directProfile, requestedBurstShotLimit, mobileFire, continuationThreshold);
             }
@@ -1904,7 +1966,7 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
         boolean inLOS = staticTarget || TargetAcquisition.hasLineOfSight(soldier, target);
 
         if (inLOS) {
-            boolean mobileFire = !staticTarget && isMobileSuppressiveFireAllowed();
+            boolean mobileFire = !staticTarget && soldier.getMovementController().hasMovingIntent();
             float targetAimQuality = staticTarget ? StevesArmyConfig.getAimQualityBaseAccuracy()
                 : AimAccuracyManager.getTargetAimQuality(soldier, target);
             float buildRate = staticTarget ? StevesArmyConfig.getAimQualityBuildRate()
@@ -1947,49 +2009,108 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
         aimQuality = Mth.clamp(aimQuality, 0.0f, 1.0f);
     }
 
-    /**
-     * Mobile fire is intentionally narrow: it is covering fire on a flat,
-     * straight navigation segment, never a replacement for terrain-safe travel.
-     */
-    private boolean isMobileSuppressiveFireAllowed() {
-        if (target == null || !target.isAlive()
-            || soldier.isNavigationTraversalLocked()
-            || !soldier.onGround()
-            || soldier.isCrawlMoving()
-            || soldier.horizontalCollision
-            || soldier.minorHorizontalCollision
-            || soldier.getDeltaMovement().horizontalDistanceSqr() <= MOBILE_FIRE_MIN_SPEED_SQR) {
+    private boolean prepareForMovingFire(Vec3 aimPoint) {
+        SoldierMovementController movement = soldier.getMovementController();
+        if (!movement.hasMovingIntent() || movement.fireMode() != SoldierMovementController.FireMode.ADS
+            || !movement.canFireAt(aimPoint)) {
             return false;
         }
+        return turnHeadToward(getYawTo(aimPoint), getPitchTo(aimPoint)) <= FIRING_ALIGNMENT_DEGREES;
+    }
 
-        Path path = soldier.getNavigation().getPath();
-        if (path == null || path.isDone() || path.getNodeCount() == 0) {
-            return false;
+    private void tickTraverseHipFire(ExposureCalculator.AimPointResult aimPoint) {
+        GunIntegration.aim(soldier, false);
+        wasAiming = false;
+        float hipQuality = Math.min(aimQuality, 0.20f);
+        if (soldier.getFireDiscipline() == FireDiscipline.CONSERVE || hipQuality < 0.08f) {
+            noteEngagementGate(EngagementGateReason.AIM_QUALITY);
+            return;
+        }
+        if (GunIntegration.getAimProgress(soldier) > 0.10f) {
+            noteEngagementGate(EngagementGateReason.ADS_LOW);
+            return;
         }
 
-        int nextIndex = Math.min(path.getNextNodeIndex(), path.getNodeCount() - 1);
-        BlockPos nextNode = path.getNode(nextIndex).asBlockPos();
-        if (nextNode.getY() != soldier.blockPosition().getY()) {
-            return false;
+        if (soldier.tickCount < mobileHipNextBurstTick) {
+            noteEngagementGate(EngagementGateReason.BURST_COOLDOWN);
+            return;
+        }
+        if (GunIntegration.isReloading(soldier) || GunIntegration.isDrawing(soldier)
+            || GunIntegration.isBolting(soldier)) {
+            noteEngagementGate(GunIntegration.isReloading(soldier) ? EngagementGateReason.RELOADING
+                : GunIntegration.isDrawing(soldier) ? EngagementGateReason.DRAWING : EngagementGateReason.BOLTING);
+            return;
         }
 
-        if (nextIndex + 1 >= path.getNodeCount()) {
-            return true;
+        float yawSigma = Math.max(6.0f, AimAccuracyManager.getYawSigma(hipQuality));
+        float pitchSigma = Math.max(3.0f, AimAccuracyManager.getPitchSigma(hipQuality));
+        float[] deviation = sampleMobileHipDeviation(yawSigma, pitchSigma);
+        if (!FriendlyFireChecker.isSafeToShoot(soldier, aimPoint.position, hipQuality,
+            yawSigma, pitchSigma, deviation[0], deviation[1], false)) {
+            noteEngagementGate(EngagementGateReason.FF_BLOCK);
+            return;
         }
+        GunIntegration.ShootResult result = GunIntegration.shootWithDeviation(
+            soldier, aimPoint, deviation[0], deviation[1]);
+        if (result == GunIntegration.ShootResult.SUCCESS) {
+            com.stevesarmy.squad.SquadMovementCoordinator.noteShot(soldier);
+            soldier.getEngagementTelemetry().noteShot(soldier.tickCount);
+            noteEngagementGate(EngagementGateReason.NONE);
+            recordMobileShot(SoldierMovementController.FireMode.HIP, hipQuality,
+                yawSigma, pitchSigma, deviation[0], deviation[1],
+                GunIntegration.getAimProgress(soldier), "direct-hip");
+            if (mobileHipShotsInBurst == 0) mobileHipBurstLimit = 1 + mobileHipRandom.nextInt(2);
+            mobileHipShotsInBurst++;
+            lastShotTick = soldier.tickCount;
+            float[] recoil = AimAccuracyManager.getGunRecoil(soldier);
+            aimQuality = Math.max(0.0f, aimQuality - (Math.abs(recoil[0]) + Math.abs(recoil[1]))
+                * StevesArmyConfig.getAimQualityRecoilScale() * stanceRecoilLossMultiplier());
+            if (mobileHipShotsInBurst >= mobileHipBurstLimit) {
+                mobileHipShotsInBurst = 0;
+                mobileHipNextBurstTick = soldier.tickCount + 20 + mobileHipRandom.nextInt(21);
+            }
+        } else if (result == GunIntegration.ShootResult.NO_AMMO) {
+            requestReload(false);
+        } else if (result == GunIntegration.ShootResult.NEED_BOLT) {
+            GunIntegration.bolt(soldier);
+            lastShotNeededBolt = true;
+            noteEngagementGate(EngagementGateReason.BOLTING);
+        } else if (result == GunIntegration.ShootResult.COOLDOWN) {
+            noteEngagementGate(EngagementGateReason.BURST_COOLDOWN);
+        } else if (result == GunIntegration.ShootResult.IS_RELOADING) {
+            noteEngagementGate(EngagementGateReason.RELOADING);
+        } else if (result == GunIntegration.ShootResult.IS_BOLTING) {
+            noteEngagementGate(EngagementGateReason.BOLTING);
+        } else if (result == GunIntegration.ShootResult.IS_DRAWING || result == GunIntegration.ShootResult.NOT_DRAWN) {
+            if (result == GunIntegration.ShootResult.NOT_DRAWN) GunIntegration.draw(soldier);
+            noteEngagementGate(EngagementGateReason.DRAWING);
+        } else if (result != GunIntegration.ShootResult.SUCCESS) {
+            noteEngagementGate(EngagementGateReason.PREPARE_FAILED);
+        }
+    }
 
-        BlockPos followingNode = path.getNode(nextIndex + 1).asBlockPos();
-        if (followingNode.getY() != nextNode.getY()) {
-            return false;
-        }
+    private float[] sampleMobileHipDeviation(float yawSigma, float pitchSigma) {
+        double u1 = Math.max(1.0e-15, mobileHipRandom.nextDouble());
+        double u2 = mobileHipRandom.nextDouble();
+        double radius = Math.sqrt(-2.0 * Math.log(u1));
+        double angle = 2.0 * Math.PI * u2;
+        double yawNormal = Mth.clamp(radius * Math.cos(angle), -2.5, 2.5);
+        double pitchNormal = Mth.clamp(radius * Math.sin(angle), -2.5, 2.5);
+        return new float[]{(float) (pitchNormal * pitchSigma), (float) (yawNormal * yawSigma)};
+    }
 
-        Vec3 travelDirection = new Vec3(nextNode.getX() + 0.5D - soldier.getX(), 0.0D,
-            nextNode.getZ() + 0.5D - soldier.getZ());
-        Vec3 followingDirection = new Vec3(followingNode.getX() - nextNode.getX(), 0.0D,
-            followingNode.getZ() - nextNode.getZ());
-        if (travelDirection.horizontalDistanceSqr() < 0.01D || followingDirection.horizontalDistanceSqr() < 0.01D) {
-            return true;
-        }
-        return travelDirection.normalize().dot(followingDirection.normalize()) >= 0.707D;
+    private void recordMobileShot(SoldierMovementController.FireMode fireMode, float effectiveQuality,
+                                  float yawSigma, float pitchSigma, float sampledPitchDeviation,
+                                  float sampledYawDeviation, float adsProgress, String source) {
+        if (!SoldierFlightRecorder.isRecording()) return;
+        SoldierFlightRecorder.event(soldier, "mobile-fire", source, java.util.Map.of(
+            "fireMode", fireMode.name(),
+            "effectiveQuality", effectiveQuality,
+            "yawSigma", yawSigma,
+            "pitchSigma", pitchSigma,
+            "sampledPitchDeviation", sampledPitchDeviation,
+            "sampledYawDeviation", sampledYawDeviation,
+            "adsProgress", adsProgress));
     }
 
     private void tickScanning(List<LivingEntity> potentialTargets) {
@@ -3598,6 +3719,25 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
     }
 
     private void trySuppressireFire(@javax.annotation.Nullable Vec3 visibleContactAimPoint) {
+        SoldierMovementController movement = soldier.getMovementController();
+        if (movement.isStationaryFireConstrained()) {
+            GunIntegration.aim(soldier, false);
+            wasAiming = false;
+            return;
+        }
+        boolean movingFire = movement.hasMovingIntent();
+        if (movingFire) updateAimQuality(null);
+        if (movingFire) {
+            if (movement.fireMode() != SoldierMovementController.FireMode.ADS
+                || target == null || !target.isAlive()
+                || visibleContactAimPoint == null
+                || !TargetAcquisition.hasLineOfSight(soldier, target)
+                || !movement.canFireAt(visibleContactAimPoint)) {
+                GunIntegration.aim(soldier, false);
+                wasAiming = false;
+                return;
+            }
+        }
         if (soldier.getCoverBehaviorManager().isInCover()
             && soldier.getPeekController().getState() != PeekController.State.EXPOSED) {
             return;
@@ -3729,20 +3869,22 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
             return;
         }
 
-        if (!prepareToFire(targetPos, false)) {
+        if (!(movingFire ? prepareForMovingFire(targetPos) : prepareToFire(targetPos, false))) {
             return;
         }
         
-        soldier.getLookControl().setLookAt(
-            targetPos.x, targetPos.y, targetPos.z,
-            30.0F, 30.0F
-        );
+        if (!movingFire) {
+            soldier.getLookControl().setLookAt(
+                targetPos.x, targetPos.y, targetPos.z,
+                30.0F, 30.0F
+            );
+        }
         
         GunIntegration.aim(soldier, true);
         wasAiming = true;
         
         float adsProgress = GunIntegration.getAimProgress(soldier);
-        if (adsProgress < SUPPRESSION_ADS_THRESHOLD) {
+        if (adsProgress < (movingFire ? MOBILE_FIRE_ADS_THRESHOLD : SUPPRESSION_ADS_THRESHOLD)) {
             if (isSuppressionDebugLogging() && soldier.tickCount % 20 == 0) {
                 StevesArmyMod.LOGGER.info("[Suppression] Soldier {} waiting for ADS ({}%)", 
                     soldier.getId(), (int)(adsProgress * 100));
@@ -3791,7 +3933,12 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
         float aimInaccuracy = GunIntegration.getAimInaccuracy(soldier);
         Vec3 spreadPos = calculateLastSeenSuppressionSpread(
             offsetSuppressorAnchor(targetPos), aimInaccuracy, contactAge);
-        if (!FriendlyFireChecker.isSafeToShoot(soldier, spreadPos, aimQuality)) {
+        boolean safeLane = movingFire
+            ? FriendlyFireChecker.isSafeToShoot(soldier, spreadPos, aimQuality,
+                AimAccuracyManager.getYawSigma(aimQuality), AimAccuracyManager.getPitchSigma(aimQuality),
+                0.0f, 0.0f, true)
+            : FriendlyFireChecker.isSafeToShoot(soldier, spreadPos, aimQuality);
+        if (!safeLane) {
             return;
         }
         GunIntegration.ShootResult result = GunIntegration.shootAtPosition(soldier, spreadPos);
@@ -3803,6 +3950,11 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
         
         switch (result) {
             case SUCCESS -> {
+                if (movingFire) {
+                    recordMobileShot(SoldierMovementController.FireMode.ADS, aimQuality,
+                        AimAccuracyManager.getYawSigma(aimQuality), AimAccuracyManager.getPitchSigma(aimQuality),
+                        0.0f, 0.0f, adsProgress, "visible-suppression");
+                }
                 if (suppressionFirstShotTick < 0) {
                     suppressionFirstShotTick = soldier.tickCount;
                 }
@@ -4178,6 +4330,12 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
     }
     
     private void trySuppressPingFire() {
+        if (soldier.getMovementController().hasMovingIntent()
+            || soldier.getMovementController().isStationaryFireConstrained()) {
+            GunIntegration.aim(soldier, false);
+            wasAiming = false;
+            return;
+        }
         SuppressionOrderController order = soldier.getSuppressionOrder();
         if (!order.isActive()) {
             isPingSuppressing = false;

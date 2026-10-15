@@ -7,6 +7,8 @@ import com.stevesarmy.debug.DiagnosticLogManager;
 import com.stevesarmy.entity.SoldierEntity;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.ai.attributes.AttributeModifier;
+import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.common.MinecraftForge;
@@ -15,6 +17,8 @@ import net.minecraftforge.common.capabilities.ForgeCapabilities;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.Optional;
+import java.util.Map;
+import java.util.UUID;
 
 public class GunIntegration {
     private static boolean taczLoaded = false;
@@ -217,6 +221,17 @@ public class GunIntegration {
     public static int getRPM(LivingEntity entity) { return handler().getRPM(entity); }
     public static float getBurstMinInterval(LivingEntity entity) { return handler().getBurstMinInterval(entity); }
     public static float getAimInaccuracy(LivingEntity entity) { return handler().getAimInaccuracy(entity); }
+    /** Weapon-only ADS normalization; all unrelated live attribute modifiers remain intact. */
+    public record MovementProfile(double adsNeutralAttribute, double adsRatio, boolean available) {}
+
+    public static MovementProfile getMovementProfile(LivingEntity entity) {
+        return handler().getMovementProfile(entity);
+    }
+
+    /** Conservative standard native dispersion estimate in degrees, added to our supplied shot envelope. */
+    public static float getNativeInaccuracy(LivingEntity entity, boolean aiming) {
+        return handler().getNativeInaccuracy(entity, aiming);
+    }
     public static float getAimPitch(LivingEntity entity, Vec3 targetPosition) {
         return handler().getAimPitch(entity, targetPosition);
     }
@@ -245,6 +260,13 @@ public class GunIntegration {
     }
 
     public interface GunHandler {
+        default MovementProfile getMovementProfile(LivingEntity entity) {
+            return new MovementProfile(Math.max(0, entity.getAttributeValue(Attributes.MOVEMENT_SPEED)), 1, false);
+        }
+        default float getNativeInaccuracy(LivingEntity entity, boolean aiming) {
+            float known = getAimInaccuracy(entity);
+            return Float.isFinite(known) ? Math.max(aiming ? 0 : 6, known) : 6;
+        }
         boolean hasGun(LivingEntity entity);
         ShootResult shoot(LivingEntity shooter, LivingEntity target);
         ShootResult shootWithDeviation(LivingEntity shooter, ExposureCalculator.AimPointResult aimPoint, float pitchDeviation, float yawDeviation);
@@ -311,6 +333,8 @@ public class GunIntegration {
         }
 
         @Override public boolean hasGun(LivingEntity entity) { return forEntity(entity).hasGun(entity); }
+        @Override public MovementProfile getMovementProfile(LivingEntity entity) { return forEntity(entity).getMovementProfile(entity); }
+        @Override public float getNativeInaccuracy(LivingEntity entity, boolean aiming) { return forEntity(entity).getNativeInaccuracy(entity, aiming); }
         @Override public ShootResult shoot(LivingEntity shooter, LivingEntity target) { return forEntity(shooter).shoot(shooter, target); }
         @Override public ShootResult shootWithDeviation(LivingEntity shooter, ExposureCalculator.AimPointResult aimPoint, float pitchDeviation, float yawDeviation) { return forEntity(shooter).shootWithDeviation(shooter, aimPoint, pitchDeviation, yawDeviation); }
         @Override public ShootResult shootAtPosition(LivingEntity shooter, Vec3 targetPosition) { return forEntity(shooter).shootAtPosition(shooter, targetPosition); }
@@ -400,6 +424,72 @@ public class GunIntegration {
     }
 
     private static class ReflectionGunHandler implements GunHandler {
+        private static final UUID EXTRA_MOVEMENT_ID = UUID.fromString("4D5696AE-A7C5-C59C-80E9-2A2DC8373C46");
+
+        private Object cachedProperty(LivingEntity entity, String modifierClass) throws ReflectiveOperationException {
+            Class<?> operatorType = Class.forName("com.tacz.guns.api.entity.IGunOperator");
+            Object operator = operatorType.getMethod("fromLivingEntity", LivingEntity.class).invoke(null, entity);
+            Object cache = operatorType.getMethod("getCacheProperty").invoke(operator);
+            if (cache == null) return null;
+            String id = (String) Class.forName("com.tacz.guns.resource.modifier.custom." + modifierClass)
+                .getField("ID").get(null);
+            return cache.getClass().getMethod("getCache", String.class).invoke(cache, id);
+        }
+
+        @Override
+        public MovementProfile getMovementProfile(LivingEntity entity) {
+            double live = Math.max(0, entity.getAttributeValue(Attributes.MOVEMENT_SPEED));
+            if (!hasGun(entity)) return new MovementProfile(live, 1, false);
+            try {
+                Object profile = cachedProperty(entity, "ExtraMovementModifier");
+                if (profile == null) return new MovementProfile(live, 1, false);
+                double baseFactor = 1 + ((Number) profile.getClass().getMethod("getBaseMultiplier").invoke(profile)).doubleValue();
+                double aimFactor = 1 + ((Number) profile.getClass().getMethod("getAimMultiplier").invoke(profile)).doubleValue();
+                if (!Double.isFinite(baseFactor) || !Double.isFinite(aimFactor) || baseFactor <= 0 || aimFactor < 0)
+                    return new MovementProfile(live, 1, false);
+                // TaCZ reload replaces its ADS/base modifier. Do not reinterpret a reload as aiming.
+                if (isReloading(entity)) return new MovementProfile(live, 1, true);
+                var attribute = entity.getAttribute(Attributes.MOVEMENT_SPEED);
+                AttributeModifier installed = attribute == null ? null : attribute.getModifier(EXTRA_MOVEMENT_ID);
+                double neutral = live;
+                if (installed != null) {
+                    double installedFactor = 1 + installed.getAmount();
+                    if (installed.getOperation() != AttributeModifier.Operation.MULTIPLY_TOTAL
+                        || !Double.isFinite(installedFactor) || installedFactor <= 0
+                        || (Math.abs(installedFactor - baseFactor) > 1e-5 && Math.abs(installedFactor - aimFactor) > 1e-5))
+                        return new MovementProfile(live, 1, false);
+                    neutral = live / installedFactor * baseFactor;
+                }
+                return new MovementProfile(neutral, aimFactor / baseFactor, true);
+            } catch (ReflectiveOperationException | RuntimeException e) {
+                return new MovementProfile(live, 1, false);
+            }
+        }
+
+        @Override
+        public float getNativeInaccuracy(LivingEntity entity, boolean aiming) {
+            try {
+                Object cached = cachedProperty(entity, "InaccuracyModifier");
+                if (cached instanceof Map<?, ?> values) {
+                    float support = 0;
+                    boolean found = false;
+                    // A transitioning ADS weapon can still use its movement dispersion.
+                    boolean settledAds = aiming && getAimProgress(entity) >= 0.99f;
+                    for (var entry : values.entrySet()) {
+                        boolean aimEntry = "AIM".equals(String.valueOf(entry.getKey()));
+                        if (settledAds != aimEntry && (settledAds || !aiming)) continue;
+                        if (entry.getValue() instanceof Number n && Float.isFinite(n.floatValue())) {
+                            support = Math.max(support, Math.abs(n.floatValue()));
+                            found = true;
+                        }
+                    }
+                    // A generous standard-dispersion envelope; arbitrary Lua calcSpread
+                    // scripts are not exposed by this cache and can choose a different model.
+                    if (found) return Math.min(89, support * 2);
+                }
+            } catch (ReflectiveOperationException | RuntimeException ignored) {}
+            return GunHandler.super.getNativeInaccuracy(entity, aiming);
+        }
         private static final double DEFAULT_GUN_RANGE = 50.0;
 
         @Override

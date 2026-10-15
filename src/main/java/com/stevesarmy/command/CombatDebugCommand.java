@@ -966,6 +966,7 @@ public class CombatDebugCommand {
                 " | tol=" + String.format("%.2f", ctrlTolerance) +
                 " | toCover=" + String.format("%.2f", distToCover) +
                 " | speed=" + String.format("%.4f", speed) +
+                " | movement=" + soldier.getMovementController().snapshot() +
                 " | nav=" + navDone +
                 " | sup=" + String.format("%.2f", manager.getSuppressionTracker().getSuppressionLevel())
             ), false);
