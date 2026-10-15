@@ -36,6 +36,8 @@ public final class SimRegistry {
             mgSuppressionRoundRobin(),
             mgDirectFireCadence(),
             MgPersistentAttackSuppressionScenario.create(),
+            MgAttackRowHoldScenarios.objectiveCrossed(),
+            MgAttackRowHoldScenarios.alignedControl(),
             fireTeamRoleBalance(),
             coverCrossRoleReservation(),
             coverReservationKeepalive(),
