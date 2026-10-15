@@ -2202,6 +2202,11 @@ public BlockPos getPingMoveTarget() {
     public void configureInfiniteReserveAmmo() {
     }
 
+    /** Read-only labels for the explicitly enabled flight recorder. */
+    public java.util.List<String> getTraceRunningGoals() {
+        return goalSelector.getRunningGoals().map(g -> g.getPriority() + ":" + g.getGoal().getClass().getSimpleName()).toList();
+    }
+
     public CoverGoalController getCoverTacticalGoal() {
         return coverTacticalGoal;
     }

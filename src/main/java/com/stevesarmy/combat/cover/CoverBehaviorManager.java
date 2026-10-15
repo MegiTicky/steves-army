@@ -4,6 +4,7 @@ import com.stevesarmy.GameClock;
 import com.stevesarmy.StevesArmyConfig;
 import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.combat.GunIntegration;
+import com.stevesarmy.debug.trace.SoldierFlightRecorder;
 import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.squad.SquadData;
 import com.stevesarmy.squad.SquadManager;
@@ -163,6 +164,9 @@ public class CoverBehaviorManager {
     public void setState(CoverState state) {
         CoverState oldState = this.state;
         this.state = state;
+        if (oldState != state && soldier != null && SoldierFlightRecorder.isRecording()) {
+            SoldierFlightRecorder.event(soldier, "cover_state", "setState", oldState.name() + " -> " + state.name());
+        }
         syncState();
         
         if (debugLog()) {

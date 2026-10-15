@@ -453,16 +453,7 @@ public final class SimManager {
 
     /** Wrapper cover goals (MG, support) shell a real CoverTacticalGoal; unwrap for sampling. */
     private static CombatStateSnapshot captureFor(SoldierEntity soldier) {
-        if (soldier.getCoverTacticalGoal() instanceof CoverTacticalGoal goal) {
-            return goal.captureStateSnapshot();
-        }
-        if (soldier.getCoverTacticalGoal() instanceof com.stevesarmy.entity.ai.SupportCoverGoal supportGoal) {
-            return supportGoal.getCoverController().captureStateSnapshot();
-        }
-        if (soldier.getCoverTacticalGoal() instanceof com.stevesarmy.entity.ai.MachineGunnerSupportGoal mgGoal) {
-            return mgGoal.getCoverController().captureStateSnapshot();
-        }
-        return null;
+        return com.stevesarmy.debug.trace.SoldierTraceSampler.state(soldier);
     }
 
     private static EnemySoldierEntity nearestEnemy(SoldierEntity soldier, List<EnemySoldierEntity> enemies) {

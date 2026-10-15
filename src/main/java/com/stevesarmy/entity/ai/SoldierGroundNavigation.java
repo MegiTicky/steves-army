@@ -2,6 +2,7 @@ package com.stevesarmy.entity.ai;
 
 import com.stevesarmy.compat.VS2Compat;
 import com.stevesarmy.debug.PerformanceMetrics;
+import com.stevesarmy.debug.trace.SoldierFlightRecorder;
 import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.StevesArmyConfig;
 import com.stevesarmy.entity.ai.pathfinding.AsyncSoldierPath;
@@ -105,16 +106,21 @@ public class SoldierGroundNavigation extends GroundPathNavigation {
     @Override
     public boolean moveTo(double x, double y, double z, double speedModifier) {
         if (isPreparingOrReloading() && !isCoverApproachDuringReload()) {
+            if (SoldierFlightRecorder.isRecording()) traceNavigation("rejected", "preparing or reloading", "target=" + x + "," + y + "," + z);
             this.stop();
             return false;
         }
         if (VS2Compat.shouldRejectNavigation(this.level, BlockPos.containing(x, y, z))) {
+            if (SoldierFlightRecorder.isRecording()) traceNavigation("rejected", "VS2 navigation veto", "target=" + x + "," + y + "," + z);
             this.stop();
             return false;
         }
         asyncMoveRequest = true;
         try {
-            return super.moveTo(x, y, z, speedModifier);
+            boolean accepted = super.moveTo(x, y, z, speedModifier);
+            if (SoldierFlightRecorder.isRecording()) traceNavigation(accepted ? "accepted" : "rejected", accepted ? "path request accepted" : "path request failed",
+                "target=" + x + "," + y + "," + z + ",speed=" + speedModifier);
+            return accepted;
         } finally {
             asyncMoveRequest = false;
         }
@@ -123,16 +129,21 @@ public class SoldierGroundNavigation extends GroundPathNavigation {
     @Override
     public boolean moveTo(Entity entity, double speedModifier) {
         if (isPreparingOrReloading() && !isCoverApproachDuringReload()) {
+            if (SoldierFlightRecorder.isRecording()) traceNavigation("rejected", "preparing or reloading", "entity=" + entity.getId());
             this.stop();
             return false;
         }
         if (VS2Compat.shouldRejectNavigation(entity)) {
+            if (SoldierFlightRecorder.isRecording()) traceNavigation("rejected", "VS2 navigation veto", "entity=" + entity.getId());
             this.stop();
             return false;
         }
         asyncMoveRequest = true;
         try {
-            return super.moveTo(entity, speedModifier);
+            boolean accepted = super.moveTo(entity, speedModifier);
+            if (SoldierFlightRecorder.isRecording()) traceNavigation(accepted ? "accepted" : "rejected", accepted ? "path request accepted" : "path request failed",
+                "entity=" + entity.getId() + ",speed=" + speedModifier);
+            return accepted;
         } finally {
             asyncMoveRequest = false;
         }
@@ -141,18 +152,23 @@ public class SoldierGroundNavigation extends GroundPathNavigation {
     @Override
     public boolean moveTo(Path path, double speedModifier) {
         if (isPreparingOrReloading() && !isCoverApproachDuringReload()) {
+            if (SoldierFlightRecorder.isRecording()) traceNavigation("rejected", "preparing or reloading", "path=" + pathSummary(path));
             this.stop();
             return false;
         }
         if (path != null) {
             for (int index = 0; index < path.getNodeCount(); index++) {
                 if (VS2Compat.shouldRejectNavigation(this.level, path.getNode(index).asBlockPos())) {
+                    if (SoldierFlightRecorder.isRecording()) traceNavigation("rejected", "VS2 path node veto", "node=" + path.getNode(index).asBlockPos());
                     this.stop();
                     return false;
                 }
             }
         }
-        return super.moveTo(path, speedModifier);
+        boolean accepted = super.moveTo(path, speedModifier);
+        if (SoldierFlightRecorder.isRecording()) traceNavigation(accepted ? "accepted" : "rejected", accepted ? "path request accepted" : "path request failed",
+            "path=" + pathSummary(path) + ",speed=" + speedModifier);
+        return accepted;
     }
 
     @Override
@@ -162,6 +178,7 @@ public class SoldierGroundNavigation extends GroundPathNavigation {
             if (!asyncPath.isProcessed()) {
                 if (asyncPath.isStale(this.mob.blockPosition(), this.level.getGameTime())) {
                     PerformanceMetrics.recordAsyncPathStaleCancelled();
+                    if (SoldierFlightRecorder.isRecording()) traceNavigation("rejected", "async path stale", "path=" + pathSummary(asyncPath));
                     this.stop();
                 }
                 return;
@@ -169,11 +186,13 @@ public class SoldierGroundNavigation extends GroundPathNavigation {
             if (validatedAsyncPath != asyncPath) {
                 validatedAsyncPath = asyncPath;
                 if (!isValidAsyncPath(asyncPath)) {
+                    if (SoldierFlightRecorder.isRecording()) traceNavigation("rejected", "async path validation failed", "path=" + pathSummary(asyncPath));
                     this.stop();
                     return;
                 }
             }
             if (asyncPath.getNodeCount() == 0) {
+                if (SoldierFlightRecorder.isRecording()) traceNavigation("rejected", "async path has no nodes", "path=" + pathSummary(asyncPath));
                 this.stop();
                 return;
             }
@@ -189,8 +208,20 @@ public class SoldierGroundNavigation extends GroundPathNavigation {
 
     @Override
     public void stop() {
+        if (SoldierFlightRecorder.isRecording()) traceNavigation("stopped", "navigation stop() called", "path=" + pathSummary(this.getPath()));
         validatedAsyncPath = null;
         super.stop();
+    }
+
+    private void traceNavigation(String event, String reason, String detail) {
+        if (this.mob instanceof SoldierEntity soldier && SoldierFlightRecorder.isRecording()) {
+            SoldierFlightRecorder.event(soldier, "navigation", event + ": " + reason, detail);
+        }
+    }
+
+    private String pathSummary(Path path) {
+        if (path == null) return "none";
+        return "nodes=" + path.getNodeCount() + ",target=" + path.getTarget();
     }
 
     private boolean isValidAsyncPath(AsyncSoldierPath path) {

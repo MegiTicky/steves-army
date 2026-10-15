@@ -1,6 +1,7 @@
 package com.stevesarmy.entity.ai;
 
 import com.stevesarmy.StevesArmyMod;
+import com.stevesarmy.debug.trace.SoldierFlightRecorder;
 import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.util.HazardBlockHelper;
 import net.minecraft.util.Mth;
@@ -92,6 +93,10 @@ public class CoverPositionController extends MoveControl {
     }
 
     public void moveTo(Vec3 pos, double tolerance, double speed, String source, String reason) {
+        if (SoldierFlightRecorder.isRecording()) {
+            traceController("request", "moveTo", "target=" + pos + ",tolerance=" + tolerance + ",speed=" + speed
+                + ",source=" + source + ",reason=" + reason);
+        }
         this.coverAnchorTarget = null;
         if (this.mob instanceof SoldierEntity soldier && soldier.cqbHoldFreezeEffective()
             && !shouldDeferCqbHold()
@@ -104,6 +109,9 @@ public class CoverPositionController extends MoveControl {
             this.operation = Operation.WAIT;
             this.debugMoveSource = "cqb-engage";
             this.debugMoveReason = "visible close target";
+            if (SoldierFlightRecorder.isRecording()) {
+                traceController("rejected", "CQB movement hold", "source=" + source + ",reason=" + reason);
+            }
             return;
         }
         if (isPreparingOrReloading()) {
@@ -114,6 +122,9 @@ public class CoverPositionController extends MoveControl {
                 stopForReload();
                 this.lastResult = MovementResult.FAILED;
                 this.lastFailureReason = FailureReason.RELOAD_INTERRUPTED;
+                if (SoldierFlightRecorder.isRecording()) {
+                    traceController("rejected", "reload interrupted", "source=" + source + ",reason=" + reason);
+                }
             }
             return;
         }
@@ -159,7 +170,7 @@ public class CoverPositionController extends MoveControl {
                 StevesArmyMod.LOGGER.info("[MoveCtl] Soldier {} moveTo to ({}, {}, {}) blocked by hazard",
                     ((net.minecraft.world.entity.LivingEntity)this.mob).getId(),
                     pos.x, pos.y, pos.z);
-                failWithReason(FailureReason.HAZARD, false);
+                failWithReason(FailureReason.HAZARD, false, pos, source, reason);
                 return;
             }
         }
@@ -172,7 +183,7 @@ public class CoverPositionController extends MoveControl {
             StevesArmyMod.LOGGER.info("[MoveCtl] Soldier {} moveTo to ({}, {}, {}) blocked by solid collision",
                 ((net.minecraft.world.entity.LivingEntity)this.mob).getId(),
                 pos.x, pos.y, pos.z);
-            failWithReason(FailureReason.BLOCKED_PATH, false);
+            failWithReason(FailureReason.BLOCKED_PATH, false, pos, source, reason);
             return;
         }
 
@@ -190,6 +201,10 @@ public class CoverPositionController extends MoveControl {
 
         this.debugMoveSource = source;
         this.debugMoveReason = reason;
+        if (SoldierFlightRecorder.isRecording()) {
+            traceController("begin", "movement started", "target=" + pos + ",tolerance=" + tolerance
+                + ",speed=" + speed + ",source=" + source + ",reason=" + reason);
+        }
     }
 
     /**
@@ -223,7 +238,12 @@ public class CoverPositionController extends MoveControl {
         return false;
     }
 
-    private void failWithReason(FailureReason reason, boolean controlledReturn) {
+    private void failWithReason(FailureReason reason, boolean controlledReturn, Vec3 failedTarget,
+                                String source, String requestReason) {
+        if (SoldierFlightRecorder.isRecording()) {
+            traceController("failure", reason.name(), "target=" + failedTarget + ",controlledReturn=" + controlledReturn
+                + ",source=" + source + ",reason=" + requestReason);
+        }
         this.movementSpeed.stop();
         this.lastResult = MovementResult.FAILED;
         this.lastFailureReason = reason;
@@ -237,6 +257,10 @@ public class CoverPositionController extends MoveControl {
     }
 
     private void completeMove() {
+        if (SoldierFlightRecorder.isRecording()) {
+            traceController("arrival", "target reached", "target=" + targetPos + ",source=" + debugMoveSource
+                + ",reason=" + debugMoveReason);
+        }
         this.movementSpeed.stop();
         this.operation = MoveControl.Operation.WAIT;
         this.mob.setZza(0.0F);
@@ -260,6 +284,10 @@ public class CoverPositionController extends MoveControl {
     }
 
     public void clear() {
+        if (SoldierFlightRecorder.isRecording()) {
+            traceController("clear", "controller cleared", "result=" + lastResult + ",target=" + targetPos
+                + ",source=" + debugMoveSource + ",reason=" + debugMoveReason);
+        }
         this.movementSpeed.stop();
         this.lastResult = MovementResult.NONE;
         this.lastFailureReason = FailureReason.NONE;
@@ -289,6 +317,12 @@ public class CoverPositionController extends MoveControl {
     public void stopForReload() {
         if (!controlledReturnToCover) {
             clear();
+        }
+    }
+
+    private void traceController(String event, String reason, String detail) {
+        if (this.mob instanceof SoldierEntity soldier && SoldierFlightRecorder.isRecording()) {
+            SoldierFlightRecorder.event(soldier, "controller", event + ": " + reason, detail);
         }
     }
 
@@ -445,7 +479,7 @@ public class CoverPositionController extends MoveControl {
         } else {
             stuckTicks++;
             if (stuckTicks > 60) {
-                failWithReason(FailureReason.NO_PROGRESS, false);
+                failWithReason(FailureReason.NO_PROGRESS, false, targetPos, debugMoveSource, debugMoveReason);
                 return;
             }
         }

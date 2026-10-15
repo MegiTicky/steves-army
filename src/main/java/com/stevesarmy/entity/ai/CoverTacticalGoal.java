@@ -623,8 +623,13 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
         }
 
         if (shouldSkipFailedSearch(mode)) {
+            if (com.stevesarmy.debug.trace.SoldierFlightRecorder.isRecording())
+                com.stevesarmy.debug.trace.SoldierFlightRecorder.event(soldier, "cover-search", "retry policy skipped failed search", mode.name());
             return;
         }
+
+        if (com.stevesarmy.debug.trace.SoldierFlightRecorder.isRecording())
+            com.stevesarmy.debug.trace.SoldierFlightRecorder.event(soldier, "cover-search", "requested", mode.name());
 
         if (coverSearchPending) {
             if (searchPriority(mode) < searchPriority(queuedSearchMode)) {
@@ -2484,6 +2489,8 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
     
     @Override
     public void start() {
+        if (com.stevesarmy.debug.trace.SoldierFlightRecorder.isRecording())
+            com.stevesarmy.debug.trace.SoldierFlightRecorder.event(soldier, "cover-goal", "start", getCoverManager().getState().name());
         stuckTicks = 0;
         reevaluateCounter = 0;
         
@@ -2518,6 +2525,8 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
     
     @Override
     public void stop() {
+        if (com.stevesarmy.debug.trace.SoldierFlightRecorder.isRecording())
+            com.stevesarmy.debug.trace.SoldierFlightRecorder.event(soldier, "cover-goal", "stop", getCoverManager().getState().name());
         CoverSearchScheduler.cancel(this);
         coverSearchPending = false;
         asyncPilotPending = false;
@@ -5557,6 +5566,12 @@ private boolean shouldExitCoverForFollow() {
         debugLastSearchResult = result.name();
         debugLastSearchPhase = phase;
         debugLastSearchTick = soldier.tickCount;
+        if (com.stevesarmy.debug.trace.SoldierFlightRecorder.isRecording()) {
+            com.stevesarmy.debug.trace.SoldierFlightRecorder.event(soldier, "cover-search-result", result.name(),
+                java.util.Map.of("mode", mode, "phase", phase, "center", String.valueOf(debugSearchCenter),
+                    "radius", debugSearchRadius, "candidates", finder.getCandidatesDiscovered(),
+                    "evaluated", finder.getCandidatesEvaluated(), "elapsedNanos", totalNanos));
+        }
         PerformanceMetrics.recordCoverSearchOutcome(mode, result.name(), phase,
             exactPathValidationBudget.getUsed(), exactPathValidationBudget.isExhausted());
         if (result == CoverMoveResult.COVER_STARTED) {
@@ -8923,6 +8938,8 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
     }
     
     private void blacklistCover(BlockPos pos, BlacklistReason reason) {
+        if (com.stevesarmy.debug.trace.SoldierFlightRecorder.isRecording())
+            com.stevesarmy.debug.trace.SoldierFlightRecorder.event(soldier, "cover-blacklist", reason.name(), pos);
         failedCoverPositions.add(pos);
         lastFailedCover = pos;
         blacklistRevision++;
@@ -9042,8 +9059,12 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
         // A queued search executes within a tick or two of its due time; give it
         // its slot instead of cancelling and re-queueing behind the whole squad.
         if (coverSearchPending) {
+            if (com.stevesarmy.debug.trace.SoldierFlightRecorder.isRecording())
+                com.stevesarmy.debug.trace.SoldierFlightRecorder.event(soldier, "cover-watchdog", "reset deferred: search pending", null);
             return;
         }
+        if (com.stevesarmy.debug.trace.SoldierFlightRecorder.isRecording())
+            com.stevesarmy.debug.trace.SoldierFlightRecorder.event(soldier, "cover-watchdog", "reset stalled cover machine", getCoverManager().getState().name());
         CoverSearchScheduler.cancel(this);
         coverSearchPending = false;
         asyncPilotPending = false;

@@ -42,6 +42,7 @@ public class CoverReservationManager {
             if (reservations.size() >= MAX_RESERVATIONS_PER_COVER) {
                 cleanupExpiredReservations(key, reservations);
                 if (reservations.size() >= MAX_RESERVATIONS_PER_COVER) {
+                    trace(soldier, "rejected: occupied", key);
                     return false;
                 }
             }
@@ -50,12 +51,14 @@ public class CoverReservationManager {
             // cross-check a rifleman's cover and an MG's prone lane could
             // claim the same spot cross-role.
             if (blockedByProneLaneNear(key, soldierUUID)) {
+                trace(soldier, "rejected: prone lane separation", key);
                 return false;
             }
 
             boolean added = reservations.add(soldierUUID);
             if (added) {
                 setTimestamp(soldierUUID, key, GameClock.nowMs(), soldier);
+                trace(soldier, "reserved", key);
             }
             return added;
         }
@@ -84,7 +87,7 @@ public class CoverReservationManager {
         synchronized (coverReservations) {
             Set<UUID> reservations = coverReservations.get(key);
             if (reservations != null) {
-                reservations.remove(soldierUUID);
+                if (reservations.remove(soldierUUID)) trace(soldier, "released", key);
                 removeTimestamp(soldierUUID, key);
                 
                 if (reservations.isEmpty()) {
@@ -100,6 +103,7 @@ public class CoverReservationManager {
         }
 
         UUID soldierUUID = soldier.getUUID();
+        trace(soldier, "releaseAll", null);
         proneReservations.remove(soldierUUID);
         proneHolders.remove(soldierUUID);
         
@@ -122,6 +126,12 @@ public class CoverReservationManager {
     
     public static boolean isAvailable(BlockPos coverPos) {
         return isAvailableFor(coverPos, null);
+    }
+
+    private static void trace(LivingEntity entity, String reason, BlockPos position) {
+        if (com.stevesarmy.debug.trace.SoldierFlightRecorder.isRecording()
+            && entity instanceof com.stevesarmy.entity.SoldierEntity soldier)
+            com.stevesarmy.debug.trace.SoldierFlightRecorder.event(soldier, "cover-reservation", reason, position);
     }
 
     public static boolean isAvailableFor(BlockPos coverPos, LivingEntity soldier) {

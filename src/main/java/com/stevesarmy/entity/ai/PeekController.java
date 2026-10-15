@@ -152,6 +152,10 @@ public class PeekController {
         if (soldier != null && !soldier.level().isClientSide) {
             soldier.syncPeekState(newState.ordinal());
             if (previousState != newState) {
+                if (com.stevesarmy.debug.trace.SoldierFlightRecorder.isRecording()) {
+                    com.stevesarmy.debug.trace.SoldierFlightRecorder.event(soldier, "peek-state", "PeekController.setState",
+                        java.util.Map.of("previous", previousState.name(), "current", newState.name()));
+                }
                 soldier.tracePeek("peek-state", "previous=" + previousState + ", current=" + newState);
             }
         }

@@ -79,6 +79,8 @@ public class CombatDebugCommand {
             .then(Commands.literal("none")
                 .executes(CombatDebugCommand::disableAllDebug))
 
+            .then(SoldierTraceCommand.tree())
+
             // === MACHINE GUNNER PIPELINE ===
             .then(Commands.literal("mg")
                 .then(Commands.literal("evaluate")
@@ -390,6 +392,7 @@ public class CombatDebugCommand {
             "=== /stevesarmy_debug ===\n" +
              "  all                 - Enable ALL debug (logging + render + combat overlay)\n" +
              "  none                - Disable ALL debug (logging + render + overlays)\n" +
+             "  record start [historySeconds] [sampleTicks] - Record soldier decisions; then status, stop, or export\n" +
              "  mg evaluate [entity] - Evaluate MG firing-position pipeline (read-only)\n" +
              "  armor [off|minimal|verbose] - Toggle armor-doctrine debug render\n" +
             "  suppressping [on|off] - Toggle the suppress-ping debug render\n" +
