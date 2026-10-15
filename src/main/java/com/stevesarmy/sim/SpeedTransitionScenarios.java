@@ -15,7 +15,7 @@ public final class SpeedTransitionScenarios {
     private SpeedTransitionScenarios() {}
 
     public static SimScenario transitions() {
-        boolean[] ok = new boolean[9];
+        boolean[] ok = new boolean[11];
         return SimScenario.builder("movement_speed_transitions").core().duration(100)
             .description("ADS-release during crawl must not amplify a stored modifier; docking "
                 + "must not add a diagonal burst; ordinary acceleration is bounded; external impulses survive.")
@@ -127,6 +127,42 @@ public final class SpeedTransitionScenarios {
                     throw new IllegalStateException("firing-prone priority probe", e);
                 }
             })
+            .action(96, "walking acceleration cannot masquerade as an external impulse", ctx -> {
+                var s = ctx.soldier("probe");
+                var ctrl = (CoverPositionController) s.getMoveControl();
+                s.setNoAi(false);
+                try {
+                    Vec3 start = s.position();
+                    s.setDeltaMovement(0.40, 0, 0);
+                    for (int n = 0; n < 3; n++) {
+                        ctrl.setWantedPosition(s.getX() + 8, s.getY(), s.getZ(), 1.2);
+                        ctrl.tick();
+                        s.setOnGround(true);
+                        s.travel(new Vec3(0, 0, 1));
+                    }
+                    double moved = s.position().subtract(start).horizontalDistance();
+                    ok[9] = moved > 0.1 && moved <= ctrl.getSpeedController().appliedSpeed() + 0.00001;
+                } finally {
+                    s.setNoAi(true);
+                }
+            })
+            .action(97, "real travel preserves a pre-existing external impulse", ctx -> {
+                var s = ctx.soldier("probe");
+                s.setNoAi(false);
+                try {
+                    s.getMoveControl().setWantedPosition(s.getX() + 8, s.getY(), s.getZ(), 1.2);
+                    s.getMoveControl().tick();
+                    Vec3 start = s.position();
+                    s.setDeltaMovement(1.2, 0.4, 0);
+                    s.travel(Vec3.ZERO);
+                    ok[10] = s.position().subtract(start).horizontalDistance() > 1.0
+                        && s.getY() > start.y;
+                } finally {
+                    s.setNoAi(true);
+                }
+            })
+            .assertThat("walking acceleration and repeated controller ticks share one physical movement budget", v -> ok[9])
+            .assertThat("physical external impulse survives travel and movement limiting", v -> ok[10])
             .assertThat("crawl pace survives ADS release", v -> ok[0])
             .assertThat("crawl never overwrites the goal's requested modifier", v -> ok[1])
             .assertThat("docking does not amplify tangential momentum", v -> ok[2])

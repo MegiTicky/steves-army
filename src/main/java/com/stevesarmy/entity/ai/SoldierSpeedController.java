@@ -31,6 +31,13 @@ public final class SoldierSpeedController {
     public SoldierSpeedController(Mob mob) { this.mob = mob; }
 
     public void beginTick() {
+        // MoveControl can be invoked more than once during one entity tick
+        // (for example when navigation and a cover owner both reassert a
+        // target). Reopening the budget here would allow each invocation to
+        // spend a full blocks-per-tick allowance.
+        if (movementBudgetTick == mob.tickCount) {
+            return;
+        }
         Vec3 position = mob.position();
         displacement = lastPosition == null ? 0 : Math.hypot(position.x - lastPosition.x, position.z - lastPosition.z);
         lastPosition = position;
