@@ -2,6 +2,7 @@ package com.stevesarmy.entity.ai;
 
 import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.entity.SoldierRole;
+import com.stevesarmy.squad.ClearingCoordinator;
 import com.stevesarmy.util.SpacingHelper;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.entity.ai.goal.Goal;
@@ -38,9 +39,7 @@ public class SoldierMoveToPingGoal extends Goal {
         // The cover endpoint owns this order, including a route through the
         // raw ping radius. Centre arrival is only for the direct-walk fallback.
         if (soldier.getCoverTacticalGoal().isHandlingGoToRelocation(commandGeneration)) return false;
-        if (soldier.hasGoToNavigationOwnership() && rawTarget != null
-            && soldier.distanceToSqr(rawTarget.getX() + 0.5, rawTarget.getY() + 0.5,
-                rawTarget.getZ() + 0.5) <= closeDistance * closeDistance) {
+        if (soldier.hasGoToNavigationOwnership() && reachedDestination()) {
             // An already-arrived re-ping must not start another relocation
             // search and bypass the failed-search pacing at a coverless site.
             soldier.completeGoToIfGeneration(commandGeneration);
@@ -64,9 +63,7 @@ public class SoldierMoveToPingGoal extends Goal {
         if (!soldier.hasValidPingMoveTarget()) return false;
         if (rawTarget == null) return false;
         if (soldier.getCoverTacticalGoal().isHandlingGoToRelocation(commandGeneration)) return false;
-        double distSq = soldier.distanceToSqr(
-            rawTarget.getX() + 0.5, rawTarget.getY() + 0.5, rawTarget.getZ() + 0.5);
-        if (distSq <= closeDistance * closeDistance) {
+        if (reachedDestination()) {
             // Continuation is checked before tick(), including its slower
             // path-refresh branch. Finish the order before yielding the legs.
             soldier.completeGoToIfGeneration(commandGeneration);
@@ -134,8 +131,7 @@ public class SoldierMoveToPingGoal extends Goal {
 
             if (rawTarget == null) return;
 
-            double distance = soldier.distanceToSqr(cx, cy, cz);
-            if (distance > closeDistance * closeDistance) {
+            if (!reachedDestination()) {
                 // Resubmit navigation — same fixed nav target, but pathfinder benefits from refresh
                 submitNavigation();
                 if (soldier.horizontalCollision || soldier.minorHorizontalCollision) {
@@ -158,12 +154,29 @@ public class SoldierMoveToPingGoal extends Goal {
             navigationTarget = null;
             return;
         }
-        navigationTarget = SpacingHelper.applySpacing(rawTarget, soldier);
+        // The coordinator already assigned distinct, bounded endpoints. A
+        // formation offset could move one through a wall or outside the area.
+        navigationTarget = ClearingCoordinator.isCatchingUp(soldier)
+            ? rawTarget : SpacingHelper.applySpacing(rawTarget, soldier);
+    }
+
+    private boolean reachedDestination() {
+        if (rawTarget == null) return false;
+        boolean catchUp = ClearingCoordinator.isCatchingUp(soldier);
+        double tolerance = catchUp ? 0.8D : closeDistance;
+        return (!catchUp || ClearingCoordinator.allowsCatchUpDestination(soldier, soldier.blockPosition()))
+            && soldier.distanceToSqr(rawTarget.getX() + 0.5, rawTarget.getY() + 0.5,
+                rawTarget.getZ() + 0.5) <= tolerance * tolerance;
     }
 
     private void submitNavigation() {
         if (navigationTarget == null) return;
-        soldier.getNavigation().moveTo(
-            navigationTarget.getX(), navigationTarget.getY(), navigationTarget.getZ(), speedModifier);
+        if (ClearingCoordinator.isCatchingUp(soldier)) {
+            var path = ClearingCoordinator.createCatchUpPath(soldier, navigationTarget);
+            if (path != null) soldier.getNavigation().moveTo(path, speedModifier);
+        } else {
+            soldier.getNavigation().moveTo(navigationTarget.getX(), navigationTarget.getY(),
+                navigationTarget.getZ(), speedModifier);
+        }
     }
 }

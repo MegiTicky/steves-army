@@ -48,6 +48,17 @@ public final class SquadActivityManager {
     public static void applyCommandCore(UUID ownerId, FireTeam scope, PingType pingType,
                                         BlockPos requestedObjective, int dimension,
                                         List<SoldierEntity> recipients) {
+        if (pingType != PingType.FOLLOW && SquadActivityType.fromPingType(pingType) == null) return;
+        // A scoped command may replace only part of an earlier ALL activity.
+        // Remove those recipients from its roster so the old regroup cannot reclaim them.
+        Set<UUID> replaced = new HashSet<>();
+        recipients.forEach(soldier -> replaced.add(soldier.getUUID()));
+        ClearingCoordinator.detachRecipients(ownerId, replaced);
+        EnumMap<FireTeam, Activity> previous = ACTIVITIES.get(ownerId);
+        if (previous != null) {
+            previous.values().forEach(activity -> activity.recipientIds.removeAll(replaced));
+            previous.values().removeIf(activity -> activity.recipientIds.isEmpty());
+        }
         if (pingType == PingType.FOLLOW) {
             clearScope(ownerId, scope);
             return;
@@ -114,7 +125,8 @@ public final class SquadActivityManager {
                     activity.dimension,
                     activity.generation,
                     activity.type == SquadActivityType.ATTACK
-                        ? ClearingCoordinator.stageOrdinal(player.getUUID(), activity.fireTeam) : -1
+                        ? ClearingCoordinator.stageOrdinal(player.getUUID(), activity.fireTeam) : -1,
+                    ClearingCoordinator.regroupingCount(player.getUUID(), activity.fireTeam, activity.generation)
                 ));
             }
         }
@@ -127,12 +139,14 @@ public final class SquadActivityManager {
                                      int dimension, Set<UUID> recipientIds, long generation) {
     }
 
-    /** Snapshot of every live ATTACK activity, for ClearingCoordinator.tick(). */
+    /** Include cleared HOLD activities while their original roster is regrouping. */
     public static List<AttackActivityView> snapshotAttackActivities() {
         List<AttackActivityView> views = new ArrayList<>();
         for (Map.Entry<UUID, EnumMap<FireTeam, Activity>> ownerEntry : ACTIVITIES.entrySet()) {
             for (Activity activity : ownerEntry.getValue().values()) {
-                if (activity.type == SquadActivityType.ATTACK) {
+                if (activity.type == SquadActivityType.ATTACK
+                    || (activity.type == SquadActivityType.HOLD && ClearingCoordinator.isRegrouping(
+                        ownerEntry.getKey(), activity.fireTeam, activity.generation))) {
                     views.add(new AttackActivityView(ownerEntry.getKey(), activity.fireTeam,
                         activity.objective, activity.dimension,
                         new HashSet<>(activity.recipientIds), activity.generation));
@@ -271,9 +285,8 @@ public final class SquadActivityManager {
 
     /**
      * Clearing-doctrine completion: the activity becomes a HOLD anchored on
-     * the secured objective and every recipient's attack target is released,
-     * so soldiers settle into hold-style watch positions instead of keeping
-     * attack movement alive.
+     * the secured objective after a majority arrives. The coordinator retains
+     * individual catch-up orders for remaining recipients.
      */
     public static void completeAttackToHold(UUID ownerId, FireTeam team, BlockPos objective) {
         EnumMap<FireTeam, Activity> ownerActivities = ACTIVITIES.get(ownerId);
@@ -284,13 +297,8 @@ public final class SquadActivityManager {
         if (activity == null || activity.type != SquadActivityType.ATTACK) {
             return;
         }
-        for (UUID recipientId : activity.recipientIds) {
-            for (ServerLevel level : serverLevels()) {
-                if (level.getEntity(recipientId) instanceof SoldierEntity soldier) {
-                    soldier.clearAttackTarget();
-                }
-            }
-        }
+        // The coordinator owns individual arrival. Travellers keep their GO_TO
+        // endpoints after the majority handoff; do not clear their movement here.
         ownerActivities.put(team, activity.asHold(objective.immutable()));
         MinecraftServer server = serverInstance;
         if (server != null) {
@@ -384,6 +392,7 @@ public final class SquadActivityManager {
     }
 
     private static void clearScope(UUID ownerId, FireTeam scope) {
+        ClearingCoordinator.cancelOrder(ownerId, scope);
         EnumMap<FireTeam, Activity> ownerActivities = ACTIVITIES.get(ownerId);
         if (ownerActivities == null) {
             return;

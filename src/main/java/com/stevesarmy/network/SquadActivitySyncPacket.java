@@ -28,6 +28,7 @@ public class SquadActivitySyncPacket {
                 buf.readBlockPos(),
                 buf.readInt(),
                 buf.readLong(),
+                buf.readVarInt(),
                 buf.readVarInt()
             ));
         }
@@ -43,6 +44,7 @@ public class SquadActivitySyncPacket {
             buf.writeInt(entry.dimension());
             buf.writeLong(entry.generation());
             buf.writeVarInt(entry.clearingStage());
+            buf.writeVarInt(entry.regroupingCount());
         }
     }
 
@@ -55,8 +57,9 @@ public class SquadActivitySyncPacket {
     /**
      * @param clearingStage ClearingCoordinator.ClearingStage ordinal for ATTACK
      *                      orders (-1 = not an attack order / no coordinator state).
+     * @param regroupingCount Recipients still travelling to a cleared objective.
      */
     public record ActivityEntry(FireTeam fireTeam, SquadActivityType type, BlockPos objective,
-                                int dimension, long generation, int clearingStage) {
+                                int dimension, long generation, int clearingStage, int regroupingCount) {
     }
 }

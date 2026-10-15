@@ -4,6 +4,9 @@ import com.stevesarmy.StevesArmyConfig;
 import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.combat.VisibilityRay;
 import com.stevesarmy.entity.SoldierEntity;
+import com.stevesarmy.entity.ai.SoldierGroundNavigation;
+import com.stevesarmy.combat.cover.CoverReservationManager;
+import com.stevesarmy.ping.PingType;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.network.chat.Component;
@@ -29,7 +32,7 @@ import java.util.UUID;
 /**
  * Squad-level decision owner for ATTACK clearing orders: the order decides
  * what progress the squad needs next; cover, navigation, aiming and firing
- * systems execute that decision. This class never moves anyone.
+ * systems execute that decision. After clearance it assigns GO_TO catch-up orders.
  *
  * <p>For each ATTACK {@code SquadActivityManager.Activity} it maintains a
  * bounded clearing area — a flood fill of walkable space connected to the
@@ -40,7 +43,7 @@ import java.util.UUID;
  * check targets. Soldiers claim one each; a target is CHECKED only after
  * verified line of sight across the geometry (never proximity through
  * walls, even between two cells of the same area) has held for a short
- * dwell. The order completes as "Area secured" only when the squad has
+ * dwell. The order completes as "Area secured" when a strict majority has
  * physically entered the space (strict area cells), checked its blind
  * spots, resolved known contact — a check made before the enemy's last
  * sighting does not count — without an additional settling delay. A stalled
@@ -131,6 +134,16 @@ public final class ClearingCoordinator {
         double stallAnchorDist = 0;
         long completedAtTick = Long.MIN_VALUE;
         boolean completeRequested;
+        boolean regrouping;
+        int lastSyncedPending = -1;
+        Set<UUID> recipients = new HashSet<>();
+        Set<UUID> arrived = new HashSet<>();
+        Map<UUID, Integer> catchUpGenerations = new HashMap<>();
+        Map<UUID, BlockPos> catchUpDestinations = new HashMap<>();
+        Map<UUID, Long> catchUpRetryTicks = new HashMap<>();
+        Map<UUID, Long> catchUpProgressTicks = new HashMap<>();
+        Map<UUID, Vec3> catchUpProgressPositions = new HashMap<>();
+        Map<UUID, Set<BlockPos>> failedCatchUpDestinations = new HashMap<>();
         /** TEMP DIAGNOSTIC (wave A validation): last stall-eligibility value, for transition logs. */
         boolean diagStallEligible;
     }
@@ -160,6 +173,15 @@ public final class ClearingCoordinator {
                 continue;
             }
 
+            state.recipients.retainAll(activity.recipientIds());
+            state.arrived.retainAll(state.recipients);
+            if (state.regrouping) {
+                if (state.level.getGameTime() % HEAVY_INTERVAL_TICKS == 0) {
+                    tickRegrouping(server, state, activity);
+                }
+                continue;
+            }
+
             reissueMissingObjectives(state, activity);
             List<SoldierEntity> squad = livingRecipients(state, activity);
             if (squad.isEmpty()) {
@@ -174,7 +196,7 @@ public final class ClearingCoordinator {
                 observe(state, squad);
                 updateContactPoints(state, squad, gameTime);
                 updateStageAndCompletion(server, state, activity, squad);
-                tickContactPlan(state.level, squad);
+                if (!state.regrouping) tickContactPlan(state.level, squad);
                 if (!state.completeRequested
                     && previousStage != stageOrdinal(activity.ownerId(), activity.fireTeam())) {
                     ServerPlayer owner = server.getPlayerList().getPlayer(activity.ownerId());
@@ -187,7 +209,7 @@ public final class ClearingCoordinator {
             // claim frees its owner, and a claim-less soldier falls back to a
             // per-tick nearest-unchecked pick that dithers when he stands near
             // the midpoint of two unchecked clusters.
-            if (heavy || gameTime % CLAIM_REFRESH_TICKS == 0) {
+            if (!state.regrouping && (heavy || gameTime % CLAIM_REFRESH_TICKS == 0)) {
                 assignClaims(state, squad, gameTime);
             }
         }
@@ -210,7 +232,7 @@ public final class ClearingCoordinator {
      */
     private static void reissueMissingObjectives(ClearingState state,
                                                  SquadActivityManager.AttackActivityView activity) {
-        if (state.completeRequested) {
+        if (state.completeRequested || state.regrouping) {
             return;
         }
         for (UUID id : activity.recipientIds()) {
@@ -264,6 +286,16 @@ public final class ClearingCoordinator {
         state.stallAnchorTick = -1;
         state.stallAnchorDist = 0;
         state.completeRequested = false;
+        state.regrouping = false;
+        state.lastSyncedPending = -1;
+        state.recipients = new HashSet<>(activity.recipientIds());
+        state.arrived.clear();
+        state.catchUpGenerations.clear();
+        state.catchUpDestinations.clear();
+        state.catchUpRetryTicks.clear();
+        state.catchUpProgressTicks.clear();
+        state.catchUpProgressPositions.clear();
+        state.failedCatchUpDestinations.clear();
         state.completedAtTick = Long.MIN_VALUE;
         state.level = findLevel(server, state);
         if (state.level == null) {
@@ -805,7 +837,6 @@ public final class ClearingCoordinator {
         }
         boolean areaHealth = allChecked && contactResolved && !recentContact;
 
-        boolean allInside = true;
         boolean anyInside = false;
         double cx = 0;
         double cz = 0;
@@ -813,7 +844,6 @@ public final class ClearingCoordinator {
             BlockPos at = soldier.blockPosition();
             // Strict walkable-cell membership: proximity through a wall is not entry.
             boolean inside = state.areaCells.contains(at.asLong());
-            allInside &= inside;
             anyInside |= inside;
             cx += at.getX();
             cz += at.getZ();
@@ -821,16 +851,14 @@ public final class ClearingCoordinator {
         cx /= squad.size();
         cz /= squad.size();
 
-        // Checks and contact safety already prove the clear. Idle cover movement
-        // must not delay the announcement or keep the attack order alive.
-        if (areaHealth && allInside) {
-            state.stage = ClearingStage.SECURED;
+        // Clearance is latched independently from arrival. A straggler must not
+        // keep the winners attacking, nor reopen the clear when new contact appears.
+        if (areaHealth) {
+            state.regrouping = true;
+            state.stage = ClearingStage.SECURE;
             state.stalled = false;
-            if (!state.completeRequested) {
-                state.completeRequested = true;
-                state.completedAtTick = now;
-                completeOrder(server, state, activity);
-            }
+            state.claims.clear();
+            tickRegrouping(server, state, activity);
             return;
         }
 
@@ -904,6 +932,213 @@ public final class ClearingCoordinator {
                 }
             }
         }
+    }
+
+    /** Continue the same recipient roster even after the activity becomes HOLD. */
+    private static void tickRegrouping(MinecraftServer server, ClearingState state,
+                                      SquadActivityManager.AttackActivityView activity) {
+        long now = state.level.getGameTime();
+        for (UUID id : new HashSet<>(state.recipients)) {
+            if (!(state.level.getEntity(id) instanceof SoldierEntity soldier)) continue;
+            if (!soldier.isAlive()) {
+                state.recipients.remove(id);
+                state.arrived.remove(id);
+                continue;
+            }
+            if (state.arrived.contains(id)) continue;
+            Integer generation = state.catchUpGenerations.get(id);
+            boolean inside = state.areaCells.contains(soldier.blockPosition().asLong());
+            // On the initial handoff, anyone already inside may keep their dock.
+            // Travellers subsequently finish at their actual GO_TO endpoint.
+            if (inside && (generation == null || (soldier.getPingMoveGeneration() == generation
+                && soldier.isGoToHolding()))) {
+                holdArrivedSoldier(state, soldier);
+                state.arrived.add(id);
+                state.catchUpDestinations.remove(id);
+                continue;
+            }
+
+            if (soldier.hasValidAttackTarget()) soldier.clearAttackTarget();
+            if (generation == null) soldier.setHoldPosition(soldier.blockPosition());
+            if (generation != null && soldier.getPingMoveGeneration() == generation
+                && soldier.hasPersistentGoTo()) {
+                Vec3 previous = state.catchUpProgressPositions.get(id);
+                if (previous == null || soldier.position().distanceToSqr(previous) >= 1.0) {
+                    state.catchUpProgressPositions.put(id, soldier.position());
+                    state.catchUpProgressTicks.put(id, now);
+                }
+                // Combat, suppression and reloads may legitimately pause travel.
+                boolean fighting = (soldier.getTarget() != null && soldier.getTarget().isAlive())
+                    || soldier.getCoverBehaviorManager().isSuppressed() || soldier.isPreparingOrReloading();
+                if (fighting) state.catchUpProgressTicks.put(id, now);
+                if (now - state.catchUpProgressTicks.getOrDefault(id, now) < 100) continue;
+                BlockPos failed = state.catchUpDestinations.get(id);
+                if (failed != null) {
+                    state.failedCatchUpDestinations.computeIfAbsent(id, ignored -> new HashSet<>()).add(failed);
+                }
+                soldier.clearPingMoveTargetIfGeneration(generation);
+                soldier.getNavigation().stop();
+            }
+            if (now < state.catchUpRetryTicks.getOrDefault(id, 0L)) continue;
+            state.catchUpRetryTicks.put(id, now + 40);
+            BlockPos destination = chooseCatchUpDestination(state, soldier);
+            if (destination == null) continue; // No path is not an arrival.
+            soldier.receivePing(PingType.GO_TO, Vec3.atBottomCenterOf(destination));
+            state.catchUpGenerations.put(id, soldier.getPingMoveGeneration());
+            state.catchUpDestinations.put(id, destination);
+            state.catchUpProgressPositions.put(id, soldier.position());
+            state.catchUpProgressTicks.put(id, now);
+        }
+
+        int pending = state.recipients.size() - state.arrived.size();
+        if (!state.completeRequested && !state.recipients.isEmpty()
+            && state.arrived.size() * 2 > state.recipients.size()) {
+            state.completeRequested = true;
+            state.completedAtTick = now;
+            state.stage = ClearingStage.SECURED;
+            completeOrder(server, state, activity);
+        }
+        if (pending != state.lastSyncedPending) {
+            state.lastSyncedPending = pending;
+            ServerPlayer owner = server.getPlayerList().getPlayer(activity.ownerId());
+            if (owner != null) SquadActivityManager.sync(owner);
+        }
+    }
+
+    private static void holdArrivedSoldier(ClearingState state, SoldierEntity soldier) {
+        soldier.clearAttackTarget();
+        soldier.clearPingMoveTarget();
+        soldier.setSquadMode(SquadMode.HOLD);
+        soldier.setHoldPosition(soldier.blockPosition());
+        soldier.clearFormationOffset();
+        soldier.getNavigation().stop();
+        // Preserve occupied cover/reservations and intel; cancel only an unfinished move.
+        var manager = soldier.getCoverBehaviorManager();
+        if (manager.getCurrentCover() != null
+            && !state.areaCells.contains(manager.getCurrentCover().getPosition().asLong())) {
+            manager.clearCover();
+        }
+        var target = manager.getTargetCover();
+        if (target != null) {
+            CoverReservationManager.release(target.getPosition(), soldier);
+            manager.clearTargetCover();
+        }
+        if (manager.getCurrentCover() == null) {
+            soldier.cancelCoverMovement();
+            manager.setState(com.stevesarmy.combat.cover.CoverBehaviorManager.CoverState.NO_COVER);
+        } else {
+            manager.setState(com.stevesarmy.combat.cover.CoverBehaviorManager.CoverState.IN_COVER);
+        }
+    }
+
+    /** A distinct reachable fallback; GO_TO gets first choice of physical cover nearby. */
+    private static BlockPos chooseCatchUpDestination(ClearingState state, SoldierEntity soldier) {
+        UUID id = soldier.getUUID();
+        Set<BlockPos> failed = state.failedCatchUpDestinations.computeIfAbsent(id, ignored -> new HashSet<>());
+        List<BlockPos> candidates = state.areaCells.stream().map(BlockPos::of)
+            .filter(pos -> !failed.contains(pos))
+            .filter(pos -> state.catchUpDestinations.entrySet().stream()
+                .noneMatch(entry -> !entry.getKey().equals(id) && entry.getValue().distSqr(pos) < 4.0))
+            .sorted(Comparator.comparingDouble(pos -> pos.distSqr(state.objective)
+                + 0.1 * pos.distSqr(soldier.blockPosition())))
+            .toList();
+        int attempts = 0;
+        for (BlockPos candidate : candidates) {
+            if (!CoverReservationManager.isAvailableFor(candidate, soldier)
+                || !state.level.getEntitiesOfClass(SoldierEntity.class,
+                    new net.minecraft.world.phys.AABB(candidate).inflate(0.75),
+                    other -> other != soldier && other.isAlive()).isEmpty()) continue;
+            if (++attempts > 8) break;
+            var path = createCatchUpPath(soldier, candidate);
+            if (path != null && path.canReach() && path.getEndNode() != null
+                && path.getEndNode().asBlockPos().equals(candidate)) return candidate;
+            failed.add(candidate);
+        }
+        // Geometry/occupancy may change. Retry the bounded pool on a later pass.
+        if (candidates.isEmpty()) failed.clear();
+        return null;
+    }
+
+    /** A far straggler needs the same wider search used by attack approach routes. */
+    public static net.minecraft.world.level.pathfinder.Path createCatchUpPath(SoldierEntity soldier,
+                                                                            BlockPos destination) {
+        var path = soldier.getNavigation().createPath(destination, 0);
+        if ((path == null || !path.canReach() || path.getEndNode() == null
+            || !path.getEndNode().asBlockPos().equals(destination))
+            && soldier.getNavigation() instanceof SoldierGroundNavigation navigation) {
+            float range = (float) Math.min(96.0, Math.sqrt(destination.distSqr(soldier.blockPosition())) + 24.0);
+            path = navigation.createWidePath(destination, 0, range);
+        }
+        return path;
+    }
+
+    public static boolean isRegrouping(UUID ownerId, FireTeam team, long generation) {
+        ClearingState state = stateFor(ownerId, team);
+        return state != null && state.generation == generation && state.regrouping;
+    }
+
+    public static int regroupingCount(UUID ownerId, FireTeam team, long generation) {
+        ClearingState state = stateFor(ownerId, team);
+        return state != null && state.generation == generation && state.regrouping
+            ? state.recipients.size() - state.arrived.size() : 0;
+    }
+
+    private static ClearingState catchUpState(SoldierEntity soldier) {
+        UUID owner = soldier.getOwnerUUID().orElse(null);
+        EnumMap<FireTeam, ClearingState> teams = STATES.get(owner);
+        if (teams == null) return null;
+        for (ClearingState state : teams.values()) {
+            Integer generation = state.catchUpGenerations.get(soldier.getUUID());
+            if (state.regrouping && !state.arrived.contains(soldier.getUUID())
+                && state.recipients.contains(soldier.getUUID())
+                && state.level == soldier.level() && generation != null
+                && generation == soldier.getPingMoveGeneration()) return state;
+        }
+        return null;
+    }
+
+    public static boolean isCatchingUp(SoldierEntity soldier) {
+        return catchUpState(soldier) != null;
+    }
+
+    /** Constrain cover standing positions, not merely their distance from the ping. */
+    public static boolean allowsCatchUpDestination(SoldierEntity soldier, BlockPos position) {
+        ClearingState state = catchUpState(soldier);
+        return state == null || state.areaCells.contains(position.asLong());
+    }
+
+    public static void detachRecipients(UUID ownerId, Set<UUID> recipients) {
+        EnumMap<FireTeam, ClearingState> teams = STATES.get(ownerId);
+        if (teams == null) return;
+        for (ClearingState state : teams.values()) {
+            for (UUID id : recipients) {
+                state.recipients.remove(id);
+                state.arrived.remove(id);
+                Integer generation = state.catchUpGenerations.remove(id);
+                state.catchUpDestinations.remove(id);
+                if (generation != null && state.level != null
+                    && state.level.getEntity(id) instanceof SoldierEntity soldier) {
+                    soldier.clearPingMoveTargetIfGeneration(generation);
+                }
+            }
+        }
+    }
+
+    public static void cancelOrder(UUID ownerId, FireTeam scope) {
+        EnumMap<FireTeam, ClearingState> teams = STATES.get(ownerId);
+        if (teams == null) return;
+        for (FireTeam team : new HashSet<>(teams.keySet())) {
+            if (scope != FireTeam.ALL && scope != team) continue;
+            ClearingState state = teams.remove(team);
+            if (state.level == null) continue;
+            for (var entry : state.catchUpGenerations.entrySet()) {
+                if (state.level.getEntity(entry.getKey()) instanceof SoldierEntity soldier
+                    && soldier.getPingMoveGeneration() == entry.getValue()) {
+                    soldier.clearPingMoveTargetIfGeneration(entry.getValue());
+                }
+            }
+        }
+        if (teams.isEmpty()) STATES.remove(ownerId);
     }
 
     private static void completeOrder(MinecraftServer server, ClearingState state,
@@ -1229,7 +1464,7 @@ public final class ClearingCoordinator {
 
     /**
      * Sim/report seam: completion is ARMED — every check ran and every contact
-     * resolved, only physical completion (all-inside settle) remains. This is
+     * resolved, only physical arrival remains. This is
      * the direct "all obligations resolved" signal ordering asserts use; the
      * same predicate drives the executor's SECURE assemble pull.
      */

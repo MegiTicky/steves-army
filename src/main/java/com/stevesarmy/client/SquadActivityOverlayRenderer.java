@@ -62,8 +62,13 @@ public final class SquadActivityOverlayRenderer {
             int textColor = PingCrosshairFade.withAlpha(teamColor(activity.fireTeam()), opacity.textAlpha());
             String label = activity.fireTeam().name() + "  " + activity.type().getDisplayName();
             String stage = clearingStageLabel(activity.clearingStage());
-            if (stage != null) {
+            if (activity.regroupingCount() > 0 && activity.clearingStage() == 2) {
+                label = activity.fireTeam().name() + "  SECURING";
+            } else if (stage != null) {
                 label = label + " \u00B7 " + stage;
+            }
+            if (activity.regroupingCount() > 0) {
+                label += " \u2014 " + activity.regroupingCount() + " regrouping";
             }
             int labelWidth = mc.font.width(label);
             guiGraphics.drawString(mc.font, label, -labelWidth / 2, -halfSize - 13, textColor, true);
