@@ -6,7 +6,7 @@ import com.stevesarmy.combat.cover.ExactPathValidationBudget;
 import com.stevesarmy.debug.DiagnosticLogManager;
 import com.stevesarmy.entity.MachineGunnerEntity;
 import com.stevesarmy.entity.SoldierEntity;
-import com.stevesarmy.entity.SupportEntity;
+import com.stevesarmy.entity.SoldierRole;
 import com.stevesarmy.squad.SquadData;
 import com.stevesarmy.squad.SquadManager;
 import net.minecraft.core.BlockPos;
@@ -60,6 +60,13 @@ public final class SupportPositionFinder {
                 return null;
             }
             forwardTarget = owner.blockPosition();
+        }
+
+        if (soldier instanceof MachineGunnerEntity && soldier.hasValidAttackTarget()) {
+            Vec3 attackAnchor = MgAttackMovementPolicy.rearAnchor(soldier, forwardTarget);
+            if (attackAnchor != null) {
+                return snapToGround(soldier.level(), BlockPos.containing(attackAnchor));
+            }
         }
 
         Vec3 towardTarget = Vec3.atCenterOf(forwardTarget).subtract(line);
@@ -226,8 +233,8 @@ public final class SupportPositionFinder {
                 continue;
             }
             if (serverLevel.getEntity(memberId) instanceof SoldierEntity s
-                && !(s instanceof MachineGunnerEntity)
-                && !(s instanceof SupportEntity)) {
+                && s.isAlive()
+                && s.getRole() == SoldierRole.RIFLEMAN) {
                 riflemen.add(s);
             }
         }
