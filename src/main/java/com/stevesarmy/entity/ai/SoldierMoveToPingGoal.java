@@ -35,6 +35,14 @@ public class SoldierMoveToPingGoal extends Goal {
         if (soldier.isGoToHolding()) return false;
         if (!soldier.hasValidPingMoveTarget()) return false;
         captureCommand();
+        if (soldier.hasGoToNavigationOwnership() && rawTarget != null
+            && soldier.distanceToSqr(rawTarget.getX() + 0.5, rawTarget.getY() + 0.5,
+                rawTarget.getZ() + 0.5) <= closeDistance * closeDistance) {
+            // An already-arrived re-ping must not start another relocation
+            // search and bypass the failed-search pacing at a coverless site.
+            soldier.completeGoToIfGeneration(commandGeneration);
+            return false;
+        }
         computeNavigationTarget();
         if (navigationTarget != null && soldier.getCoverTacticalGoal()
             .requestGoToRelocation(navigationTarget, commandGeneration)) {
@@ -55,7 +63,13 @@ public class SoldierMoveToPingGoal extends Goal {
         if (soldier.getCoverTacticalGoal().isHandlingGoToRelocation(commandGeneration)) return false;
         double distSq = soldier.distanceToSqr(
             rawTarget.getX() + 0.5, rawTarget.getY() + 0.5, rawTarget.getZ() + 0.5);
-        return distSq > closeDistance * closeDistance;
+        if (distSq <= closeDistance * closeDistance) {
+            // Continuation is checked before tick(), including its slower
+            // path-refresh branch. Finish the order before yielding the legs.
+            soldier.completeGoToIfGeneration(commandGeneration);
+            return false;
+        }
+        return true;
     }
 
     @Override
@@ -78,7 +92,9 @@ public class SoldierMoveToPingGoal extends Goal {
         if (!soldier.hasValidPingSuppressPos()
             && !soldier.getCoverTacticalGoal().isHandlingGoToRelocation(commandGeneration)) {
             soldier.getNavigation().stop();
-            if (!soldier.hasPersistentGoTo()) {
+            // Completion clears the move target, so hasPersistentGoTo() is
+            // already false. Keep the completed order's holding state intact.
+            if (!soldier.hasGoToNavigationOwnership()) {
                 soldier.clearPingMoveTargetIfGeneration(commandGeneration);
             }
         }

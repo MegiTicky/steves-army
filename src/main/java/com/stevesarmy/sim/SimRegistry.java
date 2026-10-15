@@ -101,6 +101,7 @@ public final class SimRegistry {
             attackGuideUnreachableConcede(),
             goToVolleyStrandDirectWalk(),
             goToVolleyStreet(),
+            GoToArrivalCoverScenario.arrivalCoverDelay(),
             cautionAdsTravelFloor(),
             suppressedCrawlPace(),
             clearCheckerDeath(),
@@ -1654,20 +1655,27 @@ public final class SimRegistry {
                     return near || !"SWIMMING".equals(at.posture);
                 })
             .assertThat("state flash stays bounded once the walk owns the legs "
-                    + "(<= 8 SEEKING/NO_COVER transitions after t200)",
+                    + "(<= 8 SEEKING/NO_COVER transitions per 200 ticks after t200)",
                 view -> {
-                    int flips = 0;
+                    // Completed orders now retain HOLD ownership and perform
+                    // normal paced cover retries. Count bursts, not the total
+                    // across the entire 25-second post-arrival observation.
+                    java.util.ArrayDeque<Integer> flips = new java.util.ArrayDeque<>();
                     String prev = null;
                     for (SimSample s : view.timeline().series("mover")) {
                         if (s.tick < 200) continue;
                         boolean flash = "SEEKING_COVER".equals(s.state.coverState)
                             || "NO_COVER".equals(s.state.coverState);
                         if (flash && prev != null && !prev.equals(s.state.coverState)) {
-                            flips++;
+                            flips.addLast(s.tick);
+                            while (!flips.isEmpty() && s.tick - flips.peekFirst() >= 200) {
+                                flips.removeFirst();
+                            }
+                            if (flips.size() > 8) return false;
                         }
                         prev = flash ? s.state.coverState : null;
                     }
-                    return flips <= 8;
+                    return true;
                 })
             .build();
     }

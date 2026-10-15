@@ -517,6 +517,10 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
     // requestGoToRelocation declines it so the direct walk finishes the
     // approach instead of re-capturing the ping into the same dock loop.
     private int goToRelocationLandedGeneration = -1;
+    /** Consume the direct-walk arrival once; failed searches must retain their retry pacing. */
+    private int handledGoToArrivalGeneration = -1;
+    private BlockPos lastGoToArrivalObjective;
+    private BlockPos lastGoToArrivalPosition;
     private String debugLastSearchMode = "";
     private String debugLastSearchResult = "";
     private String debugLastSearchPhase = "";
@@ -2341,6 +2345,26 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
             || suppressionPositionStatus == SuppressionPositionStatus.MOVING
             || suppressionPositionStatus == SuppressionPositionStatus.BLOCKED) {
             return true;
+        }
+
+        if (soldier.isGoToHolding()
+            && handledGoToArrivalGeneration != soldier.getPingMoveGeneration()) {
+            handledGoToArrivalGeneration = soldier.getPingMoveGeneration();
+            // A failed relocation searched from the old travel context. Reaching
+            // the objective deserves a fresh local search, not the remainder of
+            // that goal's restart delay (decremented only on canUse scans).
+            // Re-pinging the same location while already there is not another
+            // arrival: preserve failed-search pacing on a coverless objective.
+            if (!Objects.equals(lastGoToArrivalObjective, soldier.getHoldPosition())
+                || lastGoToArrivalPosition == null
+                || lastGoToArrivalPosition.distSqr(soldier.blockPosition()) > 4 * 4) {
+                lastGoToArrivalObjective = soldier.getHoldPosition();
+                lastGoToArrivalPosition = soldier.blockPosition();
+                cooldown = 0;
+                searchExhaustionCooldown = 0;
+                consecutiveFailedSearches = 0;
+                clearFailedSearch();
+            }
         }
 
         if (cooldown > 0) {
@@ -8889,6 +8913,9 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
             // walk finishes the remaining approach.
             if (relocationCenter != null
                 && soldier.blockPosition().distSqr(relocationCenter) <= 4 * 4) {
+                // Already protected: do not grant a delayed extra retry if this
+                // occupied cover is abandoned or its goal is interrupted later.
+                handledGoToArrivalGeneration = relocationCommandGeneration;
                 soldier.completeGoToIfGeneration(relocationCommandGeneration);
             } else {
                 goToRelocationLandedGeneration = relocationCommandGeneration;

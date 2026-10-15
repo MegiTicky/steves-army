@@ -79,7 +79,13 @@ flowchart TD
     Friendly --- Enemy
 ```
 
-### Key: `SoldierMoveToPingGoal` has higher priority than cover. A soldier with a valid ping move target will **not** seek cover until the ping expires.
+### GO_TO movement and cover
+
+`SoldierMoveToPingGoal` first offers the destination to cover relocation. If no
+reachable cover is selected, the direct walk finishes the order. Direct arrival
+permits one fresh cover search without the earlier relocation's restart delay;
+subsequent failed searches retain their normal retry pacing. Arriving at a cover
+dock already completes this handoff without granting another search later.
 
 ### Entrypoint Flow
 

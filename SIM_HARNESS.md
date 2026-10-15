@@ -105,6 +105,15 @@ on the 20 TPS baseline with varying reasons). Verdict-level A/B on stable
 scenarios matches exactly. If a fast-run-only signal looks async-related,
 rerun that scenario with `-Psim.fastticks=false` before chasing it.
 
+### GO_TO arrival timing
+
+`goto_arrival_cover_delay` forces an initial cover relocation failure, then adds
+reachable half cover when the direct walk reaches its objective, with a known
+enemy 30 blocks beyond it. It checks search initiation within 20 ticks, selection
+within 60 ticks, physical docking within 100 ticks, and preservation of the
+completed GO_TO holding state. `[SimGoToArrival]` logs the measured ticks and the
+arrival cooldown. Confirm timing with `-Psim.fastticks=false` as well as fast ticks.
+
 ### Crowded ATTACK traversal probes
 
 The full-only scenarios `crowded_attack_rows`, `crowded_attack_tall_rows`,
