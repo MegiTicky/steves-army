@@ -3,10 +3,14 @@ package com.stevesarmy.sim;
 import com.stevesarmy.combat.CombatStateSnapshot;
 import com.stevesarmy.entity.EnemySoldierEntity;
 import com.stevesarmy.sim.terrain.SimTerrain;
+import com.stevesarmy.util.VanillaMapColors;
 import net.minecraft.core.BlockPos;
+import net.minecraft.world.level.block.state.BlockState;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Collects what the HTML animation viewer needs: the terrain height map
@@ -18,6 +22,9 @@ public final class SimRecorder {
     private final int width;
     private final int depth;
     private final int[] heights; // (w+3)*(d+3), origin at (-1,-1); 0 = floor, 1..3 = wall height
+    private final int[] colors; // parallel to heights: index into colorPalette; 0 = nothing placed
+    private final List<Integer> colorPalette = new ArrayList<>(); // 0xRRGGBB vanilla map colors; index 0 = void
+    private final Map<Integer, Integer> colorIndex = new HashMap<>();
     private final List<String> frames = new ArrayList<>();
     private final List<String> events = new ArrayList<>();
     private final List<String> shots = new ArrayList<>();
@@ -32,18 +39,35 @@ public final class SimRecorder {
         this.width = width;
         this.depth = depth;
         this.heights = new int[(width + 3) * (depth + 3)];
+        this.colors = new int[(width + 3) * (depth + 3)];
+        colorPalette.add(0);
     }
 
-    /** Top-down height map from everything the fixture placed. */
+    /** Top-down height map and vanilla map colors from everything the fixture placed. */
     public void captureTerrain(SimTerrain terrain) {
+        Map<BlockPos, BlockState> placed = terrain.placedStates();
         for (BlockPos pos : terrain.placedBlocks()) {
             int x = pos.getX() - terrain.origin.getX();
             int z = pos.getZ() - terrain.origin.getZ();
             if (x < -1 || z < -1 || x > width + 1 || z > depth + 1) continue;
             int h = pos.getY() - terrain.origin.getY() + 1; // floor slab -> 0, wall layer 0 -> 1, ...
             int idx = (x + 1) * (depth + 3) + (z + 1);
-            if (h > heights[idx]) heights[idx] = Math.min(h, 3);
+            if (h > heights[idx] || colors[idx] == 0) {
+                heights[idx] = Math.max(heights[idx], Math.min(h, 3));
+                int rgb = VanillaMapColors.surfaceRgb(placed.get(pos), terrain.level(), pos);
+                if (rgb != 0) colors[idx] = paletteIndexFor(rgb);
+            }
         }
+    }
+
+    private int paletteIndexFor(int rgb) {
+        Integer idx = colorIndex.get(rgb);
+        if (idx == null) {
+            colorPalette.add(rgb);
+            idx = colorPalette.size() - 1;
+            colorIndex.put(rgb, idx);
+        }
+        return idx;
     }
 
     public void event(int tick, String describe) {
@@ -249,6 +273,16 @@ public final class SimRecorder {
         for (int i = 0; i < heights.length; i++) {
             if (i > 0) sb.append(',');
             sb.append(heights[i]);
+        }
+        sb.append("],\"cp\":[");
+        for (int i = 0; i < colorPalette.size(); i++) {
+            if (i > 0) sb.append(',');
+            sb.append(colorPalette.get(i));
+        }
+        sb.append("],\"colors\":[");
+        for (int i = 0; i < colors.length; i++) {
+            if (i > 0) sb.append(',');
+            sb.append(colors[i]);
         }
         sb.append("]},\"events\":[");
         for (int i = 0; i < events.size(); i++) {

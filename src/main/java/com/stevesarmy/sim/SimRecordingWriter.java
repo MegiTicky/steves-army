@@ -83,8 +83,9 @@ public final class SimRecordingWriter {
                    <td><span class="dot" style="background:transparent;border:2px solid rgba(255,60,60,.9)"></span></td><td>suppression arc</td></tr>
                <tr><td><span style="color:#0ff">&mdash;</span></td><td>cover target</td>
                    <td><span style="color:#fff">&mdash;</span></td><td>line of sight</td></tr>
-               <tr><td><span class="sq" style="background:#9c8a4d"></span></td><td>half cover</td>
-                   <td><span class="sq" style="background:#cfd8e6"></span></td><td>full cover</td></tr>
+               <tr><td><span class="sq" style="background:#9c8a4d"></span></td><td>target: half cover</td>
+                   <td><span class="sq" style="background:#cfd8e6"></span></td><td>target: full cover</td></tr>
+               <tr><td colspan="4" style="color:#888">terrain = vanilla map colors, +z relief shading</td></tr>
                <tr><td><span style="color:#ffe066">&mdash;</span></td><td>shot (dot = impact)</td>
                    <td><span style="display:inline-block;width:14px;height:14px;background:rgba(255,60,40,.35)"></span></td><td>danger (baked map)</td></tr>
                <tr><td><span style="display:inline-block;width:14px;height:14px;background:#4dff88;border-radius:50%"></span></td><td>standing</td>
@@ -113,18 +114,42 @@ public final class SimRecordingWriter {
             terr.width = cv.width; terr.height = cv.height;
             {
               const tc = terr.getContext('2d');
-              const rimShades = ['#242424', '#808080', '#a2a2a2', '#c6c6c6'];
-              const HALF = '#9c8a4d', FULL = '#cfd8e6';
-              for (let ix = 0; ix < W; ix++) for (let iz = 0; iz < H; iz++) {
-                const h = D.terrain.cells[ix * H + iz] || 0;
-                const rim = ix === 0 || ix === W - 1 || iz === 0 || iz === H - 1;
-                let fill;
-                if (h === 0) fill = '#242424';
-                else if (rim) fill = rimShades[Math.min(h, 3)];
-                else fill = h === 1 ? HALF : FULL;
-                tc.fillStyle = fill;
-                tc.fillRect(ix * CS, iz * CS, CS, CS);
-                if (h > 0) { tc.strokeStyle = 'rgba(0,0,0,.55)'; tc.strokeRect(ix*CS+.5, iz*CS+.5, CS-1, CS-1); }
+              if (D.terrain.colors) {
+                // vanilla filled-map colors: base palette sampled from the placed
+                // blocks (terrain.cp), brightness = the vanilla +z scanline relief
+                // rule (height delta * 0.8, checkerboard dither ±0.2; LOW/NORMAL/HIGH).
+                const CP = D.terrain.cp || [0];
+                const SHADE = [180, 220, 255, 135];
+                for (let ix = 0; ix < W; ix++) {
+                  let hPrev = 0;
+                  for (let iz = 0; iz < H; iz++) {
+                    const cell = ix * H + iz;
+                    const h = D.terrain.cells[cell] || 0;
+                    const rgb = CP[D.terrain.colors[cell]] || 0;
+                    if (rgb) {
+                      const d = (h - hPrev) * 0.8 + ((ix + iz) & 1 ? 0.2 : -0.2);
+                      const m = SHADE[d > 0.6 ? 2 : d < -0.6 ? 0 : 1];
+                      tc.fillStyle = 'rgb(' + [16, 8, 0].map(s => Math.round((rgb >> s & 255) * m / 255)).join(',') + ')';
+                    } else tc.fillStyle = '#242424';
+                    tc.fillRect(ix * CS, iz * CS, CS, CS);
+                    hPrev = h;
+                  }
+                }
+              } else {
+                // legacy height-coded scheme for recordings without sampled colors
+                const rimShades = ['#242424', '#808080', '#a2a2a2', '#c6c6c6'];
+                const HALF = '#9c8a4d', FULL = '#cfd8e6';
+                for (let ix = 0; ix < W; ix++) for (let iz = 0; iz < H; iz++) {
+                  const h = D.terrain.cells[ix * H + iz] || 0;
+                  const rim = ix === 0 || ix === W - 1 || iz === 0 || iz === H - 1;
+                  let fill;
+                  if (h === 0) fill = '#242424';
+                  else if (rim) fill = rimShades[Math.min(h, 3)];
+                  else fill = h === 1 ? HALF : FULL;
+                  tc.fillStyle = fill;
+                  tc.fillRect(ix * CS, iz * CS, CS, CS);
+                  if (h > 0) { tc.strokeStyle = 'rgba(0,0,0,.55)'; tc.strokeRect(ix*CS+.5, iz*CS+.5, CS-1, CS-1); }
+                }
               }
             }
 

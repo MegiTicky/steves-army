@@ -51,6 +51,7 @@ public final class TraceExportJob {
     private final List<ChunkPlan> chunks = new ArrayList<>();
     private final Map<BlockState, Integer> paletteIds = new HashMap<>();
     private final List<String> palette = new ArrayList<>();
+    private final List<Integer> paletteColors = new ArrayList<>();
     private final List<JsonObject> sections = new ArrayList<>();
     private final List<int[]> sectionIndices = new ArrayList<>();
     private final List<int[]> unloadedChunks = new ArrayList<>();
@@ -168,7 +169,7 @@ public final class TraceExportJob {
                 break;
             }
             int sectionY = level.getMinSection() + sectionCursor - 1;
-            sectionIndices.add(copySection(section));
+            sectionIndices.add(copySection(section, level, new BlockPos(plan.x << 4, sectionY << 4, plan.z << 4)));
             JsonObject descriptor = new JsonObject();
             descriptor.addProperty("x", plan.x);
             descriptor.addProperty("y", sectionY);
@@ -184,7 +185,7 @@ public final class TraceExportJob {
             : "Terrain sections copied: " + sectionIndices.size() + " / " + (chunks.size() * level.getSectionsCount());
     }
 
-    private int[] copySection(LevelChunkSection section) {
+    private int[] copySection(LevelChunkSection section, ServerLevel level, BlockPos sectionBase) {
         int[] result = new int[4096];
         int i = 0;
         for (int y = 0; y < 16; y++) {
@@ -197,6 +198,9 @@ public final class TraceExportJob {
                         paletteIds.put(state, id);
                         // Canonical registry name + properties; no Block{...} wrapper in the artifact.
                         palette.add(state.toString().replace("Block{", "").replace("}", ""));
+                        // Vanilla map color for the viewer's filled-map terrain display.
+                        paletteColors.add(com.stevesarmy.util.VanillaMapColors.surfaceRgb(
+                            state, level, sectionBase.offset(x, y, z)));
                     }
                     result[i++] = id;
                 }
@@ -226,6 +230,7 @@ public final class TraceExportJob {
         terrain.addProperty("captureStarted", captureStarted);
         terrain.addProperty("captureFinished", Instant.now().toString());
         terrain.add("palette", GSON.toJsonTree(palette));
+        terrain.add("paletteColors", GSON.toJsonTree(paletteColors));
         JsonArray unloaded = new JsonArray();
         for (int[] pos : unloadedChunks) {
             JsonArray pair = new JsonArray();

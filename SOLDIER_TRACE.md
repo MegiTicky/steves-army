@@ -27,8 +27,10 @@ Each export creates a unique directory under
 `summary.txt`. The HTML viewer runs without external libraries or a web server.
 It supports timestamp-based scrubbing and playback, actor selection, map pan
 and zoom, Y-layer inspection, terrain visibility, event browsing, and complete
-frame snapshot inspection. The map uses a top-down X/Z view. Terrain is rendered
-at the selected Y layer to reduce occlusion from roofs and upper floors.
+frame snapshot inspection. The map uses a top-down X/Z view. Terrain defaults
+to a vanilla filled-map-style surface view (topmost block per column, vanilla
+map colors with +z relief shading); the mode dropdown switches to the previous
+single Y layer to reduce occlusion from roofs and upper floors.
 
 ## Reading the output
 

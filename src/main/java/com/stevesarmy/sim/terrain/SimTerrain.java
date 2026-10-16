@@ -32,6 +32,11 @@ public final class SimTerrain {
         this.depth = depth;
     }
 
+    /** The level this fixture builds into (also used for map-color sampling). */
+    public ServerLevel level() {
+        return level;
+    }
+
     /** Solid slab the scenario plays on, ringed by a 3-high rim so actors can't path off the edge. */
     public void platform() {
         fill(origin.offset(-1, -1, -1), origin.offset(width + 1, -1, depth + 1), Blocks.SMOOTH_STONE.defaultBlockState());

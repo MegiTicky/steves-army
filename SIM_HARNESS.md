@@ -169,8 +169,9 @@ self-contained top-down animation of the run (double-click to open in any
 browser; no server or codec needed). Soldiers are colored by cover state with a
 white ring when pinned and a red arc showing suppression level; dashed white
 lines are live line-of-sight, cyan lines point at the pursued cover (marker
-colored by cover type), tan blocks are half cover and pale steel blocks are
-full cover, yellow lines are shots fired with an impact dot at the aim point,
+colored by cover type), terrain is painted with vanilla map colors plus the
+vanilla +z relief shading (so walls read as elevation edges, not color hints),
+yellow lines are shots fired with an impact dot at the aim point,
 red squares are enemies. The event feed below the scrubber is append-only.
 Play at 0.5–10x, scrub, and click a soldier for its full state snapshot at
 that tick (including shots fired, magazine, and the `last search` line —
