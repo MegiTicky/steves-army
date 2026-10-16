@@ -1184,8 +1184,8 @@ BUILDER.pop();
                 entry -> entry instanceof String);
 
         SOLDIER_DEATH_DROPS = BUILDER
-            .comment("Soldiers drop their whole inventory inside one supply pouch",
-                     "where they die instead of vanishing with it. Default: true.")
+            .comment("Soldiers drop guns and one carried ammo stack per gun ammo type loose",
+                     "where they die, with remaining inventory in a supply pouch. Default: true.")
             .define("soldierDeathDrops", true);
 
         SWAP_SYNCS_HEALTH = BUILDER

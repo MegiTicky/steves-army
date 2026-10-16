@@ -1314,10 +1314,8 @@ public class SoldierEntity extends PathfinderMob implements Container {
     }
 
     /**
-     * Soldiers drop their whole persistent inventory inside ONE supply pouch
-     * instead of vanishing with it (or showering item entities). Replaces
-     * vanilla's 8.5%-per-slot chance loop, which would roll duplicates against
-     * the mirrored SoldierInventory.
+     * Drop guns and one carried ammo stack per caliber loose, with the rest in
+     * a pouch. Only the persistent inventory is used, never mirrored equipment.
      */
     @Override
     protected void dropCustomDeathLoot(net.minecraft.world.damagesource.DamageSource source,
@@ -1325,20 +1323,56 @@ public class SoldierEntity extends PathfinderMob implements Container {
         if (!StevesArmyConfig.isSoldierDeathDropsEnabled()) {
             return;
         }
-        boolean anyItems = false;
+        List<ItemStack> guns = new ArrayList<>();
+        boolean[] loose = new boolean[inventory.getContainerSize()];
         for (int i = 0; i < inventory.getContainerSize(); i++) {
-            if (!inventory.getItem(i).isEmpty()) {
-                anyItems = true;
-                break;
+            ItemStack stack = inventory.getItem(i);
+            InfiniteReserveAmmo.stripInfiniteReserveNbt(stack);
+            if (GunIntegration.isGun(stack)) {
+                guns.add(stack);
+                loose[i] = true;
             }
         }
-        if (!anyItems) {
-            return;
+
+        // Prefer ordinary ammo over boxes, without making TaCZ a required dependency.
+        Class<?> ammoBoxClass = null;
+        try {
+            ammoBoxClass = Class.forName("com.tacz.guns.api.item.IAmmoBox");
+        } catch (ClassNotFoundException ignored) {
         }
+        java.util.Set<String> ammoTypes = new java.util.HashSet<>();
+        for (ItemStack gun : guns) {
+            String ammoId = GunIntegration.getAmmoId(gun);
+            if (ammoId.isEmpty() || !ammoTypes.add(ammoId)) continue;
+            int boxSlot = -1;
+            int ammoSlot = -1;
+            for (int i = 0; i < inventory.getContainerSize(); i++) {
+                ItemStack stack = inventory.getItem(i);
+                if (loose[i] || GunIntegration.getAmmoCountForGun(gun, stack) <= 0) continue;
+                if (ammoBoxClass != null && ammoBoxClass.isInstance(stack.getItem())) {
+                    if (boxSlot < 0) boxSlot = i;
+                } else {
+                    ammoSlot = i;
+                    break;
+                }
+            }
+            int selected = ammoSlot >= 0 ? ammoSlot : boxSlot;
+            if (selected >= 0) loose[selected] = true;
+        }
+
+        List<ItemStack> pouchContents = new ArrayList<>();
         for (int i = 0; i < inventory.getContainerSize(); i++) {
-            InfiniteReserveAmmo.stripInfiniteReserveNbt(inventory.getItem(i));
+            ItemStack stack = inventory.getItem(i);
+            if (stack.isEmpty()) continue;
+            if (loose[i]) {
+                spawnAtLocation(stack.copy());
+            } else {
+                pouchContents.add(stack.copy());
+            }
         }
-        com.stevesarmy.inventory.PouchContainer.dropInventoryAsPouch(this, inventory);
+        if (!pouchContents.isEmpty()) {
+            spawnAtLocation(com.stevesarmy.inventory.PouchContainer.packContents(pouchContents));
+        }
         for (int i = 0; i < inventory.getContainerSize(); i++) {
             inventory.setItem(i, ItemStack.EMPTY);
         }
