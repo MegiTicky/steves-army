@@ -2,6 +2,7 @@ package com.stevesarmy.squad;
 
 import com.stevesarmy.StevesArmyConfig;
 import com.stevesarmy.StevesArmyMod;
+import com.stevesarmy.debug.trace.SoldierFlightRecorder;
 import com.stevesarmy.combat.VisibilityRay;
 import com.stevesarmy.combat.TargetAcquisition;
 import com.stevesarmy.entity.TargetEntity;
@@ -198,6 +199,13 @@ public final class ClearingCoordinator {
             refreshObjectiveClocks(squad);
             boolean heavy = gameTime % HEAVY_INTERVAL_TICKS == 0;
             if (heavy) {
+                if (state.areaCells.isEmpty()) {
+                    if (gameTime % 40 == 0) computeArea(state);
+                    if (state.areaCells.isEmpty()) {
+                        state.stage = ClearingStage.APPROACH;
+                        continue;
+                    }
+                }
                 int previousStage = stageOrdinal(activity.ownerId(), activity.fireTeam());
                 observe(state, squad);
                 updateContactPoints(state, squad, gameTime);
@@ -348,9 +356,8 @@ public final class ClearingCoordinator {
     private static void computeArea(ClearingState state) {
         BlockPos start = snapToStandable(state.level, state.objective);
         if (start == null) {
-            // Unreachable interior: the objective block itself is the only cell,
-            // so completion degrades to "reached the marker" rather than nothing.
-            state.areaCells = Set.of(state.objective.asLong());
+            // An invalid marker is not a reachable cleared objective.
+            state.areaCells = Set.of();
             state.pois = List.of();
             return;
         }
@@ -411,14 +418,25 @@ public final class ClearingCoordinator {
         return pois;
     }
 
-    @SuppressWarnings("deprecation")
     private static boolean isStandable(ServerLevel level, BlockPos cell) {
-        BlockState floor = level.getBlockState(cell.below());
-        if (!floor.isFaceSturdy(level, cell.below(), Direction.UP)) {
-            return false;
-        }
-        return level.getBlockState(cell).isPathfindable(level, cell, PathComputationType.LAND)
-            && level.getBlockState(cell.above()).isPathfindable(level, cell.above(), PathComputationType.LAND);
+        if (!level.hasChunkAt(cell) || !level.hasChunkAt(cell.below())) return false;
+        var floor = level.getBlockState(cell.below()).getCollisionShape(level, cell.below());
+        if (floor.isEmpty() || !level.getFluidState(cell).isEmpty()) return false;
+        double top = floor.max(Direction.Axis.Y);
+        // Canonical cells are above the supporting block, even on paths/slabs.
+        if (top <= 0 || top > 1) return false;
+        double feet = cell.getY() - 1 + top;
+        return level.noCollision(new AABB(cell.getX() + 0.2, feet + 0.001, cell.getZ() + 0.2,
+            cell.getX() + 0.8, feet + 1.8, cell.getZ() + 0.8));
+    }
+
+    /** Partial-height floors put blockPosition one cell below the navigation cell. */
+    private static boolean insideArea(ClearingState state, BlockPos pos) {
+        if (state.areaCells.contains(pos.asLong())) return true;
+        if (!state.areaCells.contains(pos.above().asLong())) return false;
+        var support = state.level.getBlockState(pos).getCollisionShape(state.level, pos);
+        return !support.isEmpty() && support.max(Direction.Axis.Y) > 0
+            && support.max(Direction.Axis.Y) < 1;
     }
 
     @SuppressWarnings("deprecation")
@@ -429,16 +447,22 @@ public final class ClearingCoordinator {
     }
 
     private static BlockPos snapToStandable(ServerLevel level, BlockPos objective) {
-        if (isStandable(level, objective)) {
-            return objective.immutable();
-        }
-        for (int dy = -2; dy <= 4; dy++) {
-            BlockPos candidate = objective.offset(0, dy, 0);
-            if (isStandable(level, candidate)) {
-                return candidate;
+        BlockPos best = null;
+        double bestDistance = Double.MAX_VALUE;
+        for (int dx = -2; dx <= 2; dx++) {
+            for (int dz = -2; dz <= 2; dz++) {
+                if (dx * dx + dz * dz > 4) continue;
+                for (int dy = -2; dy <= 4; dy++) {
+                    BlockPos candidate = objective.offset(dx, dy, dz);
+                    double distance = dx * dx + dz * dz + dy * dy;
+                    if (distance < bestDistance && isStandable(level, candidate)) {
+                        best = candidate;
+                        bestDistance = distance;
+                    }
+                }
             }
         }
-        return null;
+        return best;
     }
 
     // ----------------------------------------------------------- observation
@@ -454,7 +478,7 @@ public final class ClearingCoordinator {
         // corner through a doorway for one tick is not checking it).
         for (SoldierEntity soldier : squad) {
             BlockPos at = soldier.blockPosition();
-            if (!state.areaCells.contains(at.asLong())) {
+            if (!insideArea(state, at)) {
                 continue;
             }
             for (BlockPos poi : state.pois) {
@@ -850,7 +874,7 @@ public final class ClearingCoordinator {
         for (SoldierEntity soldier : squad) {
             BlockPos at = soldier.blockPosition();
             // Strict walkable-cell membership: proximity through a wall is not entry.
-            boolean inside = state.areaCells.contains(at.asLong());
+            boolean inside = insideArea(state, at);
             anyInside |= inside;
             cx += at.getX();
             cz += at.getZ();
@@ -1001,13 +1025,14 @@ public final class ClearingCoordinator {
             }
             if (state.arrived.contains(id)) continue;
             Integer generation = state.catchUpGenerations.get(id);
-            boolean inside = state.areaCells.contains(soldier.blockPosition().asLong());
+            boolean inside = insideArea(state, soldier.blockPosition());
             // On the initial handoff, anyone already inside may keep their dock.
             // Travellers subsequently finish at their actual GO_TO endpoint.
             if (inside && (generation == null || (soldier.getPingMoveGeneration() == generation
                 && soldier.isGoToHolding()))) {
                 holdArrivedSoldier(state, soldier);
                 state.arrived.add(id);
+                SoldierFlightRecorder.event(soldier, "regroup", "arrived", soldier.blockPosition());
                 state.catchUpDestinations.remove(id);
                 continue;
             }
@@ -1036,7 +1061,12 @@ public final class ClearingCoordinator {
             if (now < state.catchUpRetryTicks.getOrDefault(id, 0L)) continue;
             state.catchUpRetryTicks.put(id, now + 40);
             BlockPos destination = chooseCatchUpDestination(state, soldier);
-            if (destination == null) continue; // No path is not an arrival.
+            if (destination == null) {
+                SoldierFlightRecorder.event(soldier, "regroup", "destination-unavailable",
+                    "objective=" + state.objective + ",cells=" + state.areaCells.size());
+                continue; // No path is not an arrival.
+            }
+            SoldierFlightRecorder.event(soldier, "regroup", "destination-assigned", destination);
             soldier.receivePing(PingType.GO_TO, Vec3.atBottomCenterOf(destination));
             state.catchUpGenerations.put(id, soldier.getPingMoveGeneration());
             state.catchUpDestinations.put(id, destination);
@@ -1070,7 +1100,7 @@ public final class ClearingCoordinator {
         // Preserve occupied cover/reservations and intel; cancel only an unfinished move.
         var manager = soldier.getCoverBehaviorManager();
         if (manager.getCurrentCover() != null
-            && !state.areaCells.contains(manager.getCurrentCover().getPosition().asLong())) {
+            && !insideArea(state, manager.getCurrentCover().getPosition())) {
             manager.clearCover();
         }
         var target = manager.getTargetCover();
@@ -1159,7 +1189,7 @@ public final class ClearingCoordinator {
     /** Constrain cover standing positions, not merely their distance from the ping. */
     public static boolean allowsCatchUpDestination(SoldierEntity soldier, BlockPos position) {
         ClearingState state = catchUpState(soldier);
-        return state == null || state.areaCells.contains(position.asLong());
+        return state == null || insideArea(state, position);
     }
 
     public static void detachRecipients(UUID ownerId, Set<UUID> recipients) {
@@ -1262,7 +1292,7 @@ public final class ClearingCoordinator {
      */
     public static boolean isInsideClearingArea(SoldierEntity soldier, BlockPos pos) {
         ClearingState state = stateForSoldier(soldier);
-        return state != null && state.areaCells.contains(pos.asLong());
+        return state != null && insideArea(state, pos);
     }
 
     /**
@@ -1375,7 +1405,7 @@ public final class ClearingCoordinator {
         }
 
         long now = state.level.getGameTime();
-        boolean inside = state.areaCells.contains(soldier.blockPosition().asLong());
+        boolean inside = insideArea(state, soldier.blockPosition());
 
         BlockPos assignedPoi = state.claims.get(soldier.getUUID());
         boolean poiChecked = assignedPoi != null
