@@ -2,7 +2,6 @@ package com.stevesarmy.entity.ai;
 
 import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.entity.SoldierRole;
-import com.stevesarmy.squad.ClearingCoordinator;
 import com.stevesarmy.util.SpacingHelper;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.entity.ai.goal.Goal;
@@ -209,30 +208,19 @@ public class SoldierMoveToPingGoal extends Goal {
             navigationTarget = null;
             return;
         }
-        // The coordinator already assigned distinct, bounded endpoints. A
-        // formation offset could move one through a wall or outside the area.
-        navigationTarget = ClearingCoordinator.isCatchingUp(soldier)
-            ? rawTarget : SpacingHelper.applySpacing(rawTarget, soldier);
+        navigationTarget = SpacingHelper.applySpacing(rawTarget, soldier);
     }
 
     private boolean reachedDestination() {
         if (rawTarget == null) return false;
-        boolean catchUp = ClearingCoordinator.isCatchingUp(soldier);
-        double tolerance = catchUp ? 0.8D : closeDistance;
-        return (!catchUp || ClearingCoordinator.allowsCatchUpDestination(soldier, soldier.blockPosition()))
-            && soldier.distanceToSqr(rawTarget.getX() + 0.5, rawTarget.getY() + 0.5,
-                rawTarget.getZ() + 0.5) <= tolerance * tolerance;
+        return soldier.distanceToSqr(rawTarget.getX() + 0.5, rawTarget.getY() + 0.5,
+            rawTarget.getZ() + 0.5) <= closeDistance * closeDistance;
     }
 
     private void submitNavigation() {
         if (navigationTarget == null) return;
-        if (ClearingCoordinator.isCatchingUp(soldier)) {
-            var path = ClearingCoordinator.createCatchUpPath(soldier, navigationTarget);
-            if (path != null) soldier.getNavigation().moveTo(path, speedModifier);
-        } else {
-            soldier.getNavigation().moveTo(navigationTarget.getX(), navigationTarget.getY(),
-                navigationTarget.getZ(), speedModifier);
-        }
+        soldier.getNavigation().moveTo(navigationTarget.getX(), navigationTarget.getY(),
+            navigationTarget.getZ(), speedModifier);
     }
 
     /**

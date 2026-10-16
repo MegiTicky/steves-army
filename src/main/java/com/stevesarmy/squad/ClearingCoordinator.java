@@ -11,7 +11,6 @@ import net.minecraft.world.entity.monster.Monster;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.phys.AABB;
 import com.stevesarmy.entity.SoldierEntity;
-import com.stevesarmy.entity.ai.SoldierGroundNavigation;
 import com.stevesarmy.combat.cover.CoverReservationManager;
 import com.stevesarmy.ping.PingType;
 import net.minecraft.core.BlockPos;
@@ -146,11 +145,6 @@ public final class ClearingCoordinator {
         Set<UUID> recipients = new HashSet<>();
         Set<UUID> arrived = new HashSet<>();
         Map<UUID, Integer> catchUpGenerations = new HashMap<>();
-        Map<UUID, BlockPos> catchUpDestinations = new HashMap<>();
-        Map<UUID, Long> catchUpRetryTicks = new HashMap<>();
-        Map<UUID, Long> catchUpProgressTicks = new HashMap<>();
-        Map<UUID, Vec3> catchUpProgressPositions = new HashMap<>();
-        Map<UUID, Set<BlockPos>> failedCatchUpDestinations = new HashMap<>();
         /** TEMP DIAGNOSTIC (wave A validation): last stall-eligibility value, for transition logs. */
         boolean diagStallEligible;
     }
@@ -305,11 +299,6 @@ public final class ClearingCoordinator {
         state.recipients = new HashSet<>(activity.recipientIds());
         state.arrived.clear();
         state.catchUpGenerations.clear();
-        state.catchUpDestinations.clear();
-        state.catchUpRetryTicks.clear();
-        state.catchUpProgressTicks.clear();
-        state.catchUpProgressPositions.clear();
-        state.failedCatchUpDestinations.clear();
         state.completedAtTick = Long.MIN_VALUE;
         state.level = findLevel(server, state);
         if (state.level == null) {
@@ -1025,53 +1014,30 @@ public final class ClearingCoordinator {
             }
             if (state.arrived.contains(id)) continue;
             Integer generation = state.catchUpGenerations.get(id);
-            boolean inside = insideArea(state, soldier.blockPosition());
-            // On the initial handoff, anyone already inside may keep their dock.
-            // Travellers subsequently finish at their actual GO_TO endpoint.
-            if (inside && (generation == null || (soldier.getPingMoveGeneration() == generation
-                && soldier.isGoToHolding()))) {
+            if (generation != null) {
+                if (soldier.getPingMoveGeneration() != generation
+                    || !soldier.hasGoToNavigationOwnership()) {
+                    // A newer player command owns this soldier. Never reclaim it.
+                    state.recipients.remove(id);
+                    state.catchUpGenerations.remove(id);
+                    SoldierFlightRecorder.event(soldier, "regroup", "superseded", generation);
+                } else if (soldier.isGoToHolding()) {
+                    // Ordinary GO_TO already performed the cover/endpoint handoff.
+                    state.arrived.add(id);
+                    SoldierFlightRecorder.event(soldier, "regroup", "arrived", soldier.blockPosition());
+                }
+                continue; // Normal GO_TO owns all path recovery and combat pauses.
+            }
+            if (insideArea(state, soldier.blockPosition())) {
                 holdArrivedSoldier(state, soldier);
                 state.arrived.add(id);
                 SoldierFlightRecorder.event(soldier, "regroup", "arrived", soldier.blockPosition());
-                state.catchUpDestinations.remove(id);
                 continue;
             }
-
-            if (soldier.hasValidAttackTarget()) soldier.clearAttackTarget();
-            if (generation == null) soldier.setHoldPosition(soldier.blockPosition());
-            if (generation != null && soldier.getPingMoveGeneration() == generation
-                && soldier.hasPersistentGoTo()) {
-                Vec3 previous = state.catchUpProgressPositions.get(id);
-                if (previous == null || soldier.position().distanceToSqr(previous) >= 1.0) {
-                    state.catchUpProgressPositions.put(id, soldier.position());
-                    state.catchUpProgressTicks.put(id, now);
-                }
-                // Combat, suppression and reloads may legitimately pause travel.
-                boolean fighting = (soldier.getTarget() != null && soldier.getTarget().isAlive())
-                    || soldier.getCoverBehaviorManager().isSuppressed() || soldier.isPreparingOrReloading();
-                if (fighting) state.catchUpProgressTicks.put(id, now);
-                if (now - state.catchUpProgressTicks.getOrDefault(id, now) < 100) continue;
-                BlockPos failed = state.catchUpDestinations.get(id);
-                if (failed != null) {
-                    state.failedCatchUpDestinations.computeIfAbsent(id, ignored -> new HashSet<>()).add(failed);
-                }
-                soldier.clearPingMoveTargetIfGeneration(generation);
-                soldier.getNavigation().stop();
-            }
-            if (now < state.catchUpRetryTicks.getOrDefault(id, 0L)) continue;
-            state.catchUpRetryTicks.put(id, now + 40);
-            BlockPos destination = chooseCatchUpDestination(state, soldier);
-            if (destination == null) {
-                SoldierFlightRecorder.event(soldier, "regroup", "destination-unavailable",
-                    "objective=" + state.objective + ",cells=" + state.areaCells.size());
-                continue; // No path is not an arrival.
-            }
-            SoldierFlightRecorder.event(soldier, "regroup", "destination-assigned", destination);
-            soldier.receivePing(PingType.GO_TO, Vec3.atBottomCenterOf(destination));
+            soldier.clearAttackTarget();
+            soldier.receivePing(PingType.GO_TO, Vec3.atBottomCenterOf(state.objective));
             state.catchUpGenerations.put(id, soldier.getPingMoveGeneration());
-            state.catchUpDestinations.put(id, destination);
-            state.catchUpProgressPositions.put(id, soldier.position());
-            state.catchUpProgressTicks.put(id, now);
+            SoldierFlightRecorder.event(soldier, "regroup", "go-to-issued", state.objective);
         }
 
         int pending = state.recipients.size() - state.arrived.size();
@@ -1116,47 +1082,6 @@ public final class ClearingCoordinator {
         }
     }
 
-    /** A distinct reachable fallback; GO_TO gets first choice of physical cover nearby. */
-    private static BlockPos chooseCatchUpDestination(ClearingState state, SoldierEntity soldier) {
-        UUID id = soldier.getUUID();
-        Set<BlockPos> failed = state.failedCatchUpDestinations.computeIfAbsent(id, ignored -> new HashSet<>());
-        List<BlockPos> candidates = state.areaCells.stream().map(BlockPos::of)
-            .filter(pos -> !failed.contains(pos))
-            .filter(pos -> state.catchUpDestinations.entrySet().stream()
-                .noneMatch(entry -> !entry.getKey().equals(id) && entry.getValue().distSqr(pos) < 4.0))
-            .sorted(Comparator.comparingDouble(pos -> pos.distSqr(state.objective)
-                + 0.1 * pos.distSqr(soldier.blockPosition())))
-            .toList();
-        int attempts = 0;
-        for (BlockPos candidate : candidates) {
-            if (!CoverReservationManager.isAvailableFor(candidate, soldier)
-                || !state.level.getEntitiesOfClass(SoldierEntity.class,
-                    new net.minecraft.world.phys.AABB(candidate).inflate(0.75),
-                    other -> other != soldier && other.isAlive()).isEmpty()) continue;
-            if (++attempts > 8) break;
-            var path = createCatchUpPath(soldier, candidate);
-            if (path != null && path.canReach() && path.getEndNode() != null
-                && path.getEndNode().asBlockPos().equals(candidate)) return candidate;
-            failed.add(candidate);
-        }
-        // Geometry/occupancy may change. Retry the bounded pool on a later pass.
-        if (candidates.isEmpty()) failed.clear();
-        return null;
-    }
-
-    /** A far straggler needs the same wider search used by attack approach routes. */
-    public static net.minecraft.world.level.pathfinder.Path createCatchUpPath(SoldierEntity soldier,
-                                                                            BlockPos destination) {
-        var path = soldier.getNavigation().createPath(destination, 0);
-        if ((path == null || !path.canReach() || path.getEndNode() == null
-            || !path.getEndNode().asBlockPos().equals(destination))
-            && soldier.getNavigation() instanceof SoldierGroundNavigation navigation) {
-            float range = (float) Math.min(96.0, Math.sqrt(destination.distSqr(soldier.blockPosition())) + 24.0);
-            path = navigation.createWidePath(destination, 0, range);
-        }
-        return path;
-    }
-
     public static boolean isRegrouping(UUID ownerId, FireTeam team, long generation) {
         ClearingState state = stateFor(ownerId, team);
         return state != null && state.generation == generation && state.regrouping;
@@ -1168,30 +1093,6 @@ public final class ClearingCoordinator {
             ? state.recipients.size() - state.arrived.size() : 0;
     }
 
-    private static ClearingState catchUpState(SoldierEntity soldier) {
-        UUID owner = soldier.getOwnerUUID().orElse(null);
-        EnumMap<FireTeam, ClearingState> teams = STATES.get(owner);
-        if (teams == null) return null;
-        for (ClearingState state : teams.values()) {
-            Integer generation = state.catchUpGenerations.get(soldier.getUUID());
-            if (state.regrouping && !state.arrived.contains(soldier.getUUID())
-                && state.recipients.contains(soldier.getUUID())
-                && state.level == soldier.level() && generation != null
-                && generation == soldier.getPingMoveGeneration()) return state;
-        }
-        return null;
-    }
-
-    public static boolean isCatchingUp(SoldierEntity soldier) {
-        return catchUpState(soldier) != null;
-    }
-
-    /** Constrain cover standing positions, not merely their distance from the ping. */
-    public static boolean allowsCatchUpDestination(SoldierEntity soldier, BlockPos position) {
-        ClearingState state = catchUpState(soldier);
-        return state == null || insideArea(state, position);
-    }
-
     public static void detachRecipients(UUID ownerId, Set<UUID> recipients) {
         EnumMap<FireTeam, ClearingState> teams = STATES.get(ownerId);
         if (teams == null) return;
@@ -1200,7 +1101,6 @@ public final class ClearingCoordinator {
                 state.recipients.remove(id);
                 state.arrived.remove(id);
                 Integer generation = state.catchUpGenerations.remove(id);
-                state.catchUpDestinations.remove(id);
                 if (generation != null && state.level != null
                     && state.level.getEntity(id) instanceof SoldierEntity soldier) {
                     soldier.clearPingMoveTargetIfGeneration(generation);

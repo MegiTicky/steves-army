@@ -4732,8 +4732,6 @@ private boolean shouldExitCoverForFollow() {
             CoverPoint currentCover = getCoverManager().getCurrentCover();
             for (CoverFinder.ScoredCover scoredCover : relocationCovers) {
                 CoverPoint cover = scoredCover.cover;
-                if (!ClearingCoordinator.allowsCatchUpDestination(soldier,
-                    BlockPos.containing(getCoverStandingPosition(cover.getPosition())))) continue;
                 if (failedCoverPositions.contains(cover.getPosition())
                     || (currentCover != null && cover.getPosition().equals(currentCover.getPosition()))) {
                     continue;
@@ -8423,9 +8421,6 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
 
     /** Starts navigation without re-entering tactical-bound admission. */
     private boolean startCoverPath(CoverPoint cover) {
-        // Applies to queued/async candidates as well as the relocation pool.
-        if (!ClearingCoordinator.allowsCatchUpDestination(soldier,
-            BlockPos.containing(getCoverStandingPosition(cover.getPosition())))) return false;
         if (isReloadBlockedMove()) {
             if (DiagnosticLogManager.isCoverLoggingEnabled()) {
                 StevesArmyMod.LOGGER.info("[PathDebug] Soldier {} cover path to {} held by reload, will retry after reload",
