@@ -1360,18 +1360,18 @@ public class SoldierEntity extends PathfinderMob implements Container {
             if (selected >= 0) loose[selected] = true;
         }
 
-        List<ItemStack> pouchContents = new ArrayList<>();
+        SoldierInventory pouchInventory = new SoldierInventory();
         for (int i = 0; i < inventory.getContainerSize(); i++) {
             ItemStack stack = inventory.getItem(i);
             if (stack.isEmpty()) continue;
             if (loose[i]) {
                 spawnAtLocation(stack.copy());
             } else {
-                pouchContents.add(stack.copy());
+                pouchInventory.setItem(i, stack.copy());
             }
         }
-        if (!pouchContents.isEmpty()) {
-            spawnAtLocation(com.stevesarmy.inventory.PouchContainer.packContents(pouchContents));
+        if (!pouchInventory.isEmpty()) {
+            com.stevesarmy.inventory.PouchContainer.dropInventoryAsPouch(this, pouchInventory);
         }
         for (int i = 0; i < inventory.getContainerSize(); i++) {
             inventory.setItem(i, ItemStack.EMPTY);
