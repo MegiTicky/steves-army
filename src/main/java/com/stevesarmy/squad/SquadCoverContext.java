@@ -18,6 +18,8 @@ public record SquadCoverContext(
     SquadCoverPeekabilityCache peekabilityCache,
     Vec3 ownerPosition
 ) {
+    public static final double MIN_DEFENSIVE_SPACING = 3.0D;
+
     public record FiringContact(UUID threatEntityId, Vec3 exposedPoint, long lastSeenTick) {
         public static final long MAX_AGE_TICKS = 200L;
         public static final int MAX_CONTACTS = 12;
@@ -37,6 +39,10 @@ public record SquadCoverContext(
             }
         }
         return false;
+    }
+
+    public boolean violatesDefensiveSpacing(BlockPos pos) {
+        return isTooClose(pos, MIN_DEFENSIVE_SPACING);
     }
 
     public boolean isSameCover(BlockPos pos) {

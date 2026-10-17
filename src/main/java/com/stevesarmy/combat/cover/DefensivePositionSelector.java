@@ -21,7 +21,7 @@ import java.util.Optional;
 public final class DefensivePositionSelector {
     public static final float COMPETITIVE_SCORE_DELTA = 0.15f;
     public static final float USABLE_COVER_FIRING_ACCESS = 0.25f;
-    private static final double MIN_SQUAD_SPACING = 3.0D;
+    private static final double MIN_SQUAD_SPACING = SquadCoverContext.MIN_DEFENSIVE_SPACING;
     private static final double PREFERRED_SQUAD_SPACING = 5.0D;
 
     private DefensivePositionSelector() { }
@@ -129,14 +129,20 @@ public final class DefensivePositionSelector {
         List<DefensivePositionCandidate.ProneFiringCandidate> spaced = candidates.stream()
             .filter(candidate -> closestPeerDistance(candidate.destination(), peerPositions) >= MIN_SQUAD_SPACING)
             .toList();
-        boolean fallback = spaced.isEmpty() && !candidates.isEmpty() && !peerPositions.isEmpty();
-        List<DefensivePositionCandidate.ProneFiringCandidate> choices = spaced.isEmpty() ? candidates : spaced;
-        DefensivePositionCandidate.ProneFiringCandidate selected = choices.stream().max(Comparator.comparingDouble(
-            candidate -> candidate.firingAccess() + candidate.protection() - candidate.routeExposure()
-                - candidate.movementCost() + spacingScore(closestPeerDistance(candidate.destination(), peerPositions))
-        )).orElse(null);
+        // Never fall back to an unspaced lane. If every candidate conflicts
+        // with a teammate, remain searching until a valid lane is available.
+        List<DefensivePositionCandidate.ProneFiringCandidate> choices = spaced;
+        Comparator<DefensivePositionCandidate.ProneFiringCandidate> ranking =
+            Comparator.comparingDouble((DefensivePositionCandidate.ProneFiringCandidate candidate) ->
+                candidate.firingAccess() + candidate.protection() - candidate.routeExposure()
+                    - candidate.movementCost())
+            .thenComparingDouble(candidate -> closestPeerDistance(candidate.destination(), peerPositions))
+            .thenComparingInt(candidate -> candidate.destination().getX())
+            .thenComparingInt(candidate -> candidate.destination().getZ())
+            .thenComparingInt(candidate -> candidate.destination().getY());
+        DefensivePositionCandidate.ProneFiringCandidate selected = choices.stream().max(ranking).orElse(null);
         return new SpacingResult(selected,
-            selected != null ? closestPeerDistance(selected.destination(), peerPositions) : -1.0D, fallback);
+            selected != null ? closestPeerDistance(selected.destination(), peerPositions) : -1.0D, false);
     }
 
     private static double closestPeerDistance(BlockPos candidate, List<BlockPos> peerPositions) {

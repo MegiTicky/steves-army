@@ -5183,7 +5183,7 @@ private boolean shouldExitCoverForFollow() {
             // fail-closed: keep searching/prone fallback rather than claiming
             // an arbitrary side of a block.
             if (!isUsableAgainstThreat(finder, cover, threatDirection)
-                || squadCtx.isTooClose(cover.getPosition(), 3.0D)) {
+                || squadCtx.violatesDefensiveSpacing(cover.getPosition())) {
                 if (DiagnosticLogManager.isCoverLoggingEnabled()) {
                     StevesArmyMod.LOGGER.info("[CoverGoal] Soldier {} rejected cover {} before reservation (protection/spacing)",
                         soldier.getId(), cover.getPosition());
