@@ -31,10 +31,11 @@ public record SquadCoverContext(
     }
 
     public boolean isTooClose(BlockPos pos, double minDist) {
-        if (occupiedCovers.isEmpty()) return false;
+        List<BlockPos> positions = getDefensivePositions();
+        if (positions.isEmpty()) return false;
         double minDistSq = minDist * minDist;
-        for (BlockPos cover : occupiedCovers) {
-            if (cover.distSqr(pos) < minDistSq) {
+        for (BlockPos defensivePosition : positions) {
+            if (defensivePosition.distSqr(pos) < minDistSq) {
                 return true;
             }
         }

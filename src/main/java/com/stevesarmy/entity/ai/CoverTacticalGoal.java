@@ -3513,6 +3513,18 @@ private void tickRepositioning() {
         Vec3 destination = proneFiringDestination.getCenter();
         if (soldier.position().distanceToSqr(destination) <= POSITIONING_TOLERANCE * POSITIONING_TOLERANCE) {
             navigation.stop();
+            if (buildSquadCoverContext().violatesDefensiveSpacing(proneFiringDestination)) {
+                proneFiringController.cancel("lane_spacing_conflict");
+                proneFiringDestination = null;
+                getCoverManager().setState(CoverBehaviorManager.CoverState.SEEKING_COVER);
+                requestCoverSearch(soldier.hasValidAttackTarget()
+                    ? QueuedSearchMode.ATTACK_SELECTING : QueuedSearchMode.NORMAL);
+                if (DiagnosticLogManager.isCoverLoggingEnabled()) {
+                    StevesArmyMod.LOGGER.info("[DefensivePosition] Soldier {} rejected arrived prone lane for spacing conflict",
+                        soldier.getId());
+                }
+                return;
+            }
             proneFiringController.onReached();
             if (DiagnosticLogManager.isCoverLoggingEnabled()) {
                 StevesArmyMod.LOGGER.info("[DefensivePosition] Soldier {} reached prone lane {}", soldier.getId(), proneFiringDestination);
@@ -4593,6 +4605,16 @@ private boolean shouldExitCoverForFollow() {
         
         if (currentCover != null && newCover.getPosition().equals(currentCover.getPosition())) return false;
 
+        CoverFinder admissionFinder = new CoverFinder(soldier.level());
+        if (!isUsableAgainstThreat(admissionFinder, newCover, getCoverSearchDirection())
+            || buildSquadCoverContext().violatesDefensiveSpacing(newCover.getPosition())) {
+            if (DiagnosticLogManager.isCoverLoggingEnabled()) {
+                StevesArmyMod.LOGGER.info("[CoverGoal] Soldier {} rejected reposition cover {} before reservation",
+                    soldier.getId(), newCover.getPosition());
+            }
+            return false;
+        }
+
         // This is the ordinary cover-to-cover path, not a protected low-crouch
         // trench shift. Restore normal movement dimensions before pathfinding.
         activeSuppressionRouteMovement = RouteMovement.NORMAL;
@@ -4663,6 +4685,8 @@ private boolean shouldExitCoverForFollow() {
             CoverPoint cover = scored.cover;
             if (failedCoverPositions.contains(cover.getPosition())
                 || (currentCover != null && currentCover.getPosition().equals(cover.getPosition()))
+                || !isUsableAgainstThreat(finder, cover, getCoverSearchDirection())
+                || buildSquadCoverContext().violatesDefensiveSpacing(cover.getPosition())
                 || !hasSuppressionFiringLaneFrom(getCoverStandingPosition(cover.getPosition()))) {
                 continue;
             }
@@ -5218,7 +5242,7 @@ private boolean shouldExitCoverForFollow() {
             }
             Optional<DefensivePositionCandidate.ProneFiringCandidate> prone =
                 DefensivePositionSelector.selectProne(soldier, soldier.getTarget(), getThreats(), tacticalCovers,
-                    squadCtx, exactPathValidationBudget);
+                    squadCtx, exactPathValidationBudget, threatDirection);
             if (prone.isPresent() && relocationType == RelocationType.NONE) {
                 startProneFiringMovement(prone.get());
                 logCoverSearchPerformance(finder, searchStarted, CoverMoveResult.COVER_STARTED, "prone-lane");
@@ -5371,7 +5395,7 @@ private boolean shouldExitCoverForFollow() {
         }
         Optional<DefensivePositionCandidate.ProneFiringCandidate> prone =
             DefensivePositionSelector.selectProne(soldier, soldier.getTarget(), getThreats(), tacticalCovers,
-                squadCtx, exactPathValidationBudget);
+                squadCtx, exactPathValidationBudget, threatDirection);
         if (prone.isPresent() && relocationType == RelocationType.NONE) {
             startProneFiringMovement(prone.get());
             logCoverSearchPerformance(finder, searchStarted, CoverMoveResult.COVER_STARTED, "prone-no-cover");
@@ -5404,8 +5428,19 @@ private boolean shouldExitCoverForFollow() {
     private CoverMoveResult tryReservePool(List<CoverFinder.ScoredCover> pool,
                                            CoverPoint currentCover, int attemptCap) {
         CoverPoint starvedCandidate = null;
+        CoverFinder admissionFinder = new CoverFinder(soldier.level());
+        Vec3 admissionDirection = getCoverSearchDirection();
+        SquadCoverContext admissionSquad = buildSquadCoverContext();
         for (CoverFinder.ScoredCover candidate : pool) {
             CoverPoint candidateCover = candidate.cover;
+            if (!isUsableAgainstThreat(admissionFinder, candidateCover, admissionDirection)
+                || admissionSquad.violatesDefensiveSpacing(candidateCover.getPosition())) {
+                if (DiagnosticLogManager.isCoverLoggingEnabled()) {
+                    StevesArmyMod.LOGGER.info("[CoverGoal] Soldier {} rejected pool candidate {} before reservation",
+                        soldier.getId(), candidateCover.getPosition());
+                }
+                continue;
+            }
             if (failedCoverPositions.contains(candidateCover.getPosition())) {
                 if (attackDebugLog()) {
                     StevesArmyMod.LOGGER.info("[ReservePool] {} skip {} blacklisted",

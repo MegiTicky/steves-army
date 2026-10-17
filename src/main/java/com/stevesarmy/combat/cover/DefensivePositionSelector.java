@@ -29,7 +29,7 @@ public final class DefensivePositionSelector {
     public static Optional<DefensivePositionCandidate.ProneFiringCandidate> selectProne(
         SoldierEntity soldier, @Nullable LivingEntity target, ThreatAwareness threats,
         List<CoverFinder.ScoredCover> covers, SquadCoverContext squadCtx,
-        ExactPathValidationBudget pathBudget) {
+        ExactPathValidationBudget pathBudget, @Nullable Vec3 threatDirection) {
         CombatGoalController combatGoal = soldier.getCombatGoal();
         if (combatGoal == null) {
             trace(soldier, "no_combat_goal", "none", 0, 0, 0, 0, false, 0, -1.0D, false);
@@ -46,8 +46,13 @@ public final class DefensivePositionSelector {
             return Optional.empty();
         }
         float bestScore = covers.isEmpty() ? 0.0f : (float)covers.get(0).score;
-        boolean usablePhysicalCover = covers.stream().anyMatch(sc -> sc.score >= bestScore - COMPETITIVE_SCORE_DELTA
-            && sc.cover.getFiringAccessScore() >= USABLE_COVER_FIRING_ACCESS);
+        CoverFinder coverFinder = new CoverFinder(soldier.level());
+        boolean hasProtectionContext = threatDirection != null && threatDirection.lengthSqr() >= 0.001D
+            || coverFinder.hasPrimaryThreat(soldier, threatDirection);
+        boolean usablePhysicalCover = hasProtectionContext && covers.stream()
+            .anyMatch(sc -> sc.score >= bestScore - COMPETITIVE_SCORE_DELTA
+                && sc.cover.getFiringAccessScore() >= USABLE_COVER_FIRING_ACCESS
+                && coverFinder.isPrimaryThreatProtected(sc.cover, soldier, threatDirection));
         if (usablePhysicalCover) {
             trace(soldier, "physical_firing_cover", aimSource.label(), 0, 0, 0, 0, true, 0, -1.0D, false);
             return Optional.empty();
