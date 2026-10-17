@@ -41,6 +41,8 @@ final class ProneFiringController {
         destination = candidate.destination().immutable();
         state = atDestination ? State.ACTIVE : State.MOVING;
         if (atDestination) {
+            faceThreat();
+            authorizePosition(true);
             soldier.setFiringProne(true);
             activationTick = soldier.tickCount;
         }
@@ -54,6 +56,8 @@ final class ProneFiringController {
     void onReached() {
         if (state == State.MOVING) {
             state = State.ACTIVE;
+            faceThreat();
+            authorizePosition(true);
             soldier.setFiringProne(true);
             activationTick = soldier.tickCount;
             if (DiagnosticLogManager.isCoverLoggingEnabled()) {
@@ -73,7 +77,9 @@ final class ProneFiringController {
             cancel(blockReason);
             return;
         }
-
+        // Reload/engagement posture writers may clear the shared pose. The
+        // validated, occupied lane remains its owner until explicitly cancelled.
+        if (!soldier.isFiringProne()) soldier.setFiringProne(true);
     }
 
     boolean isPlanActive() {
@@ -93,12 +99,29 @@ final class ProneFiringController {
         state = State.IDLE;
         destination = null;
         activationTick = -1;
+        authorizePosition(false);
         if (soldier.isFiringProne()) {
             soldier.setFiringProne(false);
         }
         if (wasActive && DiagnosticLogManager.isCoverLoggingEnabled()) {
             StevesArmyMod.LOGGER.info("[PronePlan] soldier={} event=cancel reason={}", soldier.getId(), reason);
         }
+    }
+
+    private void faceThreat() {
+        LivingEntity target = soldier.getTarget();
+        Vec3 direction = target != null && target.isAlive() ? target.position().subtract(soldier.position())
+            : soldier.getThreatAwareness().getPrimaryDirection(soldier.position());
+        if (direction == null || direction.horizontalDistanceSqr() < 0.001D) return;
+        float yaw = (float)(Mth.atan2(direction.z, direction.x) * (180.0D / Math.PI)) - 90.0F;
+        soldier.setYRot(yaw);
+        soldier.setYBodyRot(yaw);
+        soldier.setYHeadRot(yaw);
+    }
+
+    private void authorizePosition(boolean authorized) {
+        CombatGoalController combat = soldier.getCombatGoal();
+        if (combat != null) combat.setFiringPronePositionAuthorized(authorized);
     }
 
     @Nullable

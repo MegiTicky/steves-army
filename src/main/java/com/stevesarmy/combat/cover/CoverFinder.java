@@ -660,7 +660,9 @@ public class CoverFinder {
     public boolean isPrimaryThreatProtected(CoverPoint coverPoint, LivingEntity soldier, Vec3 fallbackDirection) {
         CoverProtectionContext protection = resolveProtectionContext(soldier, fallbackDirection);
         Vec3 direction = protection.directionFrom(coverPoint.getPosition());
-        return direction == null || new CoverQualityEvaluator(level).isDirectionProtected(coverPoint, direction);
+        // Directional protection is an admission rule. Unknown or stale threat
+        // direction must never turn into an implicit pass for a cover claim.
+        return direction != null && new CoverQualityEvaluator(level).isDirectionProtected(coverPoint, direction);
     }
 
     /** Tests physical protection against an explicit threat direction. */

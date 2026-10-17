@@ -17,13 +17,8 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
 
-/** Chooses a nearby prone firing lane only when comparable physical cover is blind. */
+/** Chooses a separated prone lane only when no usable protective cover is available. */
 public final class DefensivePositionSelector {
-    public static final float COMPETITIVE_SCORE_DELTA = 0.15f;
-    public static final float USABLE_COVER_FIRING_ACCESS = 0.25f;
-    private static final double MIN_SQUAD_SPACING = SquadCoverContext.MIN_DEFENSIVE_SPACING;
-    private static final double PREFERRED_SQUAD_SPACING = 5.0D;
-
     private DefensivePositionSelector() { }
 
     public static Optional<DefensivePositionCandidate.ProneFiringCandidate> selectProne(
@@ -35,7 +30,7 @@ public final class DefensivePositionSelector {
             trace(soldier, "no_combat_goal", "none", 0, 0, 0, 0, false, 0, -1.0D, false);
             return Optional.empty();
         }
-        AimSource aimSource = resolveAimSource(target, threats, combatGoal);
+        AimSource aimSource = resolveAimSource(soldier, target, threats, combatGoal);
         if (aimSource == null) {
             trace(soldier, "no_threat", "none", 0, 0, 0, 0, false, 0, -1.0D, false);
             return Optional.empty();
@@ -45,21 +40,24 @@ public final class DefensivePositionSelector {
             trace(soldier, safetyReason, aimSource.label(), 0, 0, 0, 0, false, 0, -1.0D, false);
             return Optional.empty();
         }
-        float bestScore = covers.isEmpty() ? 0.0f : (float)covers.get(0).score;
         CoverFinder coverFinder = new CoverFinder(soldier.level());
         boolean hasProtectionContext = threatDirection != null && threatDirection.lengthSqr() >= 0.001D
             || coverFinder.hasPrimaryThreat(soldier, threatDirection);
         boolean usablePhysicalCover = hasProtectionContext && covers.stream()
-            .anyMatch(sc -> sc.score >= bestScore - COMPETITIVE_SCORE_DELTA
-                && sc.cover.getFiringAccessScore() >= USABLE_COVER_FIRING_ACCESS
+            .anyMatch(sc -> !squadCtx.violatesDefensiveSpacing(sc.cover.getPosition())
+                && CoverReservationManager.isAvailableFor(sc.cover.getPosition(), soldier)
                 && coverFinder.isPrimaryThreatProtected(sc.cover, soldier, threatDirection));
         if (usablePhysicalCover) {
-            trace(soldier, "physical_firing_cover", aimSource.label(), 0, 0, 0, 0, true, 0, -1.0D, false);
+            trace(soldier, "protective_cover", aimSource.label(), 0, 0, 0, 0, true, 0, -1.0D, false);
             return Optional.empty();
         }
 
-        ScanResult scan = scanProneLanes(soldier, aimSource.aimPoint(), soldier.level(), pathBudget);
-        SpacingResult spacing = selectWithSpacing(scan.candidates(), squadCtx.getDefensivePositions());
+        if (DiagnosticLogManager.isCoverLoggingEnabled()) {
+            StevesArmyMod.LOGGER.info("[ProneAim] soldier={} pos={} aim={} target={}", soldier.getId(),
+                soldier.position(), aimSource.aimPoint(), target != null ? target.getName().getString() : "none");
+        }
+        ScanResult scan = scanProneLanes(soldier, aimSource.aimPoint(), soldier.level(), pathBudget, squadCtx);
+        SpacingResult spacing = selectWithSpacing(scan.candidates(), squadCtx, soldier);
         trace(soldier, spacing.candidate() != null ? "selected" : "no_valid_lane", aimSource.label(), scan.terrainValid(),
             scan.proneLos(), scan.pathValid(), scan.pathRejected(), false, squadCtx.getDefensivePositions().size(),
             spacing.closestPeerDistance(), spacing.usedFallback());
@@ -82,20 +80,33 @@ public final class DefensivePositionSelector {
     }
 
     @Nullable
-    private static AimSource resolveAimSource(@Nullable LivingEntity target, ThreatAwareness threats,
+    private static AimSource resolveAimSource(SoldierEntity soldier, @Nullable LivingEntity target, ThreatAwareness threats,
                                               CombatGoalController combatGoal) {
         if (target != null && target.isAlive()) {
             return new AimSource(combatGoal.getProneFiringAimPoint(target), "target");
         }
         BlockPos threatPos = threats.getPrimaryThreatPosition();
-        if (threatPos == null) return null;
-        return new AimSource(new Vec3(threatPos.getX() + .5, threatPos.getY() + 1.35, threatPos.getZ() + .5),
-            "threat_memory");
+        if (threatPos != null) {
+            return new AimSource(new Vec3(threatPos.getX() + .5, threatPos.getY() + 1.35, threatPos.getZ() + .5),
+                "threat_memory");
+        }
+        CoverProtectionContext protection = combatGoal.resolveCoverProtectionContext();
+        if (protection.threatPosition() != null) {
+            return new AimSource(protection.threatPosition().add(0.0D, 1.0D, 0.0D), "last_seen");
+        }
+        Vec3 direction = protection.awarenessDirection();
+        if (direction != null && direction.horizontalDistanceSqr() > 0.001D) {
+            Vec3 horizontal = new Vec3(direction.x, 0.0D, direction.z).normalize();
+            return new AimSource(soldier.position().add(horizontal.scale(32.0D)).add(0.0D, 1.35D, 0.0D),
+                "awareness_direction");
+        }
+        return null;
     }
 
     private static ScanResult scanProneLanes(
-        SoldierEntity soldier, Vec3 aimPoint, Level level, ExactPathValidationBudget pathBudget) {
-        java.util.ArrayList<DefensivePositionCandidate.ProneFiringCandidate> result = new java.util.ArrayList<>();
+        SoldierEntity soldier, Vec3 aimPoint, Level level, ExactPathValidationBudget pathBudget,
+        SquadCoverContext squadCtx) {
+        java.util.ArrayList<DefensivePositionCandidate.ProneFiringCandidate> eligible = new java.util.ArrayList<>();
         BlockPos origin = soldier.blockPosition();
         int terrainValid = 0;
         int proneLos = 0;
@@ -112,64 +123,72 @@ public final class DefensivePositionSelector {
             if (!firingLaneAccepted) continue;
             proneLos++;
             boolean currentPosition = pos.equals(origin);
-            if (!currentPosition) {
+            Vec3 spacingPosition = currentPosition ? soldier.position()
+                : new Vec3(pos.getX() + 0.5D, pos.getY(), pos.getZ() + 0.5D);
+            if (squadCtx.violatesDefensiveSpacing(spacingPosition)) continue;
+            float distance = (float)Math.sqrt(x * x + z * z);
+            float protection = adjacentCover(level, pos) ? .15f : 0.0f;
+            eligible.add(new DefensivePositionCandidate.ProneFiringCandidate(pos, 1.0f, protection,
+                0.0f, distance / 5.0f, currentPosition ? "prone-current-lane" : "prone-lane"));
+        }
+
+        // Spend the bounded path budget on the nearest separated lanes first.
+        // Stable coordinates break equal-distance ties across repeated searches.
+        eligible.sort(Comparator
+            .comparingDouble(DefensivePositionCandidate.ProneFiringCandidate::movementCost)
+            .thenComparingInt(candidate -> candidate.destination().getX())
+            .thenComparingInt(candidate -> candidate.destination().getZ())
+            .thenComparingInt(candidate -> candidate.destination().getY()));
+        java.util.ArrayList<DefensivePositionCandidate.ProneFiringCandidate> result = new java.util.ArrayList<>();
+        for (DefensivePositionCandidate.ProneFiringCandidate candidate : eligible) {
+            if (!candidate.destination().equals(origin)) {
                 if (!pathBudget.tryAcquire()) break;
-                net.minecraft.world.level.pathfinder.Path path = soldier.getNavigation().createPath(pos, 0);
+                net.minecraft.world.level.pathfinder.Path path =
+                    soldier.getNavigation().createPath(candidate.destination(), 0);
                 if (path == null || !path.canReach()) {
                     pathRejected++;
                     continue;
                 }
             }
             pathValid++;
-            float distance = (float)Math.sqrt(x * x + z * z);
-            float protection = adjacentCover(level, pos) ? .15f : 0.0f;
-            result.add(new DefensivePositionCandidate.ProneFiringCandidate(pos, 1.0f, protection,
-                0.0f, distance / 5.0f, currentPosition ? "prone-current-lane" : "prone-lane"));
+            result.add(candidate);
         }
         return new ScanResult(result, terrainValid, proneLos, pathValid, pathRejected);
     }
 
     private static SpacingResult selectWithSpacing(
-        List<DefensivePositionCandidate.ProneFiringCandidate> candidates, List<BlockPos> peerPositions) {
+        List<DefensivePositionCandidate.ProneFiringCandidate> candidates,
+        SquadCoverContext squadCtx, SoldierEntity soldier) {
         List<DefensivePositionCandidate.ProneFiringCandidate> spaced = candidates.stream()
-            .filter(candidate -> closestPeerDistance(candidate.destination(), peerPositions) >= MIN_SQUAD_SPACING)
+            .filter(candidate -> !squadCtx.violatesDefensiveSpacing(position(candidate, soldier)))
             .toList();
+        Comparator<DefensivePositionCandidate.ProneFiringCandidate> ranking =
+            Comparator.comparingDouble(DefensivePositionCandidate.ProneFiringCandidate::movementCost)
+                .thenComparing(Comparator.comparingDouble(
+                    (DefensivePositionCandidate.ProneFiringCandidate candidate) ->
+                        squadCtx.nearestDefensiveDistance(position(candidate, soldier))).reversed())
+                .thenComparingInt(candidate -> candidate.destination().getX())
+                .thenComparingInt(candidate -> candidate.destination().getZ())
+                .thenComparingInt(candidate -> candidate.destination().getY());
         // Never fall back to an unspaced lane. If every candidate conflicts
         // with a teammate, remain searching until a valid lane is available.
-        List<DefensivePositionCandidate.ProneFiringCandidate> choices = spaced;
-        Comparator<DefensivePositionCandidate.ProneFiringCandidate> ranking =
-            Comparator.comparingDouble((DefensivePositionCandidate.ProneFiringCandidate candidate) ->
-                candidate.firingAccess() + candidate.protection() - candidate.routeExposure()
-                    - candidate.movementCost())
-            .thenComparingDouble(candidate -> closestPeerDistance(candidate.destination(), peerPositions))
-            .thenComparingInt(candidate -> candidate.destination().getX())
-            .thenComparingInt(candidate -> candidate.destination().getZ())
-            .thenComparingInt(candidate -> candidate.destination().getY());
-        DefensivePositionCandidate.ProneFiringCandidate selected = choices.stream().max(ranking).orElse(null);
+        DefensivePositionCandidate.ProneFiringCandidate selected = spaced.stream().min(ranking).orElse(null);
         return new SpacingResult(selected,
-            selected != null ? closestPeerDistance(selected.destination(), peerPositions) : -1.0D, false);
+            selected != null ? squadCtx.nearestDefensiveDistance(position(selected, soldier)) : -1.0D, false);
     }
 
-    private static double closestPeerDistance(BlockPos candidate, List<BlockPos> peerPositions) {
-        double closest = Double.POSITIVE_INFINITY;
-        for (BlockPos peer : peerPositions) {
-            double dx = candidate.getX() - peer.getX();
-            double dz = candidate.getZ() - peer.getZ();
-            closest = Math.min(closest, Math.sqrt(dx * dx + dz * dz));
+    private static Vec3 position(DefensivePositionCandidate.ProneFiringCandidate candidate, SoldierEntity soldier) {
+        BlockPos destination = candidate.destination();
+        if (destination.equals(soldier.blockPosition())) {
+            return soldier.position();
         }
-        return closest;
-    }
-
-    private static double spacingScore(double closestPeerDistance) {
-        if (!Double.isFinite(closestPeerDistance) || closestPeerDistance <= MIN_SQUAD_SPACING) return 0.0D;
-        return Math.min(1.0D, (closestPeerDistance - MIN_SQUAD_SPACING)
-            / (PREFERRED_SQUAD_SPACING - MIN_SQUAD_SPACING));
+        return new Vec3(destination.getX() + 0.5D, destination.getY(), destination.getZ() + 0.5D);
     }
 
     private static void trace(SoldierEntity soldier, String reason, String threatSource, int terrainValid, int proneLos,
                               int pathValid, int pathRejected, boolean physicalCover, int peerCount,
                               double closestPeerDistance, boolean spacingFallback) {
-        if (DiagnosticLogManager.isCoverLoggingEnabled() && soldier.tickCount % 20 == 0) {
+        if (DiagnosticLogManager.isCoverLoggingEnabled()) {
             String closest = closestPeerDistance < 0.0D || !Double.isFinite(closestPeerDistance)
                 ? "none" : String.format(java.util.Locale.ROOT, "%.1f", closestPeerDistance);
             StevesArmyMod.LOGGER.info("[DefensivePosition] soldier={} result={} source={} terrain={} proneLos={} paths={} pathRejected={} physicalFiringCover={} peers={} closestPeer={} spacingFallback={}",

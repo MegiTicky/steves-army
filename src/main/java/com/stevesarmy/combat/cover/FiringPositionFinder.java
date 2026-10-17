@@ -398,9 +398,8 @@ public final class FiringPositionFinder {
         for (int x = -SEARCH_RADIUS; x <= SEARCH_RADIUS; x++) {
             for (int z = -SEARCH_RADIUS; z <= SEARCH_RADIUS; z++) {
                 if (x * x + z * z > SEARCH_RADIUS * SEARCH_RADIUS) continue;
-                BlockPos ground = level.getHeightmapPos(Heightmap.Types.WORLD_SURFACE,
+                BlockPos pos = level.getHeightmapPos(Heightmap.Types.WORLD_SURFACE,
                     anchor.offset(x, 0, z));
-                BlockPos pos = ground.above();
                 if (!isProneTerrainValid(level, pos)) continue;
                 positionsChecked++;
                 if (!CoverReservationManager.isProneAvailableFor(pos, mg)) continue;
@@ -899,9 +898,8 @@ public final class FiringPositionFinder {
                 if (x * x + z * z > radius * radius) {
                     continue;
                 }
-                BlockPos ground = level.getHeightmapPos(
+                BlockPos pos = level.getHeightmapPos(
                     Heightmap.Types.WORLD_SURFACE, anchor.offset(x, 0, z));
-                BlockPos pos = ground.above();
                 if (!isProneTerrainValid(level, pos)) {
                     continue;
                 }
