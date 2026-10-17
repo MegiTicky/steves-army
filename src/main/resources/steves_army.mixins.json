@@ -9,6 +9,7 @@
     "GunItemRendererMixin",
     "MinecraftGlowMixin",
     "MouseHandlerWheelMixin",
+    "KeyboardHandlerWheelMixin",
     "SoldierItemInHandLayerMixin"
   ],
   "injectors": {

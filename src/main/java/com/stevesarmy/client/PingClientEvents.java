@@ -121,8 +121,14 @@ public class PingClientEvents {
     }
     
     @SubscribeEvent
+    public static void onScreenOpening(net.minecraftforge.client.event.ScreenEvent.Opening event) {
+        if (event.getNewScreen() != null) WheelInteractionController.cancelAll();
+    }
+
+    @SubscribeEvent
     public static void onWorldUnload(LevelEvent.Unload event) {
         if (event.getLevel().isClientSide()) {
+            WheelInteractionController.cancelAll();
             soldierDebugDataMap.clear();
             EnemyContactOverlay.clear();
             ClientSquadActivityData.INSTANCE.clear();
@@ -176,6 +182,7 @@ public class PingClientEvents {
     public static void onClientTick(TickEvent.ClientTickEvent event) {
         if (event.phase != TickEvent.Phase.END) return;
         
+        WheelInteractionController.tick();
         PingManager.tick();
         PingWheelHandler.tick();
         WheelCycleController.tick();
@@ -352,6 +359,7 @@ public class PingClientEvents {
                 SwapRoleWheelRenderer.render(event.getGuiGraphics());
             }
 
+            WheelInteractionController.drawHint(event.getGuiGraphics());
             EnemyContactOverlay.render(event.getGuiGraphics(), lastWorldRenderContext);
             PingOverlayRenderer.render(event.getGuiGraphics(), lastWorldRenderContext);
             SquadActivityOverlayRenderer.render(event.getGuiGraphics(), lastWorldRenderContext);

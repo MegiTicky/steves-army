@@ -3,6 +3,8 @@ package com.stevesarmy.client;
 import net.minecraftforge.common.ForgeConfigSpec;
 
 public final class StevesArmyClientConfig {
+    public enum WheelInteractionMode { HOLD, CLICK }
+    public static final ForgeConfigSpec.EnumValue<WheelInteractionMode> WHEEL_INTERACTION_MODE;
     public static final ForgeConfigSpec SPEC;
     public static final ForgeConfigSpec.DoubleValue SOLDIER_HELD_ITEM_RENDER_DISTANCE;
     public static final ForgeConfigSpec.BooleanValue SHOW_OWNED_SOLDIER_GLOW;
@@ -48,6 +50,12 @@ public final class StevesArmyClientConfig {
         builder.pop();
 
         builder.push("controls");
+        WHEEL_INTERACTION_MODE = builder
+            .comment("HOLD: hold the wheel binding and release to select (default).",
+                     "CLICK: press to open, left-click to select; Escape or the opener cancels.",
+                     "Applies to command, vehicle, formation and fire-team wheels.",
+                     "In CLICK mode right-click always switches command/vehicle pages.")
+            .defineEnum("wheelInteractionMode", WheelInteractionMode.HOLD);
         ENABLE_FIRE_TEAM_WHEEL = builder
             .comment("Enable the fire-team selector wheel (P key, or Ctrl+Middle-click).",
                      "When disabled, use the cycle fire team key binding instead.",

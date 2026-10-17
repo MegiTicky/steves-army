@@ -1,4 +1,5 @@
 {
+  "wheel.steves_army.click_hint": "Left-click: select | Esc / opening key: cancel",
     "itemGroup.steves_army": "Steve's Army",
     "key.steves_army.toggle_squad": "Toggle Squad Mode",
     "key.steves_army.debug": "Debug Soldiers",

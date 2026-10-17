@@ -30,8 +30,22 @@ public class FormationWheelHandler {
         }
 
         boolean isKeyDown = KeyBindings.FORMATION_WHEEL.isDown();
+        boolean openingPress = WheelInteractionController.takeFormationPress() | (isKeyDown && !wasKeyDown);
 
-        if (isKeyDown && !wasKeyDown) {
+        if (!WheelInteractionController.canOpen()) {
+            cancel();
+            wasKeyDown = isKeyDown;
+            return;
+        }
+
+        if (openingPress && isWheelActive && WheelInteractionController.isClickMode()) {
+            cancel();
+            wasKeyDown = isKeyDown;
+            return;
+        }
+
+        if (openingPress) {
+            WheelInteractionController.beforeOpen();
             isWheelActive = true;
             pressStartTime = System.currentTimeMillis();
 
@@ -40,42 +54,62 @@ public class FormationWheelHandler {
             StevesArmyMod.LOGGER.info("Formation wheel activated");
         }
 
-        if (!isKeyDown && wasKeyDown && isWheelActive) {
-            long holdTime = System.currentTimeMillis() - pressStartTime;
-
-            releaseMouse(mc);
-
-            if (holdTime >= HOLD_TIME_MS) {
-                SquadFormation selectedFormation = currentHoveredFormation;
-                StevesArmyMod.LOGGER.info("Formation wheel released after {}ms, selected: {}", holdTime, selectedFormation.getDisplayName());
-
-                if (selectedFormation == SquadFormation.CQB) {
-                    com.stevesarmy.network.CQBToggleMessage message = new com.stevesarmy.network.CQBToggleMessage();
-                    NetworkHandler.INSTANCE.sendToServer(message);
-                } else {
-                    FormationMessage message = new FormationMessage(selectedFormation);
-                    NetworkHandler.INSTANCE.sendToServer(message);
-                }
-            }
-
-            isWheelActive = false;
-            FormationWheelRenderer.resetLogFlag();
+        if (!isKeyDown && wasKeyDown && isWheelActive && !WheelInteractionController.isClickMode()) {
+            finish(false);
         }
 
         wasKeyDown = isKeyDown;
     }
 
+    public static void confirm() {
+        if (isWheelActive) finish(true);
+    }
+
+    public static void cancel() {
+        if (!isWheelActive) return;
+        isWheelActive = false;
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.player != null && mc.screen == null && mc.isWindowActive()) releaseMouse(mc);
+    }
+
+    private static void finish(boolean force) {
+        Minecraft mc = Minecraft.getInstance();
+
+        long holdTime = System.currentTimeMillis() - pressStartTime;
+
+        if (force) currentHoveredFormation = getHoveredFormation();
+        releaseMouse(mc);
+
+        if (force || holdTime >= HOLD_TIME_MS) {
+            SquadFormation selectedFormation = currentHoveredFormation;
+            StevesArmyMod.LOGGER.info("Formation wheel released after {}ms, selected: {}", holdTime, selectedFormation.getDisplayName());
+
+            if (selectedFormation == SquadFormation.CQB) {
+                com.stevesarmy.network.CQBToggleMessage message = new com.stevesarmy.network.CQBToggleMessage();
+                NetworkHandler.INSTANCE.sendToServer(message);
+            } else {
+                FormationMessage message = new FormationMessage(selectedFormation);
+                NetworkHandler.INSTANCE.sendToServer(message);
+            }
+        }
+
+        isWheelActive = false;
+        FormationWheelRenderer.resetLogFlag();
+    }
+
     private static void grabMouseForWheel(Minecraft mc) {
         long windowHandle = mc.getWindow().getWindow();
-        int width = mc.getWindow().getWidth();
-        int height = mc.getWindow().getHeight();
-
-        GLFW.glfwSetCursorPos(windowHandle, width / 2.0, height / 2.0);
-
-        pressMouseX = width / 2.0;
-        pressMouseY = height / 2.0;
-
+        // GLFW cursor positions use logical window units, not Retina framebuffer pixels.
         mc.mouseHandler.releaseMouse();
+        int[] width = new int[1];
+        int[] height = new int[1];
+        GLFW.glfwGetWindowSize(windowHandle, width, height);
+        GLFW.glfwSetCursorPos(windowHandle, width[0] / 2.0, height[0] / 2.0);
+        double[] cursorX = new double[1];
+        double[] cursorY = new double[1];
+        GLFW.glfwGetCursorPos(windowHandle, cursorX, cursorY);
+        pressMouseX = cursorX[0];
+        pressMouseY = cursorY[0];
     }
 
     private static void releaseMouse(Minecraft mc) {

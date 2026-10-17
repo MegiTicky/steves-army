@@ -38,42 +38,81 @@ public class FireTeamWheelHandler {
             || GLFW.glfwGetKey(window, GLFW.GLFW_KEY_RIGHT_CONTROL) == GLFW.GLFW_PRESS;
         boolean pingDown = KeyBindings.isPingWheelKeyDown();
         boolean fireTeamKeyDown = KeyBindings.FIRE_TEAM_WHEEL.isDown() || (ctrlHeld && pingDown);
+        boolean openingPress = WheelInteractionController.takeTeamPress() | (fireTeamKeyDown && !wasKeyDown);
+        boolean shortcutPress = PingWheelHandler.takeFireTeamShortcutPress();
+        openingPress |= ctrlHeld && shortcutPress;
 
-        if (fireTeamKeyDown && !wasKeyDown) {
+        if (!WheelInteractionController.canOpen()) {
+            cancel();
+            wasKeyDown = fireTeamKeyDown;
+            return;
+        }
+
+        if (openingPress && isWheelActive && WheelInteractionController.isClickMode()) {
+            cancel();
+            wasKeyDown = fireTeamKeyDown;
+            return;
+        }
+
+        if (openingPress) {
+            WheelInteractionController.beforeOpen();
             isWheelActive = true;
             pressStartTime = System.currentTimeMillis();
             grabMouseForWheel(mc);
         }
 
-        if (!fireTeamKeyDown && wasKeyDown && isWheelActive) {
-            long holdTime = System.currentTimeMillis() - pressStartTime;
-            releaseMouse(mc);
-
-            if (holdTime >= HOLD_TIME_MS) {
-                FireTeam selected = currentHoveredTeam;
-                if (selected != FireTeam.ALL) {
-                    if (selected.ordinal() <= FireTeamScopeState.INSTANCE.getTeamCount()) {
-                        FireTeamScopeState.INSTANCE.setCurrentScope(selected, "fire-team wheel");
-                    }
-                } else {
-                    FireTeamScopeState.INSTANCE.setCurrentScope(FireTeam.ALL, "fire-team wheel");
-                }
-            }
-
-            isWheelActive = false;
+        if (!fireTeamKeyDown && wasKeyDown && isWheelActive && !WheelInteractionController.isClickMode()) {
+            finish(false);
         }
 
         wasKeyDown = fireTeamKeyDown;
     }
 
+    public static void confirm() {
+        if (isWheelActive) finish(true);
+    }
+
+    public static void cancel() {
+        if (!isWheelActive) return;
+        isWheelActive = false;
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.player != null && mc.screen == null && mc.isWindowActive()) releaseMouse(mc);
+    }
+
+    private static void finish(boolean force) {
+        Minecraft mc = Minecraft.getInstance();
+
+        long holdTime = System.currentTimeMillis() - pressStartTime;
+        if (force) currentHoveredTeam = getHoveredTeam();
+        releaseMouse(mc);
+
+        if (force || holdTime >= HOLD_TIME_MS) {
+            FireTeam selected = currentHoveredTeam;
+            if (selected != FireTeam.ALL) {
+                if (selected.ordinal() <= FireTeamScopeState.INSTANCE.getTeamCount()) {
+                    FireTeamScopeState.INSTANCE.setCurrentScope(selected, "fire-team wheel");
+                }
+            } else {
+                FireTeamScopeState.INSTANCE.setCurrentScope(FireTeam.ALL, "fire-team wheel");
+            }
+        }
+
+        isWheelActive = false;
+    }
+
     private static void grabMouseForWheel(Minecraft mc) {
         long windowHandle = mc.getWindow().getWindow();
-        int width = mc.getWindow().getWidth();
-        int height = mc.getWindow().getHeight();
-        GLFW.glfwSetCursorPos(windowHandle, width / 2.0, height / 2.0);
-        pressMouseX = width / 2.0;
-        pressMouseY = height / 2.0;
+        // GLFW cursor positions use logical window units, not Retina framebuffer pixels.
         mc.mouseHandler.releaseMouse();
+        int[] width = new int[1];
+        int[] height = new int[1];
+        GLFW.glfwGetWindowSize(windowHandle, width, height);
+        GLFW.glfwSetCursorPos(windowHandle, width[0] / 2.0, height[0] / 2.0);
+        double[] cursorX = new double[1];
+        double[] cursorY = new double[1];
+        GLFW.glfwGetCursorPos(windowHandle, cursorX, cursorY);
+        pressMouseX = cursorX[0];
+        pressMouseY = cursorY[0];
     }
 
     private static void releaseMouse(Minecraft mc) {

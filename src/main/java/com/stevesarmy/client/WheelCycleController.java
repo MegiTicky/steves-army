@@ -6,7 +6,7 @@ import net.minecraft.network.chat.Component;
 import org.lwjgl.glfw.GLFW;
 
 /**
- * Multi-page state for the hold-to-open wheels. The middle-mouse ping session has two pages:
+ * Multi-page state for the command wheel. The middle-mouse ping session has two pages:
  * the ping orders wheel (default) and the vehicle wheel. Pressing the configured cycle mouse
  * button (right-click by default) while the wheel is open flips between them; releasing the
  * wheel key fires the hovered action of the current page.
@@ -45,11 +45,15 @@ public final class WheelCycleController {
     /** Called when the ping wheel session opens; the default page is the ping orders wheel. */
     public static void onSessionActivated() {
         page = Page.PING_ORDERS;
+        int button = WheelInteractionController.isClickMode() ? GLFW.GLFW_MOUSE_BUTTON_RIGHT
+            : StevesArmyClientConfig.VEHICLE_WHEEL_CYCLE_BUTTON.get().glfwButton;
+        wasCycleButtonDown = GLFW.glfwGetMouseButton(Minecraft.getInstance().getWindow().getWindow(), button) == GLFW.GLFW_PRESS;
     }
 
     public static void tick() {
         Minecraft mc = Minecraft.getInstance();
-        int cycleButton = StevesArmyClientConfig.VEHICLE_WHEEL_CYCLE_BUTTON.get().glfwButton;
+        int cycleButton = WheelInteractionController.isClickMode() ? GLFW.GLFW_MOUSE_BUTTON_RIGHT
+            : StevesArmyClientConfig.VEHICLE_WHEEL_CYCLE_BUTTON.get().glfwButton;
         boolean cycleButtonDown = GLFW.glfwGetMouseButton(mc.getWindow().getWindow(), cycleButton) == GLFW.GLFW_PRESS;
         boolean pressed = cycleButtonDown && !wasCycleButtonDown;
         wasCycleButtonDown = cycleButtonDown;
@@ -61,7 +65,13 @@ public final class WheelCycleController {
         if (!StevesArmyClientConfig.ENABLE_VEHICLE_WHEEL.get()) {
             return;
         }
-        if (pressed) {
+        if (pressed && !WheelInteractionController.isClickMode()) {
+            page = page == Page.PING_ORDERS ? Page.VEHICLE : Page.PING_ORDERS;
+        }
+    }
+
+    public static void onRightClick() {
+        if (PingWheelHandler.isWheelActive() && StevesArmyClientConfig.ENABLE_VEHICLE_WHEEL.get()) {
             page = page == Page.PING_ORDERS ? Page.VEHICLE : Page.PING_ORDERS;
         }
     }
@@ -85,7 +95,8 @@ public final class WheelCycleController {
         guiGraphics.drawCenteredString(mc.font, pageTitle, centerX, headerY, 0xFFFFFFFF);
         if (StevesArmyClientConfig.ENABLE_VEHICLE_WHEEL.get()) {
             guiGraphics.drawCenteredString(mc.font,
-                Component.translatable(StevesArmyClientConfig.VEHICLE_WHEEL_CYCLE_BUTTON.get().hintKey),
+                Component.translatable(WheelInteractionController.isClickMode() ? CycleButton.RIGHT.hintKey
+                    : StevesArmyClientConfig.VEHICLE_WHEEL_CYCLE_BUTTON.get().hintKey),
                 centerX, headerY + mc.font.lineHeight, 0xFF888888);
         }
     }
