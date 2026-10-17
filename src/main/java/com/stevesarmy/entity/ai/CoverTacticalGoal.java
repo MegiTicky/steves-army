@@ -2412,6 +2412,21 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
                 if (cover != null) {
                     double distance = soldier.position().distanceTo(cover.getPosition().getCenter());
                     if (distance > COVER_ABANDON_DISTANCE) {
+                        if (suppressedDockHoldActive()) {
+                            // canUse() runs before tickInCover(), so the normal
+                            // drift guard below cannot repair this case. Keep
+                            // the occupied dock while suppression is live and
+                            // let recovery re-evaluate the physical distance.
+                            if (DiagnosticLogManager.isCoverLoggingEnabled()) {
+                                StevesArmyMod.LOGGER.info(
+                                    "[CoverSuppression] Soldier {} cover abandon held at {}: distance={} suppression={} reason=ABANDON_DISTANCE",
+                                    soldier.getId(), cover.getPosition(), String.format("%.2f", distance),
+                                    String.format("%.2f", getCoverManager().getSuppressionLevel()));
+                            }
+                            holdSuppressedAtDock(cover);
+                            result = true;
+                            break;
+                        }
                         if (DiagnosticLogManager.isCoverLoggingEnabled()) {
                             StevesArmyMod.LOGGER.info("[CoverGoal] canUse=false: cover abandoned (dist={})", distance);
                         }
@@ -2452,6 +2467,7 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
         }
 
         if (relocationType != RelocationType.NONE && !isRelocationStillValid()) {
+            logDockTransition("RELOCATION_INVALID");
             navigation.stop();
             getPositionController().clear();
             clearRelocationTarget();
@@ -2640,6 +2656,7 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
         }
 
         if (relocationType != RelocationType.NONE && !isRelocationStillValid()) {
+            logDockTransition("RELOCATION_INVALID");
             navigation.stop();
             getPositionController().clear();
             clearRelocationTarget();
@@ -2926,6 +2943,20 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
             seekingTicks++;
             noProgressTicks = 0;
             lastSeekingPosition = null;
+            return;
+        }
+
+        // Revalidate at the actual dock: threat direction/intel may have
+        // changed while navigation was in flight, and a stale target must not
+        // become a wrong-side cover claim.
+        CoverFinder arrivalFinder = new CoverFinder(soldier.level());
+        if (!isUsableAgainstThreat(arrivalFinder, targetCover, getCoverSearchDirection())) {
+            CoverReservationManager.release(targetCover.getPosition(), soldier);
+            getCoverManager().clearTargetCover();
+            blacklistCover(targetCover.getPosition(), BlacklistReason.POSITIONING_BLOCKED);
+            enterOpenGroundFallbackPosture();
+            requestCoverSearch(soldier.hasValidAttackTarget()
+                ? QueuedSearchMode.ATTACK_SELECTING : QueuedSearchMode.NORMAL);
             return;
         }
 
@@ -4531,6 +4562,11 @@ private boolean shouldExitCoverForFollow() {
     }
 
     private void startRepositioning() {
+        if (getCoverManager().getCurrentCover() != null && suppressedDockHoldActive()) {
+            logDockTransition("ROUTINE_REPOSITION_HELD");
+            holdSuppressedAtDock(getCoverManager().getCurrentCover());
+            return;
+        }
         noteReposition();
         // Normal cover navigation uses standing/crouching dimensions. Do not
         // carry the suppressed half-cover prone posture into full-speed travel.
@@ -5142,6 +5178,23 @@ private boolean shouldExitCoverForFollow() {
         if (bestCover.isPresent()) {
             CoverPoint cover = bestCover.get();
 
+            // A cover claim is legal only when its physical geometry blocks the
+            // currently known threat direction. Unknown direction is
+            // fail-closed: keep searching/prone fallback rather than claiming
+            // an arbitrary side of a block.
+            if (!isUsableAgainstThreat(finder, cover, threatDirection)
+                || squadCtx.isTooClose(cover.getPosition(), 3.0D)) {
+                if (DiagnosticLogManager.isCoverLoggingEnabled()) {
+                    StevesArmyMod.LOGGER.info("[CoverGoal] Soldier {} rejected cover {} before reservation (protection/spacing)",
+                        soldier.getId(), cover.getPosition());
+                }
+                bestCover = Optional.empty();
+            }
+        }
+
+        if (bestCover.isPresent()) {
+            CoverPoint cover = bestCover.get();
+
             if (reusableScored == null) {
                 reusableScored = finder.evaluateAndScoreAll(
                     soldier, threatDirection, threats, searchRadius, true, squadCtx);
@@ -5554,6 +5607,13 @@ private boolean shouldExitCoverForFollow() {
             .filter(sc -> CoverReservationManager.isAvailable(sc.cover.getPosition()))
             .map(sc -> sc.cover)
             .findFirst();
+    }
+
+    private boolean isUsableAgainstThreat(CoverFinder finder, CoverPoint cover, Vec3 threatDirection) {
+        if (cover == null || threatDirection == null || threatDirection.lengthSqr() < 0.001D) {
+            return false;
+        }
+        return finder.isPrimaryThreatProtected(cover, soldier, threatDirection);
     }
 
     private void startProneFiringMovement(DefensivePositionCandidate.ProneFiringCandidate candidate) {
@@ -6805,6 +6865,13 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
                         clearingStaleTargetTicks = 0;
                     } else {
                         if (dockedForSearch()) {
+                            if (attackDebugLog()) {
+                                StevesArmyMod.LOGGER.info(
+                                    "[AttackAdvance] Soldier {} releasing dock {} for far egress: suppression={} recovered={} reason=FAR_EGRESS",
+                                    soldier.getId(), getCoverManager().getCurrentCover().getPosition(),
+                                    String.format("%.2f", getCoverManager().getSuppressionLevel()),
+                                    getCoverManager().getSuppressionTracker().isRecovered());
+                            }
                             getCoverManager().clearCover();
                         }
                         // Job-directed: keep the full-route assemble walk —
@@ -6902,6 +6969,13 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
                 if (clearingEgressTicks >= CLEARING_INVESTIGATE_TICKS) {
                     clearingEgressTicks = 0;
                     if (dockedForSearch()) {
+                        if (attackDebugLog()) {
+                            StevesArmyMod.LOGGER.info(
+                                "[AttackAdvance] Soldier {} releasing dock {} for direct egress: suppression={} recovered={} reason=DIRECT_EGRESS",
+                                soldier.getId(), getCoverManager().getCurrentCover().getPosition(),
+                                String.format("%.2f", getCoverManager().getSuppressionLevel()),
+                                getCoverManager().getSuppressionTracker().isRecovered());
+                        }
                         getCoverManager().clearCover();
                     }
                     startWindowAdvance();
@@ -6943,6 +7017,7 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
                 && fallbackAdvanceTarget == null
                 && !ExposedCombatController.hasActiveMove(soldier)
                 && !FireTeamSuppressionTracker.isHeavilySuppressed(soldier)
+                && !suppressedDockHoldActive() && !dockAdvanceLaunchHeld()
                 // Never fight the cover system for the legs (same rule as the
                 // investigate advance above).
                 && getCoverManager().getState() != CoverBehaviorManager.CoverState.REPOSITIONING
@@ -6984,6 +7059,13 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
                     // direct attempt (null path) re-docks next tick, so the
                     // fallback state is no worse than the churn it replaces.
                     if (dockedForSearch()) {
+                        if (attackDebugLog()) {
+                            StevesArmyMod.LOGGER.info(
+                                "[AttackAdvance] Soldier {} releasing dock {} for assemble egress: suppression={} recovered={} reason=ASSEMBLE_EGRESS",
+                                soldier.getId(), getCoverManager().getCurrentCover().getPosition(),
+                                String.format("%.2f", getCoverManager().getSuppressionLevel()),
+                                getCoverManager().getSuppressionTracker().isRecovered());
+                        }
                         getCoverManager().clearCover();
                     }
                     startAssembleAdvance();
@@ -7428,9 +7510,11 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
                     break;
                 }
 
-                // Hard watchdog: if stuck with all gates passed for >10s, force
-                // advance regardless of peek state or any flickering conditions.
-                if (dwellMet && canAdvance && dwellTime > 10000) {
+                // Hard watchdog: quiet docks may recover through the normal
+                // launch gates, but live suppression must never force an exposed
+                // attack advance merely because occupancy took too long.
+                if (dwellMet && canAdvance && dwellTime > 10000
+                    && (!dockAdvanceLaunchHeld() || smokeAdvance)) {
                     lastAdvanceTriggerTime = GameClock.nowMs();
                     if (attackDebugLog()) {
                         StevesArmyMod.LOGGER.info("[AttackPhase] Soldier {} OCCUPYING watchdog: stuck {}ms with all gates pass, forcing advance",
@@ -7456,16 +7540,24 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
                         String.format("%.2f", getCoverManager().getSuppressionTracker().getSuppressionLevel()));
                 }
 
-                // Advance triggers when:
-                //  1. hardTimeout: unconditional watchdog — always advance after 15s
-                //  2. maxDwellReached: unconditional safety escape — always advance
-                //  3. canAdvance && peekCompletedThisCover: normal path — peeked first
-                //  4. canAdvance && dwellTime >= minDwell * 2: peek-latch bypass —
-                //     for soldiers who never completed a peek (no threat, non-peekable cover)
+                // Recovery and the dock launch policy gate every trigger.
+                // Timeouts may bypass a missing peek completion at a quiet dock.
                 boolean peekLatchBypass = dwellMet && (recovered || smokeAdvance)
                     && (!fireteamPinned || smokeAdvance) && (!heavyHold || smokeAdvance)
                     && !peekCompletedThisCover && dwellTime >= (long)(minDwell * 2);
-                if (hardTimeout || maxDwellReached || (canAdvance && peekCompletedThisCover) || peekLatchBypass) {
+                // A hard timeout may recover a genuinely quiet, non-peekable
+                // dock, but it must not launch a pinned soldier into the open.
+                // The normal peek/max-dwell gates already enforce recovery;
+                // keep this watchdog consistent with that doctrine.
+                boolean hardTimeoutBlocked = (!canLeaveCoverNow() || dockAdvanceLaunchHeld()) && !smokeAdvance;
+                if (hardTimeout && hardTimeoutBlocked && attackDebugLog()) {
+                    StevesArmyMod.LOGGER.info(
+                        "[AttackPhase] Soldier {} hard occupancy timeout held at dock: dwell={}ms suppression={} reason=HARD_OCCUPANCY_TIMEOUT",
+                        soldier.getId(), dwellTime,
+                        String.format("%.2f", getCoverManager().getSuppressionLevel()));
+                }
+                if (!hardTimeoutBlocked && (hardTimeout || maxDwellReached
+                    || (canAdvance && peekCompletedThisCover) || peekLatchBypass)) {
                     lastAdvanceTriggerTime = GameClock.nowMs();
                     if (attackDebugLog() && hardTimeout) {
                         StevesArmyMod.LOGGER.info("[AttackPhase] Soldier {} hard occupancy timeout after {}ms, forcing advance",
@@ -8803,6 +8895,18 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
         escapeCrawlToDashPending = false;
     }
 
+    private void logDockTransition(String reason) {
+        if (!DiagnosticLogManager.isCoverLoggingEnabled() && !attackDebugLog()) return;
+        CoverPoint current = getCoverManager().getCurrentCover();
+        CoverPoint target = getCoverManager().getTargetCover();
+        StevesArmyMod.LOGGER.info(
+            "[CoverTransition] Soldier {} reason={} state={} phase={} suppression={} recovered={} peek={} dock={} target={} relocation={}",
+            soldier.getId(), reason, getCoverManager().getState(), attackPhase,
+            getCoverManager().getSuppressionLevel(), canLeaveCoverNow(),
+            getPeekController().getState(), current == null ? null : current.getPosition(),
+            target == null ? null : target.getPosition(), relocationType);
+    }
+
     /**
      * Pinned hold at the claimed dock: flip to the suppressed-in-cover branch
      * (posture + duck) without touching the claim. Used by the dock-strip
@@ -9146,6 +9250,7 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
         }
         if (com.stevesarmy.debug.trace.SoldierFlightRecorder.isRecording())
             com.stevesarmy.debug.trace.SoldierFlightRecorder.event(soldier, "cover-watchdog", "reset stalled cover machine", getCoverManager().getState().name());
+        logDockTransition("WATCHDOG");
         CoverSearchScheduler.cancel(this);
         coverSearchPending = false;
         asyncPilotPending = false;
@@ -9187,6 +9292,7 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
         if (coverSearchPending) {
             return;
         }
+        logDockTransition("WATCHDOG");
         CoverSearchScheduler.cancel(this);
         coverSearchPending = false;
         asyncPilotPending = false;

@@ -39,6 +39,11 @@ public final class SimRegistry {
             MgAttackRowHoldScenarios.objectiveCrossed(),
             MgAttackRowHoldScenarios.alignedControl(),
             fireTeamRoleBalance(),
+            DirectionalCoverScenarios.wrongFacingCoverRejects(),
+            DirectionalCoverScenarios.protectedCoverControl(),
+            LoneBlockMultiSoldierScenario.create(),
+            NoCoverProneScenarios.pressuredOpenGroundFallsProne(),
+            NoCoverProneScenarios.unpressuredOpenGroundStaysUpright(),
             coverCrossRoleReservation(),
             coverReservationKeepalive(),
             pairSuppressionLanes(),
@@ -126,6 +131,7 @@ public final class SimRegistry {
             attackPeekGateDiscipline(),
             suppressedRelocationSafeRoute(),
             attackAbsolutePinHold(),
+            attackAbsolutePinHold(true),
             CautionSteeringScenarios.freshnessAndPace(),
             SpeedTransitionScenarios.transitions(),
             SoldierTraceScenarios.recorderProbes(),
@@ -5975,11 +5981,18 @@ public final class SimRegistry {
      * freeze-then-strip mechanism being reproduced.
      */
     private static SimScenario attackAbsolutePinHold() {
+        return attackAbsolutePinHold(false);
+    }
+
+    private static SimScenario attackAbsolutePinHold(boolean displacedProbe) {
+        final boolean[] displacementHeld = {false};
+        final boolean[] recoveredAbandoned = {false};
         final String[] enemyLabels =
             {"e01", "e02", "e03", "e04", "e05", "e06", "e07", "e08", "e09", "e10"};
         final int[][] enemySpots = {
             {4, 2}, {6, 4}, {8, 2}, {10, 3}, {12, 2}, {14, 4}, {16, 2}, {18, 3}, {21, 2}, {24, 4}};
-        return SimScenario.builder("attack_absolute_pin_hold")
+        return SimScenario.builder(displacedProbe
+                ? "attack_pinned_displacement_hold" : "attack_absolute_pin_hold")
             .description("ATTACK absolute-pin doctrine: one rifleman advancing on an ATTACK "
                 + "order into absolute fire (10 armed hardened shooters) must never "
                 + "voluntarily walk out of his dock while suppressed. In-game he exits after "
@@ -5999,6 +6012,7 @@ public final class SimRegistry {
                 // attack objective is 144, dissolving the advance spine.
                 ctx.spawnAnchor(20, 0, 14);
                 ctx.spawnFriendly(ModEntities.SOLDIER.get(), "rifleman", 20, 0, 14, SquadMode.HOLD);
+                if (displacedProbe) ctx.harden("rifleman");
                 for (int i = 0; i < enemyLabels.length; i++) {
                     EnemySoldierEntity e = ctx.spawnEnemyLabeled(
                         enemyLabels[i], enemySpots[i][0], 0, enemySpots[i][1]);
@@ -6009,6 +6023,71 @@ public final class SimRegistry {
                 // Past the row (z=2 is north of the z=10 row), 12 blocks out.
                 ctx.issueAttackOrder(20, 2);
             })
+            .action(200, "probe pinned distance abandonment before tickInCover", ctx -> {
+                if (!displacedProbe) return;
+                SoldierEntity s = ctx.soldier("rifleman");
+                var manager = s.getCoverBehaviorManager();
+                var dock = manager.getCurrentCover();
+                if (dock == null || manager.getSuppressionTracker().isRecovered()) return;
+                var origin = s.position();
+                var velocity = s.getDeltaMovement();
+                s.setPos(origin.x, origin.y, origin.z + 9.0);
+                try {
+                    var goal = (com.stevesarmy.entity.ai.CoverTacticalGoal) s.getCoverTacticalGoal();
+                    var attackTargetField = SoldierEntity.class.getDeclaredField("attackTargetPos");
+                    attackTargetField.setAccessible(true);
+                    Object attackTarget = attackTargetField.get(s);
+                    // ATTACK canUse returns early; exercise the shared non-attack branch
+                    // without issuing a new order or changing its generation.
+                    attackTargetField.set(s, null);
+                    try {
+                        displacementHeld[0] = goal.canUse() && manager.getCurrentCover() == dock
+                            && manager.getState() == com.stevesarmy.combat.cover.CoverBehaviorManager.CoverState.SUPPRESSED_IN_COVER;
+                    } finally {
+                        attackTargetField.set(s, attackTarget);
+                    }
+                } catch (ReflectiveOperationException e) {
+                    throw new IllegalStateException("distance abandonment probe", e);
+                } finally {
+                    // Sample voluntary movement separately from the injected displacement.
+                    s.setPos(origin.x, origin.y, origin.z);
+                    s.setDeltaMovement(velocity);
+                }
+            })
+            .action(1990, "recovered distance abandonment control", ctx -> {
+                if (!displacedProbe) return;
+                SoldierEntity s = ctx.soldier("rifleman");
+                var manager = s.getCoverBehaviorManager();
+                var dock = manager.getCurrentCover();
+                if (dock == null) return;
+                var origin = s.position();
+                manager.getSuppressionTracker().reset();
+                s.setPos(origin.x, origin.y, origin.z + 9.0);
+                try {
+                    var goal = (com.stevesarmy.entity.ai.CoverTacticalGoal) s.getCoverTacticalGoal();
+                    var attackTargetField = SoldierEntity.class.getDeclaredField("attackTargetPos");
+                    attackTargetField.setAccessible(true);
+                    Object attackTarget = attackTargetField.get(s);
+                    attackTargetField.set(s, null);
+                    try {
+                        recoveredAbandoned[0] = !goal.canUse() && manager.getCurrentCover() == null;
+                    } finally {
+                        attackTargetField.set(s, attackTarget);
+                    }
+                } catch (ReflectiveOperationException e) {
+                    throw new IllegalStateException("recovered abandonment control", e);
+                } finally {
+                    s.setPos(origin.x, origin.y, origin.z);
+                    manager.setCurrentCover(dock);
+                    ctx.injectSuppression("rifleman", 40);
+                    manager.setState(com.stevesarmy.combat.cover.CoverBehaviorManager.CoverState.SUPPRESSED_IN_COVER);
+                }
+            })
+            .assertThat("DISPLACEMENT: pinned canUse retains dock beyond eight blocks; recovered control abandons",
+                view -> !displacedProbe || (displacementHeld[0] && recoveredAbandoned[0]))
+            .assertThat("LONG PIN: hardened probe survives and remains pinned beyond fifteen seconds",
+                view -> !displacedProbe || view.timeline().series("rifleman").stream()
+                    .anyMatch(s -> s.tick >= 1800 && s.health > 0f && s.state.suppressionLevel >= 0.9f))
             .assertThat("FIREFIGHT LIVE: tracers were recorded (the pin is organic gunfire, "
                     + "not scripted injection)",
                 view -> !view.shots().isEmpty())
