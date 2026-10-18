@@ -1680,6 +1680,13 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
         boolean vehicleCombat = vehicleTarget != null;
         updateAimPatienceContact();
         if (vehicleCombat) resetAimPatience();
+        // Corner slicing owns ADS while approaching; it never bypasses the shot gates below.
+        if (!vehicleCombat && soldier.getPeekController().isMovingToPeek()
+            && soldier.getPeekController().isCornerPreAiming()) {
+            noteEngagementGate(EngagementGateReason.PREPARE_FAILED);
+            resetDirectFireBurst();
+            return;
+        }
         if (!vehicleCombat && (soldier.getMovementController().isStationaryFireConstrained()
             || (soldier.getMovementController().hasMovingIntent()
                 && soldier.getMovementController().fireMode() != SoldierMovementController.FireMode.ADS))) {
@@ -1859,6 +1866,7 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
             lastShotTick = soldier.tickCount - StevesArmyConfig.getFiringMissStreakDecayTicks();
         }
 
+        if (!vehicleCombat) applyCornerPreAimQuality();
         if (!aimQualityUpdated) updateAimQuality(vehicleCombat ? vehicleSolution : null);
 
         float targetAimQ = vehicleCombat ? StevesArmyConfig.getAimQualityBaseAccuracy()
@@ -2325,6 +2333,25 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
         pitchSigma += (float) aimPoint.concealment * 0.75f;
         return new float[]{yawSigma, pitchSigma};
     }
+
+    /** Shared readiness transfer; neither this nor pre-ADS authorizes a shot. */
+    public void applyCornerPreAimQuality() {
+        if (target == null || !target.isAlive() || GunIntegration.isReloading(soldier)
+            || GunIntegration.isDrawing(soldier) || GunIntegration.isBolting(soldier)
+            || GunIntegration.getAimProgress(soldier) < ADS_THRESHOLD
+            || !ExposureCalculator.hasFreshFiringLaneFrom(soldier.getEyePosition(), target)) return;
+        Vec3 delta = target.getEyePosition().subtract(soldier.getEyePosition());
+        float yaw = (float)Math.toDegrees(Math.atan2(-delta.x, delta.z));
+        float pitch = (float)-Math.toDegrees(Math.atan2(delta.y, delta.horizontalDistance()));
+        if (Math.abs(Mth.wrapDegrees(yaw - soldier.getYHeadRot())) > 8
+            || Math.abs(pitch - soldier.getXRot()) > 8) return;
+        float credit = soldier.getPeekController().consumeCornerPreAimCredit(target);
+        // At most 30% of equilibrium, earned from sixteen aligned ADS ticks.
+        if (credit > 0) aimQuality = Math.max(aimQuality,
+            Math.min(0.30f, AimAccuracyManager.getTargetAimQuality(soldier, target) * 0.30f) * credit);
+    }
+
+    public float getAimQualityForDebug() { return aimQuality; }
 
     private void updateAimQuality(@javax.annotation.Nullable Vec3 staticVisibleTarget) {
         if (target == null && staticVisibleTarget == null) return;

@@ -17,19 +17,29 @@ public final class CornerPeekScenarios {
 
     public static SimScenario create(boolean crossfire) { return create(crossfire, false); }
 
-    public static SimScenario create(boolean crossfire, boolean mirrored) {
+    public static SimScenario create(boolean crossfire, boolean mirrored) { return create(crossfire, mirrored, false, false); }
+
+    public static SimScenario create(boolean crossfire, boolean mirrored, boolean backoff, boolean blockedRear) {
         CoverPoint[] dock = new CoverPoint[1];
-        boolean[] evidence = new boolean[6];
+        boolean[] evidence = new boolean[8];
         int[] exposure = new int[2];
         double[] metrics = new double[4]; // first-clear displacement, exposed displacement, max, return offset
-        var b = SimScenario.builder(crossfire ? (mirrored ? "corner_peek_known_crossfire_mirror" : "corner_peek_known_crossfire") : "corner_peek_first_lane")
-            .duration(180).core()
+        int[] preAim = new int[3]; // before-lane ADS, credit ticks, reset
+        double[] backMetrics = new double[3];
+        var b = SimScenario.builder(backoff ? (blockedRear ? "corner_peek_backoff_blocked_rear" : crossfire ? "corner_peek_backoff_crossfire" : "corner_peek_backoff_pre_ads") : crossfire ? (mirrored ? "corner_peek_known_crossfire_mirror" : "corner_peek_known_crossfire") : "corner_peek_first_lane")
+            .duration(180).core().armed()
             .description("Real full-cover peek controller and entity travel: first stable fractional opening, honest lane, bounded return"
                 + (crossfire ? "; prefer west opening shielded from a known eastern threat" : ""))
             .terrain(t -> {
                 t.platform();
                 t.coverBlock(20, 21, 2);
-                if (crossfire) t.coverBlock(mirrored ? 18 : 22, 23, 2);
+                if (crossfire && !backoff) t.coverBlock(mirrored ? 18 : 22, 23, 2);
+                if (backoff) {
+                    // An oblique threat opens a view by stepping away from the face.
+                    if (!crossfire) t.coverBlock(21, 21, 2);
+                    else t.coverBlock(22, 23, 2);
+                    if (blockedRear) t.coverBlock(20, 19, 2);
+                }
             })
             .setup(ctx -> {
                 java.util.Arrays.fill(evidence, false);
@@ -37,9 +47,10 @@ public final class CornerPeekScenarios {
                 var s = ctx.spawnFriendly(ModEntities.SOLDIER.get(), "peeker", 20, 0, 20, SquadMode.HOLD);
                 s.setNoAi(true);
                 s.setNoGravity(true);
-                var enemy = ctx.spawnEnemy(20, 0, 40);
+                var enemy = ctx.spawnEnemy(backoff ? 35 : 20, 0, 40);
                 enemy.setNoAi(true);
                 s.setTarget(enemy);
+                if (s.getCombatGoal() instanceof com.stevesarmy.entity.ai.SoldierCombatGoal combat) combat.setTarget(enemy);
                 s.getThreatAwareness().onEntityDetected(enemy, s.position());
                 if (crossfire) s.getThreatAwareness().onEnemyPing(ctx.terrain.at(mirrored ? 5 : 35, 0, 40));
                 dock[0] = new CoverPoint(ctx.terrain.at(20, 0, 20));
@@ -65,7 +76,22 @@ public final class CornerPeekScenarios {
                     net.minecraft.world.level.ClipContext.Fluid.NONE, s)).getType()
                     == net.minecraft.world.phys.HitResult.Type.MISS;
                 if (clear && !evidence[0]) { evidence[0] = true; metrics[0] = distance; }
+                if (!clear && peek.isMovingToPeek() && com.stevesarmy.combat.GunIntegration.getAimProgress(s) >= 0.8f) preAim[0]++;
+                backMetrics[0] = Math.max(backMetrics[0], center.z - s.getZ());
                 if (peek.isExposed() && !evidence[1]) {
+                    preAim[1] = peek.getAlignedPreAimTicks();
+                    backMetrics[1] = peek.getCornerPreAimCredit(s.getTarget());
+                    evidence[7] = peek.getCornerPreAimCredit(ctx.enemies.stream().filter(e -> e != s.getTarget()).findFirst().orElse(null)) == 0;
+                    if (s.getCombatGoal() instanceof com.stevesarmy.entity.ai.SoldierCombatGoal combat) {
+                        float before = combat.getAimQualityForDebug();
+                        float yaw = s.getYHeadRot();
+                        s.setYHeadRot(yaw + 90);
+                        combat.applyCornerPreAimQuality();
+                        evidence[6] = combat.getAimQualityForDebug() == before;
+                        s.setYHeadRot(yaw);
+                        combat.applyCornerPreAimQuality();
+                        backMetrics[2] = combat.getAimQualityForDebug() - before;
+                    }
                     evidence[1] = true;
                     metrics[1] = distance;
                     evidence[2] = clear;
@@ -84,10 +110,12 @@ public final class CornerPeekScenarios {
                     StevesArmyMod.LOGGER.info("[CornerPeek] crossfire={} firstClear={} exposed={} x={} honest={} threatRays={}/{}",
                         crossfire, metrics[0], distance, s.getX() - center.x, clear, exposure[0], exposure[1]);
                     peek.forceReturnToCover(s, dock[0], mover);
+                    evidence[7] &= peek.getCornerPreAimCredit(s.getTarget()) == 0;
                 }
                 if (evidence[1] && peek.isIdleInCover()) {
                     metrics[3] = distance;
                     evidence[4] = distance <= 0.08;
+                    if (!peek.isCornerPreAiming() && peek.getAlignedPreAimTicks() == 0) preAim[2] = 1;
                 }
                 s.setNoAi(false);
                 try {
@@ -97,14 +125,20 @@ public final class CornerPeekScenarios {
                 } finally { s.setNoAi(true); }
                 if (at == 10) StevesArmyMod.LOGGER.info("[CornerPeek] startup state={} result={} target={} speed={} pos={}",
                     peek.getState(), mover.getLastResult(), mover.getDebugTargetPos(), s.getSpeed(), s.position());
-                if (at == 174) StevesArmyMod.LOGGER.info("[CornerPeek] crossfire={} evidence={} metrics={}",
-                    crossfire, java.util.Arrays.toString(evidence), java.util.Arrays.toString(metrics));
+                if (at == 174) StevesArmyMod.LOGGER.info("[CornerPeek] crossfire={} evidence={} metrics={} back={} preAim={}",
+                    crossfire, java.util.Arrays.toString(evidence), java.util.Arrays.toString(metrics), java.util.Arrays.toString(backMetrics), java.util.Arrays.toString(preAim));
             });
         }
-        return b.assertThat("physical opening reached and EXPOSED has an honest live lane", v -> evidence[0] && evidence[1] && evidence[2])
-            .assertThat("stop at fractional first opening without full-block overshoot", v -> metrics[1] < 0.85 && metrics[1] <= metrics[0] + 0.16 && metrics[2] < 0.90)
-            .assertThat("return physically docks within 0.08", v -> evidence[4])
-            .assertThat("known crossfire selects shielded side with independently fewer body rays", v -> !crossfire || (evidence[3] && evidence[5]))
+        return b.assertThat("physical opening reached and EXPOSED has an honest live lane", v -> blockedRear ? !evidence[1] && metrics[2] < 0.08 : evidence[0] && evidence[1] && evidence[2])
+            .assertThat("stop at fractional first opening without full-block overshoot", v -> backoff ? metrics[2] < 1.5 : metrics[1] < 0.85 && metrics[1] <= metrics[0] + 0.16 && metrics[2] < 0.90)
+            .assertThat("return physically docks within 0.08", v -> blockedRear ? metrics[2] < 0.08 : evidence[4])
+            .assertThat("known crossfire selects shielded side with independently fewer body rays", v -> !crossfire || backoff || (evidence[3] && evidence[5]))
+            .assertThat("backoff geometry uses bounded rear travel when requested", v -> !backoff || (blockedRear || crossfire ? backMetrics[0] < 0.15 : backMetrics[0] >= 0.05))
+            .assertThat("full-cover pre-ADS is established before lane confirmation", v -> !backoff || blockedRear || preAim[0] > 0)
+            .assertThat("return clears full-cover prealignment credit", v -> !evidence[1] || preAim[2] == 1)
+            .assertThat("missing or changed target and return receive no credit", v -> !evidence[1] || evidence[7])
+            .assertThat("turned-away gun receives no corner quality credit", v -> !evidence[1] || evidence[6])
+            .assertThat("aligned corner contact earns bounded initial quality above a fresh aim", v -> !backoff || blockedRear || (backMetrics[2] > 0 && backMetrics[2] <= 0.30))
             .build();
     }
 }

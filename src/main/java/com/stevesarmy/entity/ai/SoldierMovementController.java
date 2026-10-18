@@ -342,7 +342,7 @@ public final class SoldierMovementController {
         } else {
             fireMode = FireMode.ADS;
         }
-        if (moving && fireMode != FireMode.ADS && !soldier.isVehicleCrewActive()
+        if (moving && fireMode != FireMode.ADS && !soldier.getPeekController().isCornerPreAiming() && !soldier.isVehicleCrewActive()
             && !soldier.isInVehicleEngagement()) GunIntegration.aim(soldier, false);
     }
 

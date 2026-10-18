@@ -131,13 +131,17 @@ public final class SimRecorder {
                         String posture, boolean rising, float syncedCoverHeight,
                         double dangerAtSoldier, boolean dangerLegExposed,
                         String moveSource, String cautionReason, Double appliedSpeed,
-                        com.stevesarmy.entity.ai.SoldierSpeedController.Telemetry movementSpeed) {
+                        com.stevesarmy.entity.ai.SoldierSpeedController.Telemetry movementSpeed,
+                        float adsProgress, float aimQuality, int preAimTicks) {
         if (current == null) return;
         if (!firstSoldier) current.append(',');
         firstSoldier = false;
         current.append("{\"l\":").append(quote(label))
             .append(",\"x\":").append(num(s.position.x))
             .append(",\"z\":").append(num(s.position.z))
+            .append(",\"ads\":").append(num(adsProgress))
+            .append(",\"aq\":").append(num(aimQuality))
+            .append(",\"pat\":").append(preAimTicks)
             .append(",\"hp\":").append(num(health))
             .append(",\"cs\":").append(quote(s.coverState))
             .append(",\"ps\":").append(quote(s.peekState))

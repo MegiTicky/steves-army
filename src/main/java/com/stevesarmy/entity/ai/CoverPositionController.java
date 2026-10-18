@@ -522,6 +522,20 @@ public class CoverPositionController extends MoveControl {
             // dock handoffs. Lateral steering would fight the final alignment.
             cautionClamped = true;
         }
+        if (this.mob instanceof SoldierEntity peeker && peeker.getPeekController().isCornerPreAiming()) {
+            // Translate the requested world route into the pre-aim facing frame.
+            // Vanilla MoveControl turns toward travel; fighting that turn with ADS
+            // bends a backstep into an orbit instead of moving down its safe leg.
+            double yaw = peeker.getYHeadRot() * Math.PI / 180.0;
+            peeker.setYRot(peeker.getYHeadRot());
+            peeker.setYBodyRot(peeker.getYHeadRot());
+            peeker.setSpeed((float)movementSpeed.resolve(approachSpeed, true, false));
+            peeker.setZza((float)((-Math.sin(yaw) * dx + Math.cos(yaw) * dz) / distance));
+            peeker.setXxa((float)((Math.cos(yaw) * dx + Math.sin(yaw) * dz) / distance));
+            applyCoverAnchorVelocity(anchorTarget);
+            this.debugLastSetVelocity = this.mob.getDeltaMovement();
+            return;
+        }
         this.setWantedPosition(targetPos.x, targetPos.y, targetPos.z, approachSpeed);
         this.debugMoveSource = "controller";
         this.debugMoveReason = cautionClamped ? "handoff caution" : "handoff";

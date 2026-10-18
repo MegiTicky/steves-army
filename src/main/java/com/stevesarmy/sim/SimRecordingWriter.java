@@ -248,6 +248,8 @@ public final class SimRecordingWriter {
               return 'label            : ' + s.l +
                    '\\ncoverState       : ' + s.cs +
                    '\\npeekState        : ' + s.ps +
+                   '\\nADS / aim quality: ' + (s.ads === undefined ? '-' : Math.round(s.ads * 100) + '% / ' + s.aq.toFixed(3)) +
+                   '\\naligned pre-ADS  : ' + (s.pat || 0) + ' ticks' +
                    (s.po !== undefined || s.ch !== undefined
                      ? '\\nposture          : ' + (s.po || 'STANDING') + (s.ri ? '  [RISING]' : '')
                        + (s.ch !== undefined ? '   cover height: ' + s.ch : '')

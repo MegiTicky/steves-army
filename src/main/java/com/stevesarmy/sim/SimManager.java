@@ -446,7 +446,11 @@ public final class SimManager {
                 soldier.getPose().name(), soldier.isHalfCoverRising(),
                 snap.currentCover != null ? soldier.getSyncedCoverCurrentHeight() : -1f,
                 dangerAtSoldier, dangerLegExposed,
-                moveSource, cautionReason, appliedSpeed, movementSpeed);
+                moveSource, cautionReason, appliedSpeed, movementSpeed,
+                GunIntegration.getAimProgress(soldier),
+                soldier.getCombatGoal() instanceof com.stevesarmy.entity.ai.SoldierCombatGoal combat
+                    ? combat.getAimQualityForDebug() : -1f,
+                soldier.getPeekController().getAlignedPreAimTicks());
         }
         recorder.endFrame(context.enemies);
     }
