@@ -809,11 +809,18 @@ public class CoverFinder {
                 continue;
             }
 
-            Vec3 peekEye = new Vec3(peekPos.getX() + 0.5, peekPos.getY() + HALF_COVER_STANDING_EYE_HEIGHT,
-                peekPos.getZ() + 0.5);
-            FiringLaneResult candidate = evaluateFiringOrigin(peekEye, threatDirection, primaryThreat, squadCtx);
-            if (isBetterFiringLane(candidate, best)) {
-                best = candidate;
+            // The runtime corner peek stops at a fractional opening. Score the
+            // same bounded side corridor rather than requiring its endpoint lane.
+            for (int step = 1; step <= 10; step++) {
+                Vec3 peekEye = new Vec3(coverPos.getX() + 0.5 + peekDir.getStepX() * step * 0.1,
+                    coverPos.getY() + HALF_COVER_STANDING_EYE_HEIGHT,
+                    coverPos.getZ() + 0.5 + peekDir.getStepZ() * step * 0.1);
+                FiringLaneResult candidate = primaryThreat != null && primaryThreat.isAlive()
+                    && ExposureCalculator.hasFreshFiringLaneFrom(peekEye, primaryThreat)
+                    ? new FiringLaneResult(1.0f, "active", 0, 0)
+                    : evaluateFiringOrigin(peekEye, threatDirection, null, squadCtx);
+                if (isBetterFiringLane(candidate, best)) best = candidate;
+                if (best.score() >= 1.0f) break;
             }
             if (best.score() >= 1.0f) {
                 // A perfect lane cannot be improved; further peek origins would

@@ -230,6 +230,29 @@ public class ExposureCalculator {
         return result;
     }
 
+    /** Uncached body exposure at a hypothetical feet position, using only the supplied known origin. */
+    public static int calculateExposureAt(Vec3 observerEye, LivingEntity body, Vec3 feet) {
+        var box = body.getBoundingBox().move(feet.subtract(body.position()));
+        int visible = 0;
+        double[] xs = {box.minX + 0.05, box.getCenter().x, box.maxX - 0.05};
+        double[] zs = {box.minZ + 0.05, box.getCenter().z, box.maxZ - 0.05};
+        double[] ys = {box.minY + 0.05, box.getCenter().y, box.maxY - 0.05};
+        for (double y : ys) for (int x = 0; x < 3; x++) for (int z = 0; z < 3; z++) {
+            if ((x == 1) != (z == 1)) continue;
+            if (VisibilityRay.traceFresh(body.level(), observerEye, new Vec3(xs[x], y, zs[z]), null).hasContact()) visible++;
+        }
+        return visible;
+    }
+
+    /** Exact geometry for sub-block movement; perception's half-block cache is too coarse here. */
+    public static boolean hasFreshFiringLaneFrom(Vec3 observerEye, LivingEntity target) {
+        if (target == null || !target.isAlive()) return false;
+        for (TargetPoint point : getTargetPointsWithPriority(target)) {
+            if (VisibilityRay.traceFresh(target.level(), observerEye, point.position, null).hasContact()) return true;
+        }
+        return false;
+    }
+
     public static AimPointResult getBestAimPointFrom(Vec3 observerEye, LivingEntity target) {
         return getBestAimPointFrom(observerEye, target, null, null);
     }

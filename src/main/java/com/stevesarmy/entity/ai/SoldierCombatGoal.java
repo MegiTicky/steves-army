@@ -661,7 +661,9 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
         Pose targetPose = target.getPose();
         float targetWidth = target.getBbWidth();
         float targetHeight = target.getBbHeight();
-        BlockPos coverBlock = getCoverBlockPos();
+        // Select the same physically clear lane that the corner stop validates.
+        // Ignoring the dock can otherwise prefer a blocked torso over an open edge.
+        BlockPos coverBlock = null;
         int cacheTicks = StevesArmyConfig.getAimPointCacheTicks();
 
         if (cachedAimPoint != null && cacheTicks > 0
@@ -1998,9 +2000,7 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
             aimPoint = new ExposureCalculator.AimPointResult(refreshedSolution,
                 ExposureCalculator.AimPointType.FALLBACK, true, true, 0.0);
         } else {
-            BlockPos coverBlock = getCoverBlockPos();
-            if (!VisibilityRay.traceFresh(soldier.level(), soldier.getEyePosition(), aimPoint.position, soldier,
-                    coverBlock, coverBlock == null ? null : coverBlock.above())
+            if (!VisibilityRay.traceFresh(soldier.level(), soldier.getEyePosition(), aimPoint.position, soldier)
                 .hasContact()) {
                 noteEngagementGate(EngagementGateReason.BULLET_PATH_BLOCKED);
                 resetDirectFireBurst();

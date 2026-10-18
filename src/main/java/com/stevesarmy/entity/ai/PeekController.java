@@ -55,6 +55,67 @@ public class PeekController {
     private long currentMaxExposureTime = 3000;
     private long suppressionEventSequenceAtExposure = 0L;
     private boolean returnAllowedDuringReload;
+    private boolean liveCornerPeek;
+    private Vec3 cornerDirection = Vec3.ZERO;
+    private int lostLaneTicks;
+
+    /** First stable opening along each legal side, bounded to the old one-block envelope. */
+    private Vec3 findCornerOpening(SoldierEntity soldier, CoverPoint cover, Vec3 threatDir, LivingEntity target) {
+        Vec3 start = soldier.position();
+        Vec3 best = null;
+        java.util.List<Vec3> knownEyes = new java.util.ArrayList<>();
+        for (ThreatAwareness.ThreatInfo threat : soldier.getThreatAwareness().getThreatInfos()) {
+            if (threat.wasObservedWithin(GameClock.nowMs(), 10000)
+                && (threat.entity == null || threat.entity.isAlive())) {
+                knownEyes.add(Vec3.atBottomCenterOf(threat.position).add(0, 1.62, 0));
+            }
+        }
+        if (soldier.level() instanceof ServerLevel server && soldier.getSquadId() != null) {
+            SquadManager.get(server).getSquadById(soldier.getSquadId()).ifPresent(squad -> {
+                long now = server.getGameTime();
+                for (var threat : squad.getThreatIntel().getAllThreats()) {
+                    if (threat.isAlive && threat.lastVisibleAimPoint != null
+                        && now >= threat.lastSeenTime && now - threat.lastSeenTime <= SQUAD_CONTACT_MAX_AGE_TICKS) {
+                        Vec3 eye = threat.lastVisibleAimPoint;
+                        if (knownEyes.stream().noneMatch(p -> p.distanceToSqr(eye) < 1.0)) knownEyes.add(eye);
+                    }
+                }
+            });
+        }
+        double bestScore = Double.POSITIVE_INFINITY;
+        for (Direction side : Direction.Plane.HORIZONTAL) {
+            Vec3 direction = new Vec3(side.getStepX(), 0, side.getStepZ());
+            if (cover.getProtectedDirections().contains(side) || Math.abs(direction.dot(threatDir.normalize())) > 0.71) continue;
+            for (int step = 1; step <= 20; step++) {
+                double distance = step * 0.05;
+                Vec3 feet = start.add(direction.scale(distance));
+                if (!CoverFinder.isValidPeekPosition(BlockPos.containing(feet), soldier.level())
+                    || !soldier.level().noCollision(soldier, soldier.getBoundingBox().move(direction.scale(distance)))) break;
+                // An inward margin rejects knife-edge rays and absorbs controller tolerance.
+                if (!hasCornerLane(soldier, feet, target)
+                    || !hasCornerLane(soldier, feet.subtract(direction.scale(0.04)), target)) continue;
+                int threatsExposed = 0;
+                int bodyRays = 0;
+                for (Vec3 eye : knownEyes) {
+                    // Only remembered origins are supplied; no hidden entity location lookup.
+                    int rays = com.stevesarmy.combat.ExposureCalculator.calculateExposureAt(eye, soldier, feet);
+                    if (rays > 0) threatsExposed++;
+                    bodyRays += rays;
+                }
+                double score = threatsExposed * 1000 + bodyRays * 10 + distance;
+                if (score < bestScore) { bestScore = score; best = feet; }
+                break;
+            }
+        }
+        return best;
+    }
+
+    private boolean hasCornerLane(SoldierEntity soldier, Vec3 feet, LivingEntity target) {
+        if (target == null || !target.isAlive()) return false;
+        Vec3 eye = feet.add(0, soldier.getEyeHeight(), 0);
+        return com.stevesarmy.combat.ExposureCalculator.hasFreshFiringLaneFrom(eye, target);
+    }
+
     
     private long getRandomExposureTime() {
         return EXPOSURE_TIME_MIN_MS + (long)(Math.random() * (EXPOSURE_TIME_MAX_MS - EXPOSURE_TIME_MIN_MS));
@@ -344,8 +405,19 @@ public class PeekController {
             enterExposed(soldier, cover);
         } else if (isFull) {
             LivingEntity target = soldier.getTarget();
-            BlockPos peekPos = CoverTacticalGoal.computePeekPositionStatic(cover, threatDir, target, soldier.level(), soldier.getY());
-            if (peekPos == null) {
+            liveCornerPeek = target != null && target.isAlive();
+            Vec3 targetPos;
+            BlockPos peekPos;
+            if (liveCornerPeek) {
+                Vec3 targetDirection = target.position().subtract(soldier.position()).multiply(1, 0, 1).normalize();
+                targetPos = findCornerOpening(soldier, cover, targetDirection, target);
+                peekPos = targetPos == null ? null : BlockPos.containing(targetPos);
+            } else {
+                // Keep direction/ping-only probing when no live target can validate a lane.
+                peekPos = CoverTacticalGoal.computePeekPositionStatic(cover, threatDir, target, soldier.level(), soldier.getY());
+                targetPos = peekPos == null ? null : new Vec3(peekPos.getX() + 0.5, soldier.getY(), peekPos.getZ() + 0.5);
+            }
+            if (targetPos == null) {
                 if (CoverTacticalGoal.isDebugLoggingEnabled()) {
                     StevesArmyMod.LOGGER.info("[PeekController] Soldier {} no valid peek position toward threat",
                         soldier.getId());
@@ -355,7 +427,8 @@ public class PeekController {
             }
 
             currentPeekPos = peekPos;
-            Vec3 targetPos = peekPos.getCenter();
+            cornerDirection = targetPos.subtract(soldier.position()).multiply(1, 0, 1).normalize();
+            lostLaneTicks = 0;
             Vec3 soldierPos = soldier.position();
             double dist = Math.sqrt(
                 Math.pow(targetPos.x - soldierPos.x, 2) +
@@ -377,7 +450,8 @@ public class PeekController {
 
             this.peekTarget = targetPos;
             this.coverReturnTarget = CoverTacticalGoal.getCoverStandingPositionStatic(cover.getPosition());
-            mover.moveTo(targetPos, PEEK_REACHED_DISTANCE, PEEK_SPEED, "PeekController", "slide to peek");
+            mover.moveTo(targetPos, liveCornerPeek ? 0.015 : PEEK_REACHED_DISTANCE,
+                liveCornerPeek ? 0.22 : PEEK_SPEED, "PeekController", "slide to peek");
             setState(soldier, State.MOVING_TO_PEEK);
             stateStartTime = GameClock.nowMs();
         }
@@ -408,6 +482,31 @@ public class PeekController {
 
         CoverPositionController.MovementResult result = mover.getLastResult();
 
+        if (liveCornerPeek) {
+            LivingEntity target = soldier.getTarget();
+            if (hasCornerLane(soldier, soldier.position(), target)
+                && hasCornerLane(soldier, soldier.position().subtract(cornerDirection.scale(0.025)), target)) {
+                enterExposed(soldier, cover);
+                return;
+            }
+            if (getTimeInCurrentState() > 2500 || result == CoverPositionController.MovementResult.FAILED
+                || target == null || !target.isAlive()) {
+                enterReturning(soldier, cover, mover, false);
+                return;
+            }
+            if (result == CoverPositionController.MovementResult.REACHED_TARGET) {
+                // Target motion may close the planned opening. One bounded reacquisition
+                // along the chosen side; never reverse sides while outside the dock.
+                Vec3 next = peekTarget.add(cornerDirection.scale(0.05));
+                if (next.subtract(coverReturnTarget).horizontalDistance() <= 1.001
+                    && hasCornerLane(soldier, next, target)) {
+                    peekTarget = next;
+                    mover.moveTo(next, 0.015, 0.22, "PeekController", "reacquire corner lane");
+                } else enterReturning(soldier, cover, mover, false);
+            }
+            return;
+        }
+
         if (result == CoverPositionController.MovementResult.REACHED_TARGET) {
             if (CoverTacticalGoal.isDebugLoggingEnabled()) {
                 StevesArmyMod.LOGGER.info("[PeekController] Soldier {} peek slide done, exposing",
@@ -428,6 +527,13 @@ public class PeekController {
     private void tickExposed(SoldierEntity soldier, CoverPoint cover, CoverPositionController mover) {
         long timeInState = getTimeInCurrentState();
 
+        if (cover.getType() == CoverType.FULL && liveCornerPeek) {
+            if (hasCornerLane(soldier, soldier.position(), soldier.getTarget())) lostLaneTicks = 0;
+            else if (++lostLaneTicks >= 3) {
+                enterReturning(soldier, cover, mover, false);
+                return;
+            }
+        }
         updateBlindPeekTimer(soldier);
 
         if (timeInState > currentMaxExposureTime) {
