@@ -329,16 +329,18 @@ public final class SoldierMovementController {
     }
 
     private void updateFireMode() {
+        boolean quickOutward = soldier.getPeekController().isQuickPeek()
+            && soldier.getPeekController().isMovingToPeek();
         boolean controllerMove = soldier.getMoveControl() instanceof CoverPositionController control
-            && control.requiresRouteFacing();
+            && control.requiresRouteFacing() && !quickOutward;
         boolean unsafe = mandatoryCrawl || soldier.isNavigationTraversalLocked()
             || soldier.horizontalCollision || soldier.minorHorizontalCollision || controllerMove;
         boolean moving = hasMovingIntent() || soldier.getDeltaMovement().horizontalDistanceSqr() > 0.0025;
         unsafe |= moving && (soldier.isLowCrouching() || soldier.isFiringProne() || !soldier.onGround());
-        if (!visibleCombatTarget || unsafe || soldier.tickCount <= fireConstraintUntil) {
+        if ((!visibleCombatTarget && !quickOutward) || unsafe || soldier.tickCount <= fireConstraintUntil) {
             fireMode = FireMode.NONE;
         } else if (moving) {
-            fireMode = mode() == Mode.TRAVERSE ? FireMode.HIP : FireMode.ADS;
+            fireMode = quickOutward ? FireMode.ADS : mode() == Mode.TRAVERSE ? FireMode.HIP : FireMode.ADS;
         } else {
             fireMode = FireMode.ADS;
         }
@@ -410,13 +412,17 @@ public final class SoldierMovementController {
             || soldier.isInVehicleEngagement() || ownerGeneration() != lastOwnerGeneration
             || soldier.isNavigationTraversalLocked() || soldier.horizontalCollision
             || soldier.minorHorizontalCollision || !soldier.onGround()) return true;
-        if (soldier.getMoveControl() instanceof CoverPositionController control
+        boolean quickOutward = soldier.getPeekController().isQuickPeek()
+            && soldier.getPeekController().isMovingToPeek();
+        if (!quickOutward && soldier.getMoveControl() instanceof CoverPositionController control
             && (control.getLastResult() == CoverPositionController.MovementResult.IN_PROGRESS
                 || control.requiresRouteFacing())) return true;
         LivingEntity selected = soldier.getTarget();
         if (selected == null || !selected.isAlive() || !soldier.canAttack(selected)
             || !selected.getUUID().toString().equals(selectedTargetUuid)
-            || !soldier.hasLineOfSight(selected)) return true;
+            || (!quickOutward && !soldier.hasLineOfSight(selected))) return true;
+        if (quickOutward && !com.stevesarmy.combat.ExposureCalculator.hasFreshBulletLaneTo(
+            soldier.getEyePosition(), soldier.getPeekController().getQuickPeekAim(), soldier)) return true;
         var path = soldier.getNavigation().getPath();
         if (path != null && !path.isDone() && path.getNodeCount() > 0) {
             int index = Math.min(Math.max(0, path.getNextNodeIndex()), path.getNodeCount() - 1);

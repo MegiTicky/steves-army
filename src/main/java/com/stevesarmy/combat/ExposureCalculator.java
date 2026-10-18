@@ -244,6 +244,12 @@ public class ExposureCalculator {
         return visible;
     }
 
+    /** Fresh final ray for a fixed remembered point; never follows an unseen entity. */
+    public static boolean hasFreshBulletLaneTo(Vec3 observerEye, Vec3 targetPoint, LivingEntity observer) {
+        if (observer == null || targetPoint == null) return false;
+        return VisibilityRay.traceFresh(observer.level(), observerEye, targetPoint, observer).hasContact();
+    }
+
     /** Exact geometry for sub-block movement; perception's half-block cache is too coarse here. */
     public static boolean hasFreshFiringLaneFrom(Vec3 observerEye, LivingEntity target) {
         if (target == null || !target.isAlive()) return false;

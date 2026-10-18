@@ -43,7 +43,7 @@ public final class SimGunHandler implements GunIntegration.GunHandler {
     public record ShotRecord(UUID shooterId, int tick, boolean aiming, float pitchDeviation,
                              float yawDeviation, float nativePitchDeviation,
                              float nativeYawDeviation, Vec3 aimPosition,
-                             boolean movingIntent,
+                             boolean movingIntent, Vec3 shooterPosition, Vec3 shooterVelocity,
                              com.stevesarmy.entity.ai.SoldierMovementController.FireMode controllerFireMode) {}
 
     private static final int RIFLE_MAG = 30;
@@ -266,6 +266,7 @@ public final class SimGunHandler implements GunIntegration.GunHandler {
         acceptedShots.add(new ShotRecord(shooter.getUUID(), shooter.tickCount, state.aiming,
             pitchDeviation, yawDeviation, nativePitch, nativeYaw, aimPosition,
             shooter instanceof SoldierEntity s && s.getMovementController().hasMovingIntent(),
+            shooter.position(), shooter.getDeltaMovement(),
             shooter instanceof SoldierEntity s ? s.getMovementController().fireMode() : null));
 
         if (entityHit != null) {

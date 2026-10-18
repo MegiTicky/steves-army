@@ -59,6 +59,7 @@ public final class SimRegistry {
             dockSuppressedDriftRecovery(),
             dockCqbHoldFidelity(),
             dockPeekReturn(),
+            CornerPeekScenarios.quickMemorySafety(),
             CornerPeekScenarios.normalFire(),
             CornerPeekScenarios.normalFire(1),
             CornerPeekScenarios.normalFire(2),

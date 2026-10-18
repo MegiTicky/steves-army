@@ -34,6 +34,7 @@ public class ThreatAwareness {
         float weight;
         // Observation time is independent of the live-reference position refresh in tick().
         long lastObservedTime;
+        @Nullable Vec3 lastObservedAim;
 
         ThreatEntry(ThreatSource source, @Nullable LivingEntity entity, BlockPos position, float weight) {
             this.source = source;
@@ -103,6 +104,8 @@ public class ThreatAwareness {
         float weight = calculateDistanceWeight(entity, soldierPos);
         threats.add(new ThreatEntry(ThreatSource.ENTITY_DETECTED, entity, entity.blockPosition(), weight));
         threats.get(threats.size() - 1).lastObservedTime = observedTime;
+        threats.get(threats.size() - 1).lastObservedAim = observed ? entity.getEyePosition()
+            : previous != null ? previous.lastObservedAim : null;
         
         updateSmoothDirection(entity.position());
         
@@ -345,7 +348,7 @@ public class ThreatAwareness {
     public List<ThreatInfo> getThreatInfos() {
         List<ThreatInfo> infos = new ArrayList<>();
         for (ThreatEntry entry : threats) {
-            infos.add(new ThreatInfo(entry.position, entry.weight, entry.entity, entry.lastObservedTime));
+            infos.add(new ThreatInfo(entry.position, entry.weight, entry.entity, entry.lastObservedTime, entry.lastObservedAim));
         }
         return infos;
     }
@@ -355,16 +358,23 @@ public class ThreatAwareness {
         public final float weight;
         @Nullable public final LivingEntity entity;
         public final long lastObservedTime;
+        @Nullable public final Vec3 lastObservedAim;
 
         public ThreatInfo(BlockPos position, float weight, @Nullable LivingEntity entity) {
             this(position, weight, entity, GameClock.nowMs());
         }
 
         public ThreatInfo(BlockPos position, float weight, @Nullable LivingEntity entity, long lastObservedTime) {
+            this(position, weight, entity, lastObservedTime, null);
+        }
+
+        public ThreatInfo(BlockPos position, float weight, @Nullable LivingEntity entity, long lastObservedTime,
+                          @Nullable Vec3 lastObservedAim) {
             this.position = position;
             this.weight = weight;
             this.entity = entity;
             this.lastObservedTime = lastObservedTime;
+            this.lastObservedAim = lastObservedAim;
         }
 
         public boolean wasObservedWithin(long nowMs, long maxAgeMs) {

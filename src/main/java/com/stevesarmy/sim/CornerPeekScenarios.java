@@ -15,6 +15,36 @@ import net.minecraft.world.phys.Vec3;
 public final class CornerPeekScenarios {
     private CornerPeekScenarios() {}
 
+    public static SimScenario quickMemorySafety() {
+        boolean[] passed = new boolean[3];
+        return SimScenario.builder("corner_peek_quick_memory_safety").duration(5).armed()
+            .description("Hidden updates preserve precise observed aim; unobserved contacts cannot invent a prefire point.")
+            .terrain(t -> t.platform())
+            .setup(ctx -> {
+                var s = ctx.spawnFriendly(ModEntities.SOLDIER.get(), "observer", 20, 0, 20, SquadMode.HOLD);
+                var enemy = ctx.spawnEnemyLabeled("memory_target", 20, 0, 40);
+                s.setNoAi(true);
+                enemy.setNoAi(true);
+                var awareness = s.getThreatAwareness();
+                awareness.onEntityDetected(enemy, s.position(), false);
+                passed[0] = awareness.getThreatInfos().stream().filter(info -> info.entity == enemy)
+                    .allMatch(info -> info.lastObservedAim == null);
+                awareness.onEntityDetected(enemy, s.position(), true);
+                Vec3 observed = enemy.getEyePosition();
+                enemy.setPos(enemy.position().add(5, 0, 0));
+                awareness.onEntityDetected(enemy, s.position(), false);
+                passed[1] = awareness.getThreatInfos().stream().filter(info -> info.entity == enemy)
+                    .allMatch(info -> observed.equals(info.lastObservedAim));
+                awareness.onEntityDetected(enemy, s.position(), true);
+                passed[2] = awareness.getThreatInfos().stream().filter(info -> info.entity == enemy)
+                    .allMatch(info -> enemy.getEyePosition().equals(info.lastObservedAim));
+            })
+            .assertThat("unobserved contact has no precise prefire point", v -> passed[0])
+            .assertThat("hidden movement cannot move precise remembered aim", v -> passed[1])
+            .assertThat("genuine observation refreshes precise remembered aim", v -> passed[2])
+            .build();
+    }
+
     public static SimScenario normalFire() { return normalFire(0); }
 
     public static SimScenario normalFire(int window) {
@@ -22,8 +52,14 @@ public final class CornerPeekScenarios {
         java.util.Arrays.fill(ticks, -1);
         boolean[] pose = {false};
         int[] yawEvidence = {0};
+        int[] quickTiming = {-1, -1, -1, -1}; // start, first shot, return, hidden
+        int[] quickShotCount = {0};
+        boolean[] recovery = {true};
+        int[] movingQuickShots = {0};
         var b = SimScenario.builder(window == 0 ? "corner_peek_normal_fire" : window == 1 ? "corner_peek_crouched_window" : "corner_peek_standing_window").duration(360).core().armed()
             .description("Normal entity AI ticks hold a full-cover lane and fire repeatedly; logs approach and lane-to-shot latency.")
+            // Short completed bursts intentionally exceed the generic careful-peek exposure count.
+            .suppressDetectors("PeekThrash")
             .terrain(t -> {
                 t.platform(); t.coverBlock(20, 21, 2);
                 if (window > 0) {
@@ -41,8 +77,10 @@ public final class CornerPeekScenarios {
                 var s = ctx.spawnFriendly(ModEntities.SOLDIER.get(), "peeker", 20, 0, 20, SquadMode.HOLD);
                 var enemy = ctx.spawnEnemyLabeled("enemy", 20, 0, 40);
                 enemy.setNoAi(true);
+                s.setOwnerUUID(java.util.UUID.nameUUIDFromBytes("corner-peek-fixture-owner".getBytes(java.nio.charset.StandardCharsets.UTF_8)));
                 ctx.disarmSoldier("enemy");
-                ctx.harden("enemy");
+                enemy.getAttribute(net.minecraft.world.entity.ai.attributes.Attributes.MAX_HEALTH).setBaseValue(10000);
+                enemy.setHealth(10000);
                 s.setTarget(enemy);
                 s.getCombatGoal().setTarget(enemy);
                 s.getThreatAwareness().onEntityDetected(enemy, s.position());
@@ -61,6 +99,18 @@ public final class CornerPeekScenarios {
                 var s = ctx.soldier("peeker");
                 var p = s.getPeekController();
                 var target = ctx.soldier("enemy");
+                if (p.isQuickPeek() && p.isMovingToPeek() && quickTiming[0] < 0) quickTiming[0] = at;
+                int accepted = (int)SimGunHandler.acceptedShots().stream().filter(shotRecord -> shotRecord.shooterId().equals(s.getUUID())).count();
+                if (accepted > 0 && quickTiming[1] < 0) quickTiming[1] = at;
+                if (p.isQuickPeek() && p.isReturning() && quickTiming[2] < 0) {
+                    quickTiming[2] = at;
+                    quickShotCount[0] = accepted;
+                    movingQuickShots[0] = (int)SimGunHandler.acceptedShots().stream()
+                        .filter(shotRecord -> shotRecord.shooterId().equals(s.getUUID()) && shotRecord.movingIntent()
+                            && shotRecord.shooterVelocity().horizontalDistanceSqr() > 0.0001).count();
+                }
+                if (quickTiming[2] >= 0 && p.isHiding() && quickTiming[3] < 0) quickTiming[3] = at;
+                if (quickTiming[3] >= 0 && at < quickTiming[3] + 39 && !p.isHiding()) recovery[0] = false;
                 if (p.isMovingToPeek() && p.isCornerPreAiming()
                     && Math.abs(net.minecraft.util.Mth.wrapDegrees(s.getYHeadRot() - s.yBodyRot)) > 30) yawEvidence[0]++;
                 if ((p.isMovingToPeek() || p.isExposed()) && ticks[0] < 0) ticks[0] = at;
@@ -78,6 +128,8 @@ public final class CornerPeekScenarios {
                         at, p.getState(), lane, combat.getAimQualityForDebug(),
                         com.stevesarmy.combat.GunIntegration.getAimProgress(s), p.getCornerPreAimCredit(target),
                         s.getEngagementTelemetry().getGateReason(), shot, combat.getCornerShotThresholdForDebug(), combat.isCornerTargetAcquiredForDebug());
+                if (at == 358) StevesArmyMod.LOGGER.info("[QuickPeek] timing={} firstBurstShots={} recovery={} movingShots={}",
+                    java.util.Arrays.toString(quickTiming), quickShotCount[0], recovery[0], movingQuickShots[0]);
                 if (at == 358) StevesArmyMod.LOGGER.info("[CornerFire] milestones={} approach={} laneToShot={} crouch={}",
                     java.util.Arrays.toString(ticks), ticks[1] - ticks[0], ticks[5] - ticks[1], pose[0]);
             });
@@ -86,6 +138,11 @@ public final class CornerPeekScenarios {
             .assertThat("normal pose tick retains selected full-cover posture", v -> pose[0])
             .assertThat("normal movement body and head aim remain independent", v -> yawEvidence[0] >= 3)
             .assertThat("natural exposure permits multiple successful shots", v -> v.shots().size() >= 3)
+            .assertThat("fresh precise contact completes a bounded three-shot quick cycle", v -> window != 0
+                || (quickTiming[0] >= 0 && quickTiming[1] >= quickTiming[0]
+                    && quickTiming[1] - quickTiming[0] <= 20 && quickTiming[2] > quickTiming[1]
+                    && quickTiming[3] >= quickTiming[2] && quickTiming[3] - quickTiming[2] <= 20
+                    && quickShotCount[0] == 3 && movingQuickShots[0] >= 1 && recovery[0]))
             .build();
     }
 

@@ -1610,7 +1610,7 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
         }
 
         if (hasGun) {
-            if (canSee) {
+            if (soldier.getPeekController().getQuickPeekAim() != null || canSee) {
                 tickGunCombat(null);
             } else if (isSuppressing) {
                 trySuppressireFire(null);
@@ -1677,9 +1677,18 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
     }
 
     private void tickGunCombat(@javax.annotation.Nullable ArmorThreatScanner.ArmorContact vehicleTarget) {
+        if (quickBurstWasActive && soldier.getPeekController().getQuickPeekAim() == null) {
+            resetBurstState();
+            quickBurstWasActive = false;
+        }
         boolean vehicleCombat = vehicleTarget != null;
         updateAimPatienceContact();
         if (vehicleCombat) resetAimPatience();
+        if (!vehicleCombat && soldier.getPeekController().getQuickPeekAim() != null) {
+            if (!GunIntegration.isReloading(soldier) && !GunIntegration.isDrawing(soldier)
+                && !GunIntegration.isBolting(soldier)) trySuppressireFire(null);
+            return;
+        }
         // Corner slicing owns ADS while approaching; it never bypasses the shot gates below.
         if (!vehicleCombat && soldier.getPeekController().isMovingToPeek()
             && soldier.getPeekController().isCornerPreAiming()) {
@@ -4161,7 +4170,16 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
         suppressionCadenceTicks = 1;
     }
 
+    private boolean quickBurstWasActive;
+
     private void trySuppressireFire(@javax.annotation.Nullable Vec3 visibleContactAimPoint) {
+        Vec3 quickAim = soldier.getPeekController().getQuickPeekAim();
+        boolean quickFire = quickAim != null;
+        if (quickFire && soldier.getPeekController().getQuickPeekShots() >= 3) return;
+        if (quickFire != quickBurstWasActive) {
+            resetBurstState();
+            quickBurstWasActive = quickFire;
+        }
         SoldierMovementController movement = soldier.getMovementController();
         if (movement.isStationaryFireConstrained()) {
             GunIntegration.aim(soldier, false);
@@ -4173,75 +4191,79 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
         if (movingFire) {
             if (movement.fireMode() != SoldierMovementController.FireMode.ADS
                 || target == null || !target.isAlive()
-                || visibleContactAimPoint == null
-                || !TargetAcquisition.hasLineOfSight(soldier, target)
-                || !movement.canFireAt(visibleContactAimPoint)) {
+                || (!quickFire && (visibleContactAimPoint == null
+                    || !TargetAcquisition.hasLineOfSight(soldier, target)))
+                || !movement.canFireAt(quickFire ? quickAim : visibleContactAimPoint)) {
                 GunIntegration.aim(soldier, false);
                 wasAiming = false;
                 return;
             }
         }
-        if (soldier.getCoverBehaviorManager().isInCover()
+        if (!quickFire && soldier.getCoverBehaviorManager().isInCover()
             && soldier.getPeekController().getState() != PeekController.State.EXPOSED) {
             return;
         }
 
-        if (!attackSuppressionActive && suppressionTargetPos == null && pendingSuppressionThreat != null) {
-            SquadThreatIntel intel = getSquadIntel();
-            if (intel == null || !isLiveSuppressionThreat(intel, pendingSuppressionThreat.threatEntityId)
-                || pendingSuppressionThreat.lastKnownPosition == null) {
-                pendingSuppressionThreat = null;
-                return;
-            }
-            
-            int maxSuppressors = getMaxSuppressorsForThreat(pendingSuppressionThreat);
-            if (!intel.tryClaimThreatSuppression(pendingSuppressionThreat.threatEntityId, soldier.getUUID(),
-                soldier.level().getGameTime(), maxSuppressors)) {
-                if (isSuppressionDebugLogging()) {
-                    StevesArmyMod.LOGGER.info("[Suppression] Soldier {} failed to claim threat {} (all suppression slots filled)",
-                        soldier.getId(), pendingSuppressionThreat.threatEntityId.toString().substring(0, 8));
+        if (!quickFire) {
+            if (!attackSuppressionActive && suppressionTargetPos == null && pendingSuppressionThreat != null) {
+                SquadThreatIntel intel = getSquadIntel();
+                if (intel == null || !isLiveSuppressionThreat(intel, pendingSuppressionThreat.threatEntityId)
+                    || pendingSuppressionThreat.lastKnownPosition == null) {
+                    pendingSuppressionThreat = null;
+                    return;
                 }
+
+                int maxSuppressors = getMaxSuppressorsForThreat(pendingSuppressionThreat);
+                if (!intel.tryClaimThreatSuppression(pendingSuppressionThreat.threatEntityId, soldier.getUUID(),
+                    soldier.level().getGameTime(), maxSuppressors)) {
+                    if (isSuppressionDebugLogging()) {
+                        StevesArmyMod.LOGGER.info("[Suppression] Soldier {} failed to claim threat {} (all suppression slots filled)",
+                            soldier.getId(), pendingSuppressionThreat.threatEntityId.toString().substring(0, 8));
+                    }
+                    pendingSuppressionThreat = null;
+                    return;
+                }
+
+                if (isSuppressionDebugLogging()) {
+                    StevesArmyMod.LOGGER.info("[Suppression] Soldier {} claimed threat {} at {}, starting suppression",
+                        soldier.getId(), pendingSuppressionThreat.threatEntityId.toString().substring(0, 8),
+                        pendingSuppressionThreat.lastKnownPosition);
+                }
+
+                suppressionTargetUUID = pendingSuppressionThreat.threatEntityId;
+                suppressionTargetPos = pendingSuppressionThreat.lastKnownPosition;
+                suppressionTargetAimPoint = pendingSuppressionThreat.lastVisibleAimPoint;
+                suppressionLastSeenTick = pendingSuppressionThreat.lastSeenTime;
+                // Dispersion slot: the first claimant holds the reported point,
+                // the second brackets it off-axis so paired guns cover a
+                // corridor instead of stacking the same spot.
+                suppressionLaneSlot = Math.max(0, intel.getSuppressionCount(suppressionTargetUUID) - 1);
+                suppressionLaneSide = ((soldier.getUUID().hashCode() ^ suppressionTargetUUID.hashCode()) & 1) == 0
+                    ? 1.0F : -1.0F;
+                suppressionPlanStartTick = soldier.tickCount;
+                suppressionFirstShotTick = -1;
                 pendingSuppressionThreat = null;
+                burstShotsFired = 0;
+                burstCooldownTicks = 0;
+                ticksSinceLastBurstShot = 0;
+                burstWaitingForBolt = false;
+                suppressionRotation = machineGunnerPipeline && isMgSuppressionRoundRobinEnabled()
+                    ? buildSuppressionRotation(intel, suppressionTargetUUID)
+                    : List.of();
+                suppressionRotationIndex = Math.max(0, suppressionRotation.indexOf(suppressionTargetUUID));
+            }
+
+            if (suppressionTargetPos == null) {
                 return;
             }
-            
-            if (isSuppressionDebugLogging()) {
-                StevesArmyMod.LOGGER.info("[Suppression] Soldier {} claimed threat {} at {}, starting suppression",
-                    soldier.getId(), pendingSuppressionThreat.threatEntityId.toString().substring(0, 8),
-                    pendingSuppressionThreat.lastKnownPosition);
-            }
-            
-            suppressionTargetUUID = pendingSuppressionThreat.threatEntityId;
-            suppressionTargetPos = pendingSuppressionThreat.lastKnownPosition;
-            suppressionTargetAimPoint = pendingSuppressionThreat.lastVisibleAimPoint;
-            suppressionLastSeenTick = pendingSuppressionThreat.lastSeenTime;
-            // Dispersion slot: the first claimant holds the reported point,
-            // the second brackets it off-axis so paired guns cover a
-            // corridor instead of stacking the same spot.
-            suppressionLaneSlot = Math.max(0, intel.getSuppressionCount(suppressionTargetUUID) - 1);
-            suppressionLaneSide = ((soldier.getUUID().hashCode() ^ suppressionTargetUUID.hashCode()) & 1) == 0
-                ? 1.0F : -1.0F;
-            suppressionPlanStartTick = soldier.tickCount;
-            suppressionFirstShotTick = -1;
-            pendingSuppressionThreat = null;
-            burstShotsFired = 0;
-            burstCooldownTicks = 0;
-            ticksSinceLastBurstShot = 0;
-            burstWaitingForBolt = false;
-            suppressionRotation = machineGunnerPipeline && isMgSuppressionRoundRobinEnabled()
-                ? buildSuppressionRotation(intel, suppressionTargetUUID)
-                : List.of();
-            suppressionRotationIndex = Math.max(0, suppressionRotation.indexOf(suppressionTargetUUID));
-        }
-        
-        if (suppressionTargetPos == null) {
-            return;
         }
 
         SquadThreatIntel intel = getSquadIntel();
         AttackSuppressionContact attackContact = attackSuppressionActive
             ? attackSuppressionContacts.get(suppressionTargetUUID) : null;
-        if (attackSuppressionActive) {
+        if (quickFire) {
+            // A peek owns a fixed observation, independent of squad assignments.
+        } else if (attackSuppressionActive) {
             if (!isAttackSuppressionOrderActive() || attackContact == null
                 || soldier.position().distanceTo(attackContact.lastObservedBlock.getCenter()) > SUPPRESSION_MAX_RANGE) {
                 cancelAllSuppression();
@@ -4264,7 +4286,7 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
         // reports it. The claim-time anchor only bridges ticks where the live
         // point is blind from this eye, so a momentary angle change neither
         // yanks the aim off a workable lane nor cancels the plan.
-        SquadThreatIntel.ThreatKnowledge suppressionKnowledge = !attackSuppressionActive && intel != null
+        SquadThreatIntel.ThreatKnowledge suppressionKnowledge = !quickFire && !attackSuppressionActive && intel != null
             ? intel.getThreat(suppressionTargetUUID).orElse(null) : null;
         if (suppressionKnowledge != null) {
             if (suppressionKnowledge.lastKnownPosition != null) {
@@ -4282,7 +4304,7 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
             }
         }
 
-        long contactAge = attackSuppressionActive ? 0
+        long contactAge = quickFire || attackSuppressionActive ? 0
             : soldier.level().getGameTime() - suppressionLastSeenTick;
         boolean planExpired = (!attackSuppressionActive
             && (soldier.tickCount - suppressionPlanStartTick > FireControl.SUPPRESSION_PLAN_MAX_TICKS
@@ -4291,7 +4313,7 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
                     && soldier.tickCount - suppressionFirstShotTick > SUPPRESSION_ACTIVE_FIRE_TICKS)))
             || (suppressionFirstShotTick < 0
                 && soldier.tickCount - suppressionPlanStartTick > SUPPRESSION_PREPARATION_TICKS);
-        if (planExpired) {
+        if (!quickFire && planExpired) {
             if (isSuppressionDebugLogging()) {
                 StevesArmyMod.LOGGER.info("[Suppression] Soldier {} finished fire plan (contactAge={}ticks, active={}ticks)",
                     soldier.getId(), contactAge,
@@ -4301,7 +4323,7 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
             return;
         }
 
-        Vec3 targetPos = attackSuppressionActive && attackContact != null ? getAttackSuppressionAim(attackContact)
+        Vec3 targetPos = quickFire ? quickAim : attackSuppressionActive && attackContact != null ? getAttackSuppressionAim(attackContact)
             : visibleContactAimPoint != null ? visibleContactAimPoint
             : suppressionTargetAimPoint != null ? suppressionTargetAimPoint
             : Vec3.atCenterOf(suppressionTargetPos).add(0, 1.0, 0);
@@ -4329,6 +4351,7 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
             }
             targetPos = hullSolution;
         } else if (!TargetAcquisition.hasNearLineOfSightToPosition(soldier, targetPos, SUPPRESSION_LOS_TOLERANCE)) {
+            if (quickFire) return;
             if (isSuppressionDebugLogging()) {
                 StevesArmyMod.LOGGER.info("[Suppression] Soldier {} has no LOS to suppression target at {}, clearing assignment",
                     soldier.getId(), suppressionTargetPos);
@@ -4393,7 +4416,7 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
                 ? Math.max(1, Math.round(getTicksBetweenBurstShots() * cadenceBias()))
                 : getTicksBetweenBurstShots();
         }
-        int burstTarget = suppressionBurstTarget;
+        int burstTarget = quickFire ? 3 : suppressionBurstTarget;
         int ticksBetweenShots = suppressionCadenceTicks;
         if (burstShotsFired > 0 && burstShotsFired < burstTarget) {
             ticksSinceLastBurstShot++;
@@ -4403,14 +4426,33 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
         }
         
         float aimInaccuracy = GunIntegration.getAimInaccuracy(soldier);
-        Vec3 spreadPos = calculateLastSeenSuppressionSpread(
-            offsetSuppressorAnchor(targetPos), aimInaccuracy, contactAge);
+        Vec3 spreadPos;
+        if (quickFire) {
+            var aimPoint = new ExposureCalculator.AimPointResult(targetPos,
+                ExposureCalculator.AimPointType.FALLBACK, true, true, 0.0);
+            float[] sigma = directFireSpread(aimPoint);
+            float[] deviation = AimAccuracyManager.sampleGaussianDeviation(aimQuality, sigma[0], sigma[1], soldier.level());
+            Vec3 direction = targetPos.subtract(soldier.getEyePosition());
+            float yaw = (float)Math.toDegrees(Math.atan2(-direction.x, direction.z));
+            float pitch = (float)-Math.toDegrees(Math.atan2(direction.y, direction.horizontalDistance()));
+            spreadPos = soldier.getEyePosition().add(Vec3.directionFromRotation(pitch + deviation[0], yaw + deviation[1])
+                .scale(direction.length()));
+        } else {
+            spreadPos = calculateLastSeenSuppressionSpread(offsetSuppressorAnchor(targetPos), aimInaccuracy, contactAge);
+        }
         boolean safeLane = movingFire
             ? FriendlyFireChecker.isSafeToShoot(soldier, spreadPos, aimQuality,
                 AimAccuracyManager.getYawSigma(aimQuality), AimAccuracyManager.getPitchSigma(aimQuality),
                 0.0f, 0.0f, true)
             : FriendlyFireChecker.isSafeToShoot(soldier, spreadPos, aimQuality);
         if (!safeLane) {
+            return;
+        }
+        // Recheck the exact spread-adjusted lane immediately before firing. This
+        // protects moving-fire prefire and remembered contacts from a stale
+        // perception result after the body clears the opening.
+        if (!ExposureCalculator.hasFreshBulletLaneTo(soldier.getEyePosition(), spreadPos, soldier)) {
+            noteEngagementGate(EngagementGateReason.BULLET_PATH_BLOCKED);
             return;
         }
         GunIntegration.ShootResult result = GunIntegration.shootAtPosition(soldier, spreadPos);
@@ -4441,6 +4483,11 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
                     suppressionFirstShotTick = soldier.tickCount;
                 }
                 burstShotsFired++;
+                if (quickFire) {
+                    soldier.getPeekController().onQuickPeekShot();
+                    soldier.getEngagementTelemetry().noteShot(soldier.tickCount);
+                    soldier.getEngagementTelemetry().noteGate(EngagementGateReason.NONE, soldier.tickCount);
+                }
                 ticksSinceLastBurstShot = 0;
                 
                 if (soldier.getCoverBehaviorManager().isInCover()) {
