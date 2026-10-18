@@ -56,8 +56,7 @@ public final class FireTeamHudRenderer {
                 var a = row.activity();
                 String activity = a == null ? tr("idle") : tr("activity." + a.type().name().toLowerCase(java.util.Locale.ROOT));
                 if (a != null && StevesArmyClientConfig.FIRETEAM_HUD_PROGRESS.get()) {
-                    if (a.type().name().equals("ATTACK")) activity += " · " + tr("stage." + a.clearingStage());
-                    else if (a.type().name().equals("GO_TO")) activity += " · " + (row.progress() < 0 ? tr("progress_unknown") : "~" + row.progress() + "%");
+                    if (a.type().name().equals("GO_TO")) activity += " · " + (row.progress() < 0 ? tr("progress_unknown") : "~" + row.progress() + "%");
                 }
                 if (a != null && StevesArmyClientConfig.FIRETEAM_HUD_ETA.get()
                     && (a.type().name().equals("GO_TO") || a.type().name().equals("ATTACK"))) activity += " · " + (row.eta() < 0 ? tr("eta_unknown") : tr("eta_estimate", row.eta()));
