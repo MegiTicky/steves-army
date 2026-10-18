@@ -1894,6 +1894,7 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
         }
         float shotThreshold = Math.max(mobileFire ? MOBILE_FIRE_THRESHOLD_FLOOR : 0.15f,
             targetAimQ * thresholdScale);
+        cornerDebugShotThreshold = shotThreshold;
 
         DirectFireWeaponProfile directProfile = getDirectFireWeaponProfile();
         int requestedBurstShotLimit;
@@ -2351,6 +2352,9 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
             Math.min(0.30f, AimAccuracyManager.getTargetAimQuality(soldier, target) * 0.30f) * credit);
     }
 
+    private float cornerDebugShotThreshold;
+    public float getCornerShotThresholdForDebug() { return cornerDebugShotThreshold; }
+    public boolean isCornerTargetAcquiredForDebug() { return target != null && detectionSystem.isTargetDetected(target); }
     public float getAimQualityForDebug() { return aimQuality; }
 
     private void updateAimQuality(@javax.annotation.Nullable Vec3 staticVisibleTarget) {
@@ -3852,6 +3856,7 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
     }
 
     private float turnToward(float targetYaw, float targetPitch) {
+        if (soldier.getPeekController().isCornerPreAiming()) return turnHeadToward(targetYaw, targetPitch);
         float previousYaw = soldier.getYRot();
         float previousBodyYaw = soldier.yBodyRot;
         float previousHeadYaw = soldier.getYHeadRot();

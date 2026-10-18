@@ -15,6 +15,80 @@ import net.minecraft.world.phys.Vec3;
 public final class CornerPeekScenarios {
     private CornerPeekScenarios() {}
 
+    public static SimScenario normalFire() { return normalFire(0); }
+
+    public static SimScenario normalFire(int window) {
+        int[] ticks = new int[6]; // peek, lane, acquisition, ADS, credit, shot
+        java.util.Arrays.fill(ticks, -1);
+        boolean[] pose = {false};
+        int[] yawEvidence = {0};
+        var b = SimScenario.builder(window == 0 ? "corner_peek_normal_fire" : window == 1 ? "corner_peek_crouched_window" : "corner_peek_standing_window").duration(360).core().armed()
+            .description("Normal entity AI ticks hold a full-cover lane and fire repeatedly; logs approach and lane-to-shot latency.")
+            .terrain(t -> {
+                t.platform(); t.coverBlock(20, 21, 2);
+                if (window > 0) {
+                    // Narrow the bounded corridor to an opening whose vertical span selects posture.
+                    for (int x : new int[]{19, 21}) {
+                        var slab = net.minecraft.world.level.block.Blocks.STONE_BRICK_SLAB.defaultBlockState();
+                        t.block(x, 1, 21, slab.setValue(net.minecraft.world.level.block.SlabBlock.TYPE,
+                            window == 1 ? net.minecraft.world.level.block.state.properties.SlabType.TOP
+                                : net.minecraft.world.level.block.state.properties.SlabType.BOTTOM));
+                        if (window == 2) t.block(x, 0, 21, net.minecraft.world.level.block.Blocks.STONE_BRICKS.defaultBlockState());
+                    }
+                }
+            })
+            .setup(ctx -> {
+                var s = ctx.spawnFriendly(ModEntities.SOLDIER.get(), "peeker", 20, 0, 20, SquadMode.HOLD);
+                var enemy = ctx.spawnEnemyLabeled("enemy", 20, 0, 40);
+                enemy.setNoAi(true);
+                ctx.disarmSoldier("enemy");
+                ctx.harden("enemy");
+                s.setTarget(enemy);
+                s.getCombatGoal().setTarget(enemy);
+                s.getThreatAwareness().onEntityDetected(enemy, s.position());
+                var dock = new CoverPoint(ctx.terrain.at(20, 0, 20));
+                dock.setType(CoverType.FULL);
+                dock.setCoverHeight(2);
+                dock.setProtectedDirections(java.util.Set.of(Direction.SOUTH));
+                s.getCoverBehaviorManager().setCurrentCover(dock);
+                s.getCoverBehaviorManager().setState(com.stevesarmy.combat.cover.CoverBehaviorManager.CoverState.IN_COVER);
+                s.getPeekController().resetForNewCover(s, dock.getPosition());
+                ctx.setDangerSweepEnabled(false);
+            });
+        for (int tick = 1; tick < 359; tick++) {
+            final int at = tick;
+            b.action(tick, "normal firing latency observation", ctx -> {
+                var s = ctx.soldier("peeker");
+                var p = s.getPeekController();
+                var target = ctx.soldier("enemy");
+                if (p.isMovingToPeek() && p.isCornerPreAiming()
+                    && Math.abs(net.minecraft.util.Mth.wrapDegrees(s.getYHeadRot() - s.yBodyRot)) > 30) yawEvidence[0]++;
+                if ((p.isMovingToPeek() || p.isExposed()) && ticks[0] < 0) ticks[0] = at;
+                boolean lane = com.stevesarmy.combat.ExposureCalculator.hasFreshFiringLaneFrom(s.getEyePosition(), target);
+                if (lane && ticks[1] < 0) ticks[1] = at;
+                var combat = (com.stevesarmy.entity.ai.SoldierCombatGoal)s.getCombatGoal();
+                if (combat.isCornerTargetAcquiredForDebug() && ticks[2] < 0) ticks[2] = at;
+                if (com.stevesarmy.combat.GunIntegration.getAimProgress(s) >= 0.8f && ticks[3] < 0) ticks[3] = at;
+                if (p.getCornerPreAimCredit(target) > 0 && ticks[4] < 0) ticks[4] = at;
+                long shot = s.getEngagementTelemetry().getLastShotTick();
+                if (shot > 0 && ticks[5] < 0) ticks[5] = at;
+                if (p.isExposed() && s.getPose() == (window == 2 ? net.minecraft.world.entity.Pose.STANDING : net.minecraft.world.entity.Pose.CROUCHING)) pose[0] = true;
+                if (at % 5 == 0 && ticks[0] >= 0 && (ticks[5] < 0 || at % 40 == 0))
+                    StevesArmyMod.LOGGER.info("[CornerFire] t={} peek={} lane={} aq={} ads={} credit={} gate={} shot={} threshold={} acquired={}",
+                        at, p.getState(), lane, combat.getAimQualityForDebug(),
+                        com.stevesarmy.combat.GunIntegration.getAimProgress(s), p.getCornerPreAimCredit(target),
+                        s.getEngagementTelemetry().getGateReason(), shot, combat.getCornerShotThresholdForDebug(), combat.isCornerTargetAcquiredForDebug());
+                if (at == 358) StevesArmyMod.LOGGER.info("[CornerFire] milestones={} approach={} laneToShot={} crouch={}",
+                    java.util.Arrays.toString(ticks), ticks[1] - ticks[0], ticks[5] - ticks[1], pose[0]);
+            });
+        }
+        return b.assertThat("normal AI reaches usable lane and fires", v -> ticks[0] >= 0 && ticks[1] >= 0 && ticks[5] >= ticks[1])
+            .assertThat("normal pose tick retains selected full-cover posture", v -> pose[0])
+            .assertThat("normal movement body and head aim remain independent", v -> yawEvidence[0] >= 3)
+            .assertThat("natural exposure permits multiple successful shots", v -> v.shots().size() >= 3)
+            .build();
+    }
+
     public static SimScenario create(boolean crossfire) { return create(crossfire, false); }
 
     public static SimScenario create(boolean crossfire, boolean mirrored) { return create(crossfire, mirrored, false, false); }

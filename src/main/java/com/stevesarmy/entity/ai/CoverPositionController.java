@@ -523,12 +523,11 @@ public class CoverPositionController extends MoveControl {
             cautionClamped = true;
         }
         if (this.mob instanceof SoldierEntity peeker && peeker.getPeekController().isCornerPreAiming()) {
-            // Translate the requested world route into the pre-aim facing frame.
-            // Vanilla MoveControl turns toward travel; fighting that turn with ADS
-            // bends a backstep into an orbit instead of moving down its safe leg.
-            double yaw = peeker.getYHeadRot() * Math.PI / 180.0;
-            peeker.setYRot(peeker.getYHeadRot());
-            peeker.setYBodyRot(peeker.getYHeadRot());
+            // Movement owns the body frame; head/pitch remain on the remembered contact.
+            float routeYaw = (float)Math.toDegrees(Math.atan2(-dx, dz));
+            peeker.setYRot(this.rotlerp(peeker.getYRot(), routeYaw, 90));
+            peeker.setYBodyRot(peeker.getYRot());
+            double yaw = peeker.getYRot() * Math.PI / 180.0;
             peeker.setSpeed((float)movementSpeed.resolve(approachSpeed, true, false));
             peeker.setZza((float)((-Math.sin(yaw) * dx + Math.cos(yaw) * dz) / distance));
             peeker.setXxa((float)((Math.cos(yaw) * dx + Math.sin(yaw) * dz) / distance));

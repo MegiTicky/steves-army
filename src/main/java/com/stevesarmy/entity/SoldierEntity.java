@@ -145,6 +145,8 @@ public class SoldierEntity extends PathfinderMob implements Container {
         SynchedEntityData.defineId(SoldierEntity.class, EntityDataSerializers.INT);
     private static final EntityDataAccessor<BlockPos> PEEK_POSITION =
         SynchedEntityData.defineId(SoldierEntity.class, EntityDataSerializers.BLOCK_POS);
+    private static final EntityDataAccessor<Boolean> CORNER_PEEK_CROUCH =
+        SynchedEntityData.defineId(SoldierEntity.class, EntityDataSerializers.BOOLEAN);
     private static final EntityDataAccessor<Boolean> LOW_CROUCHING =
         SynchedEntityData.defineId(SoldierEntity.class, EntityDataSerializers.BOOLEAN);
     private static final EntityDataAccessor<Float> HALF_COVER_RISE_PROGRESS =
@@ -569,6 +571,7 @@ public class SoldierEntity extends PathfinderMob implements Container {
         this.entityData.define(PEEK_STATE, 0);
         this.entityData.define(PEEK_POSITION, BlockPos.ZERO);
         this.entityData.define(LOW_CROUCHING, false);
+        this.entityData.define(CORNER_PEEK_CROUCH, false);
         this.entityData.define(HALF_COVER_RISE_PROGRESS, 1.0f);
         this.entityData.define(HALF_COVER_RISING, false);
         this.entityData.define(RELOAD_PENDING, false);
@@ -1542,7 +1545,12 @@ public class SoldierEntity extends PathfinderMob implements Container {
                            || coverState == CoverBehaviorManager.CoverState.SUPPRESSED_IN_COVER.ordinal();
             boolean isHalfCover = getSyncedCoverCurrentType() == CoverType.HALF.ordinal();
 
-            if (inCover && isHalfCover) {
+            if (entityData.get(CORNER_PEEK_CROUCH)) {
+                if (this.getPose() != Pose.CROUCHING) {
+                    this.setPose(Pose.CROUCHING);
+                    this.refreshDimensions();
+                }
+            } else if (inCover && isHalfCover) {
                 Pose coverPose = isHalfCoverRising() ? Pose.CROUCHING
                     : getSyncedCoverCurrentHeight() >= 1.3f
                     ? Pose.STANDING : Pose.CROUCHING;
@@ -2462,6 +2470,18 @@ public BlockPos getPingMoveTarget() {
     private int emergencyEngagementPostureUntilTick = -1;
     private static final double CRAWL_MOVEMENT_SPEED_SQR = 0.0004D;
     private static final float CRAWL_TURN_RATE_DEGREES = 25.0F;
+
+    /** Normal crouch owned by the bounded corner excursion; crawl/prone keep priority. */
+    public void setCornerPeekCrouching(boolean active) {
+        if (level().isClientSide) return;
+        entityData.set(CORNER_PEEK_CROUCH, active);
+        if (!isLowCrouching()) {
+            setPose(active ? Pose.CROUCHING : Pose.STANDING);
+            refreshDimensions();
+        }
+    }
+
+    public boolean isCornerPeekCrouching() { return entityData.get(CORNER_PEEK_CROUCH); }
 
     public void setLowCrouching(boolean lowCrouch) {
         if (this.level().isClientSide) {

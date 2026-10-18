@@ -452,6 +452,10 @@ public final class SoldierMovementController {
 
     /** Vanilla body rotation follows velocity; Tactical travel deliberately faces another direction. */
     public void finishTick() {
+        if (soldier.getPeekController().isCornerPreAiming()) {
+            // Vanilla body control clamps head yaw to travel after goal ticks.
+            soldier.getPeekController().restoreCornerAim(soldier);
+        }
         if (mode() == Mode.TACTICAL && hasMovingIntent()
             && soldier.getMoveControl() instanceof CoverPositionController control
             && "tactical-steer".equals(control.debugMoveSource())) {

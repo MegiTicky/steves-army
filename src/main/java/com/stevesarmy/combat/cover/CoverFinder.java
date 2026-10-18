@@ -799,36 +799,58 @@ public class CoverFinder {
 
         FiringLaneResult best = FiringLaneResult.NONE;
         BlockPos coverPos = coverPoint.getPosition();
-        for (Direction peekDir : Direction.Plane.HORIZONTAL) {
-            if (protectedDirs.contains(peekDir)) {
-                continue;
-            }
-
-            BlockPos peekPos = coverPos.relative(peekDir);
-            if (!isValidPeekPosition(peekPos)) {
-                continue;
-            }
-
-            // The runtime corner peek stops at a fractional opening. Score the
-            // same bounded side corridor rather than requiring its endpoint lane.
-            for (int step = 1; step <= 10; step++) {
-                Vec3 peekEye = new Vec3(coverPos.getX() + 0.5 + peekDir.getStepX() * step * 0.1,
-                    coverPos.getY() + HALF_COVER_STANDING_EYE_HEIGHT,
-                    coverPos.getZ() + 0.5 + peekDir.getStepZ() * step * 0.1);
-                FiringLaneResult candidate = primaryThreat != null && primaryThreat.isAlive()
-                    && ExposureCalculator.hasFreshFiringLaneFrom(peekEye, primaryThreat)
-                    ? new FiringLaneResult(1.0f, "active", 0, 0)
-                    : evaluateFiringOrigin(peekEye, threatDirection, null, squadCtx);
-                if (isBetterFiringLane(candidate, best)) best = candidate;
-                if (best.score() >= 1.0f) break;
-            }
-            if (best.score() >= 1.0f) {
-                // A perfect lane cannot be improved; further peek origins would
-                // only repeat the full aim-point + contact ray work.
-                break;
+        Direction face = protectedDirs.stream().max(java.util.Comparator.comparingDouble(d ->
+            d.getStepX() * threatDirection.x + d.getStepZ() * threatDirection.z)).orElse(Direction.SOUTH);
+        Vec3 back = new Vec3(-face.getStepX(), 0, -face.getStepZ());
+        Vec3 origin = Vec3.atBottomCenterOf(coverPos);
+        // Coarse admission only: runtime performs detailed exposure ranking once at peek start.
+        // Stop at the first real contact; avoid a duplicate full opening search per candidate.
+        for (double height : new double[]{1.5, 1.8}) {
+            double eyeHeight = height == 1.5 ? 1.27 : HALF_COVER_STANDING_EYE_HEIGHT;
+            for (int depth = 0; depth <= 4; depth++) {
+                Vec3 rear = origin.add(back.scale(depth * 0.25));
+                if (!clearPeekCorridor(origin, rear, height)) break;
+                for (Direction peekDir : Direction.Plane.HORIZONTAL) {
+                    Vec3 side = new Vec3(peekDir.getStepX(), 0, peekDir.getStepZ());
+                    if (protectedDirs.contains(peekDir) || Math.abs(side.dot(back)) > 0.1) continue;
+                    for (int step = 0; step <= 10; step++) {
+                        Vec3 feet = rear.add(side.scale(step * 0.1));
+                        if (!clearPeekFootprint(feet, height)) break;
+                        Vec3 eye = feet.add(0, eyeHeight, 0);
+                        FiringLaneResult candidate;
+                        if (primaryThreat != null && primaryThreat.isAlive()) {
+                            if (!ExposureCalculator.hasFreshFiringLaneFrom(eye, primaryThreat)
+                                || !ExposureCalculator.hasFreshFiringLaneFrom(eye.subtract(side.scale(0.04)), primaryThreat)) continue;
+                            return new FiringLaneResult(1.0f, "active", 0, 0);
+                        }
+                        candidate = evaluateFiringOrigin(eye, threatDirection, null, squadCtx);
+                        if (isBetterFiringLane(candidate, best)) best = candidate;
+                        if (best.score() >= 1.0f) return best;
+                    }
+                }
             }
         }
         return best;
+    }
+
+    private boolean clearPeekCorridor(Vec3 from, Vec3 to, double height) {
+        int count = Math.max(1, (int)Math.ceil(from.distanceTo(to) / 0.1));
+        for (int i = 0; i <= count; i++) if (!clearPeekFootprint(from.lerp(to, i / (double)count), height)) return false;
+        return true;
+    }
+
+    private boolean clearPeekFootprint(Vec3 feet, double height) {
+        var box = new net.minecraft.world.phys.AABB(feet.x - 0.3, feet.y, feet.z - 0.3,
+            feet.x + 0.3, feet.y + height, feet.z + 0.3);
+        if (!level.noCollision(box) || com.stevesarmy.util.HazardBlockHelper.boundingBoxOverlapsHazard(level, box)) return false;
+        for (double x : new double[]{box.minX + 0.02, box.maxX - 0.02}) {
+            for (double z : new double[]{box.minZ + 0.02, box.maxZ - 0.02}) {
+                BlockPos pos = BlockPos.containing(x, feet.y, z);
+                if (!level.isLoaded(pos) || !level.getBlockState(pos.below()).isSolid()
+                    || !level.getBlockState(pos).getFluidState().isEmpty()) return false;
+            }
+        }
+        return true;
     }
 
     private Vec3 getHalfCoverExposedEye(CoverPoint coverPoint) {

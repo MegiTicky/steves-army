@@ -108,6 +108,9 @@ public class PeekController {
             });
         }
         double bestScore = Double.POSITIVE_INFINITY;
+        int[] bestExposure = null;
+        double bestLateral = Double.POSITIVE_INFINITY;
+        double bestPath = Double.POSITIVE_INFINITY;
         cornerOrigin = start;
         // Back means away from the cover face, not diagonally away from a moving target.
         Direction face = cover.getProtectedDirections().stream()
@@ -117,9 +120,20 @@ public class PeekController {
         cornerWaypoint = null;
         // Five depths, two sides, twenty fractional samples: <=210 lane probes.
         // Expensive body rays run only at the first stable opening of each row.
-        for (int depth = 0; depth <= 4; depth++) {
+        for (int depth = 0; depth <= (knownEyes.size() > 1 ? 0 : 4); depth++) {
             Vec3 back = start.add(cornerBack.scale(depth * 0.25));
             if (!clearCornerSegment(soldier, start, back)) break;
+            if (depth > 0) {
+                // Rear travel must preserve the dock's protection against every known enemy.
+                boolean protectedRear = true;
+                int samples = Math.max(1, depth * 2);
+                for (int i = 1; i <= samples && protectedRear; i++) {
+                    int[] rearExposure = cornerExposure(soldier, start.lerp(back, i / (double)samples), knownEyes);
+                    for (int enemy = 2; enemy < rearExposure.length; enemy++)
+                        if (rearExposure[enemy] > 0) protectedRear = false;
+                }
+                if (!protectedRear) break;
+            }
             for (Direction side : Direction.Plane.HORIZONTAL) {
                 Vec3 direction = new Vec3(side.getStepX(), 0, side.getStepZ());
                 if (Math.abs(direction.dot(cornerBack)) > 0.1 || cover.getProtectedDirections().contains(side)) continue;
@@ -145,14 +159,28 @@ public class PeekController {
                             int[] exposure = cornerExposure(soldier, p, knownEyes);
                             maxThreats = Math.max(maxThreats, exposure[0]);
                             maxRays = Math.max(maxRays, exposure[1]);
-                            if (exposure[0] > endpoint[0] || exposure[1] > endpoint[1]) { safe = false; break; }
+                            for (int enemy = 2; enemy < exposure.length; enemy++) {
+                                if (exposure[enemy] > endpoint[enemy]) safe = false;
+                            }
+                            if (!safe || exposure[0] > endpoint[0] || exposure[1] > endpoint[1]) { safe = false; break; }
                         }
                     }
                     if (safe) {
                         double pathCost = depth * 0.25 + distance;
                         double score = maxThreats * 1000 + maxRays * 10 + pathCost * 2;
-                        if (score < bestScore) {
+                        boolean noEnemyWorse = bestExposure == null;
+                        if (bestExposure != null) {
+                            noEnemyWorse = true;
+                            for (int enemy = 2; enemy < endpoint.length; enemy++)
+                                if (endpoint[enemy] > bestExposure[enemy]) noEnemyWorse = false;
+                        }
+                        boolean usefulShallowBackstep = depth >= 1 && depth <= 2 && noEnemyWorse
+                            && distance <= bestLateral - 0.10 + 1.0e-6 && pathCost <= bestPath + 0.25 + 1.0e-6;
+                        if (score < bestScore || usefulShallowBackstep) {
                             bestScore = score;
+                            bestExposure = endpoint;
+                            bestLateral = distance;
+                            bestPath = pathCost;
                             best = feet;
                             cornerWaypoint = depth == 0 ? null : back;
                         }
@@ -166,21 +194,28 @@ public class PeekController {
 
     private int[] cornerExposure(SoldierEntity soldier, Vec3 feet, List<Vec3> eyes) {
         int threats = 0, rays = 0;
-        for (Vec3 eye : eyes) {
-            int n = com.stevesarmy.combat.ExposureCalculator.calculateExposureAt(eye, soldier, feet);
+        int[] result = new int[eyes.size() + 2];
+        for (int i = 0; i < eyes.size(); i++) {
+            int n = com.stevesarmy.combat.ExposureCalculator.calculateExposureAt(eyes.get(i), soldier, feet);
+            result[i + 2] = n;
             if (n > 0) threats++;
             rays += n;
         }
-        return new int[]{threats, rays};
+        result[0] = threats;
+        result[1] = rays;
+        return result;
     }
 
     private boolean clearCornerPosition(SoldierEntity soldier, Vec3 feet) {
         var box = soldier.getBoundingBox().move(feet.subtract(soldier.position()));
-        if (!soldier.level().noCollision(soldier, box)) return false;
-        // Support all four footprint corners; a supported centre alone can straddle a ledge.
+        if (!soldier.level().noCollision(soldier, box)
+            || com.stevesarmy.util.HazardBlockHelper.boundingBoxOverlapsHazard(soldier.level(), box)) return false;
+        // Support all four footprint corners; collision uses the planned pose height.
         for (double x : new double[]{box.minX + 0.02, box.maxX - 0.02}) {
             for (double z : new double[]{box.minZ + 0.02, box.maxZ - 0.02}) {
-                if (!CoverFinder.isValidPeekPosition(BlockPos.containing(x, feet.y, z), soldier.level())) return false;
+                BlockPos pos = BlockPos.containing(x, feet.y, z);
+                if (!soldier.level().isLoaded(pos) || !soldier.level().getBlockState(pos.below()).isSolid()
+                    || !soldier.level().getBlockState(pos).getFluidState().isEmpty()) return false;
             }
         }
         return true;
@@ -213,6 +248,8 @@ public class PeekController {
         if (!target.getUUID().equals(preAimTarget)) {
             clearPreAim(soldier);
             preAimTarget = target.getUUID();
+        }
+        if (preAimPoint == null) {
             for (var threat : soldier.getThreatAwareness().getThreatInfos()) {
                 if (threat.entity == target && threat.wasObservedWithin(GameClock.nowMs(), 10000)) {
                     preAimPoint = Vec3.atBottomCenterOf(threat.position).add(0, 1.62, 0);
@@ -220,8 +257,8 @@ public class PeekController {
                 }
             }
         }
-        if (preAimPoint == null) return;
         if (hasCornerLane(soldier, soldier.position(), target)) preAimPoint = target.getEyePosition();
+        if (preAimPoint == null) return;
         Vec3 delta = preAimPoint.subtract(soldier.getEyePosition());
         float yaw = (float)Math.toDegrees(Math.atan2(-delta.x, delta.z));
         float pitch = (float)-Math.toDegrees(Math.atan2(delta.y, delta.horizontalDistance()));
@@ -229,8 +266,6 @@ public class PeekController {
         if (error > 12) alignedPreAimTicks = 0;
         soldier.getLookControl().setLookAt(preAimPoint.x, preAimPoint.y, preAimPoint.z, 20, 20);
         soldier.setYHeadRot(Mth.approachDegrees(soldier.getYHeadRot(), yaw, 12));
-        soldier.setYRot(soldier.getYHeadRot());
-        soldier.setYBodyRot(soldier.getYHeadRot());
         soldier.setXRot(Mth.approachDegrees(soldier.getXRot(), pitch, 8));
         GunIntegration.aim(soldier, true);
         ownsPreAim = true;
@@ -239,6 +274,14 @@ public class PeekController {
     }
 
     public boolean isCornerPreAiming() { return ownsPreAim; }
+
+    /** Restore only the known aim after vanilla head/body clamping; never move the body here. */
+    public void restoreCornerAim(SoldierEntity soldier) {
+        if (!ownsPreAim || preAimPoint == null) return;
+        Vec3 delta = preAimPoint.subtract(soldier.getEyePosition());
+        soldier.setYHeadRot((float)Math.toDegrees(Math.atan2(-delta.x, delta.z)));
+        soldier.setXRot((float)-Math.toDegrees(Math.atan2(delta.y, delta.horizontalDistance())));
+    }
 
     private boolean hasCornerLane(SoldierEntity soldier, Vec3 feet, LivingEntity target) {
         if (target == null || !target.isAlive()) return false;
@@ -343,6 +386,8 @@ public class PeekController {
 
     private void setState(SoldierEntity soldier, State newState) {
         if (newState != State.MOVING_TO_PEEK && newState != State.EXPOSED) clearPreAim(soldier);
+        if (soldier != null && newState != State.MOVING_TO_PEEK && newState != State.EXPOSED
+            && newState != State.RETURNING_TO_COVER) soldier.setCornerPeekCrouching(false);
         State previousState = this.state;
         this.state = newState;
         if (soldier != null && !soldier.level().isClientSide) {
@@ -545,7 +590,13 @@ public class PeekController {
             BlockPos peekPos;
             if (liveCornerPeek) {
                 Vec3 targetDirection = target.position().subtract(soldier.position()).multiply(1, 0, 1).normalize();
+                soldier.setCornerPeekCrouching(true);
                 targetPos = findCornerOpening(soldier, cover, targetDirection, target);
+                if (targetPos == null && !soldier.isLowCrouching()) {
+                    // A high window can require the standing eye and box.
+                    soldier.setCornerPeekCrouching(false);
+                    targetPos = findCornerOpening(soldier, cover, targetDirection, target);
+                }
                 peekPos = targetPos == null ? null : BlockPos.containing(targetPos);
             } else {
                 // Keep direction/ping-only probing when no live target can validate a lane.
@@ -553,6 +604,7 @@ public class PeekController {
                 targetPos = peekPos == null ? null : new Vec3(peekPos.getX() + 0.5, soldier.getY(), peekPos.getZ() + 0.5);
             }
             if (targetPos == null) {
+                soldier.setCornerPeekCrouching(false);
                 if (CoverTacticalGoal.isDebugLoggingEnabled()) {
                     StevesArmyMod.LOGGER.info("[PeekController] Soldier {} no valid peek position toward threat",
                         soldier.getId());
