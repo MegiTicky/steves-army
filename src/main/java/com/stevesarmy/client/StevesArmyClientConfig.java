@@ -86,8 +86,6 @@ public final class StevesArmyClientConfig {
             .defineEnum("vehicleWheelCycleButton", WheelCycleController.CycleButton.RIGHT);
         builder.pop();
 
-        builder.pop();
-
         builder.push("fireteamHud");
         FIRETEAM_HUD_ENABLED = builder.define("enabled", true);
         FIRETEAM_HUD_ANCHOR = builder.defineEnum("anchor", FireTeamHudRenderer.Anchor.TOP_RIGHT);
