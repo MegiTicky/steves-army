@@ -368,6 +368,7 @@ public class PingClientEvents {
             }
             
             CoverHudRenderer.render(event.getGuiGraphics());
+            FireTeamHudRenderer.render(event.getGuiGraphics());
         }
     }
     

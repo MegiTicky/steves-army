@@ -15,6 +15,18 @@ public final class StevesArmyClientConfig {
     public static final ForgeConfigSpec.DoubleValue PING_SCALE;
     public static final ForgeConfigSpec.DoubleValue ENEMY_CONTACT_PING_BASELINE_SIZE;
     public static final ForgeConfigSpec.DoubleValue ENEMY_CONTACT_PING_HEIGHT_OFFSET;
+    public static final ForgeConfigSpec.BooleanValue FIRETEAM_HUD_ENABLED;
+    public static final ForgeConfigSpec.EnumValue<FireTeamHudRenderer.Anchor> FIRETEAM_HUD_ANCHOR;
+    public static final ForgeConfigSpec.IntValue FIRETEAM_HUD_OFFSET_X;
+    public static final ForgeConfigSpec.IntValue FIRETEAM_HUD_OFFSET_Y;
+    public static final ForgeConfigSpec.DoubleValue FIRETEAM_HUD_SCALE;
+    public static final ForgeConfigSpec.IntValue FIRETEAM_HUD_WIDTH;
+    public static final ForgeConfigSpec.DoubleValue FIRETEAM_HUD_OPACITY;
+    public static final ForgeConfigSpec.BooleanValue FIRETEAM_HUD_SHOW_EMPTY;
+    public static final ForgeConfigSpec.BooleanValue FIRETEAM_HUD_SELECTED_ONLY;
+    public static final ForgeConfigSpec.BooleanValue FIRETEAM_HUD_PROGRESS;
+    public static final ForgeConfigSpec.BooleanValue FIRETEAM_HUD_ETA;
+    public static final ForgeConfigSpec.BooleanValue FIRETEAM_HUD_DETAILS;
 
     static {
         ForgeConfigSpec.Builder builder = new ForgeConfigSpec.Builder();
@@ -72,6 +84,23 @@ public final class StevesArmyClientConfig {
                      "while the scroll-wheel button is held down.",
                      "Default: RIGHT")
             .defineEnum("vehicleWheelCycleButton", WheelCycleController.CycleButton.RIGHT);
+        builder.pop();
+
+        builder.pop();
+
+        builder.push("fireteamHud");
+        FIRETEAM_HUD_ENABLED = builder.define("enabled", true);
+        FIRETEAM_HUD_ANCHOR = builder.defineEnum("anchor", FireTeamHudRenderer.Anchor.TOP_RIGHT);
+        FIRETEAM_HUD_OFFSET_X = builder.defineInRange("offsetX", 8, -1000, 1000);
+        FIRETEAM_HUD_OFFSET_Y = builder.defineInRange("offsetY", 8, -1000, 1000);
+        FIRETEAM_HUD_SCALE = builder.defineInRange("scale", 0.6, 0.25, 2.0);
+        FIRETEAM_HUD_WIDTH = builder.defineInRange("width", 150, 80, 500);
+        FIRETEAM_HUD_OPACITY = builder.defineInRange("opacity", 0.86, 0.1, 1.0);
+        FIRETEAM_HUD_SHOW_EMPTY = builder.define("showEmpty", false);
+        FIRETEAM_HUD_SELECTED_ONLY = builder.define("selectedOnly", false);
+        FIRETEAM_HUD_PROGRESS = builder.define("progress", true);
+        FIRETEAM_HUD_ETA = builder.define("eta", true);
+        FIRETEAM_HUD_DETAILS = builder.define("details", true);
         builder.pop();
 
         SPEC = builder.build();
