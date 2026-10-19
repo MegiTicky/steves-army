@@ -27,17 +27,19 @@ const soldier = bone('soldier', [0, 0, 0], [
   // Hands are separate visible grip blocks at the rifle stock and fore-end.
   bone('right_arm', [-5, 22, -1], [box('right upper arm', [-8, 17, -4], [-4, 24, 0], 3, [-6, 22, -1], [-30, 0, -12])]),
   bone('left_arm', [5, 22, -1], [box('left upper arm', [4, 17, -4], [8, 24, 0], 3, [6, 22, -1], [-30, 0, 12])]),
-  bone('right_hand', [-3.7, 19, -5], [box('right hand grip', [-4.8, 17.5, -6], [-2.6, 20, -4], 2, [-3.7, 19, -5])]),
-  bone('left_hand', [3.7, 19, -8], [box('left hand grip', [2.6, 17.5, -9], [4.8, 20, -7], 2, [3.7, 19, -8])]),
+  bone('right_hand', [-3.7, 19, -7], [box('right hand grip', [-4.8, 17, -8], [-2.6, 20, -6], 2, [-3.7, 19, -7])]),
+  bone('left_hand', [3.7, 19, -10], [box('left hand grip', [2.6, 17, -11], [4.8, 20, -9], 2, [3.7, 19, -10])]),
   bone('right_thigh', [-2, 13, 0], [box('right upper leg', [-4, 8, -2], [0, 16, 2], 5, [-2, 14, 0], [35, 0, 0])]),
   bone('right_shin', [-2, 8, -5], [box('right lower leg', [-4, 1, -7], [0, 9, -3], 5, [-2, 8, -5], [-35, 0, 0]), box('right boot', [-4.5, 0, -9], [0, 2.5, -4], 5)]),
   bone('left_thigh', [2, 13, 0], [box('left upper leg', [0, 8, -2], [4, 16, 2], 5, [2, 14, 0], [35, 0, 0])]),
   bone('left_shin', [2, 8, -5], [box('left lower leg', [0, 1, -7], [4, 9, -3], 5, [2, 8, -5], [-35, 0, 0]), box('left boot', [0, 0, -9], [4.5, 2.5, -4], 5)]),
-  bone('rifle', [0, 19, -2], [box('rifle stock', [-1, 18, -7], [1, 20, -3], 7),
-    box('rifle resting 2px above cover', [-1, 18, -20], [1, 20, -6], 7),
-    box('rifle grip', [-1.5, 16.5, -8], [1.5, 18.5, -6], 7)])
+  bone('rifle', [0, 18, -2], [box('rifle stock', [-1, 16, -7], [1, 18, -3], 7),
+    box('rifle resting on cover top', [-1, 16, -20], [1, 18, -6], 7),
+    box('rifle grip', [-1.5, 16, -10], [1.5, 18, -8], 7)])
 ]);
-const cover = bone('full half cover block', [0, 0, 0], [box('full cover block', [-13, 0, -13], [13, 16, -1], 6)]);
+// Keep the reference as a true full block. In Blockbench, toggle this group off
+// while reviewing the hidden knee and boot placement, then turn it back on.
+const cover = bone('full half cover block', [0, 0, 0], [box('full cover block', [-8, 0, -8], [8, 16, 8], 6)]);
 const floor = bone('floor', [0, 0, 0], [box('floor', [-20, -0.4, -24], [20, 0, 12], 0)]);
 const model = {
   meta: { format_version: '4.10', model_format: 'free', box_uv: false },

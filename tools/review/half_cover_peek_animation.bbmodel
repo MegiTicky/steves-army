@@ -12,7 +12,7 @@
   "elements": [
     {
       "name": "torso",
-      "uuid": "6143ed4a-1d57-4e8e-b4b7-4da4228de0e0",
+      "uuid": "ca0444d9-29a1-4f1f-977a-252885372210",
       "type": "cube",
       "from": [
         -4,
@@ -94,7 +94,7 @@
     },
     {
       "name": "head",
-      "uuid": "35d96cd9-0d34-42ef-87ca-50ffed36d37e",
+      "uuid": "71055b5b-3501-4674-94df-6349067a6843",
       "type": "cube",
       "from": [
         -4,
@@ -176,7 +176,7 @@
     },
     {
       "name": "face forward",
-      "uuid": "df110806-abd5-4a87-8527-6c67e9b18918",
+      "uuid": "2d2c6abd-12ea-4377-8138-a54bffdf0773",
       "type": "cube",
       "from": [
         -2,
@@ -258,7 +258,7 @@
     },
     {
       "name": "right upper arm",
-      "uuid": "e57991bc-9805-4987-a784-cb9dce7b84f8",
+      "uuid": "7add6347-badf-4b26-b033-e296225a1d50",
       "type": "cube",
       "from": [
         -8,
@@ -340,7 +340,7 @@
     },
     {
       "name": "left upper arm",
-      "uuid": "0340fddf-5ef2-488a-b4e1-a6af2a4df406",
+      "uuid": "01632f4f-07b7-4482-8ac9-c9713aa8ad11",
       "type": "cube",
       "from": [
         4,
@@ -422,22 +422,22 @@
     },
     {
       "name": "right hand grip",
-      "uuid": "54a4a876-2ee2-4bb9-beec-455e6189b8da",
+      "uuid": "845f4e2f-392c-40c6-898c-eba72f9b3c62",
       "type": "cube",
       "from": [
         -4.8,
-        17.5,
-        -6
+        17,
+        -8
       ],
       "to": [
         -2.6,
         20,
-        -4
+        -6
       ],
       "origin": [
         -3.7,
         19,
-        -5
+        -7
       ],
       "rotation": [
         0,
@@ -504,22 +504,22 @@
     },
     {
       "name": "left hand grip",
-      "uuid": "4439014a-5ac3-497c-a3a2-55ec4e57e821",
+      "uuid": "98c625f9-e016-4e17-a44f-9a21d36cdf57",
       "type": "cube",
       "from": [
         2.6,
-        17.5,
-        -9
+        17,
+        -11
       ],
       "to": [
         4.8,
         20,
-        -7
+        -9
       ],
       "origin": [
         3.7,
         19,
-        -8
+        -10
       ],
       "rotation": [
         0,
@@ -586,7 +586,7 @@
     },
     {
       "name": "right upper leg",
-      "uuid": "9975433d-266e-4f32-9c21-3494850272b2",
+      "uuid": "daca560f-745b-4892-afd3-faa3a47a2350",
       "type": "cube",
       "from": [
         -4,
@@ -668,7 +668,7 @@
     },
     {
       "name": "right lower leg",
-      "uuid": "a707fae4-d682-4e3b-a911-6b2b9221b159",
+      "uuid": "952df46e-e557-4cce-9b6d-18237b15454d",
       "type": "cube",
       "from": [
         -4,
@@ -750,7 +750,7 @@
     },
     {
       "name": "right boot",
-      "uuid": "31756fd0-f42a-4fa2-87b3-475bdd11b939",
+      "uuid": "f3b52b8d-99dc-49d0-8c3e-442c41f29764",
       "type": "cube",
       "from": [
         -4.5,
@@ -832,7 +832,7 @@
     },
     {
       "name": "left upper leg",
-      "uuid": "2f291598-19ba-4a39-aedc-3e6042e3c131",
+      "uuid": "3248cadd-60c7-4e54-aa2b-61a81896ed8c",
       "type": "cube",
       "from": [
         0,
@@ -914,7 +914,7 @@
     },
     {
       "name": "left lower leg",
-      "uuid": "986d1d87-66a1-450b-96a3-13482e483cc7",
+      "uuid": "11edd3f9-f0c1-4a9f-ba0b-5271597e03ef",
       "type": "cube",
       "from": [
         0,
@@ -996,7 +996,7 @@
     },
     {
       "name": "left boot",
-      "uuid": "1a3ede67-8cd1-48cb-9694-7f1fd9eac949",
+      "uuid": "db8dced7-3ea9-4c37-91fb-11ce83fdf8ad",
       "type": "cube",
       "from": [
         0,
@@ -1078,16 +1078,16 @@
     },
     {
       "name": "rifle stock",
-      "uuid": "af0478ea-5091-4532-84c5-df6302348ed6",
+      "uuid": "f889d8e1-12e9-41cd-aba4-8c1dfa36f06e",
       "type": "cube",
       "from": [
         -1,
-        18,
+        16,
         -7
       ],
       "to": [
         1,
-        20,
+        18,
         -3
       ],
       "origin": [
@@ -1159,17 +1159,17 @@
       }
     },
     {
-      "name": "rifle resting 2px above cover",
-      "uuid": "d35f7cd9-74ff-4cf3-b67c-40d925dcba1a",
+      "name": "rifle resting on cover top",
+      "uuid": "6467983b-c74f-4c3b-8e1c-6a1ba314513d",
       "type": "cube",
       "from": [
         -1,
-        18,
+        16,
         -20
       ],
       "to": [
         1,
-        20,
+        18,
         -6
       ],
       "origin": [
@@ -1242,17 +1242,17 @@
     },
     {
       "name": "rifle grip",
-      "uuid": "b317bc0b-0122-4f7f-91dc-408d86c278c5",
+      "uuid": "aaff835c-0a0d-412b-8045-ec35fd0af9f8",
       "type": "cube",
       "from": [
         -1.5,
-        16.5,
-        -8
+        16,
+        -10
       ],
       "to": [
         1.5,
-        18.5,
-        -6
+        18,
+        -8
       ],
       "origin": [
         0,
@@ -1324,17 +1324,17 @@
     },
     {
       "name": "full cover block",
-      "uuid": "a00f5733-83b5-4006-bdd8-9de0c25052b8",
+      "uuid": "60b852b9-7e2c-4f91-b4ec-a8dc22c64816",
       "type": "cube",
       "from": [
-        -13,
+        -8,
         0,
-        -13
+        -8
       ],
       "to": [
-        13,
+        8,
         16,
-        -1
+        8
       ],
       "origin": [
         0,
@@ -1406,7 +1406,7 @@
     },
     {
       "name": "floor",
-      "uuid": "147691b2-39a0-4c64-af59-202e589d59ba",
+      "uuid": "44dee47d-5a5b-4cfb-a96c-fd44d42bb7e7",
       "type": "cube",
       "from": [
         -20,
@@ -1490,7 +1490,7 @@
   "outliner": [
     {
       "name": "soldier",
-      "uuid": "f6876ceb-8e6a-44c0-8ffa-79f3572f12a2",
+      "uuid": "2e031b56-069c-4d68-82a4-54ddbe009e61",
       "origin": [
         0,
         0,
@@ -1506,7 +1506,7 @@
       "children": [
         {
           "name": "body",
-          "uuid": "5ac02b92-c869-4f0f-ad4b-035b80bd8e44",
+          "uuid": "6fa5ad27-d81e-462b-9900-d1abb4b01c2d",
           "origin": [
             0,
             16,
@@ -1520,12 +1520,12 @@
           "visibility": true,
           "export": true,
           "children": [
-            "6143ed4a-1d57-4e8e-b4b7-4da4228de0e0"
+            "ca0444d9-29a1-4f1f-977a-252885372210"
           ]
         },
         {
           "name": "head",
-          "uuid": "65af104c-56a2-44a8-b84d-89dedd05a91c",
+          "uuid": "21b927dc-dfbf-42a4-b71a-12095b7d53d8",
           "origin": [
             0,
             25,
@@ -1539,13 +1539,13 @@
           "visibility": true,
           "export": true,
           "children": [
-            "35d96cd9-0d34-42ef-87ca-50ffed36d37e",
-            "df110806-abd5-4a87-8527-6c67e9b18918"
+            "71055b5b-3501-4674-94df-6349067a6843",
+            "2d2c6abd-12ea-4377-8138-a54bffdf0773"
           ]
         },
         {
           "name": "right_arm",
-          "uuid": "c807742b-18b2-44ba-b88b-ec759ea4f002",
+          "uuid": "458606df-97ad-45e1-a919-046782128b38",
           "origin": [
             -5,
             22,
@@ -1559,12 +1559,12 @@
           "visibility": true,
           "export": true,
           "children": [
-            "e57991bc-9805-4987-a784-cb9dce7b84f8"
+            "7add6347-badf-4b26-b033-e296225a1d50"
           ]
         },
         {
           "name": "left_arm",
-          "uuid": "7cc35df8-ce11-4c31-af81-04e2d40231ce",
+          "uuid": "c643ed81-04da-464a-9863-a6a9d20d72c0",
           "origin": [
             5,
             22,
@@ -1578,16 +1578,16 @@
           "visibility": true,
           "export": true,
           "children": [
-            "0340fddf-5ef2-488a-b4e1-a6af2a4df406"
+            "01632f4f-07b7-4482-8ac9-c9713aa8ad11"
           ]
         },
         {
           "name": "right_hand",
-          "uuid": "4ce0353b-f108-422b-a5ca-8812d01fd9d2",
+          "uuid": "0db4abc4-b2f0-4f2a-b58e-5db295c2c650",
           "origin": [
             -3.7,
             19,
-            -5
+            -7
           ],
           "rotation": [
             0,
@@ -1597,16 +1597,16 @@
           "visibility": true,
           "export": true,
           "children": [
-            "54a4a876-2ee2-4bb9-beec-455e6189b8da"
+            "845f4e2f-392c-40c6-898c-eba72f9b3c62"
           ]
         },
         {
           "name": "left_hand",
-          "uuid": "e652ec26-3fb2-4f5c-8513-fdb256099948",
+          "uuid": "316ffdfb-ec05-46b7-bead-8a62aa5b139b",
           "origin": [
             3.7,
             19,
-            -8
+            -10
           ],
           "rotation": [
             0,
@@ -1616,12 +1616,12 @@
           "visibility": true,
           "export": true,
           "children": [
-            "4439014a-5ac3-497c-a3a2-55ec4e57e821"
+            "98c625f9-e016-4e17-a44f-9a21d36cdf57"
           ]
         },
         {
           "name": "right_thigh",
-          "uuid": "d115b6da-d3c4-4b8f-a711-0b771c84605c",
+          "uuid": "c2026c34-c130-46aa-99dd-551dd3606883",
           "origin": [
             -2,
             13,
@@ -1635,12 +1635,12 @@
           "visibility": true,
           "export": true,
           "children": [
-            "9975433d-266e-4f32-9c21-3494850272b2"
+            "daca560f-745b-4892-afd3-faa3a47a2350"
           ]
         },
         {
           "name": "right_shin",
-          "uuid": "6e309710-5f8c-4972-a481-9d76bfdeca8b",
+          "uuid": "9e4b24c5-8bf6-4cd0-8e3b-ea564b970b59",
           "origin": [
             -2,
             8,
@@ -1654,13 +1654,13 @@
           "visibility": true,
           "export": true,
           "children": [
-            "a707fae4-d682-4e3b-a911-6b2b9221b159",
-            "31756fd0-f42a-4fa2-87b3-475bdd11b939"
+            "952df46e-e557-4cce-9b6d-18237b15454d",
+            "f3b52b8d-99dc-49d0-8c3e-442c41f29764"
           ]
         },
         {
           "name": "left_thigh",
-          "uuid": "e84daa49-e644-4da6-8cdd-d5aa833398c9",
+          "uuid": "aaef5cf1-304b-4c08-959b-d18f7e112ca4",
           "origin": [
             2,
             13,
@@ -1674,12 +1674,12 @@
           "visibility": true,
           "export": true,
           "children": [
-            "2f291598-19ba-4a39-aedc-3e6042e3c131"
+            "3248cadd-60c7-4e54-aa2b-61a81896ed8c"
           ]
         },
         {
           "name": "left_shin",
-          "uuid": "a583f7bb-e64b-4316-9705-43ba0af3330c",
+          "uuid": "77313e42-75ae-49ed-972f-bf2b3929cf81",
           "origin": [
             2,
             8,
@@ -1693,16 +1693,16 @@
           "visibility": true,
           "export": true,
           "children": [
-            "986d1d87-66a1-450b-96a3-13482e483cc7",
-            "1a3ede67-8cd1-48cb-9694-7f1fd9eac949"
+            "11edd3f9-f0c1-4a9f-ba0b-5271597e03ef",
+            "db8dced7-3ea9-4c37-91fb-11ce83fdf8ad"
           ]
         },
         {
           "name": "rifle",
-          "uuid": "a504c902-3afc-4251-9d56-6096eb4e613a",
+          "uuid": "2e6ee8f7-1b0b-425f-88b1-1d2f1c1ffe08",
           "origin": [
             0,
-            19,
+            18,
             -2
           ],
           "rotation": [
@@ -1713,16 +1713,16 @@
           "visibility": true,
           "export": true,
           "children": [
-            "af0478ea-5091-4532-84c5-df6302348ed6",
-            "d35f7cd9-74ff-4cf3-b67c-40d925dcba1a",
-            "b317bc0b-0122-4f7f-91dc-408d86c278c5"
+            "f889d8e1-12e9-41cd-aba4-8c1dfa36f06e",
+            "6467983b-c74f-4c3b-8e1c-6a1ba314513d",
+            "aaff835c-0a0d-412b-8045-ec35fd0af9f8"
           ]
         }
       ]
     },
     {
       "name": "full half cover block",
-      "uuid": "20fd5976-c054-4a43-92e3-4392f90a0af6",
+      "uuid": "e67a565d-29b0-457a-820a-1dc5abe2c877",
       "origin": [
         0,
         0,
@@ -1736,12 +1736,12 @@
       "visibility": true,
       "export": true,
       "children": [
-        "a00f5733-83b5-4006-bdd8-9de0c25052b8"
+        "60b852b9-7e2c-4f91-b4ec-a8dc22c64816"
       ]
     },
     {
       "name": "floor",
-      "uuid": "6a8eec7f-18fa-4e64-9c71-8526cc90160b",
+      "uuid": "f7f095de-e458-4805-8fa2-e21c553e3e57",
       "origin": [
         0,
         0,
@@ -1755,14 +1755,14 @@
       "visibility": true,
       "export": true,
       "children": [
-        "147691b2-39a0-4c64-af59-202e589d59ba"
+        "44dee47d-5a5b-4cfb-a96c-fd44d42bb7e7"
       ]
     }
   ],
   "textures": [],
   "animations": [
     {
-      "uuid": "88884882-b5dc-464b-af78-4a65b1992308",
+      "uuid": "8efe8673-9309-4e01-aa4a-883e56a57ec0",
       "name": "half_cover_peek_posture",
       "loop": "once",
       "length": 0.1,
