@@ -6,6 +6,8 @@ public class StevesArmyConfig {
     
     public static final ForgeConfigSpec.Builder BUILDER = new ForgeConfigSpec.Builder();
     public static final ForgeConfigSpec SPEC;
+    public static final ForgeConfigSpec.BooleanValue SOLDIER_CHUNK_LOADING_ENABLED;
+    public static final ForgeConfigSpec.IntValue SOLDIER_CHUNK_LOADING_DISTANCE;
     
     public static final ForgeConfigSpec.DoubleValue AIM_QUALITY_BASE_ACCURACY;
     public static final ForgeConfigSpec.DoubleValue AIM_QUALITY_THRESHOLD_SCALE;
@@ -214,6 +216,17 @@ public class StevesArmyConfig {
     public static final ForgeConfigSpec.DoubleValue GROUP_BEHIND_DWELL_MULT;
 
     static {
+        BUILDER.push("soldier_chunk_loading");
+        SOLDIER_CHUNK_LOADING_ENABLED = BUILDER
+            .comment("Keep a small entity-ticking area around loaded soldiers near a non-spectator player. May increase server load.",
+                "Applies to friendly and enemy soldiers. Does not search unloaded chunks for soldiers.")
+            .define("enabled", false);
+        SOLDIER_CHUNK_LOADING_DISTANCE = BUILDER
+            .comment("Maximum horizontal distance in blocks from any non-spectator player in the same dimension.",
+                "This is a total distance, not an addition to simulation distance. Normal simulation still applies outside it.",
+                "Each qualifying soldier keeps a 3x3 entity-ticking area plus Minecraft's supporting chunk border loaded.")
+            .defineInRange("distance", 256, 16, 1024);
+        BUILDER.pop();
         BUILDER.push("aim_quality");
         
         AIM_QUALITY_BASE_ACCURACY = BUILDER
