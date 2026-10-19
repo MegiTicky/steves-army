@@ -9,7 +9,6 @@ import com.stevesarmy.entity.SoldierEntity;
 import net.minecraft.client.renderer.MultiBufferSource;
 import net.minecraft.client.renderer.entity.EntityRendererProvider;
 import net.minecraft.client.renderer.entity.HumanoidMobRenderer;
-import net.minecraft.client.renderer.entity.layers.HumanoidArmorLayer;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.phys.Vec3;
 
@@ -23,10 +22,7 @@ public class SoldierRenderer extends HumanoidMobRenderer<SoldierEntity, SoldierM
         this.layers.removeIf(net.minecraft.client.renderer.entity.layers.ItemInHandLayer.class::isInstance);
         this.addLayer(new SoldierHeldItemLayer<>(this, context.getItemInHandRenderer()));
         this.geoRenderer = YsmCompat.createGeoRenderer(context);
-        this.addLayer(new HumanoidArmorLayer<>(this,
-            new SoldierModel<SoldierEntity>(SoldierModel.createBodyLayer(new net.minecraft.client.model.geom.builders.CubeDeformation(.5F)).bakeRoot()),
-            new SoldierModel<SoldierEntity>(SoldierModel.createBodyLayer(new net.minecraft.client.model.geom.builders.CubeDeformation(1)).bakeRoot()),
-            context.getModelManager()));
+        this.addLayer(new SoldierArmorLayer<>(this, context));
         this.addLayer(new SoldierBackWeaponLayer<>(this));
     }
 

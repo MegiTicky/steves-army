@@ -9,7 +9,6 @@ import net.minecraft.client.renderer.ItemInHandRenderer;
 import net.minecraft.client.renderer.MultiBufferSource;
 import net.minecraft.client.renderer.entity.RenderLayerParent;
 import net.minecraft.client.renderer.entity.layers.ItemInHandLayer;
-import net.minecraft.util.Mth;
 import net.minecraft.world.entity.HumanoidArm;
 import net.minecraft.world.item.ItemDisplayContext;
 import net.minecraft.world.item.ItemStack;
@@ -34,14 +33,17 @@ public class SoldierHeldItemLayer<T extends SoldierEntity> extends ItemInHandLay
         stack.pushPose();
         getParentModel().translateWeaponToHand(stack);
         boolean heavy = item.getTag() != null && item.getTag().getString("GunId").contains("minigun");
-        float ready = getParentModel().weaponReady();
-        stack.translate(heavy ? .01 : 0, heavy ? .30 : Mth.lerp(ready, .35F, .10F),
-            heavy ? -.25 : Mth.lerp(ready, .13F, .28F));
-        stack.mulPose(Axis.YP.rotationDegrees(-180));
-        stack.mulPose(Axis.XP.rotationDegrees(heavy ? -70 : Mth.lerp(ready, -90, -95)));
-        if (heavy) stack.mulPose(Axis.ZP.rotationDegrees(6));
-        stack.scale(1, -1, -1);
+        applyGunDisplayTransform(stack, heavy);
         items.renderItem(entity, item, ItemDisplayContext.THIRD_PERSON_RIGHT_HAND, false, stack, buffers, light);
         stack.popPose();
+    }
+
+    /** TaCZ already places thirdperson_hand at the item origin. Do not offset it again. */
+    public static void applyGunDisplayTransform(PoseStack stack, boolean heavy) {
+        if (heavy) stack.translate(.01, .30, -.25);
+        stack.mulPose(Axis.YP.rotationDegrees(-180));
+        stack.mulPose(Axis.XP.rotationDegrees(heavy ? -70 : -95));
+        if (heavy) stack.mulPose(Axis.ZP.rotationDegrees(6));
+        stack.scale(1, -1, -1);
     }
 }

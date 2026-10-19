@@ -2,6 +2,10 @@ import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import com.stevesarmy.client.model.SoldierModel;
 import com.stevesarmy.client.animation.SoldierAnimations;
+import com.stevesarmy.client.renderer.ArticulatedArmorModel;
+import com.stevesarmy.client.renderer.SoldierHeldItemLayer;
+import net.minecraft.client.model.HumanoidModel;
+import net.minecraft.client.model.geom.builders.LayerDefinition;
 import net.minecraft.client.model.geom.ModelPart;
 import net.minecraft.client.model.geom.builders.CubeDeformation;
 import net.minecraft.client.animation.AnimationDefinition;
@@ -26,6 +30,7 @@ public class SoldierAnimationChecks {
     }
     public static void main(String[] args) throws Exception {
         root = SoldierModel.createBodyLayer().bakeRoot(); model = new SoldierModel(root);
+        model.young = false;
         apply = SoldierModel.class.getDeclaredMethod("apply", AnimationDefinition.class, float.class, float.class);
         crouch = SoldierModel.class.getDeclaredMethod("applyCrouch", float.class, float.class, float.class);
         crawl = SoldierModel.class.getDeclaredMethod("applyCrawl", float.class, float.class, float.class, float.class, boolean.class);
@@ -53,6 +58,13 @@ public class SoldierAnimationChecks {
         check(armorRoot.y == root.y && armorRoot.xRot == root.xRot, "armor lost root transform");
         check(armorRoot.getChild("right_leg").getChild("lower_leg").xRot == root.getChild("right_leg").getChild("lower_leg").xRot,
             "armor lost knee transform");
+        checkForeignArmor();
+        PoseStack palm = new PoseStack();
+        model.translateWeaponToHand(palm);
+        org.joml.Vector3f beforeGun = palm.last().pose().transformPosition(new org.joml.Vector3f());
+        SoldierHeldItemLayer.applyGunDisplayTransform(palm, false);
+        org.joml.Vector3f afterGun = palm.last().pose().transformPosition(new org.joml.Vector3f());
+        check(beforeGun.distance(afterGun) < 1e-6, "gun display offset moved the authored grip anchor away from the palm");
         reset(); crawl.invoke(model, 1f, 0f, 0f, 0f, true);
         Bounds prone = bounds("head", "body", "right_leg", "left_leg");
         System.out.println("crawl " + prone);
@@ -68,7 +80,30 @@ public class SoldierAnimationChecks {
         check(before == c.getFloat(motion), "same-frame render changes pose");
         update.invoke(motion, 2f, 0f, 0f, 0f);
         check(c.getFloat(motion) > 0 && c.getFloat(motion) < before, "transition reversal snapped");
-        System.out.println("PASS: six clips x 101 samples; posture bounds; armor root/knees; transition reversal.");
+        System.out.println("PASS: six clips x 101 samples; posture bounds; fallback AND replacement armor root/knees; gun anchor; transition reversal.");
+    }
+    static void checkForeignArmor() throws Exception {
+        // Equipment mods replace our supplied model through Forge's armor hook.
+        // A conventional rigid 12px armor leg must bend with the 6+6px skin rig.
+        HumanoidModel custom = new HumanoidModel(LayerDefinition.create(
+            HumanoidModel.createMesh(CubeDeformation.NONE, 0), 64, 32).bakeRoot());
+        for (float amount : new float[]{0, .25f, .5f, .75f, 1}) {
+            reset(); crouch.invoke(model, amount, 0f, 0f);
+            model.copyPropertiesTo(custom);
+            for (String part : new String[]{"head", "body", "right_leg", "left_leg"}) {
+                custom.setAllVisible(false);
+                ModelPart selected = switch (part) {
+                    case "head" -> custom.head; case "body" -> custom.body;
+                    case "right_leg" -> custom.rightLeg; default -> custom.leftLeg;
+                };
+                selected.visible = true;
+                Bounds expected = bounds(part), actual = new Bounds();
+                new ArticulatedArmorModel(custom, model).renderToBuffer(new PoseStack(), actual, 0, 0, 1, 1, 1, 1);
+                check(Math.abs(expected.minY - actual.minY) < .03 && Math.abs(expected.maxY - actual.maxY) < .03,
+                    "replacement armor detached from " + part + " at crouch " + amount + ": " + actual + " vs " + expected);
+                check(selected.visible && custom.hat.visible == false, "borrowed armor visibility not restored");
+            }
+        }
     }
     static class Bounds implements VertexConsumer {
         double minY = Double.POSITIVE_INFINITY, maxY = Double.NEGATIVE_INFINITY;
