@@ -40,6 +40,16 @@ const result = await evaluate(`(() => {
   const data = ${payload};
   const path = ${JSON.stringify(file.replaceAll('\\', '/'))};
   Codecs.project.load(data, {path});
+  if (${JSON.stringify(process.argv.includes('--play'))} && Animation.all.length) {
+    Modes.options.animate.select();
+    Animation.all[0].select();
+    main_preview.controls.target.set(0, 14, -5);
+    main_preview.camera.position.set(48, 32, 65);
+    main_preview.camera.lookAt(0, 14, -5);
+    Timeline.setTime(0);
+    Animator.preview();
+    Timeline.start();
+  }
   return {project: Project.name, groups: Group.all.length, cubes: Cube.all.length,
     names: Cube.all.slice(0, 8).map(cube => cube.name)};
 })()`);
