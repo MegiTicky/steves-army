@@ -16,11 +16,24 @@ found in the inspected constants; use resource-pack overrides for stock/grips
 and fallback poses when anchors are absent. Arbitrary gun packs cannot be
 promised perfect anatomical fit from the hand anchor alone.
 
-The review placeholder now has a dropped, diagonally offset stock terminating
-at the leaned shoulder instead of a high sideways connector. Blockbench world
-bounding boxes for all three stock pieces do not intersect the head box.
-Eye/optic alignment, two-pixel receiver clearance, full six-pixel leg segments,
-and export parity still pass. Viewed the three-quarter screenshot. This custom
-stock shape demonstrates clearance only; it does not prove a normal straight
-TaCZ stock fits this unchanged head/shoulder pose. No runtime integration or
-deployment was performed.
+The dropped-stock workaround was rejected by the user and removed. The review
+now uses an inline stock and shifts/cants the whole rifle 8 degrees, with the
+hands following it. Head has 8-degree roll and slight forward pitch. Scope axis
+is approximately 3.19 pixels from the eye in the lateral/vertical plane; exact ADS
+alignment is deliberately relaxed. Receiver clearance is 1.89 pixels. Grid
+sampling of both stock pieces found no points inside the oriented head box;
+this sampled check is not a formal intersection proof. Legs remain six pixels
+per segment. Core body bounds fit the sneak envelope (with authored ground tuck).
+
+Simple Enemy reference inspected locally:
+`entity/client/util/UnitModelDefinitions.java` uses fixed 4x12x4 arms, an
+asymmetric rifle hold, and a `rightHandAnchor` at (-1,9,0) in arm coordinates.
+`animation/procedural/AdvancedWeaponPoseLayer.java` follows head yaw/pitch
+at 0.65/0.85 for rifles, with separate pistol/heavy poses. Its rig has rigid
+arms, not elbow IK. Our preview takes the fixed-proportion/asymmetric approach
+without copying their geometry or animation: both arms now have six-pixel upper
+and lower segments, solved to reachable grip targets, with support grip closer
+to the receiver. Inspection asserts all four arm lengths and joint continuity.
+Viewed the uncovered front three-quarter preview. This is a pose revision for
+human review, not an assertion of finished anatomy or runtime compatibility.
+No runtime integration or deployment was performed.
