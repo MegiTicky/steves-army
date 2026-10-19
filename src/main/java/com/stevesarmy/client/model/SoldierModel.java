@@ -12,6 +12,7 @@ public class SoldierModel<T extends SoldierEntity> extends HumanoidModel<T> {
 
     private static final float EXIT_THRESHOLD = 0.15F;
     private static final float CRAWL_MOVEMENT_THRESHOLD = 0.05F;
+    private static final float HALF_COVER_PEEK_SWAY = 0.035F;
 
     public SoldierModel(ModelPart root) {
         super(root);
@@ -35,7 +36,11 @@ public class SoldierModel<T extends SoldierEntity> extends HumanoidModel<T> {
             super.setupAnim(entity, limbSwing, limbSwingAmount, ageInTicks, netHeadYaw, headPitch);
             float[] standing = capturePose();
             this.crouching = true;
-            blendPose(crouched, standing, entity.getHalfCoverRiseProgress());
+            float progress = easeHalfCoverPeek(entity.getHalfCoverRiseProgress());
+            blendPose(crouched, standing, progress);
+            applyHalfCoverPeekLead(progress);
+        } else if (entity.isHalfCoverPeekIdle()) {
+            applyHalfCoverPeekIdle(ageInTicks);
         }
 
         float f = this.swimAmount;
@@ -97,6 +102,40 @@ public class SoldierModel<T extends SoldierEntity> extends HumanoidModel<T> {
         this.leftLeg.z = Mth.lerp(f, this.leftLeg.z, 0.0F + PoseConfig.LL_POS_Z);
 
         this.hat.copyFrom(this.head);
+    }
+
+    /** Smooth acceleration and deceleration without delaying the server transition. */
+    private static float easeHalfCoverPeek(float progress) {
+        float p = Mth.clamp(progress, 0.0F, 1.0F);
+        return p * p * (3.0F - 2.0F * p);
+    }
+
+    /**
+     * The torso and head commit to the peek before the legs finish extending.
+     * Arms are deliberately left to the combat/weapon pose so aiming stays exact.
+     */
+    private void applyHalfCoverPeekLead(float progress) {
+        float lead = Mth.sin(progress * Mth.PI);
+        this.body.xRot -= 0.075F * lead;
+        this.body.zRot += 0.045F * lead;
+        this.head.xRot -= 0.06F * lead;
+        this.head.zRot -= 0.055F * lead;
+        this.rightLeg.zRot += 0.07F * lead;
+        this.leftLeg.zRot -= 0.07F * lead;
+    }
+
+    /** A tiny held-breath sway keeps the exposed silhouette alive while aiming. */
+    private void applyHalfCoverPeekIdle(float ageInTicks) {
+        float settle = Mth.clamp((ageInTicks % 240.0F) / 8.0F, 0.0F, 1.0F);
+        settle = settle * settle * (3.0F - 2.0F * settle);
+        float sway = Mth.sin(ageInTicks * 0.11F) * HALF_COVER_PEEK_SWAY * settle;
+        float breath = Mth.sin(ageInTicks * 0.22F) * 0.012F;
+        this.body.zRot += sway * 0.45F;
+        this.body.yRot += sway * 0.3F;
+        this.body.xRot -= breath * 0.25F;
+        this.head.zRot -= sway * 0.5F;
+        this.head.yRot -= sway * 0.35F;
+        this.head.y += breath;
     }
 
     private float[] capturePose() {

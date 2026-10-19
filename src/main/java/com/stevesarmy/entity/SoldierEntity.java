@@ -2458,6 +2458,16 @@ public BlockPos getPingMoveTarget() {
     public int getSyncedPeekState() {
         return this.entityData.get(PEEK_STATE);
     }
+
+    /** Client render hint for the exposed half-cover idle; never changes gameplay posture. */
+    public boolean isHalfCoverPeekIdle() {
+        int state = getSyncedCoverState();
+        boolean inCover = state == CoverBehaviorManager.CoverState.IN_COVER.ordinal()
+            || state == CoverBehaviorManager.CoverState.SUPPRESSED_IN_COVER.ordinal();
+        return !this.level().isClientSide || (inCover
+            && getSyncedCoverCurrentType() == CoverType.HALF.ordinal()
+            && getSyncedPeekState() == PeekController.State.EXPOSED.ordinal());
+    }
     
     public void syncPeekPosition(BlockPos pos) {
         this.entityData.set(PEEK_POSITION, pos);
