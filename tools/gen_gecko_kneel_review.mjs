@@ -9,15 +9,19 @@ const elements = [], groups = [], geoBones = [];
 // World-space review convention: 16 pixels = 1 block, with no legacy renderer
 // scale or crouch translation applied a second time.
 const sneak = { width: 9.6, height: 24, eye: 1.27 * 16 };
-const lean = 10, leanRad = lean * Math.PI / 180;
-const legLength = 4.45, legHalfDepth = 1.5, rearThighAngle = 8;
-const kneeHipY = legLength*Math.cos(rearThighAngle*Math.PI/180)+legHalfDepth;
+const lean = 22, leanRad = lean * Math.PI / 180;
+const legLength = 6, legHalfDepth = 1.5, rearThighAngle = 30;
+const rearGroundOverlap = 0.35;
+const frontHipInset = 1.2;
+const kneeHipY = legLength*Math.cos(rearThighAngle*Math.PI/180)+legHalfDepth-rearGroundOverlap;
 const hipOffsetZ = sneak.width/2-legLength+legLength*Math.sin(rearThighAngle*Math.PI/180);
 const restLift = 12-kneeHipY;
 const weaponShiftY = restLift-4;
-const neckY = 12 + 11;
-const neckAtKneel = kneeHipY + 11 * Math.cos(leanRad);
+// Tuck the head into the collar and rearward rather than scaling its geometry.
+const neckY = 12 + 10.3, neckZ = 1.5;
+const neckAtKneel = kneeHipY + (neckY-12)*Math.cos(leanRad)+neckZ*Math.sin(leanRad);
 const eyeOffset = sneak.eye - neckAtKneel;
+const weaponShiftZ = -0.65;
 const palette = ['#435343', '#b99b75', '#263228', '#293c50', '#24292d', '#8b8c83', '#b8b9ae', '#13191c'];
 function crc32(bytes) {
   let c = 0xffffffff;
@@ -73,21 +77,24 @@ const root = bone('soldier', [0,12,0]);
 const body = bone('body', [0,12,0], root);
 box(body, 'jacket', [-4,12,-2], [4,23,2], 0);
 box(body, 'vest', [-4.1,13.2,-2.4], [4.1,22,2.4], 2);
-const head = bone('head', [0,neckY,0], body);
-box(head, 'head', [-3.5,neckY,-3.5], [3.5,neckY+7,3.5], 1);
-box(head, 'helmet', [-3.7,neckY+5,-3.7], [3.7,neckY+7.1,3.7], 0);
+const head = bone('head', [0,neckY,neckZ], body);
+box(head, 'head', [-3.5,neckY,neckZ-3.5], [3.5,neckY+7,neckZ+3.5], 1);
+box(head, 'helmet', [-3.7,neckY+5,neckZ-3.7], [3.7,neckY+7.1,neckZ+3.7], 0);
 for (const x of [-0.8,1.8]) box(head, x<0?'dominant aiming eye':'other eye',
-  [x-0.35,neckY+eyeOffset-0.2,-3.55], [x+0.35,neckY+eyeOffset+0.2,-3.5],7);
+  [x-0.35,neckY+eyeOffset-0.2,neckZ-3.55], [x+0.35,neckY+eyeOffset+0.2,neckZ-3.5],7);
 for (const [side,x] of [['right',-2],['left',2]]) {
-  const thigh = bone(`${side}_thigh`, [x,12,0], root);
-  box(thigh, `${side} upper leg`, [x-2,12-legLength,-legHalfDepth], [x+2,12,legHalfDepth], 3);
-  const shin = bone(`${side}_shin`, [x,12-legLength,0], thigh);
-  box(shin, `${side} lower leg (no foot)`, [x-2,12-2*legLength,-legHalfDepth], [x+2,12-legLength,legHalfDepth], 3);
+  // The raised hip sits slightly inside the lower torso. Segment lengths stay
+  // six pixels, and the shin remains a true child of its knee pivot.
+  const z = side==='left' ? frontHipInset : 0;
+  const thigh = bone(`${side}_thigh`, [x,12,z], root);
+  box(thigh, `${side} upper leg`, [x-2,12-legLength,z-legHalfDepth], [x+2,12,z+legHalfDepth], 3);
+  const shin = bone(`${side}_shin`, [x,12-legLength,z], thigh);
+  box(shin, `${side} lower leg (no foot)`, [x-2,12-2*legLength,z-legHalfDepth], [x+2,12-legLength,z+legHalfDepth], 3);
 }
 const shoulderY = 12+9.6*Math.cos(leanRad), shoulderZ=-9.6*Math.sin(leanRad);
 for (const [side,shoulder,elbow,hand] of [
-  ['right',[-3.5,shoulderY,shoulderZ],[-4.1,12.8+restLift,-4.8],[-0.8,17+restLift,-8]],
-  ['left',[3.5,shoulderY,shoulderZ],[4,13.2+restLift,-7],[0,17.7+restLift,-12]]
+  ['right',[-3.5,shoulderY,shoulderZ],[-4.1,12.8+restLift,-4.8],[-0.8,17+restLift,-8+weaponShiftZ]],
+  ['left',[3.5,shoulderY,shoulderZ],[4,13.2+restLift,-7],[0,17.7+restLift,-12+weaponShiftZ]]
 ]) {
   // Arms share the translated root with the weapon: shoulder positions already
   // include the constant torso lean, so wrists never inherit an unwanted tilt.
@@ -111,11 +118,14 @@ box(rifle, 'optic sight body', [-1.45,opticY-0.55,-9.5], [-0.15,opticY+0.55,-6],
 box(rifle, 'ocular lens', [-1.25,opticY-0.35,-6.01], [-0.35,opticY+0.35,-5.97], 7);
 // Lift the weapon assembly by the changed root drop; barrel remains at y=18.4.
 rifle.origin[1] += weaponShiftY;
+rifle.origin[2] += weaponShiftZ;
 rifle.geo.pivot[1] += weaponShiftY;
+rifle.geo.pivot[2] += weaponShiftZ;
 for (const c of elements.filter(c=>rifle.children.includes(c.uuid))) {
   c.from[1]+=weaponShiftY; c.to[1]+=weaponShiftY;
+  c.from[2]+=weaponShiftZ; c.to[2]+=weaponShiftZ;
 }
-for (const c of rifle.geo.cubes) c.origin[1]+=weaponShiftY;
+for (const c of rifle.geo.cubes) {c.origin[1]+=weaponShiftY;c.origin[2]+=weaponShiftZ;}
 const cover = bone('reference_cover', [0,0,-16]);
 box(cover, '16 pixel full block', [-8,0,-28], [8,16,-12], 5);
 const floor = bone('reference_floor', [0,0,0]);
@@ -146,8 +156,9 @@ function transition(start, end) {
         const lowering = start===stand;
         const q = lowering ? p : 1-p;
         const theta = q*Math.PI/2;
-        // Keep rear shin corners above ground and the forward shin vertical.
-        const hipY = legLength*Math.cos(q*rearThighAngle*Math.PI/180)+legLength*Math.cos(theta)+legHalfDepth*Math.sin(theta);
+        // Allow the small authored overlap at the rear knee/shin, while the
+        // forward shin remains vertical and its bottom stays planted.
+        const hipY = legLength*Math.cos(q*rearThighAngle*Math.PI/180)+legLength*Math.cos(theta)+legHalfDepth*Math.sin(theta)-rearGroundOverlap*q;
         const a = Math.acos(Math.min(1,(hipY-legLength)/legLength));
         const constrained = name==='soldier' ? [0,hipY-12,-frontDistance+legLength*Math.sin(a)+hipOffsetZ]
           : name==='left_thigh' ? [-a*180/Math.PI,0,0]
