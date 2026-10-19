@@ -106,8 +106,13 @@ for (const [side,shoulder,elbow,hand] of [
   box(grip, `${side} hand grip`, hand.map(v=>v-1.2), hand.map(v=>v+1.2), 1);
 }
 const rifle = bone('rifle', [-0.8,22,-5], root);
-box(rifle, 'stock alongside cheek', [-4.4,20.2,-6.5], [-3.6,22.3,-1.5], 4);
-box(rifle, 'stock connector', [-4.4,22.3,-7.5], [0,23.1,-6.5], 4);
+// Drop the stock below the jaw and seat its butt at the leaned shoulder.
+// This is a placeholder dropped-stock design, not a transform for real TaCZ guns.
+segment(rifle, 'stock below jaw', [-0.8,20.2,-6.8],
+  [-3.5,shoulderY-0.4-weaponShiftY,shoulderZ-weaponShiftZ], 0.8, 4);
+box(rifle, 'shoulder butt pad', [-4,shoulderY-1.1-weaponShiftY,shoulderZ-0.4-weaponShiftZ],
+  [-3,shoulderY+0.1-weaponShiftY,shoulderZ+0.3-weaponShiftZ], 4);
+box(rifle, 'stock connector', [-1.3,20,-7.8], [-0.3,22.2,-6.7], 4);
 box(rifle, 'receiver', [-1.6,22,-13], [0,23.5,-6], 4);
 box(rifle, 'barrel', [-1.2,22.4,-30], [-0.4,23.2,-12], 7);
 box(rifle, 'pistol grip', [-1.45,19.8,-8.8], [-0.15,22,-7.5], 4);
