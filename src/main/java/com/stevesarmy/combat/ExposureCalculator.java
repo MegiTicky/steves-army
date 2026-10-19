@@ -254,7 +254,7 @@ public class ExposureCalculator {
     public static boolean hasFreshFiringLaneFrom(Vec3 observerEye, LivingEntity target) {
         if (target == null || !target.isAlive()) return false;
         for (TargetPoint point : getTargetPointsWithPriority(target)) {
-            if (VisibilityRay.traceFresh(target.level(), observerEye, point.position, null).hasContact()) return true;
+            if (VisibilityRay.hasFreshFiringLane(target.level(), observerEye, point.position, null)) return true;
         }
         return false;
     }

@@ -60,6 +60,7 @@ public final class SimRegistry {
             dockCqbHoldFidelity(),
             dockPeekReturn(),
             CornerPeekScenarios.quickMemorySafety(),
+            FiringLanePerformanceScenario.create(),
             CornerPeekScenarios.normalFire(),
             CornerPeekScenarios.normalFire(1),
             CornerPeekScenarios.normalFire(2),

@@ -40,6 +40,7 @@ public final class VisibilityRay {
 
     public enum TracePurpose {
         FULL_VISIBILITY,
+        FIRING_LANE,
         CONTACT_ONLY
     }
 
@@ -85,6 +86,13 @@ public final class VisibilityRay {
 
     public static Result traceFresh(Level level, Vec3 from, Vec3 to, LivingEntity observer) {
         return traceFresh(level, from, to, observer, new BlockPos[0]);
+    }
+
+    /** Exact, uncached boolean lane test. Never exposes a partial detailed visibility result. */
+    public static boolean hasFreshFiringLane(Level level, Vec3 from, Vec3 to, LivingEntity observer) {
+        PerformanceMetrics.recordVisibilityRay();
+        return traceUncached(level, from, to, observer, SmokePolicy.BLOCK,
+            Set.of(), TracePurpose.FIRING_LANE).hasContact();
     }
 
     public static Result traceFresh(Level level, Vec3 from, Vec3 to, LivingEntity observer,
@@ -196,6 +204,7 @@ public final class VisibilityRay {
         Vec3 unit = direction.scale(1.0 / length);
 
         final boolean contactOnly = (purpose == TracePurpose.CONTACT_ONLY);
+        final boolean firingLane = (purpose == TracePurpose.FIRING_LANE);
 
         double shipObstruction;
         if (contactOnly && !VS2Compat.isEnabled()) {
@@ -213,6 +222,10 @@ public final class VisibilityRay {
                 : Double.POSITIVE_INFINITY;
         } else {
             shipObstruction = VS2Compat.getShipAwareBlockHitDistance(level, from, to, observer, false);
+        }
+
+        if (firingLane && shipObstruction < Double.POSITIVE_INFINITY) {
+            return new Result(false, 0.0, shipObstruction);
         }
 
         double concealment = 0.0;
@@ -258,16 +271,23 @@ public final class VisibilityRay {
                     if (outlineIntersectsRay(level, state, mutablePos, from, to)) {
                         concealment = Math.min(MAX_CONCEALMENT, concealment + concealmentWeight(state));
                     }
-                } else if (intersectsBlock(level, state, mutablePos, from, to)) {
+                } else {
                     BlockHitResult hit = blockHit(level, state, mutablePos, from, to);
-                    double blocked = hit == null ? from.distanceTo(to) : from.distanceTo(hit.getLocation());
-                    nearestObstruction = Math.min(nearestObstruction, blocked);
-                    if (smokePolicy == SmokePolicy.IGNORE) {
-                        PerformanceMetrics.recordStageTime(
-                            PerformanceMetrics.Stage.LOS_BLOCK_TRAVERSAL,
-                            System.nanoTime() - blockStart);
-                        return new Result(false, concealment, Math.min(blocked, shipObstruction));
+                    if (hit != null) {
+                        double blocked = from.distanceTo(hit.getLocation());
+                        nearestObstruction = Math.min(nearestObstruction, blocked);
+                        if (firingLane || smokePolicy == SmokePolicy.IGNORE) {
+                            PerformanceMetrics.recordStageTime(
+                                PerformanceMetrics.Stage.LOS_BLOCK_TRAVERSAL,
+                                System.nanoTime() - blockStart);
+                            return new Result(false, concealment, Math.min(blocked, shipObstruction));
+                        }
                     }
+                }
+                if (firingLane && concealment >= MAX_CONCEALMENT) {
+                    PerformanceMetrics.recordStageTime(PerformanceMetrics.Stage.LOS_BLOCK_TRAVERSAL,
+                        System.nanoTime() - blockStart);
+                    return new Result(false, concealment, from.distanceTo(Vec3.atCenterOf(mutablePos)));
                 }
             }
 
@@ -353,11 +373,6 @@ public final class VisibilityRay {
             PerformanceMetrics.recordSmokeHit();
         }
         return result;
-    }
-
-    private static boolean intersectsBlock(Level level, BlockState state, BlockPos pos,
-                                           Vec3 from, Vec3 to) {
-        return blockHit(level, state, pos, from, to) != null;
     }
 
     private static BlockHitResult blockHit(Level level, BlockState state, BlockPos pos,
