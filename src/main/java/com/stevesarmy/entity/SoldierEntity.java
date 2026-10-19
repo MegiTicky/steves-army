@@ -157,6 +157,8 @@ public class SoldierEntity extends PathfinderMob implements Container {
         SynchedEntityData.defineId(SoldierEntity.class, EntityDataSerializers.BOOLEAN);
     private static final EntityDataAccessor<Boolean> TACTICAL_RELOADING =
         SynchedEntityData.defineId(SoldierEntity.class, EntityDataSerializers.BOOLEAN);
+    private static final EntityDataAccessor<Boolean> ANIMATION_WEAPON_READY =
+        SynchedEntityData.defineId(SoldierEntity.class, EntityDataSerializers.BOOLEAN);
     
     private static final EntityDataAccessor<Float> THREAT_DIR_X =
         SynchedEntityData.defineId(SoldierEntity.class, EntityDataSerializers.FLOAT);
@@ -576,6 +578,7 @@ public class SoldierEntity extends PathfinderMob implements Container {
         this.entityData.define(HALF_COVER_RISING, false);
         this.entityData.define(RELOAD_PENDING, false);
         this.entityData.define(TACTICAL_RELOADING, false);
+        this.entityData.define(ANIMATION_WEAPON_READY, false);
         this.entityData.define(THREAT_DIR_X, 0f);
         this.entityData.define(THREAT_DIR_Y, 0f);
         this.entityData.define(THREAT_DIR_Z, 0f);
@@ -1527,6 +1530,7 @@ public class SoldierEntity extends PathfinderMob implements Container {
                 setLowCrouching(true);
             }
             tickHalfCoverRiseProgress();
+            tickAnimationWeaponReady();
             traceRotationSnapshot();
             tracePeekSnapshot();
         }
@@ -1570,6 +1574,37 @@ public class SoldierEntity extends PathfinderMob implements Container {
     }
 
     private Vec3 velocityBeforeTravel = Vec3.ZERO;
+
+    private void tickAnimationWeaponReady() {
+        if (isDeadOrDying()) {
+            animationWeaponReadyHoldTicks = 0;
+            entityData.set(ANIMATION_WEAPON_READY, false);
+            return;
+        }
+
+        LivingEntity target = getTarget();
+        boolean hasLiveTarget = target != null && target.isAlive();
+        boolean isAiming = GunIntegration.isAnyGunLoaded()
+            && GunIntegration.getAimProgress(this) > 0.0f;
+        boolean combatReady = hasLiveTarget
+            || (combatGoal != null && combatGoal.isSuppressing())
+            || isAiming
+            || isCornerPeekCrouching();
+
+        if (combatReady) {
+            animationWeaponReadyHoldTicks = ANIMATION_WEAPON_READY_HOLD_TICKS;
+            entityData.set(ANIMATION_WEAPON_READY, true);
+        } else if (animationWeaponReadyHoldTicks > 0) {
+            animationWeaponReadyHoldTicks--;
+            if (animationWeaponReadyHoldTicks == 0) {
+                entityData.set(ANIMATION_WEAPON_READY, false);
+            }
+        }
+    }
+
+    public boolean isAnimationWeaponReady() {
+        return entityData.get(ANIMATION_WEAPON_READY);
+    }
 
     @Override
     public void travel(Vec3 input) {
@@ -2480,6 +2515,8 @@ public BlockPos getPingMoveTarget() {
     private int emergencyEngagementPostureUntilTick = -1;
     private static final double CRAWL_MOVEMENT_SPEED_SQR = 0.0004D;
     private static final float CRAWL_TURN_RATE_DEGREES = 25.0F;
+    private static final int ANIMATION_WEAPON_READY_HOLD_TICKS = 20;
+    private int animationWeaponReadyHoldTicks;
 
     /** Normal crouch owned by the bounded corner excursion; crawl/prone keep priority. */
     public void setCornerPeekCrouching(boolean active) {

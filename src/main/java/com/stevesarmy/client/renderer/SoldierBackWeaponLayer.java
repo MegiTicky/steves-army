@@ -56,6 +56,9 @@ public class SoldierBackWeaponLayer<T extends SoldierEntity, M extends HumanoidM
         }
 
         poseStack.pushPose();
+        if (this.getParentModel() instanceof com.stevesarmy.client.model.SoldierModel<?> model) {
+            model.translateBodyRoot(poseStack);
+        }
         this.getParentModel().body.translateAndRotate(poseStack);
         // Verbatim HumanoidOffhandRender.renderGunItem transform chain.
         poseStack.translate(-show.pos().x() / 16.0, 1.5 - show.pos().y() / 16.0, show.pos().z() / 16.0);

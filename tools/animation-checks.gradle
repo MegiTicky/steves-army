@@ -1,0 +1,15 @@
+// Standalone geometry/animation checks using the real mapped Minecraft classes.
+gradle.projectsEvaluated {
+    def p = rootProject
+    p.tasks.register('compileAnimationChecks', JavaCompile) {
+        dependsOn p.tasks.named('classes')
+        source p.file('tools/SoldierAnimationChecks.java')
+        classpath = p.sourceSets.main.runtimeClasspath
+        destinationDirectory = p.layout.buildDirectory.dir('animation-checks')
+    }
+    p.tasks.register('animationChecks', JavaExec) {
+        dependsOn p.tasks.named('compileAnimationChecks')
+        classpath = p.files(p.layout.buildDirectory.dir('animation-checks')) + p.sourceSets.main.runtimeClasspath
+        mainClass = 'SoldierAnimationChecks'
+    }
+}
