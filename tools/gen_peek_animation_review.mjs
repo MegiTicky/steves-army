@@ -25,14 +25,16 @@ const soldier = bone('soldier', [0, 0, 0], [
     box('face forward', [-2, 28, -4.1], [2, 30, -4], 7)
   ]),
   // Hands are separate visible grip blocks at the rifle stock and fore-end.
-  bone('right_arm', [-5, 22, -1], [box('right upper arm', [-8, 17, -4], [-4, 24, 0], 3, [-6, 22, -1], [-30, 0, -12])]),
-  bone('left_arm', [5, 22, -1], [box('left upper arm', [4, 17, -4], [8, 24, 0], 3, [6, 22, -1], [-30, 0, 12])]),
-  bone('right_hand', [-3.7, 19, -7], [box('right hand grip', [-4.8, 17, -8], [-2.6, 20, -6], 2, [-3.7, 19, -7])]),
-  bone('left_hand', [3.7, 19, -10], [box('left hand grip', [2.6, 17, -11], [4.8, 20, -9], 2, [3.7, 19, -10])]),
-  bone('right_thigh', [-2, 13, 0], [box('right upper leg', [-4, 8, -2], [0, 16, 2], 5, [-2, 14, 0], [35, 0, 0])]),
-  bone('right_shin', [-2, 8, -5], [box('right lower leg', [-4, 1, -7], [0, 9, -3], 5, [-2, 8, -5], [-35, 0, 0]), box('right boot', [-4.5, 0, -9], [0, 2.5, -4], 5)]),
-  bone('left_thigh', [2, 13, 0], [box('left upper leg', [0, 8, -2], [4, 16, 2], 5, [2, 14, 0], [35, 0, 0])]),
-  bone('left_shin', [2, 8, -5], [box('left lower leg', [0, 1, -7], [4, 9, -3], 5, [2, 8, -5], [-35, 0, 0]), box('left boot', [0, 0, -9], [4.5, 2.5, -4], 5)]),
+  // Straight weapon-ready arms: both forearms meet the rifle along -Z.
+  bone('right_arm', [-5, 22, -1], [box('right upper arm', [-7, 19, -8], [-3, 22, -2], 3)]),
+  bone('left_arm', [5, 22, -1], [box('left upper arm', [3, 19, -8], [7, 22, -2], 3)]),
+  bone('right_hand', [-2.5, 19, -9], [box('right hand grip', [-3.5, 17, -10], [-1, 20, -8], 2)]),
+  bone('left_hand', [2.5, 19, -13], [box('left hand grip', [1, 17, -14], [3.5, 20, -12], 2)]),
+  // One-knee kneel: one shin drops under the hip, the other thigh rises forward.
+  bone('right_thigh', [-2, 13, 0], [box('right upper leg', [-4, 6, -2], [0, 14, 2], 5)]),
+  bone('right_shin', [-2, 6, 0], [box('right lower leg kneeling back', [-4, 1, 0], [0, 5, 9], 5)]),
+  bone('left_thigh', [2, 13, 0], [box('left upper leg raised forward', [0, 9, -9], [4, 14, 1], 5)]),
+  bone('left_shin', [2, 9, -9], [box('left lower leg planted', [0, 0, -11], [4, 10, -7], 5)]),
   bone('rifle', [0, 18, -2], [box('rifle stock', [-1, 16, -7], [1, 18, -3], 7),
     box('rifle resting on cover top', [-1, 16, -20], [1, 18, -6], 7),
     box('rifle grip', [-1.5, 16, -10], [1.5, 18, -8], 7)])
