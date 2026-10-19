@@ -59,6 +59,24 @@ public class SoldierAnimationChecks {
         check(armorRoot.getChild("right_leg").getChild("lower_leg").xRot == root.getChild("right_leg").getChild("lower_leg").xRot,
             "armor lost knee transform");
         checkForeignArmor();
+        Method locomotion = SoldierModel.class.getDeclaredMethod("applyLocomotion", float.class, float.class, float.class);
+        locomotion.setAccessible(true);
+        for (int i = 0; i <= 100; i++) {
+            reset(); locomotion.invoke(model, i * .1f, .8f, 1f);
+            check(root.y == 6, "running introduces vertical root bob");
+            check(Math.abs(model.rightLeg.xRot + model.leftLeg.xRot) < 1e-6, "running legs are not opposed");
+        }
+        reset(); locomotion.invoke(model, 0f, .8f, 1f);
+        check(model.rightLeg.xRot > 1, "running stride is too short");
+        Method coverAim = SoldierModel.class.getDeclaredMethod("applyCoverAim", float.class);
+        coverAim.setAccessible(true);
+        for (float amount : new float[]{0, .5f, 1}) {
+            reset(); crouch.invoke(model, amount, 0f, 0f);
+            coverAim.invoke(model, 1f);
+            PoseStack hand = new PoseStack(); model.translateWeaponToHand(hand);
+            float height = 1.5f - hand.last().pose().transformPosition(new org.joml.Vector3f()).y;
+            check(height >= 1.124f, "exposed cover grip below full block clearance: " + height);
+        }
         PoseStack palm = new PoseStack();
         model.translateWeaponToHand(palm);
         org.joml.Vector3f beforeGun = palm.last().pose().transformPosition(new org.joml.Vector3f());

@@ -15,6 +15,11 @@ sneak gait, two six-pixel leg segments, crawl entry/exit and a crawling gait. Ar
 are single twelve-pixel segments with no extra hand cubes. Per-entity transition
 weights prevent renderer sharing from leaking one soldier's pose into another.
 The existing synced crawl amount and half-cover rise state drive the poses.
+Locomotion uses a distance-driven, opposed full-length leg stride rather than
+feeding limb swing into the upstream timed walk clip. It adds no root bob.
+Exposed half-cover aiming raises both holding arms to keep the hand attachment
+at least 1.125 blocks above the feet (a full block plus two model pixels).
+This checks the grip anchor; actual barrel clearance still depends on the gun pack.
 The server syncs a weapon-ready render hint, held for twenty ticks after combat
 signals disappear; this does not change AI, targeting, collision or firing rules.
 

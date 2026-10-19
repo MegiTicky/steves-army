@@ -111,6 +111,9 @@ public class SoldierModel<T extends SoldierEntity> extends HumanoidModel<T> {
         float target = entity.isHalfCoverRising() ? 1 - entity.getHalfCoverRiseProgress()
             : entity.isCrouching() ? 1 : 0;
         motion.update(age, target, entity.isAnimationWeaponReady() ? 1 : 0, Math.min(1, speed * 4));
+        float coverTarget = entity.isHalfCoverPeekIdle() ? 1
+            : entity.isHalfCoverRising() ? entity.getHalfCoverRiseProgress() : 0;
+        motion.coverAim = Mth.lerp(motion.blend, motion.coverAim, coverTarget);
         weaponReady = motion.ready;
         float crawl = entity.getSwimAmount(partial);
         boolean gun = GunIntegration.isGun(entity.getMainHandItem());
@@ -119,7 +122,7 @@ public class SoldierModel<T extends SoldierEntity> extends HumanoidModel<T> {
                 (entity.deathTime + partial) / 20, 1);
         } else {
             apply(SoldierAnimations.UNIT_IDLE, age / 20, 1 - motion.walk);
-            apply(SoldierAnimations.UNIT_WALK, swing / 4, motion.walk * (1 - crawl));
+            applyLocomotion(swing, speed, motion.walk * (1 - crawl));
             head.yRot += Mth.clamp(yaw, -30, 30) * Mth.DEG_TO_RAD;
             head.xRot += Mth.clamp(pitch, -25, 45) * Mth.DEG_TO_RAD;
             if (gun) {
@@ -134,6 +137,7 @@ public class SoldierModel<T extends SoldierEntity> extends HumanoidModel<T> {
             }
             applyCrouch(motion.crouch * (1 - crawl), swing, speed);
             applyCrawl(crawl, swing, speed, pitch, gun);
+            if (gun) applyCoverAim(motion.coverAim * (1 - crawl));
             if (entity.hurtTime > 0)
                 apply((entity.getId() & 1) == 0 ? SoldierAnimations.UNIT_HURT : SoldierAnimations.UNIT_HURT_1,
                     (entity.hurtDuration - entity.hurtTime + partial) / 10, 1);
@@ -149,6 +153,30 @@ public class SoldierModel<T extends SoldierEntity> extends HumanoidModel<T> {
     private void apply(AnimationDefinition definition, float seconds, float weight) {
         if (weight > .0001F) KeyframeAnimations.animate(animationModel, definition,
             (long) (Math.max(0, seconds) * 1000), weight, scratch);
+    }
+
+    private void applyLocomotion(float swing, float speed, float weight) {
+        // Limb swing is accumulated travel, not seconds. Use the vanilla stride
+        // phase and full-length legs, without the source clip's hip/root bounce.
+        float stride = Mth.cos(swing * .6662F) * Math.min(1, speed) * 1.4F;
+        rightLeg.xRot = Mth.lerp(weight, rightLeg.xRot, stride);
+        leftLeg.xRot = Mth.lerp(weight, leftLeg.xRot, -stride);
+        rightLeg.y = Mth.lerp(weight, rightLeg.y, 6);
+        leftLeg.y = Mth.lerp(weight, leftLeg.y, 6);
+        rightLeg.z = Mth.lerp(weight, rightLeg.z, 0);
+        leftLeg.z = Mth.lerp(weight, leftLeg.z, 0);
+    }
+
+    private void applyCoverAim(float amount) {
+        if (amount <= 0) return;
+        PoseStack palm = new PoseStack();
+        translateWeaponToHand(palm);
+        float gripHeight = 1.5F - palm.last().pose().transformPosition(new Vector3f()).y;
+        // Full block top + two model pixels. Move both hands with the weapon,
+        // rather than translating the gun away from its right-hand attachment.
+        float lift = Math.max(0, 1.125F - gripHeight) * 16 * amount / Mth.cos(unit.xRot);
+        rightArm.y -= lift;
+        leftArm.y -= lift;
     }
 
     private void applyWeaponPose(String id, String type, float ready) {
@@ -256,12 +284,12 @@ public class SoldierModel<T extends SoldierEntity> extends HumanoidModel<T> {
     }
 
     private static final class Motion {
-        float age = Float.NaN, crouch, ready, walk;
+        float age = Float.NaN, crouch, ready, walk, coverAim, blend;
         String gunId, gunType = "rifle";
         void update(float now, float targetCrouch, float targetReady, float targetWalk) {
-            if (Float.isNaN(age)) { age = now; crouch = targetCrouch; ready = targetReady; walk = targetWalk; return; }
+            if (Float.isNaN(age)) { age = now; crouch = targetCrouch; ready = targetReady; walk = targetWalk; blend = 1; return; }
             float dt = Mth.clamp(now - age, 0, 5); age = now;
-            float blend = 1 - (float) Math.exp(-dt * .45);
+            blend = 1 - (float) Math.exp(-dt * .45);
             crouch = Mth.lerp(blend, crouch, targetCrouch);
             ready = Mth.lerp(blend, ready, targetReady);
             walk = Mth.lerp(blend, walk, targetWalk);
