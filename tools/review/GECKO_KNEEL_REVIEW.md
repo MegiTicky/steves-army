@@ -17,7 +17,9 @@ Both leg segments are restored to the original 6 pixels: there is no length
 compression or animation scaling. The rear thigh folds forward 30 degrees;
 its shin folds back horizontally. The raised thigh's hip is tucked 1.2 pixels
 rearward into the lower torso. The head pivot is tucked 0.7 pixel lower and
-1.5 pixels rearward into the collar, preserving head size. The weapon and
+1.1 pixels rearward into the collar, preserving head size. This moves the head
+forward relative to the earlier 1.5-pixel tuck to follow the tilted neck more
+closely. The weapon and
 grip points move forward together by 0.65 pixel to retain eye relief.
 
 The dominant eye and optic axis share X=-0.8 and Y=20.32 pixels at the kneeling

@@ -18,7 +18,7 @@ const hipOffsetZ = sneak.width/2-legLength+legLength*Math.sin(rearThighAngle*Mat
 const restLift = 12-kneeHipY;
 const weaponShiftY = restLift-4;
 // Tuck the head into the collar and rearward rather than scaling its geometry.
-const neckY = 12 + 10.3, neckZ = 1.5;
+const neckY = 12 + 10.3, neckZ = 1.1;
 const neckAtKneel = kneeHipY + (neckY-12)*Math.cos(leanRad)+neckZ*Math.sin(leanRad);
 const eyeOffset = sneak.eye - neckAtKneel;
 const weaponShiftZ = -0.65;
