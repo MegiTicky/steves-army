@@ -130,7 +130,7 @@ for (const [side,localShoulder,hand] of [
   const upper = bone(`${side}_arm`, shoulder, root);
   segment(upper, `${side} rigid arm`, top, wrist, 3.4, 0);
   const grip = bone(`${side}_hand`, wrist, upper);
-  box(grip, `${side} hand grip`, wrist.map(v=>v-1.2), wrist.map(v=>v+1.2), 1);
+  // Keep the attachment pivot, but the rigid arm already includes the hand.
 }
 const rifle = bone('rifle', [-0.8,22,-5], root);
 rifle.rotation = [0,0,rifleCant];
