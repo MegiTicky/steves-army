@@ -22,7 +22,7 @@ const neckY = 12 + 9.9, neckZ = 1.7;
 const neckAtKneel = kneeHipY + (neckY-12)*Math.cos(leanRad)+neckZ*Math.sin(leanRad);
 const eyeOffset = sneak.eye - neckAtKneel;
 const weaponShiftZ = -0.65;
-const weaponShiftX = -4.2;
+const weaponShiftX = -2.8;
 const rifleCant = -8;
 function cantedGrip(p) {
   const pivot = [-0.8+weaponShiftX,22+weaponShiftY,-5+weaponShiftZ];

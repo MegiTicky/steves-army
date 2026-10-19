@@ -37,3 +37,9 @@ to the receiver. Inspection asserts all four arm lengths and joint continuity.
 Viewed the uncovered front three-quarter preview. This is a pose revision for
 human review, not an assertion of finished anatomy or runtime compatibility.
 No runtime integration or deployment was performed.
+
+Latest human review: rifle shifted inward 1.4 pixels (weaponShiftX -4.2 to
+-2.8), hands/elbows follow with fixed lengths. Scope-axis offset is now 1.81
+pixels. This brings the stock into the cheek again; prior no-interior-samples
+observation applies only to the wider placement, not this revision. Viewed
+updated uncovered three-quarter screenshot; retained as a review tradeoff.
