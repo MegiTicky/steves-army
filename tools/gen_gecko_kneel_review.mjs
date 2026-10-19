@@ -1,4 +1,4 @@
-// Connected two-segment rig. Both preview and runtime JSON use the same tracks.
+// Two-segment legs and rigid arms. Preview and runtime JSON share tracks.
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { deflateSync } from 'node:zlib';
@@ -9,7 +9,21 @@ const elements = [], groups = [], geoBones = [];
 // World-space review convention: 16 pixels = 1 block, with no legacy renderer
 // scale or crouch translation applied a second time.
 const sneak = { width: 9.6, height: 24, eye: 1.27 * 16 };
-const lean = 22, leanRad = lean * Math.PI / 180;
+const lean = 12, leanRad = lean * Math.PI / 180;
+const torsoYaw = 24*Math.PI/180, cy=Math.cos(torsoYaw), sy=Math.sin(torsoYaw);
+const torsoShiftZ = -0.65;
+// Apply forward lean after yaw so the torso still leans toward the target.
+const cl=Math.cos(leanRad), sl=Math.sin(leanRad);
+const torsoMatrix=[[cy,0,sy],[-sl*sy,cl,sl*cy],[-cl*sy,-sl,cl*cy]];
+const mul=(a,b)=>a.map(row=>b[0].map((_,j)=>row.reduce((s,v,k)=>s+v*b[k][j],0)));
+const transpose=a=>a[0].map((_,i)=>a.map(row=>row[i]));
+const apply=(m,p)=>m.map(row=>row.reduce((s,v,i)=>s+v*p[i],0));
+function animationEuler(m) {
+  return [-Math.atan2(m[2][1],m[2][2]),-Math.asin(-m[2][0]),Math.atan2(m[1][0],m[0][0])].map(v=>v*180/Math.PI);
+}
+const bodyRotation=animationEuler(torsoMatrix);
+const headCant=6*Math.PI/180;
+const headRotation=animationEuler(mul(transpose(torsoMatrix),[[Math.cos(headCant),-Math.sin(headCant),0],[Math.sin(headCant),Math.cos(headCant),0],[0,0,1]]));
 const legLength = 6, legHalfDepth = 1.5, rearThighAngle = 30;
 const rearGroundOverlap = 0.35;
 const frontHipInset = 1.2;
@@ -18,10 +32,10 @@ const hipOffsetZ = sneak.width/2-legLength+legLength*Math.sin(rearThighAngle*Mat
 const restLift = 12-kneeHipY;
 const weaponShiftY = restLift-4;
 // Tuck the head into the collar and rearward rather than scaling its geometry.
-const neckY = 12 + 9.9, neckZ = 1.7;
+const neckY = 12 + 9.6, neckZ = 0.4;
 const neckAtKneel = kneeHipY + (neckY-12)*Math.cos(leanRad)+neckZ*Math.sin(leanRad);
 const eyeOffset = sneak.eye - neckAtKneel;
-const weaponShiftZ = -0.65;
+const weaponShiftZ = -2.65;
 const weaponShiftX = -2.8;
 const rifleCant = -8;
 function cantedGrip(p) {
@@ -98,31 +112,24 @@ for (const [side,x] of [['right',-2],['left',2]]) {
   const shin = bone(`${side}_shin`, [x,12-legLength,z], thigh);
   box(shin, `${side} lower leg (no foot)`, [x-2,12-2*legLength,z-legHalfDepth], [x+2,12-legLength,z+legHalfDepth], 3);
 }
-const shoulderY = 12+9.6*Math.cos(leanRad), shoulderZ=-9.6*Math.sin(leanRad);
-// Simple Enemy reference: fixed 12-pixel arms and asymmetric rifle hold.
-// Preserve that total length with two six-pixel segments, rather than stretching
-// geometry to arbitrary elbow locations. This is our own two-bone construction.
-function fixedElbow(shoulder, wrist, pole) {
-  const delta=wrist.map((v,i)=>v-shoulder[i]), distance=Math.hypot(...delta);
-  if(distance>12 || distance<0.001) throw new Error('Grip outside fixed arm reach: '+distance);
-  const axis=delta.map(v=>v/distance), dot=pole.reduce((s,v,i)=>s+v*axis[i],0);
-  const perpendicular=pole.map((v,i)=>v-dot*axis[i]);
-  const norm=Math.hypot(...perpendicular), bend=Math.sqrt(36-distance*distance/4);
-  return shoulder.map((v,i)=>v+delta[i]/2+perpendicular[i]/norm*bend);
-}
-for (const [side,shoulder,pole,hand] of [
-  ['right',[-4.8,shoulderY,shoulderZ],[-0.6,-1,0],[-0.8+weaponShiftX,17+restLift,-8+weaponShiftZ]],
-  ['left',[4.8,shoulderY,shoulderZ-0.6],[0.3,-1,0],[weaponShiftX,17.7+restLift,-10.8+weaponShiftZ]]
+// Adapt Simple Enemy's fixed 12-pixel rigid arms, independent head/torso
+// directions and staggered shoulders. Two pixels extend above each shoulder
+// pivot, with the hand at ten pixels below it, as on a vanilla-style arm.
+for (const [side,localShoulder,hand] of [
+  ['right',[-4.8,9.6,0],[-0.8+weaponShiftX,17+restLift,-8+weaponShiftZ]],
+  ['left',[4.8,9.6,-0.6],[weaponShiftX,17.7+restLift,-10.8+weaponShiftZ]]
 ]) {
   // Arms share the translated root with the weapon: shoulder positions already
   // include the constant torso lean, so wrists never inherit an unwanted tilt.
-  const wrist = cantedGrip(hand);
-  const elbow = fixedElbow(shoulder,wrist,pole);
+  const shoulder=apply(torsoMatrix,localShoulder); shoulder[1]+=12; shoulder[2]+=torsoShiftZ;
+  const target = cantedGrip(hand);
+  const delta=target.map((v,i)=>v-shoulder[i]), length=Math.hypot(...delta);
+  const axis=delta.map(v=>v/length);
+  const wrist=shoulder.map((v,i)=>v+10*axis[i]);
+  const top=shoulder.map((v,i)=>v-2*axis[i]);
   const upper = bone(`${side}_arm`, shoulder, root);
-  segment(upper, `${side} upper arm`, shoulder, elbow, 2.6, 0);
-  const forearm = bone(`${side}_forearm`, elbow, upper);
-  segment(forearm, `${side} forearm`, elbow, wrist, 2.4, 0);
-  const grip = bone(`${side}_hand`, wrist, forearm);
+  segment(upper, `${side} rigid arm`, top, wrist, 3.4, 0);
+  const grip = bone(`${side}_hand`, wrist, upper);
   box(grip, `${side} hand grip`, wrist.map(v=>v-1.2), wrist.map(v=>v+1.2), 1);
 }
 const rifle = bone('rifle', [-0.8,22,-5], root);
@@ -168,8 +175,9 @@ box(guides,'1.27 block eye and optic axis',[-0.825,sneak.eye-0.025,-29],[-0.775,
 const frontAngle = Math.acos((kneeHipY-legLength)/legLength) * 180/Math.PI;
 const frontDistance = legLength*Math.sin(frontAngle*Math.PI/180);
 // Bedrock animation X rotations have the opposite sign to editor cube rotations.
-const kneel = {soldier: {position: [0,-restLift,hipOffsetZ]}, body:{rotation:[lean,0,0]}, head:{rotation:[-lean+3,0,8]}, left_thigh: {rotation: [-frontAngle,0,0]}, left_shin: {rotation: [frontAngle,0,0]}, right_thigh: {rotation: [-rearThighAngle,0,0]}, right_shin: {rotation: [90+rearThighAngle,0,0]}};
-const stand = {soldier: {position: [0,2*legLength-12,-frontDistance+hipOffsetZ]}, body:{rotation:[lean,0,0]}, head:{rotation:[-lean+3,0,8]}, left_thigh: {rotation: [0,0,0]}, left_shin: {rotation: [0,0,0]}, right_thigh: {rotation: [0,0,0]}, right_shin: {rotation: [0,0,0]}};
+const kneel = {soldier: {position: [0,-restLift,hipOffsetZ]}, body:{rotation:bodyRotation}, head:{rotation:headRotation}, left_thigh: {rotation: [-frontAngle,0,0]}, left_shin: {rotation: [frontAngle,0,0]}, right_thigh: {rotation: [-rearThighAngle,0,0]}, right_shin: {rotation: [90+rearThighAngle,0,0]}};
+const stand = {soldier: {position: [0,2*legLength-12,-frontDistance+hipOffsetZ]}, body:{rotation:bodyRotation}, head:{rotation:headRotation}, left_thigh: {rotation: [0,0,0]}, left_shin: {rotation: [0,0,0]}, right_thigh: {rotation: [0,0,0]}, right_shin: {rotation: [0,0,0]}};
+kneel.body.position = stand.body.position = [0,0,torsoShiftZ];
 function transition(start, end) {
   const bones = {};
   for (const [name,channels] of Object.entries(start)) {

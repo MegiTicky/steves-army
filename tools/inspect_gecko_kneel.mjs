@@ -32,7 +32,7 @@ try {
       Canvas.scene.updateMatrixWorld(true);
       for(const c of Cube.all.filter(c=>/leg/.test(c.name))) minGround=Math.min(minGround,new THREE.Box3().setFromObject(c.mesh).min.y);
       for(const side of ['right','left']) {
-        const c=Cube.all.find(c=>c.name===side+' forearm');
+        const c=Cube.all.find(c=>c.name===side+' rigid arm');
         c.mesh.geometry.computeBoundingBox();
         const bb=c.mesh.geometry.boundingBox;
         const endpoint=scenePoint(c.mesh,[(bb.min.x+bb.max.x)/2,bb.min.y,(bb.min.z+bb.max.z)/2]);
@@ -49,7 +49,7 @@ try {
     const eye=center('dominant aiming eye'),lens=center('ocular lens');
     const legLengths=Object.fromEntries(Cube.all.filter(c=>/upper leg|lower leg/.test(c.name))
       .map(c=>[c.name,c.to[1]-c.from[1]]));
-    const armLengths=Object.fromEntries(Cube.all.filter(c=>/upper arm|forearm/.test(c.name))
+    const armLengths=Object.fromEntries(Cube.all.filter(c=>/rigid arm/.test(c.name))
       .map(c=>[c.name,c.to[1]-c.from[1]]));
     // The authored rear-shin tuck permits 0.35 pixels of ground overlap.
     // Keep reporting the measured overlap instead of treating it as zero.
@@ -61,7 +61,7 @@ try {
       geo:Codecs.bedrock.compile({raw:true}),animations:AnimationCodec.codecs.bedrock.compileFile(Animation.all)};
   })()`});
   const r=result.result.value;
-  if(Object.keys(r.armLengths).length!==4 || Object.values(r.armLengths).some(n=>Math.abs(n-6)>1e-6)) {
+  if(Object.keys(r.armLengths).length!==2 || Object.values(r.armLengths).some(n=>Math.abs(n-12)>1e-6)) {
     throw new Error('Arm segment length changed: '+JSON.stringify(r.armLengths));
   }
   if(Object.keys(r.legLengths).length!==4 || Object.values(r.legLengths).some(length=>Math.abs(length-6)>1e-6)) {

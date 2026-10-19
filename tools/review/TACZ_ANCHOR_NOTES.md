@@ -43,3 +43,17 @@ Latest human review: rifle shifted inward 1.4 pixels (weaponShiftX -4.2 to
 pixels. This brings the stock into the cheek again; prior no-interior-samples
 observation applies only to the wider placement, not this revision. Viewed
 updated uncovered three-quarter screenshot; retained as a review tradeoff.
+
+Current revision supersedes the two-segment-arm description above: user requested
+single-segment arms. Each rigid arm is 12 pixels, with shoulder pivot 2 pixels
+below the top and wrist 10 pixels below the pivot. Adapted Simple Enemy's turned
+torso and independent forward head: 24-degree torso yaw (reduced from the source's
+37.45 degrees to fit this vest inside the sneak envelope), 12-degree global
+forward lean, 0.65-pixel torso forward offset and transformed staggered shoulders.
+Head counter-rotation cancels torso yaw/lean and retains 6-degree roll; verified
+world head pitch/yaw effectively zero. Gun moved 2 pixels forward to meet the
+rigid arms. Right wrist is about 0.16 pixels from pistol-grip center. Support
+contact remains approximate; no claim of finished stock/cheek fit. Receiver
+clearance 1.89 pixels, eye/optic transverse offset 2.18 pixels, core fit and
+rigid-arm/leg length checks PASS, export parity PASS. Viewed uncovered
+three-quarter screenshot and left it open. Review assets only; no deployment.
