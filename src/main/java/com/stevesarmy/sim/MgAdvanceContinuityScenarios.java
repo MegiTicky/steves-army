@@ -12,6 +12,54 @@ public final class MgAdvanceContinuityScenarios {
 
     private MgAdvanceContinuityScenarios() {}
 
+    public static SimScenario docklessRecovery(boolean reload) {
+        final net.minecraft.world.phys.Vec3[] start = {null};
+        String name = reload ? "mg_dockless_reload_search" : "mg_dockless_stale_target";
+        var builder = SimScenario.builder(name)
+            .duration(240).field(64, 40).armed()
+            .description("Explicit fault injection at t20: MG in NO_COVER with no current dock and stopped navigation; "
+                + (reload ? "fresh reload without a destination" : "abandoned target retained")
+                + ". Real blocks, ordinary cover search and navigation must provide physical protection.")
+            .terrain(t -> { t.platform(); t.coverRow(24, 8, 24, 32, 1); })
+            .setup(ctx -> {
+                ctx.spawnAnchor(18, 0, 20);
+                ctx.spawnFriendly(ModEntities.MACHINE_GUNNER.get(), GUNNER, 20, 0, 20, SquadMode.HOLD);
+                var enemy = ctx.spawnEnemyLabeled("threat", 54, 0, 20);
+                enemy.setNoAi(true);
+                ctx.disarmSoldier("threat");
+            })
+            .action(20, "inject dockless stopped endpoint under pressure", ctx -> {
+                var s = ctx.soldier(GUNNER);
+                var m = s.getCoverBehaviorManager();
+                m.clearCover();
+                ((com.stevesarmy.entity.ai.CoverPositionController) s.getMoveControl()).clear();
+                s.setPos(ctx.terrain.at(20, 0, 20).getX() + 0.5,
+                    ctx.terrain.at(20, 0, 20).getY(), ctx.terrain.at(20, 0, 20).getZ() + 0.5);
+                start[0] = s.position();
+                if (!reload) m.setTargetCover(new com.stevesarmy.combat.cover.CoverPoint(ctx.terrain.at(10, 0, 20)));
+                m.setState(com.stevesarmy.combat.cover.CoverBehaviorManager.CoverState.NO_COVER);
+                ctx.injectSuppressionFromGround(GUNNER, 10, 54.5, 20.5, 1.6, 3.0f);
+                if (reload) {
+                    com.stevesarmy.combat.GunIntegration.shootAtPosition(s, s.position().add(0, -1, 0));
+                    com.stevesarmy.combat.GunIntegration.reload(s);
+                }
+            });
+        for (int t = 25; t <= 120; t += 5) builder.action(t, "sustain directional pressure",
+            ctx -> ctx.injectSuppressionFromGround(GUNNER, 3, 54.5, 20.5, 1.6, 3.0f));
+        return builder
+            .assertThat("injected endpoint makes physical progress within 40 ticks", view ->
+                start[0] != null && view.timeline().series(GUNNER).stream().anyMatch(s ->
+                    s.tick > 20 && s.tick <= 60 && s.state.position != null
+                    && Math.hypot(s.state.position.x - start[0].x, s.state.position.z - start[0].z) >= 0.5))
+            .assertThat("physical protected dock reached within 120 ticks", view ->
+                view.timeline().series(GUNNER).stream().anyMatch(s -> s.tick > 20 && s.tick <= 140
+                    && s.state.currentCover != null && s.coverSlotOffset >= 0 && s.coverSlotOffset <= 0.2
+                    && s.exposedBodyRays == 0 && s.exposedHeadRays == 0))
+            .assertThat("reload actually overlaps recovery", view -> !reload || view.timeline().series(GUNNER).stream()
+                .anyMatch(s -> s.tick >= 20 && s.tick <= 60 && s.reloading))
+            .build();
+    }
+
     public static SimScenario advanceContinuity() {
         SimScenario.Builder scenario = SimScenario.builder("mg_advance_continuity")
             .duration(1500)
