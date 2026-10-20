@@ -143,6 +143,7 @@ public class SoldierModel<T extends SoldierEntity> extends HumanoidModel<T> {
             }
             applyReviewedPosture(motion.crouch * (1 - crawl), motion.coverAim,
                 motion.ready, swing, speed, gun, yaw, pitch);
+            applyLocomotion(swing, speed, motion.walk * (1 - crawl) * (1 - motion.crouch));
             applyCrawl(crawl, swing, speed, pitch, gun);
             reviewedWeaponWeight = 1 - crawl;
             if (entity.hurtTime > 0)

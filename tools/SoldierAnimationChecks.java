@@ -72,6 +72,14 @@ public class SoldierAnimationChecks {
         }
         reset(); locomotion.invoke(model, 0f, .8f, 1f);
         check(model.rightLeg.xRot > 1, "running stride is too short");
+        reset();
+        Method reviewedPosture = SoldierModel.class.getDeclaredMethod("applyReviewedPosture", float.class, float.class,
+            float.class, float.class, float.class, boolean.class, float.class, float.class);
+        reviewedPosture.setAccessible(true);
+        reviewedPosture.invoke(model, 0f, 0f, 1f, 0f, 0f, false, 0f, 0f);
+        locomotion.invoke(model, 0f, .8f, 1f);
+        check(model.rightLeg.xRot > 1 && model.leftLeg.xRot < -1,
+            "standing reviewed posture overwrote the running stride");
         checkReviewedEndpoints();
         PoseStack palm = new PoseStack();
         model.translateWeaponToHand(palm);
