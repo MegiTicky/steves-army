@@ -3,6 +3,7 @@ package com.stevesarmy.client.model;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import com.stevesarmy.client.animation.SoldierAnimations;
+import com.stevesarmy.client.animation.ReviewedSoldierPoses;
 import com.stevesarmy.combat.GunIntegration;
 import com.stevesarmy.entity.SoldierEntity;
 import net.minecraft.client.animation.AnimationDefinition;
@@ -15,6 +16,7 @@ import net.minecraft.client.model.geom.builders.*;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.HumanoidArm;
 import org.joml.Vector3f;
+import org.joml.Quaternionf;
 import java.util.List;
 import java.util.Map;
 import java.util.WeakHashMap;
@@ -30,6 +32,8 @@ public class SoldierModel<T extends SoldierEntity> extends HumanoidModel<T> {
     private final Vector3f scratch = new Vector3f();
     private final Map<T, Motion> motions = new WeakHashMap<>();
     private float weaponReady;
+    private Quaternionf reviewedWeaponRotation;
+    private float reviewedWeaponWeight;
 
     public SoldierModel(ModelPart root) {
         super(root);
@@ -103,13 +107,15 @@ public class SoldierModel<T extends SoldierEntity> extends HumanoidModel<T> {
     public void setupAnim(T entity, float swing, float speed, float age, float yaw, float pitch) {
         // HumanoidModel.setupAnim has TaCZ injections: don't apply a second arm pose.
         unit.getAllParts().forEach(ModelPart::resetPose);
-        unit.x = 0; unit.y = 6; unit.z = -1; unit.xRot = .0873F;
+        reviewedWeaponRotation = null;
+        unit.x = 0; unit.y = 6; unit.z = -1; unit.xRot = 5 * Mth.DEG_TO_RAD;
         unit.yRot = unit.zRot = 0;
         unit.xScale = unit.yScale = unit.zScale = 1;
         float partial = Mth.clamp(age - entity.tickCount, 0, 1);
         Motion motion = motions.computeIfAbsent(entity, e -> new Motion());
-        float target = entity.isHalfCoverRising() ? 1 - entity.getHalfCoverRiseProgress()
-            : entity.isCrouching() ? 1 : 0;
+        // Peeking lifts the weapon from the reviewed kneel. Do not straighten
+        // the legs (or float the arms) while the gameplay rise hint advances.
+        float target = entity.isHalfCoverRising() || entity.isHalfCoverPeekIdle() || entity.isCrouching() ? 1 : 0;
         motion.update(age, target, entity.isAnimationWeaponReady() ? 1 : 0, Math.min(1, speed * 4));
         float coverTarget = entity.isHalfCoverPeekIdle() ? 1
             : entity.isHalfCoverRising() ? entity.getHalfCoverRiseProgress() : 0;
@@ -135,9 +141,10 @@ public class SoldierModel<T extends SoldierEntity> extends HumanoidModel<T> {
                 leftArm.xRot = Mth.cos(swing * .6662F) * speed;
                 rightArm.yRot = leftArm.yRot = rightArm.zRot = leftArm.zRot = 0;
             }
-            applyCrouch(motion.crouch * (1 - crawl), swing, speed);
+            applyReviewedPosture(motion.crouch * (1 - crawl), motion.coverAim,
+                motion.ready, swing, speed, gun, yaw, pitch);
             applyCrawl(crawl, swing, speed, pitch, gun);
-            if (gun) applyCoverAim(motion.coverAim * (1 - crawl));
+            reviewedWeaponWeight = 1 - crawl;
             if (entity.hurtTime > 0)
                 apply((entity.getId() & 1) == 0 ? SoldierAnimations.UNIT_HURT : SoldierAnimations.UNIT_HURT_1,
                     (entity.hurtDuration - entity.hurtTime + partial) / 10, 1);
@@ -165,18 +172,6 @@ public class SoldierModel<T extends SoldierEntity> extends HumanoidModel<T> {
         leftLeg.y = Mth.lerp(weight, leftLeg.y, 6);
         rightLeg.z = Mth.lerp(weight, rightLeg.z, 0);
         leftLeg.z = Mth.lerp(weight, leftLeg.z, 0);
-    }
-
-    private void applyCoverAim(float amount) {
-        if (amount <= 0) return;
-        PoseStack palm = new PoseStack();
-        translateWeaponToHand(palm);
-        float gripHeight = 1.5F - palm.last().pose().transformPosition(new Vector3f()).y;
-        // Full block top + two model pixels. Move both hands with the weapon,
-        // rather than translating the gun away from its right-hand attachment.
-        float lift = Math.max(0, 1.125F - gripHeight) * 16 * amount / Mth.cos(unit.xRot);
-        rightArm.y -= lift;
-        leftArm.y -= lift;
     }
 
     private void applyWeaponPose(String id, String type, float ready) {
@@ -215,22 +210,69 @@ public class SoldierModel<T extends SoldierEntity> extends HumanoidModel<T> {
     }
 
     private void applyCrouch(float amount, float swing, float speed) {
-        if (amount <= 0) return;
-        // Standing -> tactical kneel; moving sneak -> symmetric bent-knee gait.
-        float moving = Mth.clamp(speed * 6, 0, 1);
-        unit.y += 5 * amount; unit.xRot += .12F * amount;
-        body.xRot += .18F * amount;
-        // Tuck the neck/shoulders into the leaned torso; never scale the legs.
-        body.y += 3.4F * amount; head.y += 3.4F * amount;
-        head.z -= 1.8F * amount; head.xRot -= .12F * amount;
-        rightArm.y += 3.4F * amount; leftArm.y += 3.4F * amount;
-        rightArm.z -= .8F * amount; leftArm.z -= .8F * amount;
-        rightLeg.xRot = Mth.lerp(amount, rightLeg.xRot, Mth.lerp(moving, .5F, -.8F + .25F * Mth.cos(swing)));
-        leftLeg.xRot = Mth.lerp(amount, leftLeg.xRot, Mth.lerp(moving, -1.45F, -.8F - .25F * Mth.cos(swing)));
-        rightLeg.z = Mth.lerp(amount, rightLeg.z, 1.0F);
-        leftLeg.z = Mth.lerp(amount, leftLeg.z, -1.5F);
-        rightShin.xRot = amount * Mth.lerp(moving, -2.05F, 1.55F);
-        leftShin.xRot = amount * Mth.lerp(moving, 1.6F, 1.55F);
+        applyReviewedPosture(amount, 0, weaponReady, swing, speed, true, 0, 0);
+    }
+
+    private void applyReviewedPosture(float amount, float cover, float ready,
+                                      float swing, float speed, boolean gun, float yaw, float pitch) {
+        amount = Mth.clamp(amount, 0, 1);
+        cover = Mth.clamp(cover, 0, 1);
+        var crouchPose = ReviewedSoldierPoses.blend(ReviewedSoldierPoses.get("crouch"), ReviewedSoldierPoses.get("cover"), cover);
+        var standingPose = ReviewedSoldierPoses.blend(ReviewedSoldierPoses.get("standing_lowered"), ReviewedSoldierPoses.get("standing_ready"), ready);
+        Map<String, ModelPart> parts = Map.of("head", head, "body", body, "right_arm", rightArm, "left_arm", leftArm,
+            "right_leg", rightLeg, "left_leg", leftLeg, "right_leg_shin", rightShin, "left_leg_shin", leftShin);
+        Quaternionf tracking = new Quaternionf().rotationY(Mth.clamp(yaw, -30, 30) * Mth.DEG_TO_RAD * .65F)
+            .rotateX(Mth.clamp(pitch, -25, 45) * Mth.DEG_TO_RAD * .85F);
+        for (var entry : parts.entrySet()) {
+            String name = entry.getKey(); ModelPart part = entry.getValue();
+            if (!gun && name.endsWith("_arm")) continue;
+            var standingTarget = standingPose.parts().get(name);
+            var target = ReviewedSoldierPoses.blend(standingTarget, crouchPose.parts().get(name), amount, name.endsWith("_arm"));
+            if (name.endsWith("_shin")) {
+                var shinTarget = crouchPose.parts().get(name);
+                var current = new ReviewedSoldierPoses.Part(new Vector3f(part.x, part.y, part.z), ReviewedSoldierPoses.rotation(part), shinTarget.centre());
+                var blended = ReviewedSoldierPoses.blend(current, shinTarget, amount, false);
+                part.setPos(blended.position().x, blended.position().y, blended.position().z);
+                ReviewedSoldierPoses.writeRotation(part, blended.rotation());
+            } else {
+                if (name.equals("head") || name.endsWith("_arm")) {
+                    Quaternionf look = name.equals("head")
+                        ? new Quaternionf().rotationY(Mth.clamp(yaw, -30, 30) * Mth.DEG_TO_RAD)
+                            .rotateX(Mth.clamp(pitch, -25, 45) * Mth.DEG_TO_RAD) : tracking;
+                    target = new ReviewedSoldierPoses.Part(target.position(), new Quaternionf(look).mul(target.rotation()), target.centre());
+                }
+                ReviewedSoldierPoses.writeLocal(unit, part, target);
+            }
+            part.xScale = Mth.lerp(amount, part.xScale, 1);
+            part.yScale = Mth.lerp(amount, part.yScale, 1);
+            part.zScale = Mth.lerp(amount, part.zScale, 1);
+        }
+        // Moving sneak retains a symmetric gait, blending into the reviewed
+        // planted kneel when movement stops. Standing/running is unchanged.
+        float moving = Mth.clamp(speed * 6, 0, 1) * amount;
+        if (moving > 0) {
+            // A walking crouch needs room for two supporting legs. Tuck the
+            // hips into the torso rather than driving a planted-knee hip height
+            // through the floor when switching to the symmetric walking gait.
+            Quaternionf rootRotation = ReviewedSoldierPoses.rotation(unit);
+            for (ModelPart leg : new ModelPart[]{rightLeg, leftLeg}) {
+                Vector3f hip = new Vector3f(leg.x, leg.y, leg.z).rotate(rootRotation).add(unit.x, unit.y, unit.z);
+                hip.y = Mth.lerp(moving, hip.y, 14.2F);
+                hip.z = Mth.lerp(moving, hip.z, 0);
+                hip.sub(unit.x, unit.y, unit.z).rotate(new Quaternionf(rootRotation).invert());
+                leg.setPos(hip.x, hip.y, hip.z);
+            }
+            rightLeg.xRot = Mth.lerp(moving, rightLeg.xRot, -.8F + .25F * Mth.cos(swing));
+            leftLeg.xRot = Mth.lerp(moving, leftLeg.xRot, -.8F - .25F * Mth.cos(swing));
+            rightShin.xRot = Mth.lerp(moving, rightShin.xRot, 1.55F);
+            leftShin.xRot = Mth.lerp(moving, leftShin.xRot, 1.55F);
+        }
+        if (gun) {
+            Quaternionf start = ReviewedSoldierPoses.weaponMount(standingPose);
+            Quaternionf end = ReviewedSoldierPoses.weaponMount(crouchPose);
+            reviewedWeaponRotation = new Quaternionf(tracking).mul(start.slerp(end, amount));
+            reviewedWeaponWeight = 1;
+        }
     }
 
     private void applyCrawl(float amount, float swing, float speed, float pitch, boolean gun) {
@@ -264,8 +306,18 @@ public class SoldierModel<T extends SoldierEntity> extends HumanoidModel<T> {
     }
 
     public void translateWeaponToHand(PoseStack stack) {
-        translateToHand(HumanoidArm.RIGHT, stack);
-        stack.translate(-1.0 / 16, 9.0 / 16, 0);
+        PoseStack hand = new PoseStack();
+        translateToHand(HumanoidArm.RIGHT, hand);
+        hand.translate(-1.0 / 16, 9.0 / 16, 0);
+        if (reviewedWeaponRotation == null) {
+            translateToHand(HumanoidArm.RIGHT, stack);
+            stack.translate(-1.0 / 16, 9.0 / 16, 0);
+        } else {
+            Vector3f p = hand.last().pose().transformPosition(new Vector3f());
+            Quaternionf actual = ReviewedSoldierPoses.rotation(unit).mul(ReviewedSoldierPoses.rotation(rightArm));
+            stack.translate(p.x, p.y, p.z);
+            stack.mulPose(actual.slerp(reviewedWeaponRotation, reviewedWeaponWeight));
+        }
     }
     public float weaponReady() { return weaponReady; }
 
