@@ -211,8 +211,10 @@ public class CqbSteeringAdvisor {
     }
 
     private boolean isSolidBeside(SoldierEntity soldier, Vec3 at) {
-        net.minecraft.core.BlockPos bp = net.minecraft.core.BlockPos.containing(
-            at.x, soldier.getY() + 0.6, at.z);
+        // Sample the future node's feet level. Sampling the follower's current Y
+        // makes a one-block cover row beneath a raised path look like doorway
+        // walls, even though the path is clear at the node's actual height.
+        net.minecraft.core.BlockPos bp = net.minecraft.core.BlockPos.containing(at.x, at.y, at.z);
         return !soldier.level().getBlockState(bp)
             .getCollisionShape(soldier.level(), bp).isEmpty();
     }

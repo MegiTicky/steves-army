@@ -15,6 +15,100 @@ import java.util.List;
 public final class CautionSteeringScenarios {
     private CautionSteeringScenarios() {}
 
+    /** Real pathfinding over the trace's one-block cover row, with a nearby parked friendly. */
+    public static SimScenario raisedPathDoorway() {
+        boolean[] ok = new boolean[5];
+        double[] startZ = new double[1];
+        var builder = SimScenario.builder("cqb_raised_path_not_doorway").core().duration(140)
+            .description("A future path node above a one-block cover row must sample doorway walls "
+                + "at that node's height. Nearby friendlies must not turn the row into a doorway; "
+                + "real ground-level and elevated passages still queue and release when empty.")
+            .terrain(t -> {
+                t.platform();
+                t.coverRow(0, 24, 48, 24, 1);
+                t.coverRow(29, 20, 29, 20, 2);
+                t.coverRow(31, 20, 31, 20, 2);
+                // Raised doorway, with its approach standing one block lower.
+                t.coverRow(29, 30, 31, 30, 1);
+                t.block(29, 1, 30, net.minecraft.world.level.block.Blocks.STONE.defaultBlockState());
+                t.block(31, 1, 30, net.minecraft.world.level.block.Blocks.STONE.defaultBlockState());
+            })
+            .setup(ctx -> {
+                java.util.Arrays.fill(ok, false);
+                ctx.spawnAnchor(4, 0, 4);
+                ctx.spawnFriendly(ModEntities.SOLDIER.get(), "walker", 20, 0, 19, SquadMode.HOLD).setNoAi(true);
+                ctx.spawnFriendly(ModEntities.SOLDIER.get(), "parked", 18, 0, 23, SquadMode.HOLD).setNoAi(true);
+                ctx.setDangerSweepEnabled(false);
+            })
+            .action(30, "real path crosses the cover row beside a parked friendly", ctx -> {
+                var s = ctx.soldier("walker");
+                s.getThreatAwareness().onEnemyPing(ctx.terrain.at(20, 0, 28));
+                s.setOnGround(true);
+                var path = s.getNavigation().createPath(ctx.terrain.at(20, 0, 28), 0);
+                com.stevesarmy.StevesArmyMod.LOGGER.info("[DoorwayHeightProbe] start={} ground={} path={}",
+                    s.position(), s.onGround(), path == null ? "null" : path.getNodeCount() + "/" + path.canReach());
+                ok[0] = path != null && path.canReach();
+                if (path != null) {
+                    boolean raised = false;
+                    for (int i = 0; i < path.getNodeCount(); i++) {
+                        var n = path.getNode(i);
+                        raised |= n.y == ctx.terrain.origin.getY() + 1 && n.z == 24;
+                    }
+                    ok[0] &= raised;
+                    s.getNavigation().moveTo(path, 1.2);
+                }
+                startZ[0] = s.getZ();
+                ok[1] = !new CqbSteeringAdvisor().isDoorwayBlocked(s);
+            })
+            .action(65, "measure physical approach progress before the row", ctx -> {
+                var s = ctx.soldier("walker");
+                double progress = s.getZ() - startZ[0];
+                com.stevesarmy.StevesArmyMod.LOGGER.info("[DoorwayHeightProbe] raisedRoute={} admitted={} progress={} limit={}",
+                    ok[0], ok[1], progress,
+                    ((com.stevesarmy.entity.ai.CoverPositionController) s.getMoveControl()).getSpeedController().limitingReason());
+                ok[2] = progress >= 3.0;
+            })
+            .action(80, "ordinary doorway with a friendly in the passage queues", ctx -> {
+                var s = ctx.soldier("walker");
+                s.setPos(30.5, ctx.terrain.origin.getY(), 17.5);
+                ctx.soldier("parked").setPos(30.5, ctx.terrain.origin.getY(), 20.5);
+                s.getNavigation().moveTo(s.getNavigation().createPath(ctx.terrain.at(30, 0, 23), 0), 1.2);
+                var advisor = new CqbSteeringAdvisor();
+                boolean occupied = advisor.isDoorwayBlocked(s);
+                ctx.soldier("parked").setPos(8.5, ctx.terrain.origin.getY(), 8.5);
+                ok[3] = occupied && !advisor.isDoorwayBlocked(s);
+            })
+            .action(100, "raised doorway samples real walls above its supporting row", ctx -> {
+                var s = ctx.soldier("walker");
+                s.setPos(30.5, ctx.terrain.origin.getY(), 27.5);
+                ctx.soldier("parked").setPos(30.5, ctx.terrain.origin.getY() + 1, 30.5);
+                var path = s.getNavigation().createPath(ctx.terrain.at(30, 0, 33), 0);
+                s.getNavigation().moveTo(path, 1.2);
+                ok[4] = path != null && path.canReach() && new CqbSteeringAdvisor().isDoorwayBlocked(s);
+            })
+            .assertThat("fixture uses a reachable real path over the raised cover row", v -> ok[0])
+            .assertThat("cover-row support blocks do not count as doorway walls", v -> ok[1])
+            .assertThat("physical approach advances at least 3 blocks in 35 ticks", v -> ok[2])
+            .assertThat("occupied ground-level doorway queues and empty doorway releases", v -> ok[3])
+            .assertThat("occupied elevated doorway still queues from a lower approach", v -> ok[4]);
+        for (int tick = 31; tick < 65; tick++) {
+            builder.action(tick, "consume real navigation and controller travel", ctx -> {
+                var s = ctx.soldier("walker");
+                // Isolate the controller from unrelated cover selection while retaining real
+                // navigation, collisions, vanilla travel and the per-tick movement budget.
+                s.setNoAi(false);
+                try {
+                    s.getNavigation().tick();
+                    s.getMoveControl().tick();
+                    s.travel(new net.minecraft.world.phys.Vec3(s.xxa, 0, s.zza));
+                } finally {
+                    s.setNoAi(true);
+                }
+            });
+        }
+        return builder.build();
+    }
+
     public static SimScenario freshnessAndPace() {
         boolean[] passed = new boolean[16];
         CqbSteeringAdvisor[] advisors = {new CqbSteeringAdvisor(), new CqbSteeringAdvisor(),

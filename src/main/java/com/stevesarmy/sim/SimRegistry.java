@@ -150,6 +150,7 @@ public final class SimRegistry {
             attackAbsolutePinHold(),
             attackAbsolutePinHold(true),
             CautionSteeringScenarios.freshnessAndPace(),
+            CautionSteeringScenarios.raisedPathDoorway(),
             SpeedTransitionScenarios.transitions(),
             SoldierTraceScenarios.recorderProbes(),
             SoldierTraceScenarios.exportCommandProbe(),
