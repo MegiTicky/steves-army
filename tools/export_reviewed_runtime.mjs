@@ -45,7 +45,14 @@ function evaluate(prefix,time){
 }
 function findGroup(name){let result;function visit(g){if(g.name===name)result=g;for(const c of g.children??[])if(typeof c==='object')visit(c);}model.outliner.forEach(visit);if(!result)throw Error(name);return result;}
 const states={standing_ready:evaluate('01 ',0),standing_lowered:evaluate('08 ',0),crouch:evaluate('09 ',1.2),cover:evaluate('03 ',0)};
+// The author adjusted the legs in the FULL cycle's cover hold, rather than
+// the original endpoint clips. Use that exact reviewed sample for both planted
+// kneeling states, which share their leg placement; retain each upper body.
+const reviewedLegs=evaluate('12 ',2.28);
+for(const state of [states.crouch,states.cover])for(const name of ['right_leg','left_leg','right_leg_shin','left_leg_shin']){
+ state.parts[name]=reviewedLegs.parts[name];state.expected[name]=reviewedLegs.expected[name];
+}
 const out={sourceSha256:createHash('sha256').update(raw).digest('hex'),states};
-const destination=new URL('../src/main/resources/assets/steves_army/animations/reviewed_poses.json',import.meta.url);
+const destination=new URL('../src/main/resources/assets/steves_army/pose_data/reviewed_poses.json',import.meta.url);
 mkdirSync(new URL('.',destination),{recursive:true});writeFileSync(destination,JSON.stringify(out,null,2)+'\n');
 console.log('Exported four reviewed native poses:',destination.pathname);
