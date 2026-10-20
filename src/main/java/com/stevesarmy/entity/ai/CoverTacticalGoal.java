@@ -2395,6 +2395,9 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
             return false;
         }
         if (proneFiringController.isPlanActive()) return true;
+        // Fresh fire at an unprotected endpoint must be serviced even if a
+        // previous goal stop left a routine restart cooldown behind.
+        if (docklessSuppressedSearchActive()) return true;
         if (cooldown > 0) {
             cooldown--;
             return false;
@@ -2522,6 +2525,7 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
         }
         
         boolean result = proneFiringController.isPlanActive()
+            || docklessSuppressedSearchActive()
             || state != CoverBehaviorManager.CoverState.NO_COVER || soldier.hasValidAttackTarget();
         if (DiagnosticLogManager.isCoverLoggingEnabled()) {
             StevesArmyMod.LOGGER.info("[CoverGoal] canContinueToUse={}, state={}", result, state);
@@ -2754,6 +2758,30 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
         
         PeekController peekCtrl = getPeekController();
 
+        // NO_COVER can be a transient handoff, but a retained destination is
+        // not evidence that anyone still owns its movement. Service a live
+        // approach through the ordinary arrival checks; release abandoned ones.
+        if (state == CoverBehaviorManager.CoverState.NO_COVER
+            && getCoverManager().getCurrentCover() == null) {
+            CoverPoint target = getCoverManager().getTargetCover();
+            if (target != null) {
+                if (!soldier.getNavigation().isDone()
+                    || getPositionController().getLastResult() == CoverPositionController.MovementResult.IN_PROGRESS
+                    || soldier.position().distanceToSqr(getCoverStandingPosition(target.getPosition()))
+                        <= POSITIONING_TOLERANCE * POSITIONING_TOLERANCE) {
+                    getCoverManager().setState(CoverBehaviorManager.CoverState.SEEKING_COVER);
+                } else {
+                    CoverReservationManager.release(target.getPosition(), soldier);
+                    getCoverManager().clearTargetCover();
+                    getPositionController().clear();
+                }
+            }
+            if (getCoverManager().getTargetCover() == null && docklessSuppressedSearchActive()) {
+                runDocklessSuppressedSearch();
+            }
+            state = getCoverManager().getState();
+        }
+
         // Reloading keeps a soldier protected in occupied cover, but must not
         // strand one in the open after a cover destination has been chosen.
         if (soldier.isPreparingOrReloading()) {
@@ -2768,7 +2796,10 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
                 continueCoverMovementDuringReload(state);
                 tickRepositioning();
             } else {
-                holdForReload(null);
+                // Preserve the defensive fallback while a dockless search is
+                // paced or pending; reload must not force an upright stand.
+                if (docklessSuppressedSearchActive()) enterOpenGroundFallbackPosture();
+                else holdForReload(null);
             }
             tickProneFiringPlan();
             populateCoverDebugData();
@@ -8820,11 +8851,21 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
      * — never a frozen open-ground stand.
      */
     private void runDocklessSuppressedSearch() {
-        if (getCoverManager().getTargetCover() != null) {
-            // A classified or escape move is already in flight; navigation owns
-            // the legs (the crawl->dash escalation services the escape below).
-            tickSuppressedEscapeCrawlToDash();
-            return;
+        CoverPoint retainedTarget = getCoverManager().getTargetCover();
+        if (retainedTarget != null) {
+            if (!soldier.getNavigation().isDone()
+                || getPositionController().getLastResult() == CoverPositionController.MovementResult.IN_PROGRESS
+                || soldier.position().distanceToSqr(getCoverStandingPosition(retainedTarget.getPosition()))
+                    <= POSITIONING_TOLERANCE * POSITIONING_TOLERANCE) {
+                // Resume the state that services both movement and arrival.
+                getCoverManager().setState(CoverBehaviorManager.CoverState.SEEKING_COVER);
+                tickSuppressedEscapeCrawlToDash();
+                return;
+            }
+            // No navigation/controller owner remains. A stale target must not
+            // suppress every future defensive search.
+            CoverReservationManager.release(retainedTarget.getPosition(), soldier);
+            getCoverManager().clearTargetCover();
         }
         if (escapeCommitCoverPos != null) {
             // The committed escape move died without arriving (blacklist,
