@@ -20,15 +20,26 @@ public final class SimRunResult {
     public volatile DangerOracle.Oracle dangerOracle;
     /** Sampler-vs-oracle sweep result; null when no sampler was registered or the sweep was disabled. */
     public volatile DangerOracle.SweepReport oracleSweep;
+    public final SimTickMetrics.Snapshot tickMetrics;
+    public final String performanceReport;
 
     public SimRunResult(SimScenario scenario, int durationTicks, boolean gunsLoaded,
-                        float enemyHealthStart, float enemyHealthEnd, SimTimeline timeline) {
+                        float enemyHealthStart, float enemyHealthEnd, SimTimeline timeline,
+                        SimTickMetrics.Snapshot tickMetrics, String performanceReport) {
         this.scenario = scenario;
         this.durationTicks = durationTicks;
         this.gunsLoaded = gunsLoaded;
         this.enemyHealthStart = enemyHealthStart;
         this.enemyHealthEnd = enemyHealthEnd;
         this.timeline = timeline;
+        this.tickMetrics = tickMetrics;
+        this.performanceReport = performanceReport;
+    }
+
+    public SimRunResult(SimScenario scenario, int durationTicks, boolean gunsLoaded,
+                        float enemyHealthStart, float enemyHealthEnd, SimTimeline timeline) {
+        this(scenario, durationTicks, gunsLoaded, enemyHealthStart, enemyHealthEnd, timeline,
+            new SimTickMetrics().snapshot(), "");
     }
 
     public boolean failed() {

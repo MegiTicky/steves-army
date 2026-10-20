@@ -129,6 +129,7 @@ public final class SimRegistry {
             attackGuideUnreachableConcede(),
             goToVolleyStrandDirectWalk(),
             goToVolleyStreet(),
+            GoToPerformanceScenario.create(),
             GoToCoverEndpointScenarios.endpointCompletesAtCover(),
             GoToCoverEndpointScenarios.crossingPingCenterKeepsClaim(),
             GoToArrivalCoverScenario.arrivalCoverDelay(),

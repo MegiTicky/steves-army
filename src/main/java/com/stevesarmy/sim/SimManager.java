@@ -21,6 +21,7 @@ import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.event.server.ServerStartedEvent;
 import net.minecraftforge.event.server.ServerStoppingEvent;
+import net.minecraftforge.eventbus.api.EventPriority;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 
 import java.util.ArrayList;
@@ -61,6 +62,7 @@ public final class SimManager {
     private static int queueIndex = 0;
     private static int yLevel = Y_BASE;
     private static boolean autorun = false;
+    private static boolean previousPerformanceMetricsEnabled;
 
     /**
      * sim.fastticks: 'auto' (default) = unthrottle iff sim.autorun; explicit
@@ -100,6 +102,10 @@ public final class SimManager {
     private static final Map<UUID, Integer> shotCounts = new HashMap<>();
     private static final List<SimScenario.ScheduledAction> sortedActions = new ArrayList<>();
     private static final List<ChunkPos> forcedChunks = new ArrayList<>();
+    private static final SimTickMetrics simTickMetrics = new SimTickMetrics();
+    private static long measuredTickStartedNanos;
+    private static int measuredTickRun = -1;
+    private static String performanceReport = "";
 
     private record ChunkPos(int x, int z) {}
 
@@ -179,6 +185,10 @@ public final class SimManager {
         sweepLeftoverFixtureBlocks();
         // Unarmed tail state from an aborted run must not leak into this session
         SimGunHandler.setArmed(false);
+        simTickMetrics.reset();
+        performanceReport = "";
+        previousPerformanceMetricsEnabled = com.stevesarmy.debug.PerformanceMetrics.isEnabled();
+        com.stevesarmy.debug.PerformanceMetrics.setEnabled(false);
         beginScenario();
         return true;
     }
@@ -208,6 +218,23 @@ public final class SimManager {
         }
     }
 
+    @SubscribeEvent(priority = EventPriority.HIGHEST)
+    public static void onSimulationTickStart(TickEvent.ServerTickEvent event) {
+        if (event.phase != TickEvent.Phase.START || phase != Phase.RUNNING) return;
+        measuredTickStartedNanos = System.nanoTime();
+        measuredTickRun = queueIndex;
+    }
+
+    @SubscribeEvent(priority = EventPriority.LOWEST)
+    public static void onSimulationTickEnd(TickEvent.ServerTickEvent event) {
+        if (event.phase != TickEvent.Phase.END || measuredTickStartedNanos == 0L) return;
+        if (measuredTickRun == queueIndex && scenario != null) {
+            simTickMetrics.record(simTick, System.nanoTime() - measuredTickStartedNanos);
+        }
+        measuredTickStartedNanos = 0L;
+        measuredTickRun = -1;
+    }
+
     @SubscribeEvent
     public static void onServerTick(TickEvent.ServerTickEvent event) {
         if (event.phase != TickEvent.Phase.END || phase != Phase.RUNNING) return;
@@ -232,7 +259,7 @@ public final class SimManager {
         }
     }
 
-    @SubscribeEvent
+    @SubscribeEvent(priority = EventPriority.LOWEST)
     public static void onServerCleanupTick(TickEvent.ServerTickEvent event) {
         if (event.phase != TickEvent.Phase.END || phase != Phase.CLEANUP) return;
         finishScenario();
@@ -312,6 +339,13 @@ public final class SimManager {
         // handler clears its per-entity state, which would silently undo any
         // disarmSoldier() the setup performed.
         SimGunHandler.setArmed(scenario.armed);
+        previousPerformanceMetricsEnabled = com.stevesarmy.debug.PerformanceMetrics.isEnabled();
+        if (scenario.name.startsWith("goto_performance")) {
+            com.stevesarmy.debug.PerformanceMetrics.setEnabled(true);
+            com.stevesarmy.debug.PerformanceMetrics.reset();
+        } else {
+            com.stevesarmy.debug.PerformanceMetrics.setEnabled(false);
+        }
         scenario.setup.accept(context);
         enemyHealthStart = totalEnemyHealth();
         sortedActions.clear();
@@ -319,6 +353,8 @@ public final class SimManager {
         sortedActions.sort(Comparator.comparingInt(SimScenario.ScheduledAction::tick));
         actionIndex = 0;
         simTick = 0;
+        simTickMetrics.reset();
+        performanceReport = "";
         // determinism aids: fixed daytime, no weather, no ambient mob spawns
         level.setDayTime(1000);
         level.setRainLevel(0.0f);
@@ -483,9 +519,12 @@ public final class SimManager {
 
     private static void finishScenario() {
         float enemyHealthEnd = totalEnemyHealth();
+        if (scenario.name.startsWith("goto_performance")) {
+            performanceReport = com.stevesarmy.debug.PerformanceMetrics.report();
+        }
         SimRunResult result = new SimRunResult(scenario, scenario.durationTicks,
             GunIntegration.isAnyGunLoaded() && scenario.armed,
-            enemyHealthStart, enemyHealthEnd, timeline);
+            enemyHealthStart, enemyHealthEnd, timeline, simTickMetrics.snapshot(), performanceReport);
 
         // danger-map oracle: independent ground truth over the injected threats,
         // then the sampler-vs-oracle sweep the DangerOracleMismatch detector judges
@@ -604,6 +643,10 @@ public final class SimManager {
                     + " — baking overspent the shared per-tick budget"));
         }
 
+        if (scenario.name.startsWith("goto_performance")) {
+            StevesArmyMod.LOGGER.info("[Sim][GoToPerf] {}", result.tickMetrics.summary());
+            StevesArmyMod.LOGGER.info("[Sim][GoToPerf] instrumented metrics:\n{}", result.performanceReport);
+        }
         if (result.failed()) {
             if (scenario.expectedFailReason != null) tallyXfail++;
             else tallyFails.add(scenario.name);
@@ -634,6 +677,7 @@ public final class SimManager {
         terrain.clear();
         unforceChunks();
         SimIsolation.reset(level);
+        com.stevesarmy.debug.PerformanceMetrics.setEnabled(previousPerformanceMetricsEnabled);
         GunIntegration.shotListener = null;
         yLevel += Y_SEPARATION;
         queueIndex++;

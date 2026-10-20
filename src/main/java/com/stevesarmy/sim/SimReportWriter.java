@@ -53,13 +53,18 @@ public final class SimReportWriter {
 
     private static String renderText(SimRunResult result, int simTick) {
         StringBuilder sb = new StringBuilder();
-        sb.append("SIM SCENARIO REPORT\n");        sb.append("===================\n");
+        sb.append("SIM SCENARIO REPORT\n");
+        sb.append("===================\n");
         sb.append("scenario : ").append(result.scenario.name).append('\n');
         sb.append("desc     : ").append(result.scenario.description).append('\n');
         sb.append("duration : ").append(result.durationTicks).append(" ticks (").append(simTick).append(" simulated)\n");
         sb.append("guns     : ").append(result.gunsLoaded ? "LOADED (armed scenario)" : "ABSENT — firing assertions skipped").append('\n');
         sb.append("outcome  : ").append(outcomeLabel(result)).append('\n');
         sb.append("samples  : ").append(result.timeline.sampleCount()).append('\n');
+        sb.append("tick time: ").append(result.tickMetrics.summary()).append('\n');
+        if (!result.performanceReport.isBlank()) {
+            sb.append("instrumented performance metrics:\n").append(result.performanceReport).append('\n');
+        }
         sb.append('\n');
 
         if (!result.assertionFailures.isEmpty()) {
@@ -176,6 +181,8 @@ public final class SimReportWriter {
         sb.append("  \"outcome\": \"").append(escape(outcomeLabel(result))).append("\",\n");
         sb.append("  \"enemyHealthStart\": ").append(result.enemyHealthStart).append(",\n");
         sb.append("  \"enemyHealthEnd\": ").append(result.enemyHealthEnd).append(",\n");
+        sb.append("  \"tickMetrics\": ").append(result.tickMetrics.json()).append(",\n");
+        sb.append("  \"performanceReport\": \"").append(escape(result.performanceReport)).append("\",\n");
         sb.append("  \"assertionFailures\": [");
         for (int i = 0; i < result.assertionFailures.size(); i++) {
             sb.append(i > 0 ? ", " : "").append('"').append(escape(result.assertionFailures.get(i))).append('"');
