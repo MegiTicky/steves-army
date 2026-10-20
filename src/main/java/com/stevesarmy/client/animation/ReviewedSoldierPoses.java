@@ -61,7 +61,7 @@ public final class ReviewedSoldierPoses {
         part.zRot = (float) Math.atan2(2 * (w * z + x * y), 1 - 2 * (y * y + z * z));
     }
     private static Map<String, Pose> load() {
-        var stream = ReviewedSoldierPoses.class.getResourceAsStream("/assets/steves_army/animations/reviewed_poses.json");
+        var stream = ReviewedSoldierPoses.class.getResourceAsStream("/assets/steves_army/pose_data/reviewed_poses.json");
         if (stream == null) throw new IllegalStateException("Missing reviewed soldier poses");
         try (var reader = new InputStreamReader(stream, StandardCharsets.UTF_8)) {
             JsonObject states = JsonParser.parseReader(reader).getAsJsonObject().getAsJsonObject("states");

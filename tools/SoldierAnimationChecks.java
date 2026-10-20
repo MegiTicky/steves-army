@@ -103,7 +103,7 @@ public class SoldierAnimationChecks {
         weapon.setAccessible(true); reviewed.setAccessible(true);
         JsonObject states;
         try (var reader = new InputStreamReader(SoldierModel.class.getResourceAsStream(
-                "/assets/steves_army/animations/reviewed_poses.json"), StandardCharsets.UTF_8)) {
+                "/assets/steves_army/pose_data/reviewed_poses.json"), StandardCharsets.UTF_8)) {
             states = JsonParser.parseReader(reader).getAsJsonObject().getAsJsonObject("states");
         }
         for (String state : new String[]{"standing_ready", "standing_lowered", "crouch", "cover"}) {
