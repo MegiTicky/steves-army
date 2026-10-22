@@ -214,8 +214,7 @@ public class FofSettings extends SavedData {
 
             String teamKey = null;
             if (target instanceof SoldierEntity soldier) {
-                LivingEntity owner = soldier.getOwner();
-                Team ownerTeam = owner != null ? owner.getTeam() : null;
+                Team ownerTeam = TeamManager.getEffectiveTeam(soldier);
                 teamKey = ownerTeam != null ? ownerTeam.getName() : null;
             } else if (target.getTeam() != null) {
                 teamKey = target.getTeam().getName();

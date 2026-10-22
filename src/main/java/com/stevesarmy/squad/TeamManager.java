@@ -122,6 +122,7 @@ public class TeamManager {
     }
 
     private static PlayerTeam resolveOwnerTeam(Scoreboard scoreboard, ServerPlayer owner) {
+        OwnerScoreboardIdentity.get(owner.getServer()).remember(owner);
         if (owner.getTeam() instanceof PlayerTeam ownerTeam && !isPrivateFriendlyTeam(ownerTeam)) {
             PlayerTeam team = scoreboard.getPlayerTeam(ownerTeam.getName());
             if (team != null) return team;
@@ -129,10 +130,36 @@ public class TeamManager {
         return getOrCreateOwnerTeam(scoreboard, owner.getUUID());
     }
 
+    /** Shared effective affiliation for assignment, default alliances, and team FOF. */
+    public static PlayerTeam getEffectiveTeam(SoldierEntity soldier) {
+        UUID ownerId = soldier.getOwnerUUID().orElse(null);
+        if (ownerId != null && soldier.level() instanceof ServerLevel) {
+            return getOwnerTeam(soldier.level().getScoreboard(), soldier, ownerId);
+        }
+        return soldier.getTeam() instanceof PlayerTeam team ? team : null;
+    }
+
     private static PlayerTeam getOwnerTeam(Scoreboard scoreboard, Entity entity, UUID ownerUUID) {
         if (entity.level() instanceof ServerLevel serverLevel) {
-            ServerPlayer owner = serverLevel.getServer().getPlayerList().getPlayer(ownerUUID);
-            if (owner != null) return resolveOwnerTeam(scoreboard, owner);
+            MinecraftServer server = serverLevel.getServer();
+            ServerPlayer owner = server.getPlayerList().getPlayer(ownerUUID);
+            OwnerScoreboardIdentity identities = OwnerScoreboardIdentity.get(server);
+            if (owner != null) {
+                identities.remember(owner);
+                return resolveOwnerTeam(scoreboard, owner);
+            }
+            String name = identities.name(ownerUUID);
+            if (name != null) {
+                PlayerTeam team = scoreboard.getPlayersTeam(name);
+                if (team != null && !isPrivateFriendlyTeam(team)) return team;
+                // Known identity with no membership (including deleted teams) uses only
+                // the mod's private fallback; never recreate a remembered vanilla team.
+                return getOrCreateOwnerTeam(scoreboard, ownerUUID);
+            }
+            // Legacy saves cannot infer a scoreboard name from a UUID. Retain a
+            // surviving membership until the owner returns and teaches us its identity.
+            PlayerTeam existing = scoreboard.getPlayersTeam(entity.getStringUUID());
+            if (existing != null) return existing;
         }
         return getOrCreateOwnerTeam(scoreboard, ownerUUID);
     }

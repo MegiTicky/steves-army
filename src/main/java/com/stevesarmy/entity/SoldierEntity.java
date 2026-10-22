@@ -1134,9 +1134,10 @@ public class SoldierEntity extends PathfinderMob implements Container {
 
     /** True when the other entity shares the soldier's (or owner's) scoreboard team. */
     private boolean isAlliedByTeam(LivingEntity other) {
-        Team otherTeam = other.getTeam();
+        Team otherTeam = other instanceof SoldierEntity soldier
+            ? TeamManager.getEffectiveTeam(soldier) : other.getTeam();
         if (otherTeam == null) return false;
-        Team soldierTeam = getTeam();
+        Team soldierTeam = TeamManager.getEffectiveTeam(this);
         if (soldierTeam != null && soldierTeam.isAlliedTo(otherTeam)) return true;
         LivingEntity owner = getOwner();
         Team ownerTeam = owner != null ? owner.getTeam() : null;
@@ -1766,7 +1767,7 @@ public class SoldierEntity extends PathfinderMob implements Container {
         if (!this.level().isClientSide) {
             VS2Compat.onSoldierRemoved(this);
             com.stevesarmy.combat.VehicleCrewManager.releaseAllFor(this.getUUID());
-            TeamManager.removeFromTeam(this);
+            if (reason.shouldDestroy()) TeamManager.removeFromTeam(this);
             com.stevesarmy.combat.cover.CoverReservationManager.releaseAll(this);
             com.stevesarmy.combat.VpbEntityState.remove(this.getUUID());
             if (this.level() instanceof ServerLevel serverLevel) {

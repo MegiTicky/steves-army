@@ -38,6 +38,8 @@ public class TeamEventHandler {
         if (!(event.getEntity() instanceof ServerPlayer player)) return;
         MinecraftServer server = player.getServer();
         if (server == null) return;
+        OwnerScoreboardIdentity.get(server).remember(player);
+        TeamManager.synchronizeOwnedSoldiers(server, player);
         NetworkHandler.sendTo(player, FofSyncPacket.createFor(server, player.getUUID()));
     }
 
@@ -163,6 +165,7 @@ public class TeamEventHandler {
 
         for (ServerPlayer player : event.getServer().getPlayerList().getPlayers()) {
             UUID playerUUID = player.getUUID();
+            OwnerScoreboardIdentity.get(event.getServer()).remember(player);
             String currentTeam = getTeamName(player);
             String previousTeam = LAST_PLAYER_TEAMS.put(playerUUID, currentTeam);
             if (previousTeam == null || previousTeam.equals(currentTeam)) continue;
