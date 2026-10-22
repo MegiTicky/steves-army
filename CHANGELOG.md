@@ -8,7 +8,7 @@ All notable changes to Steve's Army will be documented in this file.
 - Swapping bodies carries health with it: take the soldier's current health and leave your own behind. Swapping back no longer provides a free heal.
 
 ### Machine Gunner Overhaul
-- Machine gunners hold the back row as a base of fire, catching up in bounds as the squad advances instead of leading the charge.
+- Machine gunners retain their existing support-role cover and movement safeguards while providing sustained ATTACK suppression.
 - Suppression bursts rotate across every known enemy position, with multiple gunners interleaving their fire instead of stacking on one target.
 - Visible targets receive longer bursts with faster recovery and better tracking on moving enemies, while low-in-cover firing keeps the gun's crawl recoil.
 - Cover seeking now completes the move more reliably instead of stranding a gunner mid-seek or skipping from cover straight to the objective.
@@ -62,7 +62,7 @@ All notable changes to Steve's Army will be documented in this file.
 
 ### Developer Tools
 - Added headless simulation scenarios, a soldier flight recorder with trace viewing, and debug overlays for cover state, danger maps, movement courses and field of view.
-- Added recording command. For recording soldier's behavior to debug
+- Added a recording command to capture soldier behavior for debugging.
 
 ## [0.5.1] - 2026-09-28
 

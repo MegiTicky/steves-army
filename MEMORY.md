@@ -11,4 +11,3 @@ Rollback: remove the rear-support movement policy and its compensating recovery 
 Known separate issue: mg_persistent_attack_suppression failed on both the pre-recovery and recovery snapshots in the earlier investigation; this rollback does not claim to repair that failure. Minimal focused verification only; live evaluation remains necessary.
 
 Validation: isolated staged-source Java17 build SUCCESS; focused scenarios 3 PASS / 0 FAIL. Crossed gap 50.33 -> 29.11 with 91 shots by tick1200; aligned gap35 ->18.39 with95 shots. Both remained stationary at tick400, so this is a rollback, not proof of prompt catch-up. Reports retain FireDeadlock/rotation/danger warnings. Direct-fire cadence passed. Log: Debug/mg-rollback-validation.log. Test deployment follows the committed-source packaging check; see agents-mailbox.md for artifact hash.
-
