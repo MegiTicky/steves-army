@@ -24,6 +24,14 @@ public final class SimRegistry {
 
     public static List<SimScenario> all() {
         return List.of(
+            MovementRecoveryScenarios.diagnostic("pit", "goto"),
+            MovementRecoveryScenarios.diagnostic("pit", "follow"),
+            MovementRecoveryScenarios.diagnostic("pit", "idle"),
+            MovementRecoveryScenarios.diagnostic("pit", "cancel"),
+            MovementRecoveryScenarios.diagnostic("box", "goto"),
+            MovementRecoveryScenarios.diagnostic("box", "follow"),
+            MovementRecoveryScenarios.diagnostic("partial_box", "goto"),
+            MovementRecoveryScenarios.diagnostic("roof", "goto"),
             MovementRecoveryScenarios.roof(true),
             MovementRecoveryScenarios.roof(false),
             MovementRecoveryScenarios.wrongFloorArrival(),
