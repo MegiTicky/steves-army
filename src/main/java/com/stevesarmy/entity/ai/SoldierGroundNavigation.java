@@ -17,6 +17,19 @@ import net.minecraft.world.level.pathfinder.PathFinder;
 
 public class SoldierGroundNavigation extends GroundPathNavigation {
     private boolean asyncMoveRequest;
+    private BlockPos recoveryIntentTarget;
+    private int recoveryIntentTick;
+
+    /** A short lease renewed only by the owning goal's movement requests. */
+    public BlockPos getRecoveryIntentTarget() {
+        return recoveryIntentTarget != null && mob.tickCount - recoveryIntentTick <= 40
+            ? recoveryIntentTarget : null;
+    }
+
+    private void recordRecoveryIntent(BlockPos target) {
+        recoveryIntentTarget = target.immutable();
+        recoveryIntentTick = mob.tickCount;
+    }
     private AsyncSoldierPath validatedAsyncPath;
     /** The pathfinder createPathFinder built — vanilla keeps it private. */
     private PathFinder soldierPathFinder;
@@ -118,6 +131,7 @@ public class SoldierGroundNavigation extends GroundPathNavigation {
         asyncMoveRequest = true;
         try {
             boolean accepted = super.moveTo(x, y, z, speedModifier);
+            recordRecoveryIntent(BlockPos.containing(x, y, z));
             if (SoldierFlightRecorder.isRecording()) traceNavigation(accepted ? "accepted" : "rejected", accepted ? "path request accepted" : "path request failed",
                 "target=" + x + "," + y + "," + z + ",speed=" + speedModifier);
             return accepted;
@@ -141,6 +155,7 @@ public class SoldierGroundNavigation extends GroundPathNavigation {
         asyncMoveRequest = true;
         try {
             boolean accepted = super.moveTo(entity, speedModifier);
+            recordRecoveryIntent(entity.blockPosition());
             if (SoldierFlightRecorder.isRecording()) traceNavigation(accepted ? "accepted" : "rejected", accepted ? "path request accepted" : "path request failed",
                 "entity=" + entity.getId() + ",speed=" + speedModifier);
             return accepted;
@@ -166,6 +181,7 @@ public class SoldierGroundNavigation extends GroundPathNavigation {
             }
         }
         boolean accepted = super.moveTo(path, speedModifier);
+        if (path != null) recordRecoveryIntent(path.getTarget());
         if (SoldierFlightRecorder.isRecording()) traceNavigation(accepted ? "accepted" : "rejected", accepted ? "path request accepted" : "path request failed",
             "path=" + pathSummary(path) + ",speed=" + speedModifier);
         return accepted;
@@ -208,6 +224,7 @@ public class SoldierGroundNavigation extends GroundPathNavigation {
 
     @Override
     public void stop() {
+        recoveryIntentTarget = null;
         if (SoldierFlightRecorder.isRecording()) traceNavigation("stopped", "navigation stop() called", "path=" + pathSummary(this.getPath()));
         validatedAsyncPath = null;
         super.stop();

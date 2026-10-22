@@ -1,215 +1,213 @@
 package com.stevesarmy.entity.ai;
 
 import com.stevesarmy.StevesArmyMod;
-import com.stevesarmy.debug.DiagnosticLogManager;
+import com.stevesarmy.compat.VS2Compat;
 import com.stevesarmy.entity.SoldierEntity;
+import com.stevesarmy.util.HazardBlockHelper;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.entity.ai.goal.Goal;
-import net.minecraft.world.level.Level;
-import net.minecraft.world.level.block.Blocks;
-import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.pathfinder.Path;
+import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
-import net.minecraft.world.phys.shapes.VoxelShape;
 
 import java.util.EnumSet;
 
+/** Last-resort observer. Existing goals retain movement ownership and destination selection. */
 public class SoldierHoleRescueGoal extends Goal {
-    private static final int STUCK_THRESHOLD_TICKS = 60;
-    private static final int RESCUE_COOLDOWN_TICKS = 40;
-    private static final double BLOCKING_WALL_HEIGHT = 1.5;
-    private static final double ESCAPE_RADIUS_SQ = 6.25;
-
+    private static final int REPATH_TICKS = 60;
+    private static final int FALLBACK_TICKS = 180;
     private final SoldierEntity soldier;
-    private Vec3 stuckAnchorPos;
-    private int stuckTicks;
-    private int lastRescueTick = -RESCUE_COOLDOWN_TICKS;
+    private Vec3 anchor;
+    private Vec3 intent;
+    private Vec3 recentGood;
+    private int recentGoodTick;
+    private int failureStart;
+    private int nextAttempt;
+    private Vec3 rescueDestination;
 
     public SoldierHoleRescueGoal(SoldierEntity soldier) {
         this.soldier = soldier;
-        this.setFlags(EnumSet.noneOf(Flag.class));
+        setFlags(EnumSet.noneOf(Flag.class));
     }
 
     @Override
     public boolean canUse() {
-        if (!soldier.isAlive()) return false;
-        if (soldier.level().isClientSide()) return false;
-        if (soldier.isPassenger()) {
-            stuckAnchorPos = null;
-            stuckTicks = 0;
+        int now = soldier.tickCount;
+        Vec3 requested = movementTarget();
+        if (excluded() || requested == null || soldier.position().distanceToSqr(requested) < .64) {
+            reset();
             return false;
         }
-        
-        // Timestamp-based cooldown check
-        int ticksSinceLastRescue = soldier.tickCount - lastRescueTick;
-        if (ticksSinceLastRescue < RESCUE_COOLDOWN_TICKS) {
+        if (!soldier.onGround()) return false;
+        if (intent == null || intent.distanceToSqr(requested) > 4) {
+            intent = requested;
+            anchor = soldier.position();
+            failureStart = now;
+            nextAttempt = now + REPATH_TICKS;
             return false;
         }
-        
-        // Don't rescue if in cover - soldier is intentionally holding position
-        if (soldier.getCoverBehaviorManager().isInCover()) return false;
-        
-        // Don't rescue if has active target (in combat)
-        if (soldier.getTarget() != null && soldier.getTarget().isAlive()) return false;
-        
-        // Don't rescue if suppressing
-        if (soldier.hasValidPingSuppressPos()) return false;
+        if (anchor == null || anchor.subtract(soldier.position()).horizontalDistanceSqr() >= .25
+            || Math.abs(anchor.y - soldier.getY()) >= 1.25) {
+            if (safePosition(soldier.position())) {
+                recentGood = soldier.position();
+                recentGoodTick = now;
+            }
+            anchor = soldier.position();
+            failureStart = now;
+            nextAttempt = now + REPATH_TICKS;
+            return false;
+        }
+        if (now < nextAttempt) return false;
+        nextAttempt = now + REPATH_TICKS;
 
-        // Don't rescue if soldier has recently been on a Create seat (transport release handoff)
-        Vec3 currentPos = soldier.position();
-        
-        // Initialize anchor if needed
-        if (stuckAnchorPos == null) {
-            stuckAnchorPos = currentPos;
-            stuckTicks = 0;
-            if (DiagnosticLogManager.isHoleRescueLoggingEnabled()) {
-                StevesArmyMod.LOGGER.info("[HoleRescue DEBUG] Soldier {} initialized anchor at {}", 
-                    soldier.getId(), currentPos);
-            }
+        // Recompute the owner's route first, including safe stairs/descent from roofs.
+        var nav = soldier.getNavigation();
+        Path route = nav.createPath(BlockPos.containing(requested), 0);
+        if (route != null && route.canReach()) {
+            nav.moveTo(route, recoverySpeed());
+            // A reachable route deserves time, but a physically blocked route must
+            // not indefinitely renew the failure window.
+            if (now - failureStart < FALLBACK_TICKS) return false;
+        } else if (now - failureStart < FALLBACK_TICKS) {
+            nav.recomputePath();
             return false;
         }
-        
-        // Check if soldier escaped the anchor radius
-        double distFromAnchorSq = currentPos.distanceToSqr(stuckAnchorPos);
-        double distFromAnchor = Math.sqrt(distFromAnchorSq);
-        
-        if (distFromAnchorSq < ESCAPE_RADIUS_SQ) {
-            // Still within anchor radius = stuck
-            stuckTicks++;
-            
-            // Debug logging every 20 ticks
-            if (DiagnosticLogManager.isHoleRescueLoggingEnabled() && stuckTicks % 20 == 0) {
-                StevesArmyMod.LOGGER.info("[HoleRescue DEBUG] Soldier {} - distFromAnchor={}, stuckTicks={}, threshold=1.5, cooldownRemaining={}",
-                    soldier.getId(), 
-                    String.format("%.2f", distFromAnchor), 
-                    stuckTicks,
-                    RESCUE_COOLDOWN_TICKS - ticksSinceLastRescue);
-            }
-            
-            if (stuckTicks >= STUCK_THRESHOLD_TICKS && hasSurfaceExit()) {
-                if (DiagnosticLogManager.isHoleRescueLoggingEnabled()) {
-                StevesArmyMod.LOGGER.info("[HoleRescue DEBUG] Soldier {} STUCK condition met! stuckTicks={}, will rescue",
-                    soldier.getId(), stuckTicks);
-            }
-                return true;
-            }
-        } else {
-            // Escaped the radius = making progress
-            stuckAnchorPos = currentPos;
-            stuckTicks = 0;
-            if (DiagnosticLogManager.isHoleRescueLoggingEnabled()) {
-                StevesArmyMod.LOGGER.info("[HoleRescue DEBUG] Soldier {} escaped anchor (dist={}), resetting", 
-                    soldier.getId(), String.format("%.2f", distFromAnchor));
+
+        // Never teleport for a distant unreachable objective on ordinary flat ground.
+        // Require either a real two-block pocket or a lower objective below a roof.
+        boolean pit = blockingSides() >= 3;
+        boolean roof = requested.y < soldier.getY() - 1.5;
+        if (!pit && !roof) return false;
+
+        if (recentGood != null && now - recentGoodTick <= 400
+            && recentGood.distanceToSqr(soldier.position()) <= 36
+            && safePosition(recentGood) && hasConnectedExit(recentGood, requested)) {
+            rescueDestination = recentGood;
+            return true;
+        }
+
+        // Bounded scan only after sustained failure (at most once per 60 ticks).
+        // Try connected local paths before considering any physical relocation.
+        Vec3 best = null;
+        double bestScore = Double.POSITIVE_INFINITY;
+        int pathProbes = 0;
+        for (int dy = -3; dy <= 2; dy++) {
+            if (roof && dy >= 0 || !roof && dy <= 0) continue;
+            for (Direction dir : Direction.Plane.HORIZONTAL) {
+                for (int radius = 1; radius <= 3; radius++) {
+                    Vec3 candidate = Vec3.atBottomCenterOf(soldier.blockPosition().relative(dir, radius).offset(0, dy, 0));
+                    if (!safePosition(candidate)) continue;
+                    if (pathProbes++ < 8) {
+                        Path local = nav.createPath(BlockPos.containing(candidate), 0);
+                        if (local != null && local.canReach()) {
+                            nav.moveTo(local, recoverySpeed());
+                            return false;
+                        }
+                    }
+                    if (!hasConnectedExit(candidate, requested)) continue;
+                    double score = candidate.distanceToSqr(requested) + candidate.distanceToSqr(soldier.position());
+                    if (score < bestScore) {
+                        bestScore = score;
+                        best = candidate;
+                    }
+                }
             }
         }
-        
-        return false;
+        rescueDestination = best;
+        return best != null;
+    }
+
+    private double recoverySpeed() {
+        return soldier.getNavigation() instanceof SoldierGroundNavigation nav
+            ? Math.max(.5, Math.min(1, nav.getNavSpeedModifier())) : 1;
+    }
+
+    private Vec3 movementTarget() {
+        if (soldier.getMoveControl() instanceof CoverPositionController control
+            && control.getLastResult() == CoverPositionController.MovementResult.IN_PROGRESS) {
+            return control.getDebugTargetPos();
+        }
+        var nav = soldier.getNavigation();
+        var path = nav.getPath();
+        if (path != null && !path.isDone()) return Vec3.atBottomCenterOf(path.getTarget());
+        if (nav instanceof SoldierGroundNavigation ground && ground.getRecoveryIntentTarget() != null)
+            return Vec3.atBottomCenterOf(ground.getRecoveryIntentTarget());
+        return null;
+    }
+
+    private boolean excluded() {
+        return !soldier.isAlive() || soldier.level().isClientSide || soldier.isPassenger()
+            || soldier.isInWaterOrBubble()
+            || soldier.isPreparingOrReloading() || soldier.isHealing()
+            || soldier.isVehicleCrewActive() || soldier.isInVehicleEngagement()
+            || soldier.isNavigationTraversalLocked() || soldier.cqbHoldFreezeEffective()
+            || soldier.getCoverBehaviorManager().isInCover()
+            || soldier.getPeekController().isMovingToPeek() || soldier.getPeekController().isReturning();
+    }
+
+    private void reset() {
+        anchor = null;
+        intent = null;
+        rescueDestination = null;
+    }
+
+    private int blockingSides() {
+        int count = 0;
+        BlockPos feet = soldier.blockPosition();
+        for (Direction d : Direction.Plane.HORIZONTAL) {
+            BlockPos p = feet.relative(d);
+            if (!soldier.level().getBlockState(p).getCollisionShape(soldier.level(), p).isEmpty()
+                && !soldier.level().getBlockState(p.above()).getCollisionShape(soldier.level(), p.above()).isEmpty()) count++;
+        }
+        return count;
+    }
+
+    /** Require a dry, full supporting face and clearance for the standing body. */
+    private boolean safePosition(Vec3 p) {
+        var level = soldier.level();
+        BlockPos feet = BlockPos.containing(p);
+        AABB body = new AABB(p.x - .31, p.y, p.z - .31, p.x + .31, p.y + 1.8, p.z + .31);
+        if (!level.hasChunkAt(feet) || !level.getWorldBorder().isWithinBounds(feet)
+            || p.y < level.getMinBuildHeight() + 1 || p.y + 2 >= level.getMaxBuildHeight()
+            || !level.getBlockState(feet.below()).isFaceSturdy(level, feet.below(), Direction.UP)
+            || !level.noCollision(soldier, body) || level.containsAnyLiquid(body)
+            || VS2Compat.shouldRejectNavigation(level, feet)) return false;
+        for (BlockPos block : BlockPos.betweenClosed(feet.offset(-1, -1, -1), feet.offset(1, 2, 1))) {
+            if (!level.hasChunkAt(block) || HazardBlockHelper.isHazardBlock(level, block)
+                || !level.getFluidState(block).isEmpty()) return false;
+        }
+        return level.getEntities(soldier, body).isEmpty();
+    }
+
+    /** Validate destination-to-goal connectivity without moving the actor or mutating its path. */
+    private boolean hasConnectedExit(Vec3 p, Vec3 requested) {
+        // A remote path probe from the soldier would still start in the trap.
+        // Require a dry, unobstructed local step away from the landing, directed
+        // toward the owner's destination; the owner then resumes normal pathfinding.
+        Vec3 delta = requested.subtract(p);
+        Direction d = Math.abs(delta.x) >= Math.abs(delta.z)
+            ? (delta.x >= 0 ? Direction.EAST : Direction.WEST)
+            : (delta.z >= 0 ? Direction.SOUTH : Direction.NORTH);
+        return safePosition(p.add(d.getStepX(), 0, d.getStepZ()));
     }
 
     @Override
     public void start() {
-        tryRescue();
-        stuckTicks = 0;
-        stuckAnchorPos = null;
-        lastRescueTick = soldier.tickCount;  // Record exact tick of rescue
-        StevesArmyMod.LOGGER.info("[HoleRescue] Soldier {} rescued at tick {}, next rescue available at tick {}",
-            soldier.getId(), lastRescueTick, lastRescueTick + RESCUE_COOLDOWN_TICKS);
-    }
-    
-    private void tryRescue() {
-        BlockPos surfaceLevel = soldier.blockPosition().above(2);
-        Level level = soldier.level();
-        
-        for (Direction dir : Direction.Plane.HORIZONTAL) {
-            BlockPos candidate = surfaceLevel.relative(dir);
-            if (isStandable(level, candidate)) {
-                StevesArmyMod.LOGGER.info("[HoleRescue] Soldier {} teleported to {} (surface rescue, walls: {})",
-                    soldier.getId(), candidate, countBlockingWalls());
-                soldier.teleportTo(
-                    candidate.getX() + 0.5,
-                    candidate.getY(),
-                    candidate.getZ() + 0.5
-                );
-                soldier.getNavigation().stop();
-                return;
-            }
+        Vec3 destination = rescueDestination;
+        if (destination == null || excluded() || !safePosition(destination)) {
+            reset();
+            return;
         }
-        
-        // No valid rescue position found
-        StevesArmyMod.LOGGER.warn("[HoleRescue] Soldier {} at {} - no valid rescue position found, stopping navigation",
-            soldier.getId(), soldier.blockPosition());
         soldier.getNavigation().stop();
-    }
-    
-    private boolean hasSurfaceExit() {
-        BlockPos surfaceLevel = soldier.blockPosition().above(2);
-        Level level = soldier.level();
-
-        for (Direction dir : Direction.Plane.HORIZONTAL) {
-            BlockPos candidate = surfaceLevel.relative(dir);
-            if (isStandable(level, candidate)) {
-                return true;
-            }
-        }
-        return false;
+        if (soldier.getMoveControl() instanceof CoverPositionController control) control.clear();
+        soldier.teleportTo(destination.x, destination.y, destination.z);
+        soldier.setDeltaMovement(Vec3.ZERO);
+        soldier.fallDistance = 0;
+        StevesArmyMod.LOGGER.info("[HoleRescue] Soldier {} recovered after sustained movement failure to {}", soldier.getId(), destination);
+        reset();
     }
 
-    private boolean isStandable(Level level, BlockPos pos) {
-        BlockState below = level.getBlockState(pos.below());
-        BlockState at = level.getBlockState(pos);
-        BlockState above = level.getBlockState(pos.above());
-        BlockState above2 = level.getBlockState(pos.above(2));
-
-        return below.isSolid()
-            && isPassable(at, level, pos)
-            && isPassable(above, level, pos.above())
-            && isPassable(above2, level, pos.above(2));
-    }
-    
-    private boolean isPassable(BlockState state, Level level, BlockPos pos) {
-        if (state.isAir()) return true;
-        
-        // No collision = passable (flowers, grass, etc.)
-        VoxelShape collisionShape = state.getCollisionShape(level, pos);
-        if (collisionShape.isEmpty()) return true;
-        
-        // Shallow water is passable (fluid level <= 4)
-        if (state.is(Blocks.WATER)) {
-            int fluidLevel = state.getFluidState().getAmount();
-            return fluidLevel <= 4;
-        }
-        
-        // Partial height blocks are passable if height < 1.0
-        double height = collisionShape.max(Direction.Axis.Y);
-        return height < 1.0;
-    }
-    
-    private int countBlockingWalls() {
-        BlockPos pos = soldier.blockPosition();
-        Level level = soldier.level();
-        int count = 0;
-        
-        for (Direction dir : Direction.Plane.HORIZONTAL) {
-            BlockPos wallPos = pos.relative(dir);
-            BlockState state = level.getBlockState(wallPos);
-            if (isBlockingWall(level, wallPos, state)) {
-                count++;
-            }
-        }
-        return count;
-    }
-    
-    private boolean isBlockingWall(Level level, BlockPos pos, BlockState state) {
-        if (state.isAir()) return false;
-        
-        VoxelShape collisionShape = state.getCollisionShape(level, pos);
-        if (collisionShape.isEmpty()) return false;
-        
-        // Full block = definitely blocking
-        if (state.isCollisionShapeFullBlock(level, pos)) return true;
-        
-        // Height check: can soldier jump over? (jump height = 1 block, need clearance for 1.5+)
-        double height = collisionShape.max(Direction.Axis.Y);
-        return height >= BLOCKING_WALL_HEIGHT;
-    }
+    @Override
+    public boolean canContinueToUse() { return false; }
 }

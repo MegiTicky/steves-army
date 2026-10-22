@@ -24,6 +24,12 @@ public final class SimRegistry {
 
     public static List<SimScenario> all() {
         return List.of(
+            MovementRecoveryScenarios.roof(true),
+            MovementRecoveryScenarios.roof(false),
+            MovementRecoveryScenarios.wrongFloorArrival(),
+            MovementRecoveryScenarios.pit(false, false),
+            MovementRecoveryScenarios.pit(true, false),
+            MovementRecoveryScenarios.pit(true, true),
             PlayerSuppressionScenarios.freshPlayer(),
             PlayerSuppressionScenarios.npcControl(),
             PlayerSuppressionScenarios.respawnedPlayer(),

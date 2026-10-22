@@ -3014,8 +3014,8 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
             Math.pow(soldier.position().z - standingPos.z, 2));
         
         // 1. Position controller reached the target or soldier is already at standing pos
-        if (moveResult == CoverPositionController.MovementResult.REACHED_TARGET
-            || horizontalDist < POSITIONING_TOLERANCE) {
+        if (isCoverFloorReached(targetCover) && (moveResult == CoverPositionController.MovementResult.REACHED_TARGET
+            || horizontalDist < POSITIONING_TOLERANCE)) {
             if (soldier.hasValidAttackTarget()) {
                 StevesArmyMod.LOGGER.info("[CoverNav] Soldier {} ({}) reached cover at hDist={} cover={}",
                     soldier.getId(), soldier.getName().getString(), String.format("%.2f", horizontalDist), targetCover.getPosition());
@@ -3062,7 +3062,7 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
         }
         
         // Measure distance to the standing block position, not just the cover center
-        if (horizontalDist < COVER_REACHED_DISTANCE) {
+        if (isCoverFloorReached(targetCover) && horizontalDist < COVER_REACHED_DISTANCE) {
             if (soldier.hasValidAttackTarget()) {
                 StevesArmyMod.LOGGER.info("[CoverNav] Soldier {} ({}) reached standing pos at hDist={} cover={}",
                     soldier.getId(), soldier.getName().getString(), String.format("%.2f", horizontalDist), targetCover.getPosition());
@@ -3075,7 +3075,7 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
         }
         
         // Handoff to position controller when close to standing position
-        if (horizontalDist < COVER_VALID_DISTANCE) {
+        if (isCoverFloorReached(targetCover) && horizontalDist < COVER_VALID_DISTANCE) {
             if (soldier.hasValidAttackTarget()) {
                 StevesArmyMod.LOGGER.info("[CoverNav] Soldier {} ({}) handoff to position controller at hDist={} cover={}",
                     soldier.getId(), soldier.getName().getString(), String.format("%.2f", horizontalDist), targetCover.getPosition());
@@ -3281,7 +3281,7 @@ private void tickRepositioning() {
             return;
         }
         
-        if (currentCover != null && targetCover.getPosition().equals(currentCover.getPosition())) {
+        if (currentCover != null && isCoverFloorReached(targetCover) && targetCover.getPosition().equals(currentCover.getPosition())) {
             onCoverReached(targetCover);
             return;
         }
@@ -3339,8 +3339,8 @@ private void tickRepositioning() {
             Math.pow(soldier.position().z - standingPos.z, 2));
 
         // 1. Position controller reached the target or soldier is already at standing pos
-        if (moveResult == CoverPositionController.MovementResult.REACHED_TARGET
-            || horizontalDist < POSITIONING_TOLERANCE) {
+        if (isCoverFloorReached(targetCover) && (moveResult == CoverPositionController.MovementResult.REACHED_TARGET
+            || horizontalDist < POSITIONING_TOLERANCE)) {
             onCoverReached(targetCover);
             noProgressTicks = 0;
             lastSeekingPosition = null;
@@ -3365,7 +3365,7 @@ private void tickRepositioning() {
                 // halt against it. Within the arrival distance the goal
                 // already accepts below, treat it as arrived — onCoverReached
                 // still re-validates suppression lanes from the real eye.
-                if (horizontalDist < COVER_REACHED_DISTANCE) {
+                if (isCoverFloorReached(targetCover) && horizontalDist < COVER_REACHED_DISTANCE) {
                     onCoverReached(targetCover);
                     noProgressTicks = 0;
                     lastSeekingPosition = null;
@@ -3395,7 +3395,7 @@ private void tickRepositioning() {
             return;
         }
         
-        if (horizontalDist < COVER_REACHED_DISTANCE) {
+        if (isCoverFloorReached(targetCover) && horizontalDist < COVER_REACHED_DISTANCE) {
             onCoverReached(targetCover);
             noProgressTicks = 0;
             lastSeekingPosition = null;
@@ -3403,7 +3403,7 @@ private void tickRepositioning() {
         }
         
         // Handoff to position controller when close to standing position
-        if (horizontalDist < COVER_VALID_DISTANCE) {
+        if (isCoverFloorReached(targetCover) && horizontalDist < COVER_VALID_DISTANCE) {
             if (soldier.hasValidAttackTarget()) {
                 StevesArmyMod.LOGGER.info("[CoverNav] Soldier {} ({}) reposition handoff to position controller at hDist={} cover={}",
                     soldier.getId(), soldier.getName().getString(), String.format("%.2f", horizontalDist), targetCover.getPosition());
@@ -3426,7 +3426,7 @@ private void tickRepositioning() {
                     // The pathfinder delivered the soldier to the cover; a
                     // rejected final alignment within arrival distance is an
                     // arrival, not a bad cover.
-                    if (horizontalDist < COVER_REACHED_DISTANCE) {
+                    if (isCoverFloorReached(targetCover) && horizontalDist < COVER_REACHED_DISTANCE) {
                         onCoverReached(targetCover);
                         noProgressTicks = 0;
                         lastSeekingPosition = null;
@@ -9133,7 +9133,17 @@ public static Vec3 getCoverStandingPositionStatic(BlockPos coverPos) {
         }
     }
     
+    private boolean isCoverFloorReached(CoverPoint cover) {
+        return cover != null && Math.abs(soldier.getY() - getCoverStandingPosition(cover.getPosition()).y) <= 0.75;
+    }
+
     private void onCoverReached(CoverPoint cover) {
+        // Every arrival channel must verify the standing floor before stopping navigation.
+        if (!isCoverFloorReached(cover)) {
+            getPositionController().clear();
+            moveToCover(cover);
+            return;
+        }
         if (suppressionPositionStatus == SuppressionPositionStatus.MOVING
             && suppressionPositionGeneration == soldier.getSuppressionOrder().getGeneration()
             && !hasSuppressionFiringLaneFrom(soldier.getEyePosition())) {
