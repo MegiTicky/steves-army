@@ -2,87 +2,67 @@
 
 All notable changes to Steve's Army will be documented in this file.
 
-## [0.5.2] - Unreleased
+## [0.6.0] - Release preparation
 
-### Changed
+### Soldier Swap
+- Swapping bodies carries health with it: take the soldier's current health and leave your own behind. Swapping back no longer provides a free heal.
 
-- Combat positioning rework.
-  - Close-range fights no longer freeze soldiers on sight: the engagement hold only
-    latches inside an emergency range (5 blocks; 3 in CQB formation) with a loaded gun,
-    never while suppressed or reloading, and releases when it stops producing fire.
-  - Soldiers caught in the open without cover follow an **exposed-combat doctrine**
-    instead of endlessly re-failing cover searches: plant and engage, one bounded
-    sidestep off a blocked firing lane, or a checked withdrawal that ends once clear.
-- **Danger-map-aware routing.** Each squad bakes a transient line-of-sight danger grid
-  from its known threats, and pathfinding adds exposure cost through dangerous ground
-  weighted by role (support most cautious, then anti-tank, machine gunner, garrison,
-  rifleman) — squads prefer covered routes but still cross open ground when the
-  objective demands it. Danger is a cost, never a wall. Enemy soldiers use the same
-  routing and detour around kill zones too.
-- **Suppressed-traveler doctrine.** A soldier marching under near-miss fire keeps
-  moving: the fire origin feeds squad intel so the danger map bakes the shadow, the
-  path is recomputed danger-aware, and the soldier drops to a low crawl through
-  stretches where crawling hides them (universal travel crawl + traveler suppression
-  resistance).
-- **Squad street-crossing doctrine.** Fire teams cross open ground in bounds: one
-  bounder per team, an overwatch anchor (the machine gunner), covering fire from a
-  teammate's real shots, and a quiet-dwell rule that releases docked soldiers so the
-  march resumes instead of stalling.
-- **CQB doorway/corner doctrine.** Squadmates queue behind a soldier at a narrow
-  doorway instead of stacking into it; soldiers pre-aim past the first corner into the
-  arc a known threat opens (pie-slicing); and after close contact breaks, a soldier on
-  open ground holds a short lost-contact watch on the last-known position.
-- **Assault-and-secure clearing.** Attack orders no longer complete a few blocks from
-  the ping: a squad-level coordinator bounds a walkable clearing area, turns
-  wall-adjacent blind spots and broken-contact last-knowns into check targets, and
-  assigns them as claims. The order completes as **"Area secured"** only when the squad
-  is inside the space, its blind spots are observed, contact is resolved, and everyone
-  has settled. Cover churn after the fight resolves is fixed.
-- **Machine-gun direct-fire cadence.** With an active visible target, machine guns now
-  fire real machine-gun bursts (longer bursts, short recovery, tuned per-shot recoil)
-  instead of the marksman pacing that made them aim slowly and starve at the aim gate.
-- **Machine-gun round-robin suppression.** When an MG suppresses multiple known
-  threats, each completed burst rotates to the next candidate position, and two MGs
-  interleave instead of stacking on the same target (`mgSuppressionRoundRobin`,
-  `mgSuppressionRotationSize`).
-- Body swap carries health: swapping into a soldier sets your health to theirs, and
-  the body you leave keeps the health you had — damage round-trips through bodies and
-  swapping back is never a free heal (`armorDoctrine.swapSyncsHealth`, default true).
+### Machine Gunner Overhaul
+- Machine gunners hold the back row as a base of fire, catching up in bounds as the squad advances instead of leading the charge.
+- Suppression bursts rotate across every known enemy position, with multiple gunners interleaving their fire instead of stacking on one target.
+- Visible targets receive longer bursts with faster recovery and better tracking on moving enemies, while low-in-cover firing keeps the gun's crawl recoil.
+- Cover seeking now completes the move more reliably instead of stranding a gunner mid-seek or skipping from cover straight to the objective.
 
-### Fixed
+### Danger Map & Moving Under Fire
+- Squads build a line-of-sight danger map from known threats. Friendly and enemy pathfinding favors safer routes around kill zones, while danger remains a cost rather than an impassable wall.
+- Suppressed soldiers keep moving when a safer route exists, and crawl through stretches where going low reduces exposure while incoming fire is fresh.
+- Relocation under suppression only happens when the route is fully safe; fully pinned soldiers hold their cover instead of walking out.
 
-- Soldier gun magazine split-brain between hand and inventory: the held stack and the
-  inventory slot were separate copies, so reloads could strand, loop, and drain ammo.
-  The main-hand slot now shares one stack instance end to end. Death pouches and
-  pick-block eggs also stop carrying the enemy infinite-reserve ammo NBT.
-- Machine gunners no longer strand in SEEKING_COVER without pathing while riflemen
-  claim cover normally (fallback reservation pools + seek escalation).
-- Prone deployment no longer bypasses the physical-cover gate for target-less
-  soldiers under fire, and the selector refuses prone positions while suppressed.
-- A reload starting during the final cover dock no longer leaves the soldier crouched
-  short of the slot for the whole magazine swap.
-- Cover scoring: the distance term is awake again, pilot classification is
-  threat-aware, and the legacy x10 scorer is retired.
-- Fire-team rebalance buckets soldiers by role instead of exact main-hand item (so
-  empty-handed or sidearm-swapped soldiers no longer collapse into one role-blind
-  bucket), and soldiers in unloaded chunks keep their roster slot.
-- Cover churn after a clearing order's contact resolves: free-picked checks are sticky
-  and claims reassign promptly, so soldiers work the remaining checks instead of
-  flip-flopping covers.
+### Prone Positions & Squad Spacing
+- Soldiers prioritize physical cover that protects them from the threat. When suitable cover is unavailable, they can spread into prone firing positions with usable sightlines.
+- Squad spacing applies while moving and selecting defensive positions, including prone firing lanes. The spacing distance is configurable, with a default of 3 blocks.
 
-### For developers
+### CQB & Room Clearing
+- Close-quarters behavior no longer freezes when an enemy is spotted nearby, and close-range cover seeking works more consistently.
+- Squads queue at doorways, pre-aim around corners and search last-known enemy positions after contact breaks.
+- Soldiers make smaller corner peeks and can briefly expose themselves to fire a short burst at a recently spotted enemy before withdrawing.
+- ATTACK combines an assault with room-by-room and area clearing, advancing cover-to-cover and checking blind spots before reporting "Area secured. All clear."
+- Improved clearing objectives and regrouping on slabs and other partial-height ground. New orders take over from earlier regrouping tasks.
 
-- `/stevesarmy_sim` headless state-machine simulation harness: scenario fixtures,
-  hitscan sim guns, HTML animation recording, a danger-map verification rig
-  (oracle engine + mismatch detectors + red/green self-tests), fast ticks, and
-  core/full scenario tiers.
-- Debug renders: `/stevesarmy_debug coverstate` (per-soldier cover/peek/mode
-  diagnostic card), `/stevesarmy_debug dangermap` (danger cells, threats, and
-  corridors — own squads by default, `all` restores everything), `/stevesarmy_debug
-  course` (five-room CQB training building with enemy defenders) and the soldier FOV
-  cone overlay.
-- Fire-pipeline telemetry: every silent fire-chain exit is recorded with a reason and
-  surfaced in the coverstate card and sim JSON.
+### Movement & Recovery
+- Traverse lets soldiers relocate quickly while Tactical movement runs at 40% pace so they can fight while advancing.
+- Fire teams cross open ground in bounds with an overwatching gunner; soldiers caught in the open return fire instead of endlessly re-seeking cover.
+- Normal travel speed is capped around player sprint speed, with fixes for movement bursts and sudden skips.
+- GO_TO orders arrive properly and hand off to cover, with improved long-distance travel and obstacle detours.
+- Fixed soldiers becoming stranded outside cover during reloads, suppression or interrupted movement, and fixed doorway detection on raised paths.
+- Added recovery from persistent movement failures. Soldiers trapped in enclosed terrain can relocate a short distance as a last resort while retaining their movement order.
+
+### Soldier Animation Overhaul
+- Rebuilt soldier presentation around a Simple Enemy-derived full-body rig and animation set, with updated idle, hit reactions, death animations and head tracking.
+- Improved TaCZ weapon handling and ready stances for rifles, pistols and miniguns, alongside updated armor and stowed-weapon rendering.
+- Added refreshed standing, crouching, kneeling, cover and crawl transitions. Half-cover firing uses a planted one-knee stance, with an updated walking and running stride.
+
+### Command Wheels & Fireteam HUD
+- Added optional click-to-open controls for command, vehicle, formation and fire-team wheels. Hold-to-open remains the default.
+- In click mode, left-click confirms, Escape or the opener button cancels, and right-click switches between command and vehicle pages.
+- Added a configurable compact fireteam HUD showing squad strength, orders and suppression, with estimated travel progress and arrival times.
+
+### Guns, Equipment & Squad Management
+- Fixed the empty-gun reload loop: soldiers handed an empty gun now reload and fire instead of looping forever.
+- Aim holds on moving targets more patiently, including imperfect bursts against fast movers. Reload timing is role-aware, and gun weight no longer pushes caution movement below sneak pace.
+- Soldiers interrupt combat less readily for tactical reloads, with longer firing windows for machine gunners. Suppression survives player respawn.
+- When death drops are enabled, guns and one carried ammunition stack per ammunition type used by those guns drop separately. Remaining equipment stays in the supply pouch, preserving its inventory slots.
+- Fixed soldiers losing their owner's team affiliation while the owner is offline, including across chunk reloads.
+- Enemy anti-tank soldiers can spawn into callsign squads.
+
+### Configuration & Performance
+- Added optional server-side soldier chunk loading, disabled by default. It keeps qualifying nearby friendly and enemy soldiers active beyond normal ticking distance, with matching tracking distance.
+- Chunk-loading distance defaults to 256 blocks and is configurable from 16 to 1024 blocks.
+- Reduced processing costs for cover searches and squad danger updates.
+
+### Developer Tools
+- Added headless simulation scenarios, a soldier flight recorder with trace viewing, and debug overlays for cover state, danger maps, movement courses and field of view.
+- Added recording command. For recording soldier's behavior to debug
 
 ## [0.5.1] - 2026-09-28
 
