@@ -13,6 +13,7 @@ public final class ReviewedSoldierPoses {
     public record Part(Vector3f position, Quaternionf rotation, Vector3f centre) { }
     public record Pose(Map<String, Part> parts, Quaternionf weaponRotation) { }
     private static final Map<String, Pose> POSES = load();
+    private static final List<Pose> UNARMED = loadUnarmed();
     // Calibrate the upright proxy to the existing TaCZ hand/display convention.
     // TaCZ's own thirdperson_hand attachment still handles each gun's mesh origin.
     private static final Quaternionf WEAPON_BASIS = new Quaternionf(get("standing_ready").weaponRotation)
@@ -20,6 +21,16 @@ public final class ReviewedSoldierPoses {
 
     private ReviewedSoldierPoses() { }
     public static Pose get(String name) { return Objects.requireNonNull(POSES.get(name), name); }
+    /** Baked samples preserve the reviewed shoulder pivots, knee path and grounding. */
+    public static Pose unarmed(float progress) {
+        float index = Math.max(0, Math.min(1, progress)) * (UNARMED.size() - 1);
+        int lo = (int) index, hi = Math.min(lo + 1, UNARMED.size() - 1);
+        Map<String, Part> parts = new LinkedHashMap<>();
+        final float weight = index - lo;
+        UNARMED.get(lo).parts.forEach((name, part) ->
+            parts.put(name, blend(part, UNARMED.get(hi).parts.get(name), weight, false)));
+        return new Pose(parts, new Quaternionf());
+    }
     public static Quaternionf weaponMount(Pose pose) {
         return new Quaternionf(pose.weaponRotation).mul(WEAPON_BASIS);
     }
@@ -81,4 +92,21 @@ public final class ReviewedSoldierPoses {
     }
     private static Vector3f vector(JsonArray a) { return new Vector3f(a.get(0).getAsFloat(), a.get(1).getAsFloat(), a.get(2).getAsFloat()); }
     private static Quaternionf quaternion(JsonArray a) { return new Quaternionf(a.get(0).getAsFloat(), a.get(1).getAsFloat(), a.get(2).getAsFloat(), a.get(3).getAsFloat()).normalize(); }
+    private static List<Pose> loadUnarmed() {
+        var stream = ReviewedSoldierPoses.class.getResourceAsStream("/assets/steves_army/pose_data/unarmed_crouch.json");
+        if (stream == null) throw new IllegalStateException("Missing reviewed unarmed crouch");
+        try (var reader = new InputStreamReader(stream, StandardCharsets.UTF_8)) {
+            List<Pose> frames = new ArrayList<>();
+            for (JsonElement frame : JsonParser.parseReader(reader).getAsJsonObject().getAsJsonArray("frames")) {
+                Map<String, Part> parts = new LinkedHashMap<>();
+                for (var entry : frame.getAsJsonObject().getAsJsonObject("parts").entrySet()) {
+                    JsonObject part = entry.getValue().getAsJsonObject();
+                    parts.put(entry.getKey(), new Part(vector(part.getAsJsonArray("position")),
+                        quaternion(part.getAsJsonArray("rotation")), vector(part.getAsJsonArray("centre"))));
+                }
+                frames.add(new Pose(Collections.unmodifiableMap(parts), new Quaternionf()));
+            }
+            return List.copyOf(frames);
+        } catch (java.io.IOException e) { throw new IllegalStateException("Cannot read reviewed unarmed crouch", e); }
+    }
 }

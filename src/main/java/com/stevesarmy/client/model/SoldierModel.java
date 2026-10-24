@@ -141,7 +141,7 @@ public class SoldierModel<T extends SoldierEntity> extends HumanoidModel<T> {
                 leftArm.xRot = Mth.cos(swing * .6662F) * speed;
                 rightArm.yRot = leftArm.yRot = rightArm.zRot = leftArm.zRot = 0;
             }
-            applyReviewedPosture(motion.crouch * (1 - crawl), motion.coverAim,
+            applyReviewedPosture((gun ? motion.crouch : motion.unarmedCrouch) * (1 - crawl), motion.coverAim,
                 motion.ready, swing, speed, gun, yaw, pitch);
             applyLocomotion(swing, speed, motion.walk * (1 - crawl) * (1 - motion.crouch));
             applyCrawl(crawl, swing, speed, pitch, gun);
@@ -220,23 +220,24 @@ public class SoldierModel<T extends SoldierEntity> extends HumanoidModel<T> {
         cover = Mth.clamp(cover, 0, 1);
         var crouchPose = ReviewedSoldierPoses.blend(ReviewedSoldierPoses.get("crouch"), ReviewedSoldierPoses.get("cover"), cover);
         var standingPose = ReviewedSoldierPoses.blend(ReviewedSoldierPoses.get("standing_lowered"), ReviewedSoldierPoses.get("standing_ready"), ready);
+        var unarmedPose = gun ? null : ReviewedSoldierPoses.unarmed(amount);
         Map<String, ModelPart> parts = Map.of("head", head, "body", body, "right_arm", rightArm, "left_arm", leftArm,
             "right_leg", rightLeg, "left_leg", leftLeg, "right_leg_shin", rightShin, "left_leg_shin", leftShin);
         Quaternionf tracking = new Quaternionf().rotationY(Mth.clamp(yaw, -30, 30) * Mth.DEG_TO_RAD * .65F)
             .rotateX(Mth.clamp(pitch, -25, 45) * Mth.DEG_TO_RAD * .85F);
         for (var entry : parts.entrySet()) {
             String name = entry.getKey(); ModelPart part = entry.getValue();
-            if (!gun && name.endsWith("_arm")) continue;
             var standingTarget = standingPose.parts().get(name);
-            var target = ReviewedSoldierPoses.blend(standingTarget, crouchPose.parts().get(name), amount, name.endsWith("_arm"));
+            var target = gun ? ReviewedSoldierPoses.blend(standingTarget, crouchPose.parts().get(name), amount, name.endsWith("_arm"))
+                : unarmedPose.parts().get(name);
             if (name.endsWith("_shin")) {
                 var shinTarget = crouchPose.parts().get(name);
                 var current = new ReviewedSoldierPoses.Part(new Vector3f(part.x, part.y, part.z), ReviewedSoldierPoses.rotation(part), shinTarget.centre());
-                var blended = ReviewedSoldierPoses.blend(current, shinTarget, amount, false);
+                var blended = gun ? ReviewedSoldierPoses.blend(current, shinTarget, amount, false) : target;
                 part.setPos(blended.position().x, blended.position().y, blended.position().z);
                 ReviewedSoldierPoses.writeRotation(part, blended.rotation());
             } else {
-                if (name.equals("head") || name.endsWith("_arm")) {
+                if (name.equals("head") || gun && name.endsWith("_arm")) {
                     Quaternionf look = name.equals("head")
                         ? new Quaternionf().rotationY(Mth.clamp(yaw, -30, 30) * Mth.DEG_TO_RAD)
                             .rotateX(Mth.clamp(pitch, -25, 45) * Mth.DEG_TO_RAD) : tracking;
@@ -247,6 +248,10 @@ public class SoldierModel<T extends SoldierEntity> extends HumanoidModel<T> {
             part.xScale = Mth.lerp(amount, part.xScale, 1);
             part.yScale = Mth.lerp(amount, part.yScale, 1);
             part.zScale = Mth.lerp(amount, part.zScale, 1);
+        }
+        if (!gun) {
+            rightArm.xRot += Mth.cos(swing * .6662F + Mth.PI) * speed * (1 - amount * .5F);
+            leftArm.xRot += Mth.cos(swing * .6662F) * speed * (1 - amount * .5F);
         }
         // Moving sneak retains a symmetric gait, blending into the reviewed
         // planted kneel when movement stops. Standing/running is unchanged.
@@ -337,13 +342,14 @@ public class SoldierModel<T extends SoldierEntity> extends HumanoidModel<T> {
     }
 
     private static final class Motion {
-        float age = Float.NaN, crouch, ready, walk, coverAim, blend;
+        float age = Float.NaN, crouch, unarmedCrouch, ready, walk, coverAim, blend;
         String gunId, gunType = "rifle";
         void update(float now, float targetCrouch, float targetReady, float targetWalk) {
-            if (Float.isNaN(age)) { age = now; crouch = targetCrouch; ready = targetReady; walk = targetWalk; blend = 1; return; }
+            if (Float.isNaN(age)) { age = now; crouch = unarmedCrouch = targetCrouch; ready = targetReady; walk = targetWalk; blend = 1; return; }
             float dt = Mth.clamp(now - age, 0, 5); age = now;
             blend = 1 - (float) Math.exp(-dt * .45);
             crouch = Mth.lerp(blend, crouch, targetCrouch);
+            unarmedCrouch += Mth.clamp(targetCrouch - unarmedCrouch, -dt / 24, dt / 24);
             ready = Mth.lerp(blend, ready, targetReady);
             walk = Mth.lerp(blend, walk, targetWalk);
         }

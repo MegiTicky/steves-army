@@ -81,6 +81,7 @@ public class SoldierAnimationChecks {
         check(model.rightLeg.xRot > 1 && model.leftLeg.xRot < -1,
             "standing reviewed posture overwrote the running stride");
         checkReviewedEndpoints();
+        checkUnarmedReview(reviewedPosture);
         PoseStack palm = new PoseStack();
         model.translateWeaponToHand(palm);
         org.joml.Vector3f beforeGun = palm.last().pose().transformPosition(new org.joml.Vector3f());
@@ -169,6 +170,54 @@ public class SoldierAnimationChecks {
     }
     static String pointSummary(List<double[]> points) {
         return points.stream().limit(8).map(p -> String.format(java.util.Locale.ROOT, "(%.6f,%.6f,%.6f)", p[0], p[1], p[2])).toList().toString();
+    }
+    static void checkUnarmedReview(Method reviewed) throws Exception {
+        JsonArray frames;
+        try (var reader = new InputStreamReader(SoldierModel.class.getResourceAsStream(
+                "/assets/steves_army/pose_data/unarmed_crouch.json"), StandardCharsets.UTF_8)) {
+            frames = JsonParser.parseReader(reader).getAsJsonObject().getAsJsonArray("frames");
+        }
+        double largest = 0;
+        for (JsonElement frame : frames) {
+            JsonObject data = frame.getAsJsonObject();
+            float progress = data.get("progress").getAsFloat();
+            reset(); reviewed.invoke(model, progress, 1f, 1f, 0f, 0f, false, 0f, 0f);
+            for (var entry : data.getAsJsonObject("expected").entrySet()) {
+                String name = entry.getKey(); boolean shin = name.endsWith("_shin");
+                ModelPart parent = root.getChild(shin ? name.replace("_shin", "") : name);
+                ModelPart part = shin ? parent.getChild("lower_leg") : parent;
+                List<ModelPart> children = part.getAllParts().filter(p -> p != part).toList();
+                List<Boolean> visibility = children.stream().map(p -> p.visible).toList();
+                children.forEach(p -> p.visible = false);
+                PoseStack stack = new PoseStack(); root.translateAndRotate(stack);
+                if (shin) parent.translateAndRotate(stack);
+                Bounds actual = new Bounds();
+                try { part.render(stack, actual, 0, 0); }
+                finally { for (int i = 0; i < children.size(); i++) children.get(i).visible = visibility.get(i); }
+                List<double[]> wanted = new ArrayList<>();
+                for (JsonElement corner : entry.getValue().getAsJsonArray()) {
+                    JsonArray a = corner.getAsJsonArray();
+                    wanted.add(new double[]{a.get(0).getAsDouble(), a.get(1).getAsDouble(), a.get(2).getAsDouble()});
+                }
+                double error = Math.max(nearestError(actual.points, wanted), nearestError(wanted, actual.points));
+                largest = Math.max(largest, error);
+                check(error < .00002, "unarmed " + progress + " " + name + " differs from reviewed vertices by " + error);
+            }
+            root.getAllParts().forEach(p -> check(p.xScale == 1 && p.yScale == 1 && p.zScale == 1, "unarmed limb shortened"));
+        }
+        Class<?> type = Class.forName("com.stevesarmy.client.model.SoldierModel$Motion");
+        Constructor<?> ctor = type.getDeclaredConstructor(); ctor.setAccessible(true);
+        Object motion = ctor.newInstance();
+        Method update = type.getDeclaredMethod("update", float.class, float.class, float.class, float.class); update.setAccessible(true);
+        Field progress = type.getDeclaredField("unarmedCrouch"); progress.setAccessible(true);
+        update.invoke(motion, 0f, 0f, 0f, 0f);
+        for (int i = 1; i <= 24; i++) update.invoke(motion, (float) i, 1f, 0f, 0f);
+        check(Math.abs(progress.getFloat(motion) - 1) < 1e-6, "unarmed crouch must complete in reviewed 1.2 seconds");
+        update.invoke(motion, 24f, 0f, 0f, 0f);
+        check(Math.abs(progress.getFloat(motion) - 1) < 1e-6, "unarmed repeated render advanced transition");
+        update.invoke(motion, 25f, 0f, 0f, 0f);
+        check(progress.getFloat(motion) < 1 && progress.getFloat(motion) > .9, "unarmed reversal snapped");
+        System.out.println("Reviewed unarmed: 41 frames x 8 parts; max vertex error " + largest + "; 1.2s timing/reversal PASS");
     }
     static double nearestError(List<double[]> points, List<double[]> candidates) {
         double max = 0;
