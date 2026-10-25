@@ -11,6 +11,7 @@ import net.minecraft.client.renderer.entity.EntityRendererProvider;
 import net.minecraft.client.renderer.entity.HumanoidMobRenderer;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.phys.Vec3;
+import com.stevesarmy.compat.curios.SoldierCuriosClient;
 
 public class SoldierRenderer extends HumanoidMobRenderer<SoldierEntity, SoldierModel<SoldierEntity>> {
     private static final ResourceLocation TEXTURE = new ResourceLocation("minecraft", "textures/entity/player/wide/steve.png");
@@ -24,6 +25,9 @@ public class SoldierRenderer extends HumanoidMobRenderer<SoldierEntity, SoldierM
         this.geoRenderer = YsmCompat.createGeoRenderer(context);
         this.addLayer(new SoldierArmorLayer<>(this, context));
         this.addLayer(new SoldierBackWeaponLayer<>(this));
+        if (net.minecraftforge.fml.ModList.get().isLoaded("curios")) {
+            this.addLayer(SoldierCuriosClient.layer(this));
+        }
     }
 
     @Override

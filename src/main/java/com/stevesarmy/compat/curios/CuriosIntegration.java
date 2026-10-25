@@ -13,6 +13,7 @@ import net.minecraftforge.items.SlotItemHandler;
 import top.theillusivec4.curios.api.CuriosApi;
 import top.theillusivec4.curios.api.event.CurioDropsEvent;
 import top.theillusivec4.curios.api.type.inventory.IDynamicStackHandler;
+import top.theillusivec4.curios.api.type.inventory.ICurioStacksHandler;
 import java.util.*;
 
 final class CuriosIntegration {
@@ -39,7 +40,9 @@ final class CuriosIntegration {
         ensureDefaults(soldier);
         var result = new ArrayList<SoldierCurios.Descriptor>();
         CuriosApi.getCuriosInventory(soldier).ifPresent(handler -> handler.getCurios().entrySet().stream()
-            .sorted(Map.Entry.comparingByKey()).forEach(entry -> {
+            .sorted(Comparator.<Map.Entry<String, top.theillusivec4.curios.api.type.inventory.ICurioStacksHandler>>comparingInt(entry ->
+                CuriosApi.getSlot(entry.getKey(), soldier.level()).map(type -> type.getOrder()).orElse(Integer.MAX_VALUE))
+                .thenComparing(Map.Entry::getKey)).forEach(entry -> {
                 var stacks = entry.getValue();
                 for (int i = 0; i < stacks.getStacks().getSlots(); i++) result.add(new SoldierCurios.Descriptor(entry.getKey(), i, false));
                 if (stacks.hasCosmetic()) for (int i = 0; i < stacks.getCosmeticStacks().getSlots(); i++) result.add(new SoldierCurios.Descriptor(entry.getKey(), i, true));
@@ -68,6 +71,10 @@ final class CuriosIntegration {
             @Override public int getMaxStackSize() { return 1; }
             @Override public int getMaxStackSize(ItemStack stack) { return 1; }
         };
+    }
+    static com.mojang.datafixers.util.Pair<net.minecraft.resources.ResourceLocation, net.minecraft.resources.ResourceLocation> icon(SoldierCurios.Descriptor descriptor, net.minecraft.world.level.Level level) {
+        return CuriosApi.getSlot(descriptor.identifier(), level)
+            .map(type -> com.mojang.datafixers.util.Pair.of(net.minecraft.world.inventory.InventoryMenu.BLOCK_ATLAS, type.getIcon())).orElse(null);
     }
     static void transfer(SoldierEntity source, SoldierEntity target) {
         CuriosApi.getCuriosInventory(source).ifPresent(from ->

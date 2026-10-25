@@ -32,7 +32,7 @@ public class SoldierInventoryScreen extends AbstractContainerScreen<SoldierInven
 
     public SoldierInventoryScreen(SoldierInventoryMenu menu, Inventory playerInventory, Component title) {
         super(menu, playerInventory, title);
-        this.imageWidth = GUI_WIDTH + menu.getAccessoryPanelWidth();
+        this.imageWidth = GUI_WIDTH;
         this.imageHeight = GUI_HEIGHT;
         this.titleLabelX = 8;
         this.titleLabelY = 6;
@@ -41,6 +41,17 @@ public class SoldierInventoryScreen extends AbstractContainerScreen<SoldierInven
     @Override
     protected void init() {
         super.init();
+        if (!menu.getCuriosDescriptors().isEmpty()) {
+            var toggle = new net.minecraft.client.gui.components.ImageButton(leftPos + 27, topPos + 18,
+                14, 14, 50, 0, 14, new ResourceLocation("curios", "textures/gui/inventory.png"), button -> {
+                    menu.setCuriosOpen(!menu.isCuriosOpen());
+                    if (minecraft != null && minecraft.gameMode != null) {
+                        minecraft.gameMode.handleInventoryButtonClick(menu.containerId, menu.isCuriosOpen() ? 1 : 0);
+                    }
+                });
+            toggle.setTooltip(net.minecraft.client.gui.components.Tooltip.create(Component.translatable("curios.container.inventory")));
+            addRenderableWidget(toggle);
+        }
         SoldierEntity soldier = resolveSoldier();
         SoldierRole currentRole = soldier != null ? soldier.getRole() : SoldierRole.RIFLEMAN;
         this.roleWidget = new RoleDropdownWidget(currentRole, this::switchRole);
@@ -96,14 +107,19 @@ public class SoldierInventoryScreen extends AbstractContainerScreen<SoldierInven
         int x = (this.width - this.imageWidth) / 2;
         int y = (this.height - this.imageHeight) / 2;
         guiGraphics.blit(CONTAINER_LOCATION, x, y, 0, 0, GUI_WIDTH, GUI_HEIGHT, GUI_WIDTH, GUI_HEIGHT);
-        if (menu.getAccessoryPanelWidth() > 0) {
-            guiGraphics.fill(x + GUI_WIDTH, y, x + imageWidth, y + GUI_HEIGHT, 0xffc6c6c6);
-            guiGraphics.drawString(font, "Curios", x + GUI_WIDTH + 5, y + 6, 4210752, false);
-            for (int i = 0; i < menu.getCuriosDescriptors().size(); i++) {
-                int sx = x + 183 + (i / 8) * 18;
-                int sy = y + 23 + (i % 8) * 18;
-                guiGraphics.fill(sx, sy, sx + 18, sy + 18, 0xff373737);
-                guiGraphics.fill(sx + 1, sy + 1, sx + 17, sy + 17, 0xff8b8b8b);
+        if (menu.isCuriosOpen()) {
+            ResourceLocation drawer = new ResourceLocation("curios", "textures/gui/inventory_revamp.png");
+            int columns = (menu.getCuriosDescriptors().size() + 7) / 8;
+            for (int column = 0; column < columns; column++) {
+                int rows = Math.min(8, menu.getCuriosDescriptors().size() - column * 8);
+                int sx = x - 34 - column * 18;
+                int sy = y + 16;
+                int upper = 7 + rows * 18;
+                guiGraphics.blit(drawer, sx, sy, 91, 0, 25, upper);
+                guiGraphics.blit(drawer, sx, sy + upper, 91, 159, 25, 7);
+                guiGraphics.blit(drawer, sx + 7, sy, 98, 0, 25, upper);
+                guiGraphics.blit(drawer, sx + 7, sy + upper, 98, 159, 25, 7);
+                guiGraphics.blit(drawer, sx + 7, sy + 7, 7, 7, 18, rows * 18);
             }
         }
 
@@ -132,8 +148,8 @@ public class SoldierInventoryScreen extends AbstractContainerScreen<SoldierInven
         this.renderBackground(guiGraphics);
         super.render(guiGraphics, mouseX, mouseY, partialTick);
         this.renderTooltip(guiGraphics, mouseX, mouseY);
-        for (int i = 0; i < menu.getCuriosDescriptors().size(); i++) {
-            int sx = leftPos + 184 + (i / 8) * 18;
+        for (int i = 0; menu.isCuriosOpen() && i < menu.getCuriosDescriptors().size(); i++) {
+            int sx = leftPos - 26 - (i / 8) * 18;
             int sy = topPos + 24 + (i % 8) * 18;
             if (mouseX >= sx && mouseX < sx + 16 && mouseY >= sy && mouseY < sy + 16
                 && menu.slots.get(SoldierInventory.INVENTORY_SIZE + i).getItem().isEmpty()) {
@@ -143,6 +159,18 @@ public class SoldierInventoryScreen extends AbstractContainerScreen<SoldierInven
                 guiGraphics.renderTooltip(font, label, mouseX, mouseY);
             }
         }
+    }
+
+    @Override
+    protected boolean hasClickedOutside(double mouseX, double mouseY, int guiLeft, int guiTop, int button) {
+        if (menu.isCuriosOpen()) {
+            for (int i = 0; i < menu.getCuriosDescriptors().size(); i++) {
+                var slot = menu.slots.get(SoldierInventory.INVENTORY_SIZE + i);
+                if (mouseX >= guiLeft + slot.x - 8 && mouseX < guiLeft + slot.x + 24
+                    && mouseY >= guiTop + slot.y - 8 && mouseY < guiTop + slot.y + 24) return false;
+            }
+        }
+        return super.hasClickedOutside(mouseX, mouseY, guiLeft, guiTop, button);
     }
 
     @Override

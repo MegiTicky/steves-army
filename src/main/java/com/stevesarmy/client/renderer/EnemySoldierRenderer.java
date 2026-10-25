@@ -24,6 +24,9 @@ public class EnemySoldierRenderer extends HumanoidMobRenderer<EnemySoldierEntity
         this.geoRenderer = YsmCompat.createGeoRenderer(context);
         this.addLayer(new SoldierArmorLayer<>(this, context));
         this.addLayer(new SoldierBackWeaponLayer<>(this));
+        if (net.minecraftforge.fml.ModList.get().isLoaded("curios")) {
+            this.addLayer(com.stevesarmy.compat.curios.SoldierCuriosClient.layer(this));
+        }
         // Vanilla glow outline via MobEffects.GLOWING + team color handles enemy glow
     }
 

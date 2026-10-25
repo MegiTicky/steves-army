@@ -39,6 +39,7 @@ public class SoldierInventoryMenu extends AbstractContainerMenu {
     @Nullable
     private final SoldierEntity soldier;
     private final java.util.List<SoldierCurios.Descriptor> curiosDescriptors;
+    private boolean curiosOpen;
 
     public SoldierInventoryMenu(int containerId, Inventory playerInventory, Container soldierInventory,
                                 int soldierId, @Nullable SoldierEntity soldier) {
@@ -60,10 +61,25 @@ public class SoldierInventoryMenu extends AbstractContainerMenu {
         addGeneralSlots();
         var clientAccessories = new net.minecraft.world.SimpleContainer(this.curiosDescriptors.size());
         for (int i = 0; i < this.curiosDescriptors.size(); i++) {
-            int x = 184 + (i / 8) * 18;
+            int x = -26 - (i / 8) * 18;
             int y = 24 + (i % 8) * 18;
-            addSlot(soldier == null ? new Slot(clientAccessories, i, x, y)
-                : SoldierCurios.slot(soldier, this.curiosDescriptors.get(i), x, y));
+            Slot backing = soldier == null ? new Slot(clientAccessories, i, x, y)
+                : SoldierCurios.slot(soldier, this.curiosDescriptors.get(i), x, y);
+            final var descriptor = this.curiosDescriptors.get(i);
+            addSlot(new Slot(clientAccessories, i, x, y) {
+                @Override public boolean isActive() { return curiosOpen; }
+                @Override public ItemStack getItem() { return backing.getItem(); }
+                @Override public void set(ItemStack stack) { backing.set(stack); }
+                @Override public void setChanged() { backing.setChanged(); }
+                @Override public ItemStack remove(int amount) { return backing.remove(amount); }
+                @Override public boolean mayPlace(ItemStack stack) { return curiosOpen && backing.mayPlace(stack); }
+                @Override public boolean mayPickup(Player player) { return curiosOpen && backing.mayPickup(player); }
+                @Override public int getMaxStackSize() { return backing.getMaxStackSize(); }
+                @Override public int getMaxStackSize(ItemStack stack) { return backing.getMaxStackSize(stack); }
+                @Override public Pair<ResourceLocation, ResourceLocation> getNoItemIcon() {
+                    return SoldierCurios.icon(descriptor, playerInventory.player.level());
+                }
+            });
         }
         addPlayerInventorySlots(playerInventory);
     }
@@ -152,7 +168,7 @@ public class SoldierInventoryMenu extends AbstractContainerMenu {
         ItemStack result = ItemStack.EMPTY;
         if (index < 0 || index >= slots.size() || !stillValid(player)) return ItemStack.EMPTY;
         Slot slot = this.slots.get(index);
-        if (slot != null && slot.hasItem() && slot.mayPickup(player)) {
+        if (slot != null && slot.isActive() && slot.hasItem() && slot.mayPickup(player)) {
             ItemStack slotItem = slot.getItem();
             result = slotItem.copy();
 
@@ -160,7 +176,7 @@ public class SoldierInventoryMenu extends AbstractContainerMenu {
             if (index < playerStart) {
                 if (!this.moveItemStackTo(slotItem, playerStart, this.slots.size(), true)) return ItemStack.EMPTY;
             } else {
-                boolean moved = playerStart > SOLDIER_MENU_SLOT_COUNT
+                boolean moved = curiosOpen && playerStart > SOLDIER_MENU_SLOT_COUNT
                     && this.moveItemStackTo(slotItem, SOLDIER_MENU_SLOT_COUNT, playerStart, false);
                 if (!slotItem.isEmpty()) moved |= this.moveItemStackTo(slotItem, 0, SOLDIER_MENU_SLOT_COUNT, false);
                 if (!moved) return ItemStack.EMPTY;
@@ -182,7 +198,15 @@ public class SoldierInventoryMenu extends AbstractContainerMenu {
     }
 
     @Override
+    public boolean clickMenuButton(Player player, int id) {
+        if ((id != 0 && id != 1) || !stillValid(player)) return false;
+        setCuriosOpen(id == 1);
+        return true;
+    }
+
+    @Override
     public void clicked(int slotId, int button, net.minecraft.world.inventory.ClickType type, Player player) {
+        if (slotId >= SOLDIER_MENU_SLOT_COUNT && slotId < SOLDIER_MENU_SLOT_COUNT + curiosDescriptors.size() && !curiosOpen) return;
         if (stillValid(player)) super.clicked(slotId, button, type, player);
     }
 
@@ -193,7 +217,9 @@ public class SoldierInventoryMenu extends AbstractContainerMenu {
     }
 
     public java.util.List<SoldierCurios.Descriptor> getCuriosDescriptors() { return curiosDescriptors; }
-    public int getAccessoryPanelWidth() { return curiosDescriptors.isEmpty() ? 0 : 16 + ((curiosDescriptors.size() + 7) / 8) * 18; }
+    public int getAccessoryPanelWidth() { return curiosOpen && !curiosDescriptors.isEmpty() ? 16 + ((curiosDescriptors.size() + 7) / 8) * 18 : 0; }
+    public boolean isCuriosOpen() { return curiosOpen; }
+    public void setCuriosOpen(boolean open) { curiosOpen = open && !curiosDescriptors.isEmpty(); }
 
     @Override
     public void removed(Player player) {

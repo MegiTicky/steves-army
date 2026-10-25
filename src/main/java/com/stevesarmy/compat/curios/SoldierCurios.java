@@ -17,6 +17,9 @@ public final class SoldierCurios {
     public static Slot slot(SoldierEntity soldier, Descriptor descriptor, int x, int y) {
         return CuriosIntegration.slot(soldier, descriptor, x, y);
     }
+    public static com.mojang.datafixers.util.Pair<net.minecraft.resources.ResourceLocation, net.minecraft.resources.ResourceLocation> icon(Descriptor descriptor, net.minecraft.world.level.Level level) {
+        return available() ? CuriosIntegration.icon(descriptor, level) : null;
+    }
     public static void transfer(SoldierEntity source, SoldierEntity target) {
         if (available()) CuriosIntegration.transfer(source, target);
     }
