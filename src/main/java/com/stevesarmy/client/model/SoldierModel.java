@@ -350,6 +350,10 @@ public class SoldierModel<T extends SoldierEntity> extends HumanoidModel<T> {
     public float weaponReady() { return weaponReady; }
 
     public void translateBodyRoot(PoseStack stack) { unit.translateAndRotate(stack); }
+    /** Lower-leg attachment used by fixed-space Curios footwear profiles. */
+    public void translateCurioShin(PoseStack stack, boolean left) {
+        (left ? leftShin : rightShin).translateAndRotate(stack);
+    }
 
     @Override public void copyPropertiesTo(HumanoidModel<T> target) {
         super.copyPropertiesTo(target);

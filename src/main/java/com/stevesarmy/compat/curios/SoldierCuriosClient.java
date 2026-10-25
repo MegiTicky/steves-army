@@ -8,6 +8,9 @@ import net.minecraft.world.entity.LivingEntity;
 /** Loaded only after the optional Curios presence check on the client. */
 public final class SoldierCuriosClient {
     public static <T extends LivingEntity, M extends EntityModel<T>> RenderLayer<T, M> layer(RenderLayerParent<T, M> parent) {
+        if (parent.getModel() instanceof com.stevesarmy.client.model.SoldierModel<?>) {
+            return new SoldierCuriosLayer<>(parent);
+        }
         try {
             @SuppressWarnings("unchecked")
             RenderLayer<T, M> layer = (RenderLayer<T, M>) Class.forName("top.theillusivec4.curios.client.render.CuriosLayer")
