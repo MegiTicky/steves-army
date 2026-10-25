@@ -68,8 +68,9 @@ public class SoldierModel<T extends SoldierEntity> extends HumanoidModel<T> {
             .addBox(-4, -8, -4, 8, 8, 8, d.extend(.5F)), PartPose.ZERO);
         root.addOrReplaceChild("body", CubeListBuilder.create().texOffs(16, 16)
             .addBox(-4, 0, -2, 8, 12, 4, d), PartPose.offsetAndRotation(0, -6.26F, 1.0616F, .0997F, .6536F, .0238F));
+        float rightArmMeshZ = armor ? -1.7505F : -2.0F;
         root.addOrReplaceChild("right_arm", CubeListBuilder.create().texOffs(40, 16)
-            .addBox(-3.0123F, -1.9895F, -1.7505F, 4, 12, 4, d),
+            .addBox(-3.0123F, -1.9895F, rightArmMeshZ, 4, 12, 4, d),
             PartPose.offsetAndRotation(-3, -2.9089F, 3.4377F, -1.6919F, -.0024F, -.0561F));
         root.addOrReplaceChild("left_arm", CubeListBuilder.create().texOffs(armor ? 40 : 32, armor ? 16 : 48).mirror(armor)
             .addBox(-1, -2, -2, 4, 12, 4, d),
@@ -80,7 +81,7 @@ public class SoldierModel<T extends SoldierEntity> extends HumanoidModel<T> {
             root.getChild("body").addOrReplaceChild("jacket", CubeListBuilder.create().texOffs(16, 32)
                 .addBox(-4, 0, -2, 8, 12, 4, d.extend(.25F)), PartPose.ZERO);
             root.getChild("right_arm").addOrReplaceChild("sleeve", CubeListBuilder.create().texOffs(40, 32)
-                .addBox(-3.0123F, -1.9895F, -1.7505F, 4, 12, 4, d.extend(.25F)), PartPose.ZERO);
+                .addBox(-3.0123F, -1.9895F, -2.0F, 4, 12, 4, d.extend(.25F)), PartPose.ZERO);
             root.getChild("left_arm").addOrReplaceChild("sleeve", CubeListBuilder.create().texOffs(48, 48)
                 .addBox(-1, -2, -2, 4, 12, 4, d.extend(.25F)), PartPose.ZERO);
             addPants(root.getChild("right_leg"), 0, 32);

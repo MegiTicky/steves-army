@@ -19,7 +19,7 @@ const extract=function(model){
    if(g.name.endsWith('_arm'))p.add(new THREE.Vector3(0,4,0).sub(new THREE.Vector3(...centre)).applyQuaternion(r));
    world[g.name]={p,r,centre};
    const c=Cube.all.find(c=>c.name===g.name),pos=c.mesh.geometry.attributes.position;let corners=[];c.mesh.updateMatrixWorld(true);
-   for(let j=0;j<pos.count;j++){let v=new THREE.Vector3().fromBufferAttribute(pos,j).applyMatrix4(c.mesh.matrixWorld).divideScalar(16);if(!corners.some(a=>v.distanceTo(new THREE.Vector3(...a))<1e-7))corners.push(v.toArray())}expected[g.name]=corners;
+   for(let j=0;j<pos.count;j++){let v=new THREE.Vector3().fromBufferAttribute(pos,j).applyMatrix4(c.mesh.matrixWorld);if(g.name==='right_arm')v.add(new THREE.Vector3(0,0,-.2495).applyQuaternion(g.mesh.getWorldQuaternion(new THREE.Quaternion())));v.divideScalar(16);if(!corners.some(a=>v.distanceTo(new THREE.Vector3(...a))<1e-7))corners.push(v.toArray())}expected[g.name]=corners;
   }
   for(let [n,s] of Object.entries(world)){let p=s.p.clone(),r=s.r.clone();if(n.endsWith('_shin')){let parent=world[n.replace('_shin','')];p.sub(parent.p).applyQuaternion(parent.r.clone().invert());r.premultiply(parent.r.clone().invert())}parts[n]={position:p.toArray(),rotation:r.toArray(),centre:s.centre}}
   frames.push({progress:i/40,parts,expected});

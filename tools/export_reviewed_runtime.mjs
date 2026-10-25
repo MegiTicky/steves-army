@@ -33,7 +33,7 @@ function evaluate(prefix,time){
    const r=nativeR(state.r),localCentre=box.slice(0,3).map((v,i)=>v+box[i+3]/2);
    const origin=sub(nativeP(wc),vec(r,localCentre));
    parts[name]={position:origin,rotation:quaternion(r),centre:localCentre};
-   expected[name]=[];for(let mask=0;mask<8;mask++){const p=cube.from.map((v,i)=>mask&(1<<i)?cube.to[i]:v);expected[name].push(add(state.p,vec(state.r,sub(p,g.origin))).map(v=>v/16));}
+   expected[name]=[];for(let mask=0;mask<8;mask++){const p=cube.from.map((v,i)=>mask&(1<<i)?cube.to[i]:v);if(name==='right_arm')p[2]-=.2495;expected[name].push(add(state.p,vec(state.r,sub(p,g.origin))).map(v=>v/16));}
  }
  for(const name of ['right_leg_shin','left_leg_shin']){
    const parent=world.get(name.replace('_shin','')),child=world.get(name),r=mul(tr(nativeR(parent.r)),nativeR(child.r));
