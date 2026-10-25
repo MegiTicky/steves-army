@@ -50,7 +50,7 @@ public class SoldierRenderer extends HumanoidMobRenderer<SoldierEntity, SoldierM
 
     @Override
     protected void scale(SoldierEntity entity, PoseStack poseStack, float partialTick) {
-        // Rig is calibrated at sixteen pixels per block.
+        poseStack.scale(0.9375F, 0.9375F, 0.9375F);
     }
 
     @Override protected float getFlipDegrees(SoldierEntity soldier) { return 0; }

@@ -51,7 +51,7 @@ public class EnemySoldierRenderer extends HumanoidMobRenderer<EnemySoldierEntity
 
     @Override
     protected void scale(EnemySoldierEntity entity, PoseStack poseStack, float partialTick) {
-        // Rig is calibrated at sixteen pixels per block.
+        poseStack.scale(0.9375F, 0.9375F, 0.9375F);
     }
 
     @Override protected float getFlipDegrees(EnemySoldierEntity soldier) { return 0; }
