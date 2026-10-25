@@ -65,7 +65,8 @@ final class CuriosIntegration {
                     CuriosApi.getCurio(stack).ifPresent(curio -> curio.onEquipFromUse(context));
                 }
             }
-            @Override public int getMaxStackSize() { return stacks.getSlotLimit(d.index()); }
+            @Override public int getMaxStackSize() { return 1; }
+            @Override public int getMaxStackSize(ItemStack stack) { return 1; }
         };
     }
     static void transfer(SoldierEntity source, SoldierEntity target) {
