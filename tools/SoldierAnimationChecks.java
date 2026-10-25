@@ -239,17 +239,32 @@ public class SoldierAnimationChecks {
         for (float amount : new float[]{0, .25f, .5f, .75f, 1}) {
             reset(); crouch.invoke(model, amount, 0f, 0f);
             model.copyPropertiesTo(custom);
-            for (String part : new String[]{"head", "body", "right_leg", "left_leg"}) {
+            for (String part : new String[]{"head", "body", "right_arm", "left_arm", "right_leg", "left_leg"}) {
                 custom.setAllVisible(false);
                 ModelPart selected = switch (part) {
                     case "head" -> custom.head; case "body" -> custom.body;
+                    case "right_arm" -> custom.rightArm; case "left_arm" -> custom.leftArm;
                     case "right_leg" -> custom.rightLeg; default -> custom.leftLeg;
                 };
                 selected.visible = true;
                 Bounds expected = bounds(part), actual = new Bounds();
                 new ArticulatedArmorModel(custom, model).renderToBuffer(new PoseStack(), actual, 0, 0, 1, 1, 1, 1);
-                check(Math.abs(expected.minY - actual.minY) < .03 && Math.abs(expected.maxY - actual.maxY) < .03,
+                double tolerance = part.equals("right_arm") ? .04 : .03;
+                check(Math.abs(expected.minY - actual.minY) < tolerance && Math.abs(expected.maxY - actual.maxY) < tolerance,
                     "replacement armor detached from " + part + " at crouch " + amount + ": " + actual + " vs " + expected);
+                if (part.endsWith("_arm")) {
+                    PoseStack local = new PoseStack();
+                    root.translateAndRotate(local);
+                    selected.translateAndRotate(local);
+                    if (part.equals("right_arm")) local.translate(0, 0, .25 / 16);
+                    var pose = selected.storePose();
+                    Bounds wanted = new Bounds();
+                    selected.loadPose(net.minecraft.client.model.geom.PartPose.ZERO);
+                    try { selected.render(local, wanted, 0, 0); }
+                    finally { selected.loadPose(pose); }
+                    check(nearestError(actual.points, wanted.points) < .000001,
+                        "borrowed arm local clearance changed at crouch " + amount);
+                }
                 check(selected.visible && custom.hat.visible == false, "borrowed armor visibility not restored");
             }
         }
