@@ -14,7 +14,9 @@ import net.minecraft.client.model.geom.ModelPart;
 import net.minecraft.client.model.geom.PartPose;
 import net.minecraft.client.model.geom.builders.*;
 import net.minecraft.util.Mth;
+import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.HumanoidArm;
+import net.minecraft.world.item.ArmorItem;
 import org.joml.Vector3f;
 import org.joml.Quaternionf;
 import java.util.List;
@@ -156,6 +158,25 @@ public class SoldierModel<T extends SoldierEntity> extends HumanoidModel<T> {
             rightShin.xRot = leftShin.xRot = 1.2F;
         }
         hat.copyFrom(head);
+        updateSkinSleeves(entity);
+    }
+
+    private void updateSkinSleeves(T entity) {
+        var chest = entity.getItemBySlot(EquipmentSlot.CHEST);
+        boolean chestArmor = !chest.isEmpty() && chest.getItem() instanceof ArmorItem armor
+            && armor.getEquipmentSlot() == EquipmentSlot.CHEST;
+        setSkinSleevesVisible(!chestArmor);
+    }
+
+    private void setSkinSleevesVisible(boolean visible) {
+        setChildVisible(rightArm, "sleeve", visible);
+        setChildVisible(leftArm, "sleeve", visible);
+    }
+
+    private static void setChildVisible(ModelPart parent, String childName, boolean visible) {
+        if (parent.hasChild(childName)) {
+            parent.getChild(childName).visible = visible;
+        }
     }
 
     private void apply(AnimationDefinition definition, float seconds, float weight) {

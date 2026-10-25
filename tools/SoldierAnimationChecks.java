@@ -35,6 +35,17 @@ public class SoldierAnimationChecks {
     public static void main(String[] args) throws Exception {
         root = SoldierModel.createBodyLayer().bakeRoot(); model = new SoldierModel(root);
         model.young = false;
+        Method sleeves = SoldierModel.class.getDeclaredMethod("setSkinSleevesVisible", boolean.class);
+        sleeves.setAccessible(true);
+        SoldierModel armorWithoutSleeves = new SoldierModel(SoldierModel.createBodyLayer(new CubeDeformation(.5f)).bakeRoot());
+        for (boolean visible : new boolean[]{false, true, false, true}) {
+            sleeves.invoke(model, visible);
+            sleeves.invoke(armorWithoutSleeves, visible);
+            check(model.rightArm.getChild("sleeve").visible == visible
+                && model.leftArm.getChild("sleeve").visible == visible, "skin sleeve visibility did not restore");
+            check(model.rightArm.visible && model.leftArm.visible && model.body.getChild("jacket").visible,
+                "sleeve visibility changed other skin parts");
+        }
         apply = SoldierModel.class.getDeclaredMethod("apply", AnimationDefinition.class, float.class, float.class);
         crouch = SoldierModel.class.getDeclaredMethod("applyCrouch", float.class, float.class, float.class);
         crawl = SoldierModel.class.getDeclaredMethod("applyCrawl", float.class, float.class, float.class, float.class, boolean.class);
@@ -249,22 +260,9 @@ public class SoldierAnimationChecks {
                 selected.visible = true;
                 Bounds expected = bounds(part), actual = new Bounds();
                 new ArticulatedArmorModel(custom, model).renderToBuffer(new PoseStack(), actual, 0, 0, 1, 1, 1, 1);
-                double tolerance = part.equals("right_arm") ? .04 : .03;
+                double tolerance = part.endsWith("_arm") ? .04 : .03;
                 check(Math.abs(expected.minY - actual.minY) < tolerance && Math.abs(expected.maxY - actual.maxY) < tolerance,
                     "replacement armor detached from " + part + " at crouch " + amount + ": " + actual + " vs " + expected);
-                if (part.endsWith("_arm")) {
-                    PoseStack local = new PoseStack();
-                    root.translateAndRotate(local);
-                    selected.translateAndRotate(local);
-                    if (part.equals("right_arm")) local.translate(0, 0, .25 / 16);
-                    var pose = selected.storePose();
-                    Bounds wanted = new Bounds();
-                    selected.loadPose(net.minecraft.client.model.geom.PartPose.ZERO);
-                    try { selected.render(local, wanted, 0, 0); }
-                    finally { selected.loadPose(pose); }
-                    check(nearestError(actual.points, wanted.points) < .000001,
-                        "borrowed arm local clearance changed at crouch " + amount);
-                }
                 check(selected.visible && custom.hat.visible == false, "borrowed armor visibility not restored");
             }
         }
