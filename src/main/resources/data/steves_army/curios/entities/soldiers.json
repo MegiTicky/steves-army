@@ -1,0 +1,10 @@
+{
+  "entities": [
+    "steves_army:soldier", "steves_army:enemy_soldier",
+    "steves_army:machine_gunner", "steves_army:support",
+    "steves_army:garrison_soldier", "steves_army:team_garrison",
+    "steves_army:vehicle_crew", "steves_army:enemy_vehicle_crew",
+    "steves_army:anti_tank", "steves_army:enemy_anti_tank"
+  ],
+  "slots": ["ring", "necklace", "belt", "back", "charm", "hands", "curio"]
+}

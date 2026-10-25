@@ -58,6 +58,7 @@ public class StevesArmyMod {
         GunIntegration.init();
         GrenadeIntegration.init();
         YsmCompat.init();
+        com.stevesarmy.compat.curios.SoldierCurios.init();
         ForgeChunkManager.setForcedChunkLoadingCallback(MODID, (level, helper) -> {
             // Recall tickets are intentionally transient and are never resumed
             // after a server restart.

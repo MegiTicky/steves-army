@@ -137,6 +137,12 @@ repositories {
         name = 'ParchmentMC'
         url = 'https://maven.parchmentmc.org'
     }
+    exclusiveContent {
+        forRepository {
+            maven { url = 'https://maven.theillusivec4.top/' }
+        }
+        filter { includeGroup 'top.theillusivec4.curios' }
+    }
     flatDir {
         dir 'libs'
     }
@@ -151,6 +157,7 @@ dependencies {
     // runtime (GunIntegration/YsmCompat); real gun behavior is tested on the
     // deployed instances, which install these mods properly.
     compileOnly fileTree(dir: 'libs', include: ['pointblank*.jar', 'tacz*.jar', 'ysm*.jar'])
+    compileOnly 'top.theillusivec4.curios:curios-forge:5.14.1+1.20.1:api'
     annotationProcessor 'org.spongepowered:mixin:0.8.5:processor'
 }
 

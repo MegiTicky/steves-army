@@ -3,6 +3,7 @@ package com.stevesarmy.inventory;
 import com.mojang.datafixers.util.Pair;
 import com.stevesarmy.combat.GunIntegration;
 import com.stevesarmy.entity.SoldierEntity;
+import com.stevesarmy.compat.curios.SoldierCurios;
 import com.stevesarmy.network.NetworkHandler;
 import com.stevesarmy.network.SyncSoldierInventoryPacket;
 import com.stevesarmy.registry.ModMenuTypes;
@@ -37,17 +38,33 @@ public class SoldierInventoryMenu extends AbstractContainerMenu {
     private final int soldierId;
     @Nullable
     private final SoldierEntity soldier;
+    private final java.util.List<SoldierCurios.Descriptor> curiosDescriptors;
 
-    public SoldierInventoryMenu(int containerId, Inventory playerInventory, Container soldierInventory, 
+    public SoldierInventoryMenu(int containerId, Inventory playerInventory, Container soldierInventory,
                                 int soldierId, @Nullable SoldierEntity soldier) {
+        this(containerId, playerInventory, soldierInventory, soldierId, soldier,
+            soldier == null ? java.util.List.of() : SoldierCurios.describe(soldier));
+    }
+
+    public SoldierInventoryMenu(int containerId, Inventory playerInventory, Container soldierInventory,
+                                int soldierId, @Nullable SoldierEntity soldier,
+                                java.util.List<SoldierCurios.Descriptor> curiosDescriptors) {
         super(ModMenuTypes.SOLDIER_INVENTORY.get(), containerId);
         this.soldierInventory = soldierInventory;
         this.soldierId = soldierId;
         this.soldier = soldier;
+        this.curiosDescriptors = java.util.List.copyOf(curiosDescriptors);
 
         addArmorSlots();
         addMainHandSlot();
         addGeneralSlots();
+        var clientAccessories = new net.minecraft.world.SimpleContainer(this.curiosDescriptors.size());
+        for (int i = 0; i < this.curiosDescriptors.size(); i++) {
+            int x = 184 + (i / 8) * 18;
+            int y = 24 + (i % 8) * 18;
+            addSlot(soldier == null ? new Slot(clientAccessories, i, x, y)
+                : SoldierCurios.slot(soldier, this.curiosDescriptors.get(i), x, y));
+        }
         addPlayerInventorySlots(playerInventory);
     }
 
@@ -133,19 +150,20 @@ public class SoldierInventoryMenu extends AbstractContainerMenu {
     @Override
     public ItemStack quickMoveStack(Player player, int index) {
         ItemStack result = ItemStack.EMPTY;
+        if (index < 0 || index >= slots.size() || !stillValid(player)) return ItemStack.EMPTY;
         Slot slot = this.slots.get(index);
-        if (slot != null && slot.hasItem()) {
+        if (slot != null && slot.hasItem() && slot.mayPickup(player)) {
             ItemStack slotItem = slot.getItem();
             result = slotItem.copy();
 
-            if (index < SOLDIER_MENU_SLOT_COUNT) {
-                if (!this.moveItemStackTo(slotItem, SOLDIER_MENU_SLOT_COUNT, this.slots.size(), true)) {
-                    return ItemStack.EMPTY;
-                }
+            int playerStart = SOLDIER_MENU_SLOT_COUNT + curiosDescriptors.size();
+            if (index < playerStart) {
+                if (!this.moveItemStackTo(slotItem, playerStart, this.slots.size(), true)) return ItemStack.EMPTY;
             } else {
-                if (!this.moveItemStackTo(slotItem, 0, SOLDIER_MENU_SLOT_COUNT, false)) {
-                    return ItemStack.EMPTY;
-                }
+                boolean moved = playerStart > SOLDIER_MENU_SLOT_COUNT
+                    && this.moveItemStackTo(slotItem, SOLDIER_MENU_SLOT_COUNT, playerStart, false);
+                if (!slotItem.isEmpty()) moved |= this.moveItemStackTo(slotItem, 0, SOLDIER_MENU_SLOT_COUNT, false);
+                if (!moved) return ItemStack.EMPTY;
             }
 
             if (slotItem.isEmpty()) {
@@ -159,8 +177,23 @@ public class SoldierInventoryMenu extends AbstractContainerMenu {
 
     @Override
     public boolean stillValid(Player player) {
-        return this.soldierInventory.stillValid(player);
+        return this.soldierInventory.stillValid(player) && (soldier == null ||
+            (soldier.isAlive() && !soldier.isRemoved() && curiosDescriptors.equals(SoldierCurios.describe(soldier))));
     }
+
+    @Override
+    public void clicked(int slotId, int button, net.minecraft.world.inventory.ClickType type, Player player) {
+        if (stillValid(player)) super.clicked(slotId, button, type, player);
+    }
+
+    @Override
+    public void broadcastChanges() {
+        if (soldier == null || (soldier.isAlive() && !soldier.isRemoved()
+            && curiosDescriptors.equals(SoldierCurios.describe(soldier)))) super.broadcastChanges();
+    }
+
+    public java.util.List<SoldierCurios.Descriptor> getCuriosDescriptors() { return curiosDescriptors; }
+    public int getAccessoryPanelWidth() { return curiosDescriptors.isEmpty() ? 0 : 16 + ((curiosDescriptors.size() + 7) / 8) * 18; }
 
     @Override
     public void removed(Player player) {

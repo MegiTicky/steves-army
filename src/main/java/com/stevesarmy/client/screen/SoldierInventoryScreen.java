@@ -32,7 +32,7 @@ public class SoldierInventoryScreen extends AbstractContainerScreen<SoldierInven
 
     public SoldierInventoryScreen(SoldierInventoryMenu menu, Inventory playerInventory, Component title) {
         super(menu, playerInventory, title);
-        this.imageWidth = GUI_WIDTH;
+        this.imageWidth = GUI_WIDTH + menu.getAccessoryPanelWidth();
         this.imageHeight = GUI_HEIGHT;
         this.titleLabelX = 8;
         this.titleLabelY = 6;
@@ -95,7 +95,17 @@ public class SoldierInventoryScreen extends AbstractContainerScreen<SoldierInven
     protected void renderBg(GuiGraphics guiGraphics, float partialTick, int mouseX, int mouseY) {
         int x = (this.width - this.imageWidth) / 2;
         int y = (this.height - this.imageHeight) / 2;
-        guiGraphics.blit(CONTAINER_LOCATION, x, y, 0, 0, this.imageWidth, this.imageHeight, GUI_WIDTH, GUI_HEIGHT);
+        guiGraphics.blit(CONTAINER_LOCATION, x, y, 0, 0, GUI_WIDTH, GUI_HEIGHT, GUI_WIDTH, GUI_HEIGHT);
+        if (menu.getAccessoryPanelWidth() > 0) {
+            guiGraphics.fill(x + GUI_WIDTH, y, x + imageWidth, y + GUI_HEIGHT, 0xffc6c6c6);
+            guiGraphics.drawString(font, "Curios", x + GUI_WIDTH + 5, y + 6, 4210752, false);
+            for (int i = 0; i < menu.getCuriosDescriptors().size(); i++) {
+                int sx = x + 183 + (i / 8) * 18;
+                int sy = y + 23 + (i % 8) * 18;
+                guiGraphics.fill(sx, sy, sx + 18, sy + 18, 0xff373737);
+                guiGraphics.fill(sx + 1, sy + 1, sx + 17, sy + 17, 0xff8b8b8b);
+            }
+        }
 
         if (roleWidget != null) {
             int widgetX = getRoleWidgetX();
@@ -122,6 +132,17 @@ public class SoldierInventoryScreen extends AbstractContainerScreen<SoldierInven
         this.renderBackground(guiGraphics);
         super.render(guiGraphics, mouseX, mouseY, partialTick);
         this.renderTooltip(guiGraphics, mouseX, mouseY);
+        for (int i = 0; i < menu.getCuriosDescriptors().size(); i++) {
+            int sx = leftPos + 184 + (i / 8) * 18;
+            int sy = topPos + 24 + (i % 8) * 18;
+            if (mouseX >= sx && mouseX < sx + 16 && mouseY >= sy && mouseY < sy + 16
+                && menu.slots.get(SoldierInventory.INVENTORY_SIZE + i).getItem().isEmpty()) {
+                var descriptor = menu.getCuriosDescriptors().get(i);
+                Component label = Component.translatable("curios.identifier." + descriptor.identifier());
+                if (descriptor.cosmetic()) label = Component.translatable("curios.cosmetic").append(" ").append(label);
+                guiGraphics.renderTooltip(font, label, mouseX, mouseY);
+            }
+        }
     }
 
     @Override

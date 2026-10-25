@@ -1,6 +1,7 @@
 package com.stevesarmy.inventory;
 
 import com.stevesarmy.entity.SoldierEntity;
+import com.stevesarmy.compat.curios.SoldierCurios;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.MenuProvider;
@@ -13,9 +14,11 @@ import javax.annotation.Nullable;
 
 public class SoldierInventoryMenuProvider implements MenuProvider {
     private final SoldierEntity soldier;
+    private final java.util.List<SoldierCurios.Descriptor> accessories;
 
     public SoldierInventoryMenuProvider(SoldierEntity soldier) {
         this.soldier = soldier;
+        this.accessories = SoldierCurios.describe(soldier);
     }
 
     @Override
@@ -26,7 +29,7 @@ public class SoldierInventoryMenuProvider implements MenuProvider {
     @Nullable
     @Override
     public AbstractContainerMenu createMenu(int containerId, Inventory playerInventory, Player player) {
-        return new SoldierInventoryMenu(containerId, playerInventory, soldier.getSoldierInventory(), soldier.getId(), soldier);
+        return new SoldierInventoryMenu(containerId, playerInventory, soldier.getSoldierInventory(), soldier.getId(), soldier, accessories);
     }
 
     public void writeExtraData(FriendlyByteBuf buf) {
@@ -40,5 +43,6 @@ public class SoldierInventoryMenuProvider implements MenuProvider {
                 buf.writeItem(stack);
             }
         }
+        SoldierCurios.write(buf, accessories);
     }
 }

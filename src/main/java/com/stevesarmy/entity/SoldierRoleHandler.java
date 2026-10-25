@@ -2,6 +2,7 @@ package com.stevesarmy.entity;
 
 import com.stevesarmy.compat.SbwCompat;
 import com.stevesarmy.compat.VS2Compat;
+import com.stevesarmy.compat.curios.SoldierCurios;
 import com.stevesarmy.inventory.SoldierInventory;
 import com.stevesarmy.registry.ModEntities;
 import com.stevesarmy.respawn.PlayerDeathHandler;
@@ -110,6 +111,7 @@ public final class SoldierRoleHandler {
             dst.setItem(i, src.getItem(i).copy());
         }
         dst.syncArmorToEntity(replacement);
+        SoldierCurios.transfer(soldier, replacement);
 
         soldier.getOwnerUUID().ifPresent(replacement::setOwnerUUID);
         replacement.setSkinRaw(soldier.getSkin());

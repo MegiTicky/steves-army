@@ -25,7 +25,8 @@ public class ModMenuTypes {
                         soldierInv.setItem(i, data.readItem());
                     }
                 }
-                return new SoldierInventoryMenu(windowId, inv, soldierInv, soldierId, null);
+                return new SoldierInventoryMenu(windowId, inv, soldierInv, soldierId, null,
+                    com.stevesarmy.compat.curios.SoldierCurios.read(data));
             }));
 
     public static void register(IEventBus eventBus) {
