@@ -49,7 +49,7 @@ public class SoldierInventoryScreen extends AbstractContainerScreen<SoldierInven
                         minecraft.gameMode.handleInventoryButtonClick(menu.containerId, menu.isCuriosOpen() ? 1 : 0);
                     }
                 });
-            toggle.setTooltip(net.minecraft.client.gui.components.Tooltip.create(Component.translatable("curios.container.inventory")));
+            toggle.setTooltip(net.minecraft.client.gui.components.Tooltip.create(Component.translatable("key.curios.open.desc")));
             addRenderableWidget(toggle);
         }
         SoldierEntity soldier = resolveSoldier();

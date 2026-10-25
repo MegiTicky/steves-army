@@ -30,7 +30,11 @@ public final class SoldierCuriosLayer<T extends LivingEntity, M extends EntityMo
      * Unknown renderers receive only the unit root; slot names alone cannot identify renderer behavior.
      */
     public record FixedProfile(String attachment, boolean sneakTranslation, boolean sneakRotation,
-                               boolean headLook) {}
+                               boolean headLook, boolean suppressLimbSwing) {
+        public FixedProfile(String attachment, boolean sneakTranslation, boolean sneakRotation, boolean headLook) {
+            this(attachment, sneakTranslation, sneakRotation, headLook, false);
+        }
+    }
     private static final Map<String, FixedProfile> FIXED = new ConcurrentHashMap<>();
     static {
         // CombatGear 3.4.0: standalone EntityModels, not HumanoidModels. These renderers call
@@ -44,6 +48,15 @@ public final class SoldierCuriosLayer<T extends LivingEntity, M extends EntityMo
             registerFixedRenderer("net.combatgear.client.renderer." + name + "Renderer",
                 new FixedProfile("head", true, false, true));
         }
+        // Armbands 1.0.2: body-slot items whose standalone armred model uses the vanilla
+        // left-arm pivot (5, 2, 0). The soldier attachment supplies all arm motion, so
+        // suppress setupAnim's native swing. String profiles keep Armbands optional.
+        for (String name : new String[]{"Redarmband", "Bluearmband", "Greenarmband", "Yellowarmband"}) {
+            registerFixedRenderer("net.mcreator.armbands.client.renderer." + name + "Renderer",
+                new FixedProfile("left_arm", true, true, false, true));
+        }
+        registerFixedRenderer("net.mcreator.armbands.client.renderer.MedicalarmbandRenderer",
+            new FixedProfile("left_arm", true, false, false, true));
     }
 
     /** Per-renderer opt-in for other fixed vanilla-space accessories; "slot" uses slot/index mapping. */
@@ -90,7 +103,8 @@ public final class SoldierCuriosLayer<T extends LivingEntity, M extends EntityMo
                         renderHumanoid(humanoid, item, context, stack, buffers, light, model,
                             limbSwing, limbSwingAmount, partialTicks, ageInTicks, netHeadYaw, headPitch);
                     } else {
-                        renderer.render(item, context, stack, parent, buffers, light, limbSwing, limbSwingAmount,
+                        renderer.render(item, context, stack, parent, buffers, light, limbSwing,
+                            profile != null && profile.suppressLimbSwing() ? 0 : limbSwingAmount,
                             partialTicks, ageInTicks, profile != null && profile.headLook() ? 0 : netHeadYaw,
                             profile != null && profile.headLook() ? 0 : headPitch);
                     }
