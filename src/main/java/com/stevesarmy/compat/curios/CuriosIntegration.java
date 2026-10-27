@@ -18,12 +18,27 @@ import java.util.*;
 
 final class CuriosIntegration {
     private static final UUID RING_BONUS = UUID.fromString("cc4bd07b-90bf-49cf-9331-b282ebbd0441");
+    static void probe() {
+        try {
+            CuriosApi.class.getMethod("getCuriosInventory", net.minecraft.world.entity.LivingEntity.class);
+            CuriosApi.class.getMethod("getSlot", String.class, net.minecraft.world.level.Level.class);
+            CuriosApi.class.getMethod("getCurio", ItemStack.class);
+            ICurioStacksHandler.class.getMethod("getStacks");
+            ICurioStacksHandler.class.getMethod("getCosmeticStacks");
+            ICurioStacksHandler.class.getMethod("getRenders");
+            top.theillusivec4.curios.api.type.capability.ICuriosItemHandler.class.getMethod("writeTag");
+            top.theillusivec4.curios.api.type.capability.ICuriosItemHandler.class.getMethod("readTag", net.minecraft.nbt.Tag.class);
+        } catch (ReflectiveOperationException e) { throw new IllegalStateException("Required Curios equipment API is unavailable", e); }
+    }
     static void init() {
         MinecraftForge.EVENT_BUS.addListener(CuriosIntegration::tick);
         MinecraftForge.EVENT_BUS.addListener(CuriosIntegration::drops);
     }
     private static void tick(LivingEvent.LivingTickEvent event) {
-        if (event.getEntity() instanceof SoldierEntity soldier && !soldier.level().isClientSide) ensureDefaults(soldier);
+        if (!SoldierCurios.available()) return;
+        try {
+            if (event.getEntity() instanceof SoldierEntity soldier && !soldier.level().isClientSide) ensureDefaults(soldier);
+        } catch (RuntimeException | LinkageError error) { SoldierCurios.fail("soldier tick", error); }
     }
     private static void ensureDefaults(SoldierEntity soldier) {
         CuriosApi.getCuriosInventory(soldier).ifPresent(handler -> {
@@ -76,11 +91,18 @@ final class CuriosIntegration {
         return CuriosApi.getSlot(descriptor.identifier(), level)
             .map(type -> com.mojang.datafixers.util.Pair.of(net.minecraft.world.inventory.InventoryMenu.BLOCK_ATLAS, type.getIcon())).orElse(null);
     }
-    static void transfer(SoldierEntity source, SoldierEntity target) {
-        CuriosApi.getCuriosInventory(source).ifPresent(from ->
-            CuriosApi.getCuriosInventory(target).ifPresent(to -> to.readTag(from.writeTag().copy())));
+    static boolean transfer(SoldierEntity source, SoldierEntity target) {
+        var from = CuriosApi.getCuriosInventory(source).resolve().orElseThrow();
+        var to = CuriosApi.getCuriosInventory(target).resolve().orElseThrow();
+        var original = from.writeTag().copy();
+        to.readTag(original.copy());
+        if (!original.equals(to.writeTag())) throw new IllegalStateException("Accessory transfer did not preserve serialized data");
+        return true;
     }
     private static void drops(CurioDropsEvent event) {
-        if (event.getEntity() instanceof SoldierEntity && !StevesArmyConfig.isSoldierDeathDropsEnabled()) event.setCanceled(true);
+        if (!SoldierCurios.available()) return;
+        try {
+            if (event.getEntity() instanceof SoldierEntity && !StevesArmyConfig.isSoldierDeathDropsEnabled()) event.setCanceled(true);
+        } catch (RuntimeException | LinkageError error) { SoldierCurios.fail("death drops", error); }
     }
 }

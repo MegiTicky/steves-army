@@ -134,7 +134,7 @@ description='''${mod_description}'''
 [[dependencies.${mod_id}]]
     modId="curios"
     mandatory=false
-    versionRange="[5.14.1,)"
+    versionRange="[0,)"
     ordering="AFTER"
     side="BOTH"
 

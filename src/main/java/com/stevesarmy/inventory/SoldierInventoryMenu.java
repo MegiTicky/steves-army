@@ -67,13 +67,13 @@ public class SoldierInventoryMenu extends AbstractContainerMenu {
                 : SoldierCurios.slot(soldier, this.curiosDescriptors.get(i), x, y);
             final var descriptor = this.curiosDescriptors.get(i);
             addSlot(new Slot(clientAccessories, i, x, y) {
-                @Override public boolean isActive() { return curiosOpen; }
+                @Override public boolean isActive() { return curiosOpen && (soldier == null || SoldierCurios.available()); }
                 @Override public ItemStack getItem() { return backing.getItem(); }
                 @Override public void set(ItemStack stack) { backing.set(stack); }
                 @Override public void setChanged() { backing.setChanged(); }
                 @Override public ItemStack remove(int amount) { return backing.remove(amount); }
-                @Override public boolean mayPlace(ItemStack stack) { return curiosOpen && backing.mayPlace(stack); }
-                @Override public boolean mayPickup(Player player) { return curiosOpen && backing.mayPickup(player); }
+                @Override public boolean mayPlace(ItemStack stack) { return curiosOpen && (soldier == null || SoldierCurios.available()) && backing.mayPlace(stack); }
+                @Override public boolean mayPickup(Player player) { return curiosOpen && (soldier == null || SoldierCurios.available()) && backing.mayPickup(player); }
                 @Override public int getMaxStackSize() { return backing.getMaxStackSize(); }
                 @Override public int getMaxStackSize(ItemStack stack) { return backing.getMaxStackSize(stack); }
                 @Override public Pair<ResourceLocation, ResourceLocation> getNoItemIcon() {
@@ -218,7 +218,7 @@ public class SoldierInventoryMenu extends AbstractContainerMenu {
 
     public java.util.List<SoldierCurios.Descriptor> getCuriosDescriptors() { return curiosDescriptors; }
     public int getAccessoryPanelWidth() { return curiosOpen && !curiosDescriptors.isEmpty() ? 16 + ((curiosDescriptors.size() + 7) / 8) * 18 : 0; }
-    public boolean isCuriosOpen() { return curiosOpen; }
+    public boolean isCuriosOpen() { return curiosOpen && (soldier == null || SoldierCurios.available()); }
     public void setCuriosOpen(boolean open) { curiosOpen = open && !curiosDescriptors.isEmpty(); }
 
     @Override

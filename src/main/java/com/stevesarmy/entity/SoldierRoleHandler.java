@@ -111,7 +111,7 @@ public final class SoldierRoleHandler {
             dst.setItem(i, src.getItem(i).copy());
         }
         dst.syncArmorToEntity(replacement);
-        SoldierCurios.transfer(soldier, replacement);
+        if (!SoldierCurios.transfer(soldier, replacement)) return null;
 
         soldier.getOwnerUUID().ifPresent(replacement::setOwnerUUID);
         replacement.setSkinRaw(soldier.getSkin());

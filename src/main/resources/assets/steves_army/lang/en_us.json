@@ -99,5 +99,8 @@
     "transport.steves_army.feedback.enemy_crew_deployed": "Enemy vehicle crew deployed to seat",
     "transport.steves_army.feedback.enemy_crew_standing": "Enemy vehicle crew spawned standing — could not reach a seat",
     "transport.steves_army.feedback.crew_dismounted": "Vehicle crew dismounted",
-    "transport.steves_army.feedback.crew_not_mounted": "That crew is not mounted"
+    "transport.steves_army.feedback.crew_not_mounted": "That crew is not mounted",
+  "steves_army.curios.disabled": "[Steve's Army] Curios %s (tested: %s): soldier accessories disabled: %s. Existing equipment is preserved; role conversion is blocked.",
+  "steves_army.curios.untested": "[Steve's Army] Curios %s is potentially incompatible (tested: %s). Soldier accessories will be tried; API failures disable the affected feature safely.",
+  "steves_army.curios.render_disabled": "[Steve's Army] Curios soldier rendering disabled: %s. Equipped accessories are retained."
 }
