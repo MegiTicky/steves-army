@@ -33,6 +33,10 @@ public class StevesArmyMod {
     
     public static boolean teleportOnlyMode = false;
 
+    public StevesArmyMod() {
+        this(FMLJavaModLoadingContext.get());
+    }
+
     public StevesArmyMod(FMLJavaModLoadingContext context) {
         IEventBus modEventBus = context.getModEventBus();
 
