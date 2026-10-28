@@ -170,6 +170,11 @@ public class StevesArmyConfig {
     public static final ForgeConfigSpec.ConfigValue<java.util.List<? extends String>> ARMOR_AT_GUN_PATTERNS;
     public static final ForgeConfigSpec.ConfigValue<java.util.List<? extends String>> SIDEARM_GUN_PATTERNS;
     public static final ForgeConfigSpec.BooleanValue SOLDIER_DEATH_DROPS;
+    public static final ForgeConfigSpec.BooleanValue SOLDIER_DROP_GUNS;
+    public static final ForgeConfigSpec.BooleanValue SOLDIER_DROP_SELECTED_AMMO;
+    public static final ForgeConfigSpec.BooleanValue SOLDIER_DROP_CURIOS;
+    public static final ForgeConfigSpec.EnumValue<DeathInventoryDropMode> SOLDIER_REMAINING_INVENTORY_DROPS;
+    public enum DeathInventoryDropMode { POUCH, LOOSE, NONE }
     public static final ForgeConfigSpec.BooleanValue SWAP_SYNCS_HEALTH;
     public static final ForgeConfigSpec.EnumValue<ArmorDoctrineOverride> ARMOR_DOCTRINE_OVERRIDE;
     public static final ForgeConfigSpec.BooleanValue OCCUPANCY_VEHICLE_DETECTION;
@@ -1200,6 +1205,19 @@ BUILDER.pop();
             .comment("Soldiers drop guns and one carried ammo stack per gun ammo type loose",
                      "where they die, with remaining inventory in a supply pouch. Default: true.")
             .define("soldierDeathDrops", true);
+
+        SOLDIER_DROP_GUNS = BUILDER
+            .comment("Drop carried guns on soldier death. If false, guns are destroyed. Default: true.")
+            .define("soldierDropGuns", true);
+        SOLDIER_DROP_SELECTED_AMMO = BUILDER
+            .comment("Drop one carried ammo stack per gun ammo type on soldier death. If false, those stacks are destroyed. Default: true.")
+            .define("soldierDropSelectedAmmo", true);
+        SOLDIER_REMAINING_INVENTORY_DROPS = BUILDER
+            .comment("How to drop all other inventory: POUCH, LOOSE, or NONE (destroy). Default: POUCH.")
+            .defineEnum("soldierRemainingInventoryDrops", DeathInventoryDropMode.POUCH);
+        SOLDIER_DROP_CURIOS = BUILDER
+            .comment("Allow Curios accessories to drop according to their Curios drop rules. Default: true.")
+            .define("soldierDropCurios", true);
 
         SWAP_SYNCS_HEALTH = BUILDER
             .comment("Player-soldier body swap carries health with the body: swapping into",

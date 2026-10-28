@@ -1332,12 +1332,14 @@ public class SoldierEntity extends PathfinderMob implements Container {
         }
         List<ItemStack> guns = new ArrayList<>();
         boolean[] loose = new boolean[inventory.getContainerSize()];
+        boolean[] gunSlots = new boolean[inventory.getContainerSize()];
         for (int i = 0; i < inventory.getContainerSize(); i++) {
             ItemStack stack = inventory.getItem(i);
             InfiniteReserveAmmo.stripInfiniteReserveNbt(stack);
             if (GunIntegration.isGun(stack)) {
                 guns.add(stack);
                 loose[i] = true;
+                gunSlots[i] = true;
             }
         }
 
@@ -1372,8 +1374,15 @@ public class SoldierEntity extends PathfinderMob implements Container {
             ItemStack stack = inventory.getItem(i);
             if (stack.isEmpty()) continue;
             if (loose[i]) {
+                if (gunSlots[i] ? StevesArmyConfig.SOLDIER_DROP_GUNS.get()
+                        : StevesArmyConfig.SOLDIER_DROP_SELECTED_AMMO.get()) {
+                    spawnAtLocation(stack.copy());
+                }
+            } else if (StevesArmyConfig.SOLDIER_REMAINING_INVENTORY_DROPS.get()
+                    == StevesArmyConfig.DeathInventoryDropMode.LOOSE) {
                 spawnAtLocation(stack.copy());
-            } else {
+            } else if (StevesArmyConfig.SOLDIER_REMAINING_INVENTORY_DROPS.get()
+                    == StevesArmyConfig.DeathInventoryDropMode.POUCH) {
                 pouchInventory.setItem(i, stack.copy());
             }
         }
