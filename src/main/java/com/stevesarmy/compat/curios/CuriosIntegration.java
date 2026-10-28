@@ -102,8 +102,12 @@ final class CuriosIntegration {
     private static void drops(CurioDropsEvent event) {
         if (!SoldierCurios.available()) return;
         try {
-            if (event.getEntity() instanceof SoldierEntity && (!StevesArmyConfig.isSoldierDeathDropsEnabled()
-                    || !StevesArmyConfig.SOLDIER_DROP_CURIOS.get())) event.setCanceled(true);
+            if (event.getEntity() instanceof SoldierEntity soldier) {
+                boolean enemy = soldier instanceof com.stevesarmy.entity.EnemySoldierEntity;
+                boolean enabled = (enemy ? StevesArmyConfig.ENEMY_SOLDIER_DEATH_DROPS : StevesArmyConfig.SOLDIER_DEATH_DROPS).get();
+                boolean curios = (enemy ? StevesArmyConfig.ENEMY_SOLDIER_DROP_CURIOS : StevesArmyConfig.SOLDIER_DROP_CURIOS).get();
+                if (!enabled || !curios) event.setCanceled(true);
+            }
         } catch (RuntimeException | LinkageError error) { SoldierCurios.fail("death drops", error); }
     }
 }

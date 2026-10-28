@@ -1327,9 +1327,16 @@ public class SoldierEntity extends PathfinderMob implements Container {
     @Override
     protected void dropCustomDeathLoot(net.minecraft.world.damagesource.DamageSource source,
                                        int lootingLevel, boolean recentlyHit) {
-        if (!StevesArmyConfig.isSoldierDeathDropsEnabled()) {
+        boolean enemy = this instanceof EnemySoldierEntity;
+        if (!(enemy ? StevesArmyConfig.ENEMY_SOLDIER_DEATH_DROPS.get()
+                : StevesArmyConfig.isSoldierDeathDropsEnabled())) {
             return;
         }
+        boolean dropGuns = (enemy ? StevesArmyConfig.ENEMY_SOLDIER_DROP_GUNS : StevesArmyConfig.SOLDIER_DROP_GUNS).get();
+        boolean dropAmmo = (enemy ? StevesArmyConfig.ENEMY_SOLDIER_DROP_SELECTED_AMMO : StevesArmyConfig.SOLDIER_DROP_SELECTED_AMMO).get();
+        StevesArmyConfig.DeathInventoryDropMode remainingDrops = (enemy
+                ? StevesArmyConfig.ENEMY_SOLDIER_REMAINING_INVENTORY_DROPS
+                : StevesArmyConfig.SOLDIER_REMAINING_INVENTORY_DROPS).get();
         List<ItemStack> guns = new ArrayList<>();
         boolean[] loose = new boolean[inventory.getContainerSize()];
         boolean[] gunSlots = new boolean[inventory.getContainerSize()];
@@ -1374,15 +1381,12 @@ public class SoldierEntity extends PathfinderMob implements Container {
             ItemStack stack = inventory.getItem(i);
             if (stack.isEmpty()) continue;
             if (loose[i]) {
-                if (gunSlots[i] ? StevesArmyConfig.SOLDIER_DROP_GUNS.get()
-                        : StevesArmyConfig.SOLDIER_DROP_SELECTED_AMMO.get()) {
+                if (gunSlots[i] ? dropGuns : dropAmmo) {
                     spawnAtLocation(stack.copy());
                 }
-            } else if (StevesArmyConfig.SOLDIER_REMAINING_INVENTORY_DROPS.get()
-                    == StevesArmyConfig.DeathInventoryDropMode.LOOSE) {
+            } else if (remainingDrops == StevesArmyConfig.DeathInventoryDropMode.LOOSE) {
                 spawnAtLocation(stack.copy());
-            } else if (StevesArmyConfig.SOLDIER_REMAINING_INVENTORY_DROPS.get()
-                    == StevesArmyConfig.DeathInventoryDropMode.POUCH) {
+            } else if (remainingDrops == StevesArmyConfig.DeathInventoryDropMode.POUCH) {
                 pouchInventory.setItem(i, stack.copy());
             }
         }

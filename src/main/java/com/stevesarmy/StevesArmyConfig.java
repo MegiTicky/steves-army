@@ -174,6 +174,11 @@ public class StevesArmyConfig {
     public static final ForgeConfigSpec.BooleanValue SOLDIER_DROP_SELECTED_AMMO;
     public static final ForgeConfigSpec.BooleanValue SOLDIER_DROP_CURIOS;
     public static final ForgeConfigSpec.EnumValue<DeathInventoryDropMode> SOLDIER_REMAINING_INVENTORY_DROPS;
+    public static final ForgeConfigSpec.BooleanValue ENEMY_SOLDIER_DEATH_DROPS;
+    public static final ForgeConfigSpec.BooleanValue ENEMY_SOLDIER_DROP_GUNS;
+    public static final ForgeConfigSpec.BooleanValue ENEMY_SOLDIER_DROP_SELECTED_AMMO;
+    public static final ForgeConfigSpec.BooleanValue ENEMY_SOLDIER_DROP_CURIOS;
+    public static final ForgeConfigSpec.EnumValue<DeathInventoryDropMode> ENEMY_SOLDIER_REMAINING_INVENTORY_DROPS;
     public enum DeathInventoryDropMode { POUCH, LOOSE, NONE }
     public static final ForgeConfigSpec.BooleanValue SWAP_SYNCS_HEALTH;
     public static final ForgeConfigSpec.EnumValue<ArmorDoctrineOverride> ARMOR_DOCTRINE_OVERRIDE;
@@ -1202,8 +1207,8 @@ BUILDER.pop();
                 entry -> entry instanceof String);
 
         SOLDIER_DEATH_DROPS = BUILDER
-            .comment("Soldiers drop guns and one carried ammo stack per gun ammo type loose",
-                     "where they die, with remaining inventory in a supply pouch. Default: true.")
+            .comment("Enable friendly soldier death drops. Overrides the other friendly drop settings when false.",
+                     "Enemy soldiers use the separate enemySoldier settings. Default: true.")
             .define("soldierDeathDrops", true);
 
         SOLDIER_DROP_GUNS = BUILDER
@@ -1218,6 +1223,22 @@ BUILDER.pop();
         SOLDIER_DROP_CURIOS = BUILDER
             .comment("Allow Curios accessories to drop according to their Curios drop rules. Default: true.")
             .define("soldierDropCurios", true);
+
+        ENEMY_SOLDIER_DEATH_DROPS = BUILDER
+            .comment("Enable enemy soldier death drops. Overrides the other enemy drop settings when false. Default: true.")
+            .define("enemySoldierDeathDrops", true);
+        ENEMY_SOLDIER_DROP_GUNS = BUILDER
+            .comment("Drop enemy soldiers' carried guns. If false, guns are destroyed. Default: true.")
+            .define("enemySoldierDropGuns", true);
+        ENEMY_SOLDIER_DROP_SELECTED_AMMO = BUILDER
+            .comment("Drop one carried ammo stack per enemy gun ammo type. If false, those stacks are destroyed. Default: true.")
+            .define("enemySoldierDropSelectedAmmo", true);
+        ENEMY_SOLDIER_REMAINING_INVENTORY_DROPS = BUILDER
+            .comment("How to drop other enemy inventory: POUCH, LOOSE, or NONE (destroy). Default: POUCH.")
+            .defineEnum("enemySoldierRemainingInventoryDrops", DeathInventoryDropMode.POUCH);
+        ENEMY_SOLDIER_DROP_CURIOS = BUILDER
+            .comment("Allow enemy Curios accessories to follow their Curios drop rules. Default: true.")
+            .define("enemySoldierDropCurios", true);
 
         SWAP_SYNCS_HEALTH = BUILDER
             .comment("Player-soldier body swap carries health with the body: swapping into",
