@@ -1321,7 +1321,7 @@ public class SoldierEntity extends PathfinderMob implements Container {
     }
 
     /**
-     * Drop guns and one carried ammo stack per caliber loose, with the rest in
+     * Drop selected guns and one carried ammo stack per gun loose, with the rest in
      * a pouch. Only the persistent inventory is used, never mirrored equipment.
      */
     @Override
@@ -1338,15 +1338,19 @@ public class SoldierEntity extends PathfinderMob implements Container {
                 ? StevesArmyConfig.ENEMY_SOLDIER_REMAINING_INVENTORY_DROPS
                 : StevesArmyConfig.SOLDIER_REMAINING_INVENTORY_DROPS).get();
         List<ItemStack> guns = new ArrayList<>();
+        List<ItemStack> allGuns = new ArrayList<>();
         boolean[] loose = new boolean[inventory.getContainerSize()];
         boolean[] gunSlots = new boolean[inventory.getContainerSize()];
         for (int i = 0; i < inventory.getContainerSize(); i++) {
             ItemStack stack = inventory.getItem(i);
             InfiniteReserveAmmo.stripInfiniteReserveNbt(stack);
             if (GunIntegration.isGun(stack)) {
-                guns.add(stack);
-                loose[i] = true;
-                gunSlots[i] = true;
+                allGuns.add(stack);
+                if (guns.size() < StevesArmyConfig.SOLDIER_DEATH_GUN_LIMIT.get()) {
+                    guns.add(stack);
+                    loose[i] = true;
+                    gunSlots[i] = true;
+                }
             }
         }
 
@@ -1356,10 +1360,9 @@ public class SoldierEntity extends PathfinderMob implements Container {
             ammoBoxClass = Class.forName("com.tacz.guns.api.item.IAmmoBox");
         } catch (ClassNotFoundException ignored) {
         }
-        java.util.Set<String> ammoTypes = new java.util.HashSet<>();
         for (ItemStack gun : guns) {
             String ammoId = GunIntegration.getAmmoId(gun);
-            if (ammoId.isEmpty() || !ammoTypes.add(ammoId)) continue;
+            if (ammoId.isEmpty()) continue;
             int boxSlot = -1;
             int ammoSlot = -1;
             for (int i = 0; i < inventory.getContainerSize(); i++) {
@@ -1380,6 +1383,18 @@ public class SoldierEntity extends PathfinderMob implements Container {
         for (int i = 0; i < inventory.getContainerSize(); i++) {
             ItemStack stack = inventory.getItem(i);
             if (stack.isEmpty()) continue;
+            if (!loose[i] && GunIntegration.isGun(stack)) {
+                if (dropGuns && remainingDrops != StevesArmyConfig.DeathInventoryDropMode.NONE) {
+                    pouchInventory.setItem(i, stack.copy());
+                }
+                continue;
+            }
+            if (!loose[i] && allGuns.stream().anyMatch(gun -> GunIntegration.getAmmoCountForGun(gun, stack) > 0)) {
+                if (remainingDrops != StevesArmyConfig.DeathInventoryDropMode.NONE) {
+                    pouchInventory.setItem(i, stack.copy());
+                }
+                continue;
+            }
             if (loose[i]) {
                 if (gunSlots[i] ? dropGuns : dropAmmo) {
                     spawnAtLocation(stack.copy());

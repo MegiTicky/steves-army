@@ -170,6 +170,7 @@ public class StevesArmyConfig {
     public static final ForgeConfigSpec.ConfigValue<java.util.List<? extends String>> ARMOR_AT_GUN_PATTERNS;
     public static final ForgeConfigSpec.ConfigValue<java.util.List<? extends String>> SIDEARM_GUN_PATTERNS;
     public static final ForgeConfigSpec.BooleanValue SOLDIER_DEATH_DROPS;
+    public static final ForgeConfigSpec.IntValue SOLDIER_DEATH_GUN_LIMIT;
     public static final ForgeConfigSpec.BooleanValue SOLDIER_DROP_GUNS;
     public static final ForgeConfigSpec.BooleanValue SOLDIER_DROP_SELECTED_AMMO;
     public static final ForgeConfigSpec.BooleanValue SOLDIER_DROP_CURIOS;
@@ -1211,11 +1212,17 @@ BUILDER.pop();
                      "Enemy soldiers use the separate enemySoldier settings. Default: true.")
             .define("soldierDeathDrops", true);
 
+        SOLDIER_DEATH_GUN_LIMIT = BUILDER
+            .comment("Maximum guns and matching ammo stacks dropped loose per soldier, friendly or enemy.",
+                     "Excess guns and matching ammo go into a pouch unless remaining inventory is NONE.",
+                     "Zero selects no guns or ammo. Default: 2.")
+            .defineInRange("soldierDeathGunLimit", 2, 0, 1000);
+
         SOLDIER_DROP_GUNS = BUILDER
             .comment("Drop carried guns on soldier death. If false, guns are destroyed. Default: true.")
             .define("soldierDropGuns", true);
         SOLDIER_DROP_SELECTED_AMMO = BUILDER
-            .comment("Drop one carried ammo stack per gun ammo type on soldier death. If false, those stacks are destroyed. Default: true.")
+            .comment("Drop one matching carried ammo stack per selected gun. If false, selected stacks are destroyed. Default: true.")
             .define("soldierDropSelectedAmmo", true);
         SOLDIER_REMAINING_INVENTORY_DROPS = BUILDER
             .comment("How to drop all other inventory: POUCH, LOOSE, or NONE (destroy). Default: POUCH.")
@@ -1231,7 +1238,7 @@ BUILDER.pop();
             .comment("Drop enemy soldiers' carried guns. If false, guns are destroyed. Default: true.")
             .define("enemySoldierDropGuns", true);
         ENEMY_SOLDIER_DROP_SELECTED_AMMO = BUILDER
-            .comment("Drop one carried ammo stack per enemy gun ammo type. If false, those stacks are destroyed. Default: true.")
+            .comment("Drop one matching carried ammo stack per selected enemy gun. If false, selected stacks are destroyed. Default: true.")
             .define("enemySoldierDropSelectedAmmo", true);
         ENEMY_SOLDIER_REMAINING_INVENTORY_DROPS = BUILDER
             .comment("How to drop other enemy inventory: POUCH, LOOSE, or NONE (destroy). Default: POUCH.")
