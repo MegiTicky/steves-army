@@ -135,6 +135,13 @@ public class CombatDebugCommand {
                     .executes(ctx -> setCoverStateDebug(ctx, false))))
 
             // === SIDEARM FALLBACK ===
+            .then(Commands.literal("support")
+                .executes(ctx -> setSupportDebug(ctx, true))
+                .then(Commands.literal("on")
+                    .executes(ctx -> setSupportDebug(ctx, true)))
+                .then(Commands.literal("off")
+                    .executes(ctx -> setSupportDebug(ctx, false))))
+
             .then(Commands.literal("sidearm")
                 .executes(ctx -> setSidearmDebug(ctx, true))
                 .then(Commands.literal("on")
@@ -1234,6 +1241,17 @@ public class CombatDebugCommand {
         CoverStateDebugManager.setEnabled(player, enabled);
         source.sendSuccess(() -> Component.literal("Cover state-machine debug render: "
             + (enabled ? "ON" : "OFF")), false);
+        return 1;
+    }
+
+    private static int setSupportDebug(CommandContext<CommandSourceStack> context, boolean enabled) {
+        CommandSourceStack source = context.getSource();
+        if (!(source.getEntity() instanceof ServerPlayer player)) {
+            source.sendFailure(Component.literal("Player only command"));
+            return 0;
+        }
+        com.stevesarmy.combat.SupportDebugManager.setEnabled(player, enabled);
+        source.sendSuccess(() -> Component.literal("Support duty debug render: " + (enabled ? "ON" : "OFF")), false);
         return 1;
     }
 

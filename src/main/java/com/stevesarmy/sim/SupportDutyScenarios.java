@@ -25,12 +25,14 @@ public final class SupportDutyScenarios {
         String[] token = new String[1];
         int[] counts = new int[3];
         boolean[] targetedSupport = new boolean[1];
+        boolean[] diagnostic = new boolean[2];
         SimScenario.Builder builder = SimScenario.builder("support_duty_bystander")
             .description("A support stands in the path to a recipient; it must neither intercept nor receive a support pouch.")
             .duration(500).terrain(t -> t.floorOnly())
             .setup(ctx -> {
                 java.util.Arrays.fill(counts, 0);
                 targetedSupport[0] = false;
+                java.util.Arrays.fill(diagnostic, false);
                 token[0] = java.util.UUID.randomUUID().toString();
                 ctx.spawnAnchor(4, 0, 24);
                 SoldierEntity source = ctx.spawnFriendly(ModEntities.SUPPORT.get(), "support", 12, 0, 24, SquadMode.FOLLOW);
@@ -56,6 +58,10 @@ public final class SupportDutyScenarios {
                 SoldierEntity source = ctx.soldier("support");
                 SoldierEntity bystander = ctx.soldier("bystander");
                 targetedSupport[0] |= bystander.getUUID().equals(((SupportCoverGoal) source.getCoverTacticalGoal()).debugDuty().debugTarget());
+                SupportCoverGoal goal = (SupportCoverGoal) source.getCoverTacticalGoal();
+                String details = String.join(" | ", goal.debugDuty().debugLines(goal.debugPhase(), goal.debugCoverGate()));
+                diagnostic[0] |= details.contains("heals 0/<1 to 2");
+                diagnostic[1] |= details.contains("pouch: delivered");
                 counts[0] = apples(source, token[0]);
                 counts[1] = apples(bystander, token[0]);
                 counts[2] = apples(ctx.soldier("recipient"), token[0]);
@@ -63,6 +69,7 @@ public final class SupportDutyScenarios {
         }
         return builder.assertThat("support never targets or supplies the other support", v -> !targetedSupport[0] && counts[1] == 0)
             .assertThat("pouch reaches the intended recipient past the bystander", v -> counts[0] == 6 && counts[2] == 2)
+            .assertThat("diagnostics show the recipient deficit and delivered pouch", v -> diagnostic[0] && diagnostic[1])
             .build();
     }
 

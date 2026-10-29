@@ -73,6 +73,8 @@ public final class SupportDutyController {
     private int holdTicks;
     private int noProgressTicks;
     private ResupplyConfig currentConfig;
+    private String debugLastDecision = "not yet evaluated";
+    private String debugLastPouch = "none";
 
     private record ClaimEntry(UUID claimerId, long timestamp) {}
     private record TaskSelection(SupportTask task, LivingEntity target) {}
@@ -137,6 +139,50 @@ public final class SupportDutyController {
     public UUID debugTarget() { return currentTarget == null ? null : currentTarget.getUUID(); }
     public int debugDutyTicks() { return dutyTicks; }
     public int debugHoldTicks() { return holdTicks; }
+
+    /** Snapshot only: never starts a path, changes claims, or consumes cooldowns. */
+    public List<String> debugLines(String phase, boolean coverGate) {
+        ResupplyConfig config = loadConfig();
+        LivingEntity target = currentTarget;
+        if (target == null && soldier.level() instanceof ServerLevel level) {
+            AABB box = soldier.getBoundingBox().inflate(TASK_RADIUS);
+            List<LivingEntity> candidates = new ArrayList<>(level.getEntitiesOfClass(SoldierEntity.class, box,
+                t -> t.isAlive() && !(t instanceof SupportEntity) && soldier.isFriendlyTo(t)));
+            for (ServerPlayer player : level.players()) {
+                if (player.isAlive() && box.contains(player.position()) && soldier.isFriendlyTo(player)) candidates.add(player);
+            }
+            target = candidates.stream().min(Comparator.comparingDouble(soldier::distanceTo)).orElse(null);
+        }
+        List<String> lines = new ArrayList<>();
+        lines.add("SUPPORT " + phase + " / " + currentTask + " | last: " + debugLastDecision);
+        String work = soldier.isRecalling() ? "recalling" : soldier.isHealing() ? "healing"
+            : soldier.isUsingItem() ? "using item" : soldier.isPreparingOrReloading() ? "reloading" : canWork() ? "ready" : "unavailable";
+        lines.add("work " + work + " | recovered "
+            + soldier.getCoverBehaviorManager().getSuppressionTracker().isRecovered()
+            + " | cover gate " + coverGate + " | cooldown checks " + taskCooldownTicks + "/" + searchCooldownTicks);
+        if (target == null) {
+            lines.add("recipient: none in 32-block search box");
+        } else {
+            int ammo = countTotalAmmo(target);
+            int heals = countHealingItems(target);
+            ClaimEntry entry = CLAIMS.get(target.getUUID());
+            long now = GameClock.nowMs();
+            boolean claimed = entry != null && now - entry.timestamp() <= CLAIM_TIMEOUT_MS;
+            Long failed = TARGET_FAILURES.get(target.getUUID());
+            long deferMs = failed == null ? 0 : Math.max(0, TARGET_FAILURE_COOLDOWN_MS - (now - failed));
+            lines.add((currentTarget == null ? "nearest " : "target ") + target.getName().getString()
+                + " | distance " + String.format(java.util.Locale.ROOT, "%.1f", soldier.distanceTo(target))
+                + " | claimed " + claimed + " | defer " + ((deferMs + 999) / 1000) + "s");
+            lines.add("ammo " + ammo + "/<" + config.ammoThreshold() + " to " + config.resupplyToAmmo()
+                + " | heals " + heals + "/<" + config.healingThreshold() + " to " + config.resupplyToHeals());
+            lines.add("supply+space ammo " + supportHasCompatibleAmmoFor(target)
+                + " heals " + supportHasHealingItems(target) + " | throw lane " + (hasClearThrow(target) ? "clear" : "blocked"));
+        }
+        lines.add("pouch: " + debugLastPouch);
+        return lines;
+    }
+
+    public void debugPouchOutcome(String outcome) { debugLastPouch = outcome; }
 
     /** Remove only a completed fixture's own bookkeeping, without affecting live soldiers. */
     public static void clearSimState(java.util.Set<UUID> actors) {
@@ -250,7 +296,10 @@ public final class SupportDutyController {
         ResupplyConfig config = loadConfig();
 
         TaskSelection revive = findReviveTask();
-        if (revive != null) return revive;
+        if (revive != null) {
+            debugLastDecision = "revive selected " + revive.target().getName().getString();
+            return revive;
+        }
 
         TaskSelection resupply = findResupplyTask(config);
         if (resupply != null) return resupply;
@@ -270,10 +319,13 @@ public final class SupportDutyController {
 
     private TaskSelection findResupplyTask(ResupplyConfig config) {
         List<LivingEntity> candidates = findTargetsNeedingResupply(config);
+        debugLastDecision = candidates.isEmpty() ? "no recipient below threshold" : "no serviceable recipient";
         for (LivingEntity target : candidates) {
-            if (isClaimed(target) || isOnFailureCooldown(target)) continue;
-            if (!canServe(target, config)) continue;
-            if (!isDutyApproachSafe(target)) continue;
+            if (isClaimed(target)) { debugLastDecision = "recipient claimed"; continue; }
+            if (isOnFailureCooldown(target)) { debugLastDecision = "recipient deferred"; continue; }
+            if (!canServe(target, config)) { debugLastDecision = "no compatible supply or capacity"; continue; }
+            if (!isDutyApproachSafe(target)) { debugLastDecision = "blocked, unsafe, or unreachable"; continue; }
+            debugLastDecision = "selected " + target.getName().getString();
             return new TaskSelection(SupportTask.RESUPPLY, target);
         }
         return null;
@@ -532,6 +584,7 @@ public final class SupportDutyController {
             if (soldier.getNavigation().isDone()) noProgressTicks++;
             else noProgressTicks = 0;
             if (noProgressTicks >= NO_PROGRESS_ABORT_TICKS) {
+                debugLastDecision = "aborted: no path progress";
                 finish(REVIVE_COOLDOWN_TICKS);
                 return DutyResult.ABORTED;
             }
@@ -587,6 +640,7 @@ public final class SupportDutyController {
                 noProgressTicks = 0;
             }
             if (noProgressTicks >= NO_PROGRESS_ABORT_TICKS) {
+                debugLastDecision = "aborted: no resupply path progress";
                 recordTargetFailure(currentTarget);
                 finish(RESUPPLY_COOLDOWN_TICKS);
                 return DutyResult.ABORTED;
@@ -608,11 +662,13 @@ public final class SupportDutyController {
 
         ResupplyConfig config = currentConfig != null ? currentConfig : loadConfig();
         if (!needsResupply(currentTarget, config)) {
+            debugLastDecision = "recipient no longer needs supplies";
             finish(0);
             return DutyResult.COMPLETE;
         }
 
         if (!canServe(currentTarget, config) || !hasClearThrow(currentTarget)) {
+            debugLastDecision = "aborted: supply, capacity, or throw lane";
             recordTargetFailure(currentTarget);
             finish(RESUPPLY_COOLDOWN_TICKS);
             return DutyResult.ABORTED;
@@ -628,11 +684,14 @@ public final class SupportDutyController {
 
         List<ItemStack> payload = buildPayload(currentTarget, config);
         if (payload.isEmpty()) {
+            debugLastDecision = "aborted: empty payload";
             finish(RESUPPLY_COOLDOWN_TICKS);
             return DutyResult.ABORTED;
         }
 
         spawnPouch(currentTarget, payload);
+        debugLastDecision = "pouch thrown to " + currentTarget.getName().getString();
+        debugLastPouch = "in flight to " + currentTarget.getName().getString();
         syncInventory();
         finish(RESUPPLY_COOLDOWN_TICKS);
         return DutyResult.COMPLETE;

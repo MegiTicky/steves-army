@@ -44,6 +44,9 @@ public final class SupportCoverGoal extends Goal implements CoverGoalController 
     /** Read-only state for simulator diagnostics. */
     public String debugPhase() { return phase.name(); }
     public SupportDutyController debugDuty() { return supportDuty; }
+    public boolean debugCoverGate() {
+        return soldier.getCoverBehaviorManager().isInCover() || canWorkOutsideCover();
+    }
 
     @Override
     public boolean canUse() {
