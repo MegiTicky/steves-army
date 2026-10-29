@@ -4,6 +4,7 @@ import com.stevesarmy.inventory.PouchContainer;
 import com.stevesarmy.registry.ModEntities;
 import com.stevesarmy.registry.ModItems;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.nbt.CompoundTag;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
@@ -22,10 +23,8 @@ import javax.annotation.Nullable;
 import java.util.UUID;
 
 /**
- * Snowball-style throw of a supply pouch. A direct hit on a player or soldier
- * delivers the whole contents (soldiers get their slot layout restored);
- * anything else drops the pouch as a ground item that can be picked up and
- * opened later.
+ * Player-thrown pouches use physical collisions. Support throws are cosmetic;
+ * their contents are managed independently by SupportDeliveryQueue.
  */
 public class SupplyPouchProjectile extends ThrowableItemProjectile {
     /** Homing assist constants, carried over from the retired ResupplyPouchEntity. */
@@ -47,19 +46,40 @@ public class SupplyPouchProjectile extends ThrowableItemProjectile {
     }
 
     /** Medic throw: the pouch homes toward the staged ally until delivered. */
-    public static SupplyPouchProjectile forTarget(Level level, LivingEntity thrower, LivingEntity target, ItemStack pouchStack) {
+    public static SupplyPouchProjectile forTarget(Level level, LivingEntity thrower, LivingEntity target) {
         SupplyPouchProjectile pouch = new SupplyPouchProjectile(level, thrower);
-        pouch.setItem(pouchStack.copy());
+        pouch.setItem(new ItemStack(ModItems.SUPPLY_POUCH.get()));
         pouch.homingTargetId = target.getUUID();
+        pouch.setNoGravity(true);
         return pouch;
     }
 
     @Override
     public void tick() {
         if (!level().isClientSide) {
+            if (homingTargetId != null && tickCount >= SupportDeliveryQueue.DELAY_TICKS) {
+                discard();
+                return;
+            }
             homeTowardTarget();
         }
         super.tick();
+    }
+
+    @Override
+    public void addAdditionalSaveData(CompoundTag tag) {
+        super.addAdditionalSaveData(tag);
+        if (homingTargetId != null) tag.putUUID("SupportVisualTarget", homingTargetId);
+        tag.putInt("SupportVisualAge", tickCount);
+    }
+
+    @Override
+    public void readAdditionalSaveData(CompoundTag tag) {
+        super.readAdditionalSaveData(tag);
+        if (tag.hasUUID("SupportVisualTarget")) {
+            homingTargetId = tag.getUUID("SupportVisualTarget");
+            tickCount = tag.getInt("SupportVisualAge");
+        }
     }
 
     private void homeTowardTarget() {
@@ -106,18 +126,14 @@ public class SupplyPouchProjectile extends ThrowableItemProjectile {
 
     @Override
     protected void onHit(HitResult result) {
+        if (homingTargetId != null) return;
         super.onHit(result);
         if (level().isClientSide) {
             return;
         }
         if (result.getType() == HitResult.Type.ENTITY && delivered) {
-            recordSupportOutcome("delivered");
             discard();
             return;
-        }
-        if (homingTargetId != null && getOwner() instanceof SupportEntity) {
-            com.stevesarmy.entity.ai.SupportDutyController.noteFailedPouch(homingTargetId);
-            recordSupportOutcome(result.getType() == HitResult.Type.BLOCK ? "dropped: block hit" : "dropped: recipient unavailable or full");
         }
         // Non-deliverable entity or block: land as a ground pouch anyone can pick up.
         Vec3 dropPos = result.getType() == HitResult.Type.BLOCK
@@ -129,15 +145,11 @@ public class SupplyPouchProjectile extends ThrowableItemProjectile {
         discard();
     }
 
-    private void recordSupportOutcome(String outcome) {
-        if (homingTargetId != null && getOwner() instanceof SupportEntity support
-            && support.getCoverTacticalGoal() instanceof com.stevesarmy.entity.ai.SupportCoverGoal goal) {
-            goal.debugDuty().debugPouchOutcome(outcome);
-        }
+    private boolean deliverTo(Entity target) {
+        return deliverContents(target, getItem());
     }
 
-    private boolean deliverTo(Entity target) {
-        ItemStack pouch = getItem();
+    public static boolean deliverContents(Entity target, ItemStack pouch) {
         var contents = PouchContainer.unpackContents(pouch);
         if (contents.isEmpty()) {
             // Nothing to give — report as non-delivery so the pouch lands on
@@ -161,8 +173,8 @@ public class SupplyPouchProjectile extends ThrowableItemProjectile {
         return false;
     }
 
-    private void dropBeside(ItemStack stack, Entity target) {
-        ItemEntity entity = new ItemEntity(level(), target.getX(), target.getY() + 0.5, target.getZ(), stack);
-        level().addFreshEntity(entity);
+    private static void dropBeside(ItemStack stack, Entity target) {
+        ItemEntity entity = new ItemEntity(target.level(), target.getX(), target.getY() + 0.5, target.getZ(), stack);
+        target.level().addFreshEntity(entity);
     }
 }

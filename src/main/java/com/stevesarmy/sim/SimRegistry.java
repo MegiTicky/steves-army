@@ -102,6 +102,8 @@ public final class SimRegistry {
             SupportDutyScenarios.create("blocked_pouch", 19, 16, false, true, false),
             SupportDutyScenarios.create("late_block", 15, 7, false, false, false),
             SupportDutyScenarios.create("late_full", 15, 7, false, false, false),
+            SupportDutyScenarios.create("visual_missing", 15, 7, false, false, false),
+            SupportDutyScenarios.create("target_gone", 15, 7, false, false, false),
             SupportDutyScenarios.create("threshold_met", 15, 16, false, false, false),
             SupportDutyScenarios.create("full_inventory", 15, 16, false, false, false),
             SupportDutyScenarios.create("partial_inventory", 15, 16, false, false, false),

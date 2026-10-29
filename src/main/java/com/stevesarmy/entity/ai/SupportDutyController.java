@@ -7,6 +7,7 @@ import com.stevesarmy.combat.cover.CoverBehaviorManager;
 import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.entity.SupplyPouchProjectile;
 import com.stevesarmy.entity.SupportEntity;
+import com.stevesarmy.entity.SupportDeliveryQueue;
 import com.stevesarmy.inventory.PouchContainer;
 import com.stevesarmy.inventory.SoldierInventory;
 import com.stevesarmy.network.NetworkHandler;
@@ -172,7 +173,8 @@ public final class SupportDutyController {
             long deferMs = failed == null ? 0 : Math.max(0, TARGET_FAILURE_COOLDOWN_MS - (now - failed));
             lines.add((currentTarget == null ? "nearest " : "target ") + target.getName().getString()
                 + " | distance " + String.format(java.util.Locale.ROOT, "%.1f", soldier.distanceTo(target))
-                + " | claimed " + claimed + " | defer " + ((deferMs + 999) / 1000) + "s");
+                + " | claimed " + claimed + " | pending " + (soldier.level() instanceof ServerLevel level && SupportDeliveryQueue.get(level).hasTarget(target.getUUID()))
+                + " | defer " + ((deferMs + 999) / 1000) + "s");
             lines.add("ammo " + ammo + "/<" + config.ammoThreshold() + " to " + config.resupplyToAmmo()
                 + " | heals " + heals + "/<" + config.healingThreshold() + " to " + config.resupplyToHeals());
             lines.add("supply+space ammo " + supportHasCompatibleAmmoFor(target)
@@ -322,6 +324,9 @@ public final class SupportDutyController {
         debugLastDecision = candidates.isEmpty() ? "no recipient below threshold" : "no serviceable recipient";
         for (LivingEntity target : candidates) {
             if (isClaimed(target)) { debugLastDecision = "recipient claimed"; continue; }
+            if (soldier.level() instanceof ServerLevel level && SupportDeliveryQueue.get(level).hasTarget(target.getUUID())) {
+                debugLastDecision = "delivery already pending"; continue;
+            }
             if (isOnFailureCooldown(target)) { debugLastDecision = "recipient deferred"; continue; }
             if (!canServe(target, config)) { debugLastDecision = "no compatible supply or capacity"; continue; }
             if (!isDutyApproachSafe(target)) { debugLastDecision = "blocked, unsafe, or unreachable"; continue; }
@@ -827,7 +832,8 @@ public final class SupportDutyController {
 
         Vec3 origin = soldier.getEyePosition();
         ItemStack pouchStack = PouchContainer.packContents(payload);
-        SupplyPouchProjectile pouch = SupplyPouchProjectile.forTarget(level, soldier, target, pouchStack);
+        SupportDeliveryQueue.get(level).enqueue(soldier, target, pouchStack);
+        SupplyPouchProjectile pouch = SupplyPouchProjectile.forTarget(level, soldier, target);
 
         Vec3 targetPos = target.getEyePosition();
         Vec3 dir = targetPos.subtract(origin).normalize();

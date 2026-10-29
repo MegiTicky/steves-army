@@ -2,6 +2,7 @@ package com.stevesarmy.sim;
 
 import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.entity.SupplyPouchProjectile;
+import com.stevesarmy.entity.SupportDeliveryQueue;
 import com.stevesarmy.entity.ai.SupportCoverGoal;
 import com.stevesarmy.inventory.PouchContainer;
 import com.stevesarmy.inventory.SoldierInventory;
@@ -46,6 +47,7 @@ public final class SupportDutyScenarios {
                 OwnedSoldierRegistry.get(ctx.level.getServer()).setResupplyConfig(owner, new ResupplyConfig(0, 1, 0, 2));
                 ctx.cleanupActions.add(() -> {
                     com.stevesarmy.entity.ai.SupportDutyController.clearSimState(java.util.Set.of(source.getUUID(), bystander.getUUID(), recipient.getUUID()));
+                    SupportDeliveryQueue.get(ctx.level).clearSimSources(java.util.Set.of(source.getUUID()));
                     OwnedSoldierRegistry.get(ctx.level.getServer()).clearSimResupplyConfig(owner);
                     ctx.level.getEntitiesOfClass(SupplyPouchProjectile.class, fixtureArea(ctx)).stream()
                         .filter(p -> p.getOwner() == source).forEach(SupplyPouchProjectile::discard);
@@ -105,6 +107,7 @@ public final class SupportDutyScenarios {
                 OwnedSoldierRegistry.get(ctx.level.getServer()).setResupplyConfig(owner, new ResupplyConfig(20, 0, 60, 0));
                 ctx.cleanupActions.add(() -> {
                     com.stevesarmy.entity.ai.SupportDutyController.clearSimState(java.util.Set.of(support.getUUID(), recipient.getUUID()));
+                    SupportDeliveryQueue.get(ctx.level).clearSimSources(java.util.Set.of(support.getUUID()));
                     OwnedSoldierRegistry.get(ctx.level.getServer()).clearSimResupplyConfig(owner);
                     ctx.level.getEntitiesOfClass(SupplyPouchProjectile.class, fixtureArea(ctx)).stream()
                         .filter(p -> p.getOwner() == support).forEach(SupplyPouchProjectile::discard);
@@ -230,6 +233,7 @@ public final class SupportDutyScenarios {
                     java.util.Set<java.util.UUID> ids = new java.util.HashSet<>();
                     ctx.friendlies.forEach(s -> ids.add(s.getUUID()));
                     com.stevesarmy.entity.ai.SupportDutyController.clearSimState(ids);
+                    SupportDeliveryQueue.get(ctx.level).clearSimSources(ids);
                     OwnedSoldierRegistry.get(ctx.level.getServer()).clearSimResupplyConfig(owner);
                     ctx.level.getEntitiesOfClass(SupplyPouchProjectile.class, fixtureArea(ctx)).stream()
                         .filter(p -> p.getOwner() != null && ids.contains(p.getOwner().getUUID()))
@@ -275,6 +279,9 @@ public final class SupportDutyScenarios {
         boolean interrupt = name.equals("interrupted");
         boolean lateBlock = name.equals("late_block");
         boolean lateFull = name.equals("late_full");
+        boolean visualMissing = name.equals("visual_missing");
+        boolean targetGone = name.equals("target_gone");
+        boolean[] queuePersisted = new boolean[1];
         boolean[] obstacleAdded = new boolean[1];
         boolean coverless = name.equals("coverless");
         boolean quiet = name.equals("quiet") || coverless;
@@ -300,6 +307,7 @@ public final class SupportDutyScenarios {
                 java.util.Arrays.fill(counts, 0);
                 java.util.Arrays.fill(interruption, false);
                 obstacleAdded[0] = false;
+                queuePersisted[0] = false;
                 ctx.spawnAnchor(4, 0, 24);
                 AABB area = fixtureArea(ctx);
                 token[0] = java.util.UUID.randomUUID().toString();
@@ -337,6 +345,7 @@ public final class SupportDutyScenarios {
                     ctx.friendlies.forEach(s -> ids.add(s.getUUID()));
                     if (player[0] != null) ids.add(player[0].getUUID());
                     com.stevesarmy.entity.ai.SupportDutyController.clearSimState(ids);
+                    SupportDeliveryQueue.get(ctx.level).clearSimSources(ids);
                     OwnedSoldierRegistry.get(ctx.level.getServer()).clearSimResupplyConfig(ownerId);
                     ctx.level.getEntitiesOfClass(SupplyPouchProjectile.class, area).stream()
                         .filter(p -> p.getOwner() == support).forEach(SupplyPouchProjectile::discard);
@@ -366,13 +375,22 @@ public final class SupportDutyScenarios {
                 else if (interruption[1] && active) interruption[2] = true;
             });
         }
-        if (lateBlock || lateFull) {
+        if (lateBlock || lateFull || visualMissing || targetGone) {
             for (int tick = 1; tick <= 800; tick++) {
                 builder.action(tick, "block a pouch after launch", ctx -> {
                     if (obstacleAdded[0]) return;
                     SoldierEntity support = ctx.soldier("support");
                     var pouches = ctx.level.getEntitiesOfClass(SupplyPouchProjectile.class, fixtureArea(ctx), p -> p.getOwner() == support);
                     if (pouches.isEmpty()) return;
+                    var queue = SupportDeliveryQueue.get(ctx.level);
+                    queuePersisted[0] = SupportDeliveryQueue.load(queue.save(new net.minecraft.nbt.CompoundTag()))
+                        .hasTarget(ctx.soldier("recipient").getUUID());
+                    if (visualMissing || targetGone) {
+                        if (visualMissing) pouches.forEach(SupplyPouchProjectile::discard);
+                        else ctx.soldier("recipient").discard();
+                        obstacleAdded[0] = true;
+                        return;
+                    }
                     if (lateFull) {
                         SoldierInventory inventory = ctx.soldier("recipient").getSoldierInventory();
                         for (int i = SoldierInventory.SLOT_GENERAL_START; i < SoldierInventory.INVENTORY_SIZE; i++) {
@@ -404,12 +422,15 @@ public final class SupportDutyScenarios {
             .assertThat(noSupply || unsafe || thresholdMet || fullInventory ? "no duty starts when no eligible recipient can be served" : "support selects a serviceable recipient",
                 view -> noSupply || unsafe || thresholdMet || fullInventory ? !observed[1] : blocked || observed[1])
             .assertThat("recipient receives supplies only when delivery is possible",
-                view -> lateBlock || lateFull ? !observed[2] : partialInventory ? counts[1] == 64 && counts[0] == 7 : thresholdMet ? counts[1] == 2 && counts[0] == 8 : noSupply || unsafe || fullInventory ? !observed[2]
+                view -> lateFull || targetGone ? !observed[2] : partialInventory ? counts[1] == 64 && counts[0] == 7 : thresholdMet ? counts[1] == 2 && counts[0] == 8 : noSupply || unsafe || fullInventory ? !observed[2]
                     : blocked ? !observed[1] || observed[2] : observed[2])
             .assertThat("blocked or full-recipient deliveries do not expend supplies on the ground",
                 view -> !(blocked || fullInventory) || counts[3] == 0)
-            .assertThat("a pouch that cannot deliver in flight is not repeatedly thrown", view -> !(lateBlock || lateFull)
+            .assertThat("a pouch that cannot deliver is preserved and not repeatedly thrown", view -> !(lateFull || targetGone)
                 || (obstacleAdded[0] && counts[3] == 2 && counts[0] == 6))
+            .assertThat("delivery survives a new obstacle or lost visual", view -> !(lateBlock || visualMissing)
+                || (obstacleAdded[0] && counts[1] == 2 && counts[3] == 0))
+            .assertThat("pending delivery survives serialization", view -> !(lateBlock || lateFull || visualMissing || targetGone) || queuePersisted[0])
             .assertThat("healing items conserved in inventories, flight, or ground pouch",
                 view -> counts[0] + counts[1] + counts[2] + counts[3] == (noSupply ? 0 : partialInventory ? 71 : thresholdMet ? 10 : 8))
             .assertThat("support returns to cover after completed delivery when threatened", view -> quiet || !observed[2] || observed[3])
@@ -432,8 +453,8 @@ public final class SupportDutyScenarios {
         if (counts[1] >= deliveredCount) observed[2] = true;
         if (observed[2] && covered) observed[3] = true;
         AABB area = fixtureArea(ctx);
-        counts[2] = ctx.level.getEntitiesOfClass(SupplyPouchProjectile.class, area).stream()
-            .filter(p -> p.getOwner() == support).mapToInt(p -> fixtureItemCount(p.getItem(), token)).sum();
+        counts[2] = SupportDeliveryQueue.get(ctx.level).pendingForSource(support.getUUID()).stream()
+            .mapToInt(p -> fixtureItemCount(p, token)).sum();
         counts[3] = ctx.level.getEntitiesOfClass(ItemEntity.class, area).stream()
             .mapToInt(item -> fixtureItemCount(item.getItem(), token)).sum();
         if (tick % 50 == 0) {

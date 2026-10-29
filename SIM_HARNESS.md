@@ -334,8 +334,12 @@ but the generic ExposedWhileHiding detector flagged the support's later cover.
 The existing `support_rear_cover_pick` passed; `support_squad_fight` failed
 its cover and concealment assertions. See individual reports for evidence.
 
-The fixed support rejects blocked throws and recipients with no inventory space;
-a pouch blocked after launch drops intact and delays another attempt.
+The fixed support rejects blocked throws and recipients with no inventory space.
+Support throws queue their actual contents server-side; a cosmetic pouch flies
+independently and delivery occurs after 12 ticks even if the visual is blocked
+or removed. A recipient that becomes unavailable or full causes the sealed pouch
+to drop intact. The `visual_missing`, `target_gone`, `late_block`, and `late_full`
+scenarios exercise these outcomes and pending-delivery serialization.
 It can start duty without cover when there is no active threat or movement order.
 `support_revive_8` and `support_revive_22` use fake-player bleeding state to
 test direct approach and duty completion; `support_ammo_primary` and
