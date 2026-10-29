@@ -311,6 +311,40 @@ the `dangerCoverWeight`/`dangerClaimMaxScore` config keys no longer exist.
 Y_BASE by crashed sessions at startup — strays poison every heightmap
 query downstream. Fixtures now stack 5Y apart (32 scenarios must fit
 under the build limit).
+## Support duty scenarios
+
+The `support_duty_*` scenarios use the real support goal and real tagged golden
+apples, inventory and supply pouch physics. Their text and JSON reports include
+sampled duty phase, task, target, suppression, position and item counts. Items
+are tagged per fixture so cleanup and conservation checks do not include other
+players' items. The player fixture uses a Forge fake server player.
+
+`close`, `quiet`, `coverless`, `distant_safe`, `distant_unsafe`, `interrupted`, `no_supply`,
+`threshold_met`, `full_inventory`, `blocked_pouch`, `player`, `two_supports`
+and `two_recipients` cover delivery, safety, interruption and coordination.
+Failures are ordinary FAILs, not expected-fail scenarios. The two coordination
+fixtures sample target claims separately from the general state timeline.
+
+Findings from the 2026-10-29 fast-tick and 20 TPS runs: `blocked_pouch` repeatedly throws
+into the intervening wall, and `full_inventory` repeatedly sends items to a
+recipient with no free slots. In both, all eight support items eventually end
+up on the ground and the recipient remains empty. `player` delivers two items,
+but the generic ExposedWhileHiding detector flagged the support's later cover.
+The existing `support_rear_cover_pick` passed; `support_squad_fight` failed
+its cover and concealment assertions. See individual reports for evidence.
+
+The default userdev server does not load TaCZ or PlayerRevive. These fixtures
+do not test actual gun/ammo compatibility or a bleeding player; the simulated
+gun uses virtual magazines and cannot prove inventory-ammo delivery. The
+reports explicitly note when PlayerRevive is unavailable. Real integration
+coverage requires a compatible runtime with the respective optional mods and
+an actual bleeding-player fixture. Unreachable-route and incompatible-ammo
+cases are not yet covered by these scenarios.
+The `quiet` fixture has perimeter walls; `coverless` uses only a floor.
+In fast-tick and 20 TPS `coverless` runs, an unsuppressed support never started duty
+despite a nearby ally needing items and holding eight items throughout. The
+support goal currently attempts duty only while its cover manager is in cover.
+
 ## Scenarios (v1 — cover/suppression strand)
 
 | Scenario | What it reproduces |

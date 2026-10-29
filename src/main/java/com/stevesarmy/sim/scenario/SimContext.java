@@ -33,6 +33,8 @@ public final class SimContext {
     public final List<SoldierEntity> friendlies = new ArrayList<>();
     public final List<EnemySoldierEntity> enemies = new ArrayList<>();
     public final Map<String, SoldierEntity> byLabel = new LinkedHashMap<>();
+    public final List<String> diagnostics = new ArrayList<>();
+    public final List<Runnable> cleanupActions = new ArrayList<>();
     public TargetEntity anchor;
     /** Every anchor this scenario spawned — discardAll must remove all of them,
      * not just the last (a leaked anchor persists in run/world and pollutes
@@ -435,6 +437,8 @@ public final class SimContext {
     }
 
     public void discardAll() {
+        for (Runnable cleanup : cleanupActions) cleanup.run();
+        cleanupActions.clear();
         for (SoldierEntity s : friendlies) s.discard();
         for (LivingEntity e : enemies) e.discard();
         for (TargetEntity a : anchors) a.discard();

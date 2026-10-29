@@ -111,6 +111,11 @@ public class OwnedSoldierRegistry extends SavedData {
         setDirty();
     }
 
+    /** Drop configuration belonging to a disposable simulator owner. */
+    public void clearSimResupplyConfig(UUID ownerId) {
+        if (resupplyConfigs.remove(ownerId) != null) setDirty();
+    }
+
     public void clearPendingRole(UUID soldierId) {
         Entry entry = entries.get(soldierId);
         if (entry != null && entry.pendingRole >= 0) {

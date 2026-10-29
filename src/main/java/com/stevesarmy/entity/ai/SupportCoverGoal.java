@@ -41,6 +41,10 @@ public final class SupportCoverGoal extends Goal implements CoverGoalController 
         return coverController;
     }
 
+    /** Read-only state for simulator diagnostics. */
+    public String debugPhase() { return phase.name(); }
+    public SupportDutyController debugDuty() { return supportDuty; }
+
     @Override
     public boolean canUse() {
         if (phase == SupportPhase.DUTY) return soldier.isAlive();

@@ -67,6 +67,12 @@ public final class SimReportWriter {
         }
         sb.append('\n');
 
+        if (!result.diagnostics.isEmpty()) {
+            sb.append("SCENARIO DIAGNOSTICS\n--------------------\n");
+            for (String line : result.diagnostics) sb.append(line).append('\n');
+            sb.append('\n');
+        }
+
         if (!result.assertionFailures.isEmpty()) {
             sb.append("ASSERTION FAILURES\n");
             sb.append("------------------\n");
@@ -183,6 +189,11 @@ public final class SimReportWriter {
         sb.append("  \"enemyHealthEnd\": ").append(result.enemyHealthEnd).append(",\n");
         sb.append("  \"tickMetrics\": ").append(result.tickMetrics.json()).append(",\n");
         sb.append("  \"performanceReport\": \"").append(escape(result.performanceReport)).append("\",\n");
+        sb.append("  \"diagnostics\": [");
+        for (int i = 0; i < result.diagnostics.size(); i++) {
+            sb.append(i > 0 ? ", " : "").append('"').append(escape(result.diagnostics.get(i))).append('"');
+        }
+        sb.append("],\n");
         sb.append("  \"assertionFailures\": [");
         for (int i = 0; i < result.assertionFailures.size(); i++) {
             sb.append(i > 0 ? ", " : "").append('"').append(escape(result.assertionFailures.get(i))).append('"');

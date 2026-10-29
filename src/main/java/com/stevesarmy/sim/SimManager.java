@@ -616,6 +616,7 @@ public final class SimManager {
                 result.assertionFailures.add("assertion crashed: " + assertion.description() + " (" + e + ")");
             }
         }
+        result.diagnostics.addAll(context.diagnostics);
 
         // post-run orphan check: reservations outliving any in-cover claimant
         int orphaned = 0;

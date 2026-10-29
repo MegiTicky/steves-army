@@ -131,6 +131,18 @@ public final class SupportDutyController {
         return currentTask != SupportTask.IDLE && currentTarget != null;
     }
 
+    /** Read-only state for simulator diagnostics. */
+    public String debugTask() { return currentTask.name(); }
+    public UUID debugTarget() { return currentTarget == null ? null : currentTarget.getUUID(); }
+    public int debugDutyTicks() { return dutyTicks; }
+    public int debugHoldTicks() { return holdTicks; }
+
+    /** Remove only a completed fixture's own bookkeeping, without affecting live soldiers. */
+    public static void clearSimState(java.util.Set<UUID> actors) {
+        CLAIMS.entrySet().removeIf(e -> actors.contains(e.getKey()) || actors.contains(e.getValue().claimerId()));
+        TARGET_FAILURES.keySet().removeIf(actors::contains);
+    }
+
     public void start() {
         pathRecalcTicks = 0;
         reviveProgressTicks = 0;
