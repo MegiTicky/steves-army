@@ -47,7 +47,10 @@ public class RespawnTickHandler {
         
         List<SoldierEntity> nearbySoldiers = level.getEntitiesOfClass(
             SoldierEntity.class, searchBox,
-            s -> s.isAlive() && s.isFriendlyTo(downedPlayer));
+            s -> s.isAlive() && s.isFriendlyTo(downedPlayer)
+                && !(s.getCoverTacticalGoal() instanceof com.stevesarmy.entity.ai.SupportCoverGoal goal
+                    && "REVIVING".equals(goal.debugDuty().debugTask())
+                    && downedPlayer.getUUID().equals(goal.debugDuty().debugTarget())));
         
         if (nearbySoldiers.isEmpty()) return;
         

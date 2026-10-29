@@ -146,6 +146,7 @@ public final class SupportDutyScenarios {
         var player = new net.minecraftforge.common.util.FakePlayer[1];
         boolean[] selected = new boolean[1];
         float[] progress = new float[1];
+        boolean[] posture = new boolean[2];
         double[] closest = new double[1];
         SimScenario.Builder builder = SimScenario.builder("support_revive_" + distance)
             .description("Normal support goal approaches and revives a fake player; bleeding capability is simulated, not PlayerRevive integration.")
@@ -153,6 +154,7 @@ public final class SupportDutyScenarios {
             .terrain(t -> t.floorOnly())
             .setup(ctx -> {
                 selected[0] = false;
+                java.util.Arrays.fill(posture, false);
                 progress[0] = 0;
                 closest[0] = Double.MAX_VALUE;
                 SoldierEntity support = ctx.spawnFriendly(ModEntities.SUPPORT.get(), "support", 12, 0, 24, SquadMode.FOLLOW);
@@ -182,6 +184,8 @@ public final class SupportDutyScenarios {
                 selected[0] |= "REVIVING".equals(goal.debugDuty().debugTask());
                 closest[0] = Math.min(closest[0], support.distanceTo(player[0]));
                 progress[0] = com.stevesarmy.entity.ai.SupportDutyController.simReviveProgress(player[0].getUUID());
+                if (progress[0] > 0 && progress[0] < 100 && support.isLowCrouching()) posture[0] = true;
+                if (progress[0] >= 100 && !support.isLowCrouching()) posture[1] = true;
                 if (at % 100 == 0) ctx.diagnostics.add("t" + at + " task=" + goal.debugDuty().debugTask()
                     + " distance=" + support.distanceTo(player[0]) + " reviveProgress=" + progress[0]
                     + " friendly=" + support.isFriendlyTo(player[0]) + " listed=" + ctx.level.players().contains(player[0])
@@ -194,6 +198,7 @@ public final class SupportDutyScenarios {
         return builder.assertThat("support selects the bleeding player", v -> selected[0])
             .assertThat("support approaches within revive range", v -> closest[0] <= 3.0)
             .assertThat("simulated revive reaches full progress", v -> progress[0] >= 100f)
+            .assertThat("support is prone during revival and releases posture afterward", v -> posture[0] && posture[1])
             .build();
     }
 

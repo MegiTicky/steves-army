@@ -8,6 +8,7 @@ import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.entity.SupplyPouchProjectile;
 import com.stevesarmy.entity.SupportEntity;
 import com.stevesarmy.entity.SupportDeliveryQueue;
+import com.stevesarmy.entity.ai.GrenadeTacticalController.SmokeRequestResult;
 import com.stevesarmy.inventory.PouchContainer;
 import com.stevesarmy.inventory.SoldierInventory;
 import com.stevesarmy.network.NetworkHandler;
@@ -74,6 +75,9 @@ public final class SupportDutyController {
     private int holdTicks;
     private int noProgressTicks;
     private ResupplyConfig currentConfig;
+    private boolean rescueSmokePending;
+    private int rescueSmokeWaitTicks;
+    private boolean reviveProne;
     private String debugLastDecision = "not yet evaluated";
     private String debugLastPouch = "none";
 
@@ -155,7 +159,7 @@ public final class SupportDutyController {
             target = candidates.stream().min(Comparator.comparingDouble(soldier::distanceTo)).orElse(null);
         }
         List<String> lines = new ArrayList<>();
-        lines.add("SUPPORT " + phase + " / " + currentTask + " | last: " + debugLastDecision);
+        lines.add("SUPPORT " + phase + " / " + currentTask + (reviveProne ? " prone" : "") + " | last: " + debugLastDecision);
         String work = soldier.isRecalling() ? "recalling" : soldier.isHealing() ? "healing"
             : soldier.isUsingItem() ? "using item" : soldier.isPreparingOrReloading() ? "reloading" : canWork() ? "ready" : "unavailable";
         lines.add("work " + work + " | recovered "
@@ -208,11 +212,21 @@ public final class SupportDutyController {
         throwWindupTicks = 0;
         holdTicks = 0;
         noProgressTicks = 0;
+        rescueSmokePending = false;
+        rescueSmokeWaitTicks = 0;
+        reviveProne = false;
         // Kill any stale cover path before duty movement; a throw-from-cover
         // duty must not keep walking the old route.
         soldier.getNavigation().stop();
+        if (currentTask == SupportTask.REVIVING && currentTarget instanceof ServerPlayer player
+            && soldier.getThreatAwareness().hasActiveThreat()) {
+            Vec3 smokePoint = rescueSmokePoint(player);
+            SmokeRequestResult result = soldier.getGrenadeTacticalController().requestRescueSmoke(smokePoint);
+            debugLastDecision = result.accepted() ? "rescue smoke preparing" : "rescue smoke skipped: " + result.reason();
+            rescueSmokePending = result.accepted();
+        }
         double startRange = currentTask == SupportTask.REVIVING ? THROW_ARRIVE_DISTANCE : THROW_RANGE;
-        if (soldier.distanceToSqr(currentTarget) > startRange * startRange) {
+        if (!rescueSmokePending && soldier.distanceToSqr(currentTarget) > startRange * startRange) {
             navigateToTarget();
         }
     }
@@ -229,6 +243,22 @@ public final class SupportDutyController {
         if (++dutyTicks > MAX_DUTY_TICKS) {
             finish(RESUPPLY_COOLDOWN_TICKS);
             return DutyResult.ABORTED;
+        }
+
+        if (rescueSmokePending) {
+            rescueSmokeWaitTicks++;
+            if (!soldier.getGrenadeTacticalController().isActive()
+                || rescueSmokeWaitTicks > 40) {
+                rescueSmokePending = false;
+                if (rescueSmokeWaitTicks > 40 && soldier.getGrenadeTacticalController().isSmokeRequestBlocked()) {
+                    soldier.getGrenadeTacticalController().cancel();
+                }
+                debugLastDecision = "rescue smoke attempt finished; approaching";
+            } else {
+                soldier.getNavigation().stop();
+                soldier.setLowCrouching(true);
+                return DutyResult.RUNNING;
+            }
         }
         if (dutyTicks % 20 == 0) {
             ClaimEntry claim = CLAIMS.get(currentTarget.getUUID());
@@ -262,6 +292,9 @@ public final class SupportDutyController {
     }
 
     public void stop() {
+        if (rescueSmokePending && soldier.getGrenadeTacticalController().isSmokeRequestBlocked()) {
+            soldier.getGrenadeTacticalController().cancel();
+        }
         if (currentTarget != null) {
             releaseClaim(currentTarget);
         }
@@ -269,6 +302,9 @@ public final class SupportDutyController {
         currentTarget = null;
         currentConfig = null;
         reviveProgressTicks = 0;
+        rescueSmokePending = false;
+        rescueSmokeWaitTicks = 0;
+        reviveProne = false;
         throwWindupTicks = 0;
         holdTicks = 0;
         noProgressTicks = 0;
@@ -586,6 +622,10 @@ public final class SupportDutyController {
     private DutyResult tickRevive() {
         double distance = soldier.distanceTo(currentTarget);
         if (distance > THROW_ARRIVE_DISTANCE) {
+            if (reviveProne) {
+                reviveProne = false;
+                soldier.setLowCrouching(false);
+            }
             if (soldier.getNavigation().isDone()) noProgressTicks++;
             else noProgressTicks = 0;
             if (noProgressTicks >= NO_PROGRESS_ABORT_TICKS) {
@@ -602,6 +642,8 @@ public final class SupportDutyController {
 
         soldier.getNavigation().stop();
         noProgressTicks = 0;
+        reviveProne = true;
+        soldier.setLowCrouching(true);
         soldier.getLookControl().setLookAt(
             currentTarget.getX(), currentTarget.getEyeY(), currentTarget.getZ(),
             30.0F, 30.0F);
@@ -616,6 +658,16 @@ public final class SupportDutyController {
             return DutyResult.ABORTED;
         }
         return DutyResult.RUNNING;
+    }
+
+    private Vec3 rescueSmokePoint(ServerPlayer player) {
+        Vec3 target = player.position();
+        Vec3 offset = target.subtract(soldier.position()).multiply(1.0, 0.0, 1.0);
+        if (offset.lengthSqr() < 9.0) {
+            offset = new Vec3(1.0, 0.0, 0.0);
+            target = soldier.position().add(offset.normalize().scale(3.5));
+        }
+        return target;
     }
 
     private static boolean isBleeding(ServerPlayer player) {
@@ -923,6 +975,11 @@ public final class SupportDutyController {
     }
 
     private void finish(int cooldown) {
+        if (rescueSmokePending && soldier.getGrenadeTacticalController().isSmokeRequestBlocked()) {
+            soldier.getGrenadeTacticalController().cancel();
+        }
+        rescueSmokePending = false;
+        reviveProne = false;
         if (currentTarget != null) {
             releaseClaim(currentTarget);
         }

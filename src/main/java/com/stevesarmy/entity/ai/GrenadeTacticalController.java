@@ -85,6 +85,7 @@ public final class GrenadeTacticalController {
     private long lastDebugRenderTick = Long.MIN_VALUE;
 
     private enum State { IDLE, WAITING_FOR_ARC, PREPARING }
+    private long rescueSmokeDeadline = Long.MIN_VALUE;
 
     private enum TargetSource {
         LIVE_ENTITY,
@@ -410,6 +411,17 @@ public final class GrenadeTacticalController {
      * smoke throw; it re-evaluates next cycle.
      */
     public SmokeRequestResult requestSmokeScreen(@Nullable Vec3 screenPoint) {
+        return requestSmokeScreen(screenPoint, false);
+    }
+
+    /** Rescue screens use the player's elevation rather than the surface heightmap. */
+    public SmokeRequestResult requestRescueSmoke(@Nullable Vec3 screenPoint) {
+        SmokeRequestResult result = requestSmokeScreen(screenPoint, true);
+        if (result.accepted()) rescueSmokeDeadline = soldier.level().getGameTime() + 80;
+        return result;
+    }
+
+    private SmokeRequestResult requestSmokeScreen(@Nullable Vec3 screenPoint, boolean rescue) {
         if (soldier.level().isClientSide || !GrenadeIntegration.isAvailable()) {
             return SmokeRequestResult.rejected(
                 "client-side or LesRaisins integration unavailable");
@@ -442,7 +454,11 @@ public final class GrenadeTacticalController {
             return SmokeRequestResult.rejected(
                 "ballistic profile unavailable: " + ballistic.reason());
         }
-        Vec3 targetPoint = clampSmokeScreenPoint(screenPoint, ballistic.profile());
+        Vec3 targetPoint = rescue ? screenPoint : clampSmokeScreenPoint(screenPoint, ballistic.profile());
+        if (rescue && targetPoint != null) {
+            double distance = soldier.position().distanceTo(targetPoint);
+            if (distance < SMOKE_MIN_SCREEN_DISTANCE || distance > smokeThrowReach(ballistic.profile())) targetPoint = null;
+        }
         if (targetPoint == null) {
             return SmokeRequestResult.rejected("screen point missing or out of reach");
         }
@@ -500,6 +516,19 @@ public final class GrenadeTacticalController {
 
     /** Returns true while grenade preparation owns this combat tick. */
     public boolean tick(@Nullable LivingEntity target, @Nullable SquadThreatIntel intel) {
+        if (rescueSmokeDeadline != Long.MIN_VALUE) {
+            if (soldier.level().getGameTime() >= rescueSmokeDeadline || !soldier.isAlive()
+                || soldier.isRecalling() || soldier.isHealing() || soldier.isUsingItem()
+                || !(soldier.getCoverTacticalGoal() instanceof SupportCoverGoal goal)
+                || !"REVIVING".equals(goal.debugDuty().debugTask())
+                || !(soldier.level() instanceof ServerLevel level)
+                || goal.debugDuty().debugTarget() == null
+                || !(level.getEntity(goal.debugDuty().debugTarget()) instanceof LivingEntity recipient)
+                || !recipient.isAlive()) {
+                cancel("rescue smoke timed out or rescue interrupted");
+                return false;
+            }
+        }
         if (soldier.level().isClientSide || !GrenadeIntegration.isAvailable()) {
             logDebug("tick unavailable: client-side or LesRaisins integration unavailable", target, intel);
             cancel("grenade tick unavailable");
@@ -1017,6 +1046,7 @@ public final class GrenadeTacticalController {
     }
 
     private void cancel(String reason) {
+        rescueSmokeDeadline = Long.MIN_VALUE;
         GrenadeArcCalculationScheduler.cancel(this);
         arcCalculationQueued = false;
         releasePendingReservation(reason);
@@ -1235,6 +1265,7 @@ public final class GrenadeTacticalController {
         SquadData.GrenadeThrowResult squadResult = completePendingSquadThrow(
             squad, gameTime, true);
         soldier.markGrenadeUsed(gameTime);
+        rescueSmokeDeadline = Long.MIN_VALUE;
         state = State.IDLE;
         pendingPlan = null;
         pendingArc = null;
