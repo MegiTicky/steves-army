@@ -85,6 +85,12 @@ public class SupplyPouchProjectile extends ThrowableItemProjectile {
     }
 
     @Override
+    protected boolean canHitEntity(Entity entity) {
+        return (homingTargetId == null || homingTargetId.equals(entity.getUUID()))
+            && super.canHitEntity(entity);
+    }
+
+    @Override
     protected void onHitEntity(EntityHitResult result) {
         super.onHitEntity(result);
         if (!level().isClientSide) {

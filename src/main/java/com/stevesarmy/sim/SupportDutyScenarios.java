@@ -21,6 +21,51 @@ import net.minecraft.world.phys.AABB;
 public final class SupportDutyScenarios {
     private SupportDutyScenarios() {}
 
+    public static SimScenario bystander() {
+        String[] token = new String[1];
+        int[] counts = new int[3];
+        boolean[] targetedSupport = new boolean[1];
+        SimScenario.Builder builder = SimScenario.builder("support_duty_bystander")
+            .description("A support stands in the path to a recipient; it must neither intercept nor receive a support pouch.")
+            .duration(500).terrain(t -> t.floorOnly())
+            .setup(ctx -> {
+                java.util.Arrays.fill(counts, 0);
+                targetedSupport[0] = false;
+                token[0] = java.util.UUID.randomUUID().toString();
+                ctx.spawnAnchor(4, 0, 24);
+                SoldierEntity source = ctx.spawnFriendly(ModEntities.SUPPORT.get(), "support", 12, 0, 24, SquadMode.FOLLOW);
+                SoldierEntity bystander = ctx.spawnFriendly(ModEntities.SUPPORT.get(), "bystander", 14, 0, 24, SquadMode.FOLLOW);
+                SoldierEntity recipient = ctx.spawnFriendly(ModEntities.SOLDIER.get(), "recipient", 18, 0, 24, SquadMode.FOLLOW);
+                bystander.setNoAi(true);
+                recipient.setNoAi(true);
+                ctx.disarmSoldier("recipient");
+                source.getSoldierInventory().setItem(SoldierInventory.SLOT_GENERAL_START, fixtureApples(8, token[0]));
+                java.util.UUID owner = ctx.anchor.getUUID();
+                OwnedSoldierRegistry.get(ctx.level.getServer()).setResupplyConfig(owner, new ResupplyConfig(0, 1, 0, 2));
+                ctx.cleanupActions.add(() -> {
+                    com.stevesarmy.entity.ai.SupportDutyController.clearSimState(java.util.Set.of(source.getUUID(), bystander.getUUID(), recipient.getUUID()));
+                    OwnedSoldierRegistry.get(ctx.level.getServer()).clearSimResupplyConfig(owner);
+                    ctx.level.getEntitiesOfClass(SupplyPouchProjectile.class, fixtureArea(ctx)).stream()
+                        .filter(p -> p.getOwner() == source).forEach(SupplyPouchProjectile::discard);
+                    ctx.level.getEntitiesOfClass(ItemEntity.class, fixtureArea(ctx)).stream()
+                        .filter(item -> fixtureItemCount(item.getItem(), token[0]) > 0).forEach(ItemEntity::discard);
+                });
+            });
+        for (int tick = 1; tick <= 500; tick++) {
+            builder.action(tick, "sample delivery past support", ctx -> {
+                SoldierEntity source = ctx.soldier("support");
+                SoldierEntity bystander = ctx.soldier("bystander");
+                targetedSupport[0] |= bystander.getUUID().equals(((SupportCoverGoal) source.getCoverTacticalGoal()).debugDuty().debugTarget());
+                counts[0] = apples(source, token[0]);
+                counts[1] = apples(bystander, token[0]);
+                counts[2] = apples(ctx.soldier("recipient"), token[0]);
+            });
+        }
+        return builder.assertThat("support never targets or supplies the other support", v -> !targetedSupport[0] && counts[1] == 0)
+            .assertThat("pouch reaches the intended recipient past the bystander", v -> counts[0] == 6 && counts[2] == 2)
+            .build();
+    }
+
     public static SimScenario ammo(boolean recipientAlreadyHasBox) {
         boolean[] selected = new boolean[1];
         int[] boxes = new int[2];

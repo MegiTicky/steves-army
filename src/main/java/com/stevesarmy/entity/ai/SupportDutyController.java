@@ -301,7 +301,7 @@ public final class SupportDutyController {
         List<LivingEntity> result = new ArrayList<>();
 
         for (SoldierEntity target : level.getEntitiesOfClass(SoldierEntity.class, box,
-            t -> t.isAlive() && t != soldier && soldier.isFriendlyTo(t))) {
+            t -> t.isAlive() && !(t instanceof SupportEntity) && soldier.isFriendlyTo(t))) {
             if (needsResupply(target, config)) {
                 result.add(target);
             }

@@ -107,6 +107,7 @@ public final class SimRegistry {
             SupportDutyScenarios.create("partial_inventory", 15, 16, false, false, false),
             SupportDutyScenarios.create("player", 15, 16, false, false, false),
             SupportDutyScenarios.coordination(true),
+            SupportDutyScenarios.bystander(),
             SupportDutyScenarios.coordination(false),
             dangerOracleOpenField(),
             dangerOracleRidge(),
