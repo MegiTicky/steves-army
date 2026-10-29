@@ -21,6 +21,127 @@ import net.minecraft.world.phys.AABB;
 public final class SupportDutyScenarios {
     private SupportDutyScenarios() {}
 
+    public static SimScenario ammo(boolean recipientAlreadyHasBox) {
+        boolean[] selected = new boolean[1];
+        int[] boxes = new int[2];
+        String[] token = new String[1];
+        SimScenario.Builder builder = SimScenario.builder(recipientAlreadyHasBox ? "support_ammo_box_threshold" : "support_ammo_primary")
+            .description("Real inventories and pouch delivery with simulated gun and ammo-box compatibility; not a TaCZ integration test.")
+            .duration(500).armed().terrain(t -> t.floorOnly())
+            .setup(ctx -> {
+                selected[0] = false;
+                java.util.Arrays.fill(boxes, 0);
+                token[0] = java.util.UUID.randomUUID().toString();
+                ctx.spawnAnchor(4, 0, 24);
+                SoldierEntity support = ctx.spawnFriendly(ModEntities.SUPPORT.get(), "support", 12, 0, 24, SquadMode.FOLLOW);
+                SoldierEntity recipient = ctx.spawnFriendly(ModEntities.SOLDIER.get(), "recipient", 16, 0, 24, SquadMode.FOLLOW);
+                recipient.setNoAi(true);
+                ItemStack primary = new ItemStack(Items.STICK);
+                primary.getOrCreateTag().putString("SimFixtureGun", token[0]);
+                primary.getTag().putInt("SimFixtureMagazine", 0);
+                recipient.getSoldierInventory().setItem(SoldierInventory.SLOT_MAIN_HAND, primary);
+                ItemStack secondary = new ItemStack(Items.STICK);
+                secondary.getOrCreateTag().putString("SimFixtureGun", "other");
+                secondary.getTag().putInt("SimFixtureMagazine", 100);
+                recipient.getSoldierInventory().setItem(SoldierInventory.SLOT_SIDEARM, secondary);
+                ItemStack box = new ItemStack(Items.BUCKET);
+                box.getOrCreateTag().putString("SimFixtureAmmo", token[0]);
+                box.getTag().putInt("SimFixtureRounds", 60);
+                support.getSoldierInventory().setItem(SoldierInventory.SLOT_GENERAL_START, box.copy());
+                if (recipientAlreadyHasBox) recipient.getSoldierInventory().setItem(SoldierInventory.SLOT_GENERAL_START, box.copy());
+                java.util.UUID owner = ctx.anchor.getUUID();
+                OwnedSoldierRegistry.get(ctx.level.getServer()).setResupplyConfig(owner, new ResupplyConfig(20, 0, 60, 0));
+                ctx.cleanupActions.add(() -> {
+                    com.stevesarmy.entity.ai.SupportDutyController.clearSimState(java.util.Set.of(support.getUUID(), recipient.getUUID()));
+                    OwnedSoldierRegistry.get(ctx.level.getServer()).clearSimResupplyConfig(owner);
+                    ctx.level.getEntitiesOfClass(SupplyPouchProjectile.class, fixtureArea(ctx)).stream()
+                        .filter(p -> p.getOwner() == support).forEach(SupplyPouchProjectile::discard);
+                });
+                ctx.diagnostics.add("Simulated gun compatibility and 60-round box; TaCZ integration is not exercised.");
+            });
+        for (int tick = 5; tick <= 500; tick += 5) {
+            final int at = tick;
+            builder.action(at, "sample ammo resupply", ctx -> {
+                SoldierEntity support = ctx.soldier("support");
+                SoldierEntity recipient = ctx.soldier("recipient");
+                var goal = (SupportCoverGoal) support.getCoverTacticalGoal();
+                selected[0] |= "RESUPPLY".equals(goal.debugDuty().debugTask());
+                boxes[0] = ammoBoxes(support, token[0]);
+                boxes[1] = ammoBoxes(recipient, token[0]);
+                if (at % 100 == 0) ctx.diagnostics.add("t" + at + " task=" + goal.debugDuty().debugTask()
+                    + " supportBoxes=" + boxes[0] + " recipientBoxes=" + boxes[1]);
+            });
+        }
+        return builder.assertThat("selection follows the active gun's actual rounds", v -> recipientAlreadyHasBox ? !selected[0] : selected[0])
+            .assertThat("recipient has exactly one 60-round box", v -> boxes[1] == 1)
+            .assertThat("support only transfers the needed box", v -> boxes[0] == (recipientAlreadyHasBox ? 1 : 0))
+            .build();
+    }
+
+    private static int ammoBoxes(SoldierEntity soldier, String token) {
+        int count = 0;
+        for (int i = SoldierInventory.SLOT_GENERAL_START; i < SoldierInventory.INVENTORY_SIZE; i++) {
+            ItemStack stack = soldier.getSoldierInventory().getItem(i);
+            if (stack.hasTag() && token.equals(stack.getTag().getString("SimFixtureAmmo"))) count += stack.getCount();
+        }
+        return count;
+    }
+
+    public static SimScenario revive(int distance) {
+        var player = new net.minecraftforge.common.util.FakePlayer[1];
+        boolean[] selected = new boolean[1];
+        float[] progress = new float[1];
+        double[] closest = new double[1];
+        SimScenario.Builder builder = SimScenario.builder("support_revive_" + distance)
+            .description("Normal support goal approaches and revives a fake player; bleeding capability is simulated, not PlayerRevive integration.")
+            .duration(800)
+            .terrain(t -> t.floorOnly())
+            .setup(ctx -> {
+                selected[0] = false;
+                progress[0] = 0;
+                closest[0] = Double.MAX_VALUE;
+                SoldierEntity support = ctx.spawnFriendly(ModEntities.SUPPORT.get(), "support", 12, 0, 24, SquadMode.FOLLOW);
+                java.util.UUID id = java.util.UUID.randomUUID();
+                player[0] = new net.minecraftforge.common.util.FakePlayer(ctx.level,
+                    new com.mojang.authlib.GameProfile(id, "SimRevive"));
+                var pos = ctx.terrain.at(12 + distance, 0, 24);
+                player[0].moveTo(pos.getX() + 0.5, pos.getY(), pos.getZ() + 0.5, 0, 0);
+                if (!ctx.level.addFreshEntity(player[0])) throw new IllegalStateException("failed to add sim player");
+                support.setOwnerUUID(id);
+                com.stevesarmy.squad.FofSettings.get(ctx.level.getServer()).owner(id)
+                    .setCategory(com.stevesarmy.squad.FofCategory.MONSTERS, com.stevesarmy.squad.FofStance.FRIENDLY);
+                ctx.cleanupActions.add(() -> {
+                    com.stevesarmy.entity.ai.SupportDutyController.clearSimState(java.util.Set.of(id, support.getUUID()));
+                    com.stevesarmy.squad.FofSettings.get(ctx.level.getServer()).clearOwner(id);
+                    player[0].discard();
+                });
+                ctx.diagnostics.add("PlayerRevive capability is simulated; integration with the mod is not exercised.");
+            })
+            .action(1, "mark fake player bleeding", ctx ->
+                com.stevesarmy.entity.ai.SupportDutyController.setSimBleeding(player[0]));
+        for (int tick = 5; tick <= 800; tick += 5) {
+            final int at = tick;
+            builder.action(at, "sample revive", ctx -> {
+                SoldierEntity support = ctx.soldier("support");
+                var goal = (SupportCoverGoal) support.getCoverTacticalGoal();
+                selected[0] |= "REVIVING".equals(goal.debugDuty().debugTask());
+                closest[0] = Math.min(closest[0], support.distanceTo(player[0]));
+                progress[0] = com.stevesarmy.entity.ai.SupportDutyController.simReviveProgress(player[0].getUUID());
+                if (at % 100 == 0) ctx.diagnostics.add("t" + at + " task=" + goal.debugDuty().debugTask()
+                    + " distance=" + support.distanceTo(player[0]) + " reviveProgress=" + progress[0]
+                    + " friendly=" + support.isFriendlyTo(player[0]) + " listed=" + ctx.level.players().contains(player[0])
+                    + " alive=" + player[0].isAlive() + " threat=" + support.getThreatAwareness().hasActiveThreat()
+                    + " threatPos=" + support.getThreatAwareness().getPrimaryThreatPosition()
+                    + " target=" + (support.getTarget() == null ? "none" : support.getTarget().getName().getString())
+                    + " ping=" + support.hasValidPingMoveTarget());
+            });
+        }
+        return builder.assertThat("support selects the bleeding player", v -> selected[0])
+            .assertThat("support approaches within revive range", v -> closest[0] <= 3.0)
+            .assertThat("simulated revive reaches full progress", v -> progress[0] >= 100f)
+            .build();
+    }
+
     public static SimScenario coordination(boolean twoSupports) {
         boolean[] flags = new boolean[4]; // first duty, second duty, simultaneous claim, second support ready
         int[] deliveries = new int[2];
@@ -97,8 +218,12 @@ public final class SupportDutyScenarios {
         String[] token = new String[1];
         boolean thresholdMet = name.equals("threshold_met");
         boolean fullInventory = name.equals("full_inventory");
+        boolean partialInventory = name.equals("partial_inventory");
         boolean playerRecipient = name.equals("player");
         boolean interrupt = name.equals("interrupted");
+        boolean lateBlock = name.equals("late_block");
+        boolean lateFull = name.equals("late_full");
+        boolean[] obstacleAdded = new boolean[1];
         boolean coverless = name.equals("coverless");
         boolean quiet = name.equals("quiet") || coverless;
         boolean[] interruption = new boolean[3]; // injected, duty exited, duty restarted
@@ -122,6 +247,7 @@ public final class SupportDutyScenarios {
                 java.util.Arrays.fill(observed, false);
                 java.util.Arrays.fill(counts, 0);
                 java.util.Arrays.fill(interruption, false);
+                obstacleAdded[0] = false;
                 ctx.spawnAnchor(4, 0, 24);
                 AABB area = fixtureArea(ctx);
                 token[0] = java.util.UUID.randomUUID().toString();
@@ -142,16 +268,18 @@ public final class SupportDutyScenarios {
                 } else player[0] = null;
                 if (thresholdMet) recipient.getSoldierInventory().setItem(SoldierInventory.SLOT_GENERAL_START,
                     fixtureApples(2, token[0]));
-                if (fullInventory) {
+                if (fullInventory || partialInventory) {
                     for (int i = SoldierInventory.SLOT_GENERAL_START; i < SoldierInventory.INVENTORY_SIZE; i++) {
                         recipient.getSoldierInventory().setItem(i, new ItemStack(Items.COBBLESTONE, 64));
                     }
                 }
+                if (partialInventory) recipient.getSoldierInventory().setItem(SoldierInventory.SLOT_GENERAL_START,
+                    fixtureApples(63, token[0]));
                 if (!noSupply) support.getSoldierInventory().setItem(SoldierInventory.SLOT_GENERAL_START,
                     fixtureApples(8, token[0]));
                 java.util.UUID ownerId = playerRecipient ? player[0].getUUID() : ctx.anchor.getUUID();
                 OwnedSoldierRegistry.get(ctx.level.getServer()).setResupplyConfig(ownerId,
-                    new ResupplyConfig(0, 1, 0, 2));
+                    partialInventory ? new ResupplyConfig(0, 64, 0, 66) : new ResupplyConfig(0, 1, 0, 2));
                 ctx.cleanupActions.add(() -> {
                     java.util.Set<java.util.UUID> ids = new java.util.HashSet<>();
                     ctx.friendlies.forEach(s -> ids.add(s.getUUID()));
@@ -174,7 +302,7 @@ public final class SupportDutyScenarios {
             });
         for (int tick = 10; tick <= 800; tick += 10) {
             final int at = tick;
-            builder.action(at, "sample support duty", ctx -> sample(ctx, at, observed, counts, token[0], player[0]));
+            builder.action(at, "sample support duty", ctx -> sample(ctx, at, observed, counts, token[0], player[0], partialInventory ? 64 : 2));
             if (interrupt) builder.action(at, "interrupt active support duty once", ctx -> {
                 SupportCoverGoal goal = (SupportCoverGoal) ctx.soldier("support").getCoverTacticalGoal();
                 boolean active = "DUTY".equals(goal.debugPhase());
@@ -186,26 +314,60 @@ public final class SupportDutyScenarios {
                 else if (interruption[1] && active) interruption[2] = true;
             });
         }
+        if (lateBlock || lateFull) {
+            for (int tick = 1; tick <= 800; tick++) {
+                builder.action(tick, "block a pouch after launch", ctx -> {
+                    if (obstacleAdded[0]) return;
+                    SoldierEntity support = ctx.soldier("support");
+                    var pouches = ctx.level.getEntitiesOfClass(SupplyPouchProjectile.class, fixtureArea(ctx), p -> p.getOwner() == support);
+                    if (pouches.isEmpty()) return;
+                    if (lateFull) {
+                        SoldierInventory inventory = ctx.soldier("recipient").getSoldierInventory();
+                        for (int i = SoldierInventory.SLOT_GENERAL_START; i < SoldierInventory.INVENTORY_SIZE; i++) {
+                            inventory.setItem(i, new ItemStack(Items.COBBLESTONE, 64));
+                        }
+                        ctx.diagnostics.add("filled recipient inventory while pouch was in flight");
+                        obstacleAdded[0] = true;
+                        return;
+                    }
+                    SupplyPouchProjectile pouch = pouches.get(0);
+                    double dx = ctx.soldier("recipient").getX() - pouch.getX();
+                    double dz = ctx.soldier("recipient").getZ() - pouch.getZ();
+                    int x = (int) Math.floor(pouch.getX() - ctx.terrain.origin.getX());
+                    int z = (int) Math.floor(pouch.getZ() - ctx.terrain.origin.getZ());
+                    if (Math.abs(dx) > Math.abs(dz)) {
+                        x += (int) Math.signum(dx);
+                        ctx.terrain.coverRow(x, z - 1, x, z + 1, 3);
+                    } else {
+                        z += (int) Math.signum(dz);
+                        ctx.terrain.coverRow(x - 1, z, x + 1, z, 3);
+                    }
+                    ctx.diagnostics.add("blocked pouch at " + x + "," + z);
+                    obstacleAdded[0] = true;
+                });
+            }
+        }
         return builder
             .assertThat("support reaches cover before a duty", view -> quiet || observed[0])
-            .assertThat(noSupply || unsafe || thresholdMet ? "no duty starts when no eligible recipient can be served" : "support selects the recipient for resupply",
-                view -> noSupply || unsafe || thresholdMet ? !observed[1] : observed[1])
-            .assertThat(noSupply || unsafe || thresholdMet ? "no unexpected delivery" : blocked ? "blocked delivery remains observable" : fullInventory
-                    ? "full recipient inventory drops undelivered items" : "recipient receives two healing items",
-                view -> thresholdMet ? counts[1] == 2 && counts[0] == 8 : noSupply || unsafe ? !observed[2] : blocked ? true
-                    : fullInventory ? counts[1] == 0 && counts[3] >= 2 : observed[2])
-            .assertThat("blocked or full-recipient deliveries do not repeatedly expend supplies",
-                view -> !(blocked || fullInventory) || counts[3] <= 2)
+            .assertThat(noSupply || unsafe || thresholdMet || fullInventory ? "no duty starts when no eligible recipient can be served" : "support selects a serviceable recipient",
+                view -> noSupply || unsafe || thresholdMet || fullInventory ? !observed[1] : blocked || observed[1])
+            .assertThat("recipient receives supplies only when delivery is possible",
+                view -> lateBlock || lateFull ? !observed[2] : partialInventory ? counts[1] == 64 && counts[0] == 7 : thresholdMet ? counts[1] == 2 && counts[0] == 8 : noSupply || unsafe || fullInventory ? !observed[2]
+                    : blocked ? !observed[1] || observed[2] : observed[2])
+            .assertThat("blocked or full-recipient deliveries do not expend supplies on the ground",
+                view -> !(blocked || fullInventory) || counts[3] == 0)
+            .assertThat("a pouch that cannot deliver in flight is not repeatedly thrown", view -> !(lateBlock || lateFull)
+                || (obstacleAdded[0] && counts[3] == 2 && counts[0] == 6))
             .assertThat("healing items conserved in inventories, flight, or ground pouch",
-                view -> counts[0] + counts[1] + counts[2] + counts[3] == (noSupply ? 0 : thresholdMet ? 10 : 8))
-            .assertThat("support returns to cover after completed delivery", view -> !observed[2] || observed[3])
+                view -> counts[0] + counts[1] + counts[2] + counts[3] == (noSupply ? 0 : partialInventory ? 71 : thresholdMet ? 10 : 8))
+            .assertThat("support returns to cover after completed delivery when threatened", view -> quiet || !observed[2] || observed[3])
             .assertThat("suppressed duty aborts and can restart after recovery", view -> !interrupt
                 || (interruption[0] && interruption[1] && interruption[2]))
             .build();
     }
 
     private static void sample(SimContext ctx, int tick, boolean[] observed, int[] counts,
-                               String token, net.minecraft.world.entity.player.Player player) {
+                               String token, net.minecraft.world.entity.player.Player player, int deliveredCount) {
         SoldierEntity support = ctx.soldier("support");
         SoldierEntity recipient = ctx.soldier("recipient");
         if (!(support.getCoverTacticalGoal() instanceof SupportCoverGoal goal)) return;
@@ -215,7 +377,7 @@ public final class SupportDutyScenarios {
         counts[0] = apples(support, token);
         counts[1] = player == null ? apples(recipient, token) : player.getInventory().items.stream()
             .mapToInt(stack -> fixtureItemCount(stack, token)).sum();
-        if (counts[1] >= 2) observed[2] = true;
+        if (counts[1] >= deliveredCount) observed[2] = true;
         if (observed[2] && covered) observed[3] = true;
         AABB area = fixtureArea(ctx);
         counts[2] = ctx.level.getEntitiesOfClass(SupplyPouchProjectile.class, area).stream()

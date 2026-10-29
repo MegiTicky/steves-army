@@ -48,7 +48,12 @@ public final class SupportCoverGoal extends Goal implements CoverGoalController 
     @Override
     public boolean canUse() {
         if (phase == SupportPhase.DUTY) return soldier.isAlive();
-        return coverController.canUse();
+        if (coverController.canUse()) return true;
+        if (canWorkOutsideCover() && supportDuty.tryStartDuty()) {
+            phase = SupportPhase.DUTY;
+            return true;
+        }
+        return false;
     }
 
     @Override
@@ -110,7 +115,7 @@ public final class SupportCoverGoal extends Goal implements CoverGoalController 
         coverController.tick();
 
         CoverBehaviorManager manager = soldier.getCoverBehaviorManager();
-        if (manager.isInCover()
+        if ((manager.isInCover() || canWorkOutsideCover())
             && supportDuty.tryStartDuty()) {
             phase = SupportPhase.DUTY;
             coverController.stop();
@@ -122,8 +127,18 @@ public final class SupportCoverGoal extends Goal implements CoverGoalController 
     private void resumeCover() {
         CoverBehaviorManager manager = soldier.getCoverBehaviorManager();
         manager.clearCover();
+        if (canWorkOutsideCover()) {
+            manager.setState(CoverBehaviorManager.CoverState.NO_COVER);
+            return;
+        }
         manager.setState(CoverBehaviorManager.CoverState.SEEKING_COVER);
         coverController.start();
+    }
+
+    private boolean canWorkOutsideCover() {
+        return !soldier.getThreatAwareness().hasActiveThreat()
+            && !soldier.hasValidAttackTarget() && !soldier.hasValidPingMoveTarget()
+            && !soldier.isVehicleCrewActive() && !soldier.isCrewSeated();
     }
 
     @Override

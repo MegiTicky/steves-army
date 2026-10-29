@@ -320,12 +320,13 @@ are tagged per fixture so cleanup and conservation checks do not include other
 players' items. The player fixture uses a Forge fake server player.
 
 `close`, `quiet`, `coverless`, `distant_safe`, `distant_unsafe`, `interrupted`, `no_supply`,
-`threshold_met`, `full_inventory`, `blocked_pouch`, `player`, `two_supports`
+`threshold_met`, `full_inventory`, `partial_inventory`, `blocked_pouch`,
+`late_block`, `late_full`, `player`, `two_supports`
 and `two_recipients` cover delivery, safety, interruption and coordination.
 Failures are ordinary FAILs, not expected-fail scenarios. The two coordination
 fixtures sample target claims separately from the general state timeline.
 
-Findings from the 2026-10-29 fast-tick and 20 TPS runs: `blocked_pouch` repeatedly throws
+Before the support-duty fix, the 2026-10-29 fast-tick and 20 TPS runs showed `blocked_pouch` repeatedly throwing
 into the intervening wall, and `full_inventory` repeatedly sends items to a
 recipient with no free slots. In both, all eight support items eventually end
 up on the ground and the recipient remains empty. `player` delivers two items,
@@ -333,17 +334,24 @@ but the generic ExposedWhileHiding detector flagged the support's later cover.
 The existing `support_rear_cover_pick` passed; `support_squad_fight` failed
 its cover and concealment assertions. See individual reports for evidence.
 
+The fixed support rejects blocked throws and recipients with no inventory space;
+a pouch blocked after launch drops intact and delays another attempt.
+It can start duty without cover when there is no active threat or movement order.
+`support_revive_8` and `support_revive_22` use fake-player bleeding state to
+test direct approach and duty completion; `support_ammo_primary` and
+`support_ammo_box_threshold` use simulated guns and 60-round boxes in real
+inventories to test active-weapon selection, round counting and transfer.
+
 The default userdev server does not load TaCZ or PlayerRevive. These fixtures
-do not test actual gun/ammo compatibility or a bleeding player; the simulated
-gun uses virtual magazines and cannot prove inventory-ammo delivery. The
+do not test actual gun/ammo compatibility or a PlayerRevive bleeding player. The
 reports explicitly note when PlayerRevive is unavailable. Real integration
 coverage requires a compatible runtime with the respective optional mods and
 an actual bleeding-player fixture. Unreachable-route and incompatible-ammo
 cases are not yet covered by these scenarios.
 The `quiet` fixture has perimeter walls; `coverless` uses only a floor.
-In fast-tick and 20 TPS `coverless` runs, an unsuppressed support never started duty
-despite a nearby ally needing items and holding eight items throughout. The
-support goal currently attempts duty only while its cover manager is in cover.
+Before the fix, fast-tick and 20 TPS `coverless` runs showed an unsuppressed
+support never starting duty despite a nearby ally needing items. The updated
+fixture requires successful delivery without cover.
 
 ## Scenarios (v1 — cover/suppression strand)
 

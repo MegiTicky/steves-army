@@ -370,10 +370,20 @@ public final class SimGunHandler implements GunIntegration.GunHandler {
     @Override public Optional<ItemStack> getGunStack(LivingEntity entity) { return Optional.empty(); }
     @Override public void initialData(LivingEntity entity) {}
     @Override public void draw(LivingEntity entity) {}
-    @Override public int getCurrentAmmo(ItemStack gunStack) { return 0; }
+    @Override public boolean isFixtureGun(ItemStack stack) {
+        return stack.hasTag() && stack.getTag().contains("SimFixtureGun");
+    }
+    @Override public int getCurrentAmmo(ItemStack gunStack) {
+        return isFixtureGun(gunStack) ? gunStack.getTag().getInt("SimFixtureMagazine") : 0;
+    }
     @Override public String getAmmoId(LivingEntity entity) { return "sim:ammo"; }
     @Override public String getAmmoId(ItemStack gunStack) { return "sim:ammo"; }
-    @Override public int getAmmoCountForGun(ItemStack gunStack, ItemStack ammoStack) { return 0; }
+    @Override public int getAmmoCountForGun(ItemStack gunStack, ItemStack ammoStack) {
+        if (!isFixtureGun(gunStack) || !ammoStack.hasTag()
+            || !gunStack.getTag().getString("SimFixtureGun").equals(ammoStack.getTag().getString("SimFixtureAmmo"))) return 0;
+        return (int) Math.min(Integer.MAX_VALUE,
+            (long) ammoStack.getCount() * Math.max(0, ammoStack.getTag().getInt("SimFixtureRounds")));
+    }
     @Override public void lowCrouch(LivingEntity entity, boolean isLowCrouch) {}
     @Override public boolean isLowCrouching(LivingEntity entity) { return false; }
     @Override public float[] getGunRecoil(LivingEntity entity) { return RECOIL.clone(); }

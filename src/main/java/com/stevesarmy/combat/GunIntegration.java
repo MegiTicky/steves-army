@@ -118,7 +118,7 @@ public class GunIntegration {
     }
 
     public static boolean isGun(ItemStack stack) {
-        return isTaczGun(stack) || isVpbGun(stack);
+        return (simHandler != null && simHandler.isFixtureGun(stack)) || isTaczGun(stack) || isVpbGun(stack);
     }
 
     private static boolean isTaczGun(ItemStack stack) {
@@ -260,6 +260,7 @@ public class GunIntegration {
     }
 
     public interface GunHandler {
+        default boolean isFixtureGun(ItemStack stack) { return false; }
         default MovementProfile getMovementProfile(LivingEntity entity) {
             return new MovementProfile(Math.max(0, entity.getAttributeValue(Attributes.MOVEMENT_SPEED)), 1, false);
         }

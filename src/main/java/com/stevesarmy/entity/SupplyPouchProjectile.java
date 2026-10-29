@@ -88,7 +88,13 @@ public class SupplyPouchProjectile extends ThrowableItemProjectile {
     protected void onHitEntity(EntityHitResult result) {
         super.onHitEntity(result);
         if (!level().isClientSide) {
-            delivered = deliverTo(result.getEntity());
+            Entity target = result.getEntity();
+            if (homingTargetId == null || (homingTargetId.equals(target.getUUID())
+                && target instanceof LivingEntity living
+                && com.stevesarmy.entity.ai.SupportDutyController.canAcceptPayload(
+                    living, PouchContainer.unpackContents(getItem())))) {
+                delivered = deliverTo(target);
+            }
         }
     }
 
@@ -101,6 +107,9 @@ public class SupplyPouchProjectile extends ThrowableItemProjectile {
         if (result.getType() == HitResult.Type.ENTITY && delivered) {
             discard();
             return;
+        }
+        if (homingTargetId != null && getOwner() instanceof SupportEntity) {
+            com.stevesarmy.entity.ai.SupportDutyController.noteFailedPouch(homingTargetId);
         }
         // Non-deliverable entity or block: land as a ground pouch anyone can pick up.
         Vec3 dropPos = result.getType() == HitResult.Type.BLOCK
