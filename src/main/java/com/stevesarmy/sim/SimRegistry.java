@@ -93,6 +93,7 @@ public final class SimRegistry {
             SupportDutyScenarios.create("coverless", 15, 16, false, false, false),
             SupportDutyScenarios.revive(8),
             SupportDutyScenarios.revive(22),
+            SupportDutyScenarios.smokeLanding(),
             SupportDutyScenarios.ammo(false),
             SupportDutyScenarios.ammo(true),
             SupportDutyScenarios.create("distant_safe", 5, 40, false, false, false),

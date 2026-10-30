@@ -86,6 +86,7 @@ public final class GrenadeTacticalController {
 
     private enum State { IDLE, WAITING_FOR_ARC, PREPARING }
     private long rescueSmokeDeadline = Long.MIN_VALUE;
+    @Nullable private UUID rescueSmokeRecipient;
 
     private enum TargetSource {
         LIVE_ENTITY,
@@ -218,6 +219,10 @@ public final class GrenadeTacticalController {
     }
 
     private void replanDuringPreparation() {
+        if (rescueSmokeRecipient != null) {
+            cancel("rescue smoke trajectory changed");
+            return;
+        }
         if (preparationReplans >= 2 || pendingPlan == null) {
             cancel("preparation arc retry budget exhausted");
             return;
@@ -415,9 +420,25 @@ public final class GrenadeTacticalController {
     }
 
     /** Rescue screens use the player's elevation rather than the surface heightmap. */
-    public SmokeRequestResult requestRescueSmoke(@Nullable Vec3 screenPoint) {
-        SmokeRequestResult result = requestSmokeScreen(screenPoint, true);
-        if (result.accepted()) rescueSmokeDeadline = soldier.level().getGameTime() + 80;
+    public SmokeRequestResult requestRescueSmoke(LivingEntity recipient, Vec3 screenPoint) {
+        if (state == State.WAITING_FOR_ARC) cancel("rescue smoke takeover");
+        rescueSmokeRecipient = recipient.getUUID();
+        SmokeRequestResult result = SmokeRequestResult.rejected("no safe landing near player");
+        double[][] offsets = {{0, 0}, {2, 0}, {-2, 0}, {0, 2}, {0, -2}};
+        for (double[] offset : offsets) {
+            Vec3 point = screenPoint.add(offset[0], 0, offset[1]);
+            result = requestSmokeScreen(point, true);
+            if (result.accepted()) {
+                rescueSmokeDeadline = soldier.level().getGameTime() + 80;
+                reportRescueSmoke("preparing near " + recipient.getName().getString() + " at " + point);
+                return result;
+            }
+            if (!result.reason().equals("screen point missing or out of reach")
+                && !result.reason().startsWith("no ") && !result.reason().contains("arc")
+                && !result.reason().contains("trajectory")) break;
+        }
+        rescueSmokeRecipient = null;
+        reportRescueSmoke("rejected near " + recipient.getName().getString() + ": " + result.reason());
         return result;
     }
 
@@ -1046,7 +1067,9 @@ public final class GrenadeTacticalController {
     }
 
     private void cancel(String reason) {
+        if (rescueSmokeRecipient != null && rescueSmokeDeadline != Long.MIN_VALUE) reportRescueSmoke("cancelled: " + reason);
         rescueSmokeDeadline = Long.MIN_VALUE;
+        rescueSmokeRecipient = null;
         GrenadeArcCalculationScheduler.cancel(this);
         arcCalculationQueued = false;
         releasePendingReservation(reason);
@@ -1145,7 +1168,7 @@ public final class GrenadeTacticalController {
         }
 
         long gameTime = soldier.level().getGameTime();
-        if (!soldier.canUseGrenade(gameTime)) return "personal grenade cooldown became active";
+        if (!isSmokePlan(pendingPlan) && !soldier.canUseGrenade(gameTime)) return "personal grenade cooldown became active";
 
         ItemStack current = soldier.getSoldierInventory().getItem(pendingPlan.slot);
         GrenadeIntegration.SupportInfo support = GrenadeIntegration.inspect(current,
@@ -1265,7 +1288,9 @@ public final class GrenadeTacticalController {
         SquadData.GrenadeThrowResult squadResult = completePendingSquadThrow(
             squad, gameTime, true);
         soldier.markGrenadeUsed(gameTime);
+        if (rescueSmokeRecipient != null) reportRescueSmoke("thrown; predicted landing " + finalArc.predictedLanding());
         rescueSmokeDeadline = Long.MIN_VALUE;
+        rescueSmokeRecipient = null;
         state = State.IDLE;
         pendingPlan = null;
         pendingArc = null;
@@ -1392,9 +1417,13 @@ public final class GrenadeTacticalController {
     /** Smoke is harmless on landing, but the cloud is ~5.5 blocks wide — keep
      * the whole cloud off friendlies, not just the impact point. */
     private boolean isSmokeSafeLanding(Vec3 landing) {
+        return isSmokeSafeLanding(landing, rescueSmokeRecipient);
+    }
+
+    private boolean isSmokeSafeLanding(Vec3 landing, @Nullable UUID exempt) {
         AABB area = new AABB(landing, landing).inflate(SMOKE_LANDING_FRIENDLY_RADIUS + 1.0);
         for (LivingEntity nearby : soldier.level().getEntitiesOfClass(LivingEntity.class, area)) {
-            if (nearby == soldier || !isFriendly(nearby)) continue;
+            if (nearby == soldier || nearby.getUUID().equals(exempt) || !isFriendly(nearby)) continue;
             Vec3 horizontal = nearby.position().subtract(landing).multiply(1.0, 0.0, 1.0);
             if (horizontal.lengthSqr()
                 <= SMOKE_LANDING_FRIENDLY_RADIUS * SMOKE_LANDING_FRIENDLY_RADIUS) {
@@ -1402,6 +1431,16 @@ public final class GrenadeTacticalController {
             }
         }
         return true;
+    }
+
+    public boolean simSmokeLandingSafe(Vec3 landing, @Nullable UUID exempt) {
+        if (!com.stevesarmy.sim.SimManager.running()) throw new IllegalStateException("simulator is not running");
+        return isSmokeSafeLanding(landing, exempt);
+    }
+
+    private void reportRescueSmoke(String outcome) {
+        StevesArmyMod.LOGGER.info("[RescueSmoke] soldier={} {}", soldier.getUUID(), outcome);
+        if (soldier.getCoverTacticalGoal() instanceof SupportCoverGoal goal) goal.debugDuty().debugRescueSmoke(outcome);
     }
 
     private boolean isProtectedTarget(LivingEntity target) {

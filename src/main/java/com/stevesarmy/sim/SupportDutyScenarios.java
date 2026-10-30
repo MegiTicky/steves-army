@@ -22,6 +22,31 @@ import net.minecraft.world.phys.AABB;
 public final class SupportDutyScenarios {
     private SupportDutyScenarios() {}
 
+    public static SimScenario smokeLanding() {
+        boolean[] checks = new boolean[3];
+        return SimScenario.builder("support_rescue_smoke_landing")
+            .description("Rescue smoke exempts the recipient, while other friendly exclusions remain in force.")
+            .duration(40).terrain(t -> t.floorOnly())
+            .setup(ctx -> {
+                java.util.Arrays.fill(checks, false);
+                ctx.spawnAnchor(4, 0, 24);
+                SoldierEntity support = ctx.spawnFriendly(ModEntities.SUPPORT.get(), "support", 12, 0, 24, SquadMode.FOLLOW);
+                SoldierEntity recipient = ctx.spawnFriendly(ModEntities.SOLDIER.get(), "recipient", 20, 0, 24, SquadMode.FOLLOW);
+                SoldierEntity other = ctx.spawnFriendly(ModEntities.SOLDIER.get(), "other", 30, 0, 24, SquadMode.FOLLOW);
+                support.setNoAi(true); recipient.setNoAi(true); other.setNoAi(true);
+                var controller = support.getGrenadeTacticalController();
+                var landing = recipient.position();
+                checks[0] = !controller.simSmokeLandingSafe(landing, null);
+                checks[1] = controller.simSmokeLandingSafe(landing, recipient.getUUID());
+                other.moveTo(recipient.getX() + 2, recipient.getY(), recipient.getZ());
+                checks[2] = !controller.simSmokeLandingSafe(landing, recipient.getUUID());
+            })
+            .assertThat("ordinary smoke avoids the recipient", v -> checks[0])
+            .assertThat("rescue smoke permits its recipient", v -> checks[1])
+            .assertThat("rescue smoke still avoids other friendlies", v -> checks[2])
+            .build();
+    }
+
     public static SimScenario bystander() {
         String[] token = new String[1];
         int[] counts = new int[3];

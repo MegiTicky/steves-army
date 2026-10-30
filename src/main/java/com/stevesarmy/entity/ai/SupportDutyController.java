@@ -80,6 +80,7 @@ public final class SupportDutyController {
     private boolean reviveProne;
     private String debugLastDecision = "not yet evaluated";
     private String debugLastPouch = "none";
+    private String debugRescueSmoke = "none";
 
     private record ClaimEntry(UUID claimerId, long timestamp) {}
     private record TaskSelection(SupportTask task, LivingEntity target) {}
@@ -184,11 +185,13 @@ public final class SupportDutyController {
             lines.add("supply+space ammo " + supportHasCompatibleAmmoFor(target)
                 + " heals " + supportHasHealingItems(target) + " | throw lane " + (hasClearThrow(target) ? "clear" : "blocked"));
         }
-        lines.add("pouch: " + debugLastPouch);
+        lines.add(currentTask == SupportTask.REVIVING || !"none".equals(debugRescueSmoke)
+            ? "rescue smoke: " + debugRescueSmoke : "pouch: " + debugLastPouch);
         return lines;
     }
 
     public void debugPouchOutcome(String outcome) { debugLastPouch = outcome; }
+    public void debugRescueSmoke(String outcome) { debugRescueSmoke = outcome; }
 
     /** Remove only a completed fixture's own bookkeeping, without affecting live soldiers. */
     public static void clearSimState(java.util.Set<UUID> actors) {
@@ -215,13 +218,14 @@ public final class SupportDutyController {
         rescueSmokePending = false;
         rescueSmokeWaitTicks = 0;
         reviveProne = false;
+        debugRescueSmoke = "not needed";
         // Kill any stale cover path before duty movement; a throw-from-cover
         // duty must not keep walking the old route.
         soldier.getNavigation().stop();
         if (currentTask == SupportTask.REVIVING && currentTarget instanceof ServerPlayer player
             && soldier.getThreatAwareness().hasActiveThreat()) {
             Vec3 smokePoint = rescueSmokePoint(player);
-            SmokeRequestResult result = soldier.getGrenadeTacticalController().requestRescueSmoke(smokePoint);
+            SmokeRequestResult result = soldier.getGrenadeTacticalController().requestRescueSmoke(player, smokePoint);
             debugLastDecision = result.accepted() ? "rescue smoke preparing" : "rescue smoke skipped: " + result.reason();
             rescueSmokePending = result.accepted();
         }
