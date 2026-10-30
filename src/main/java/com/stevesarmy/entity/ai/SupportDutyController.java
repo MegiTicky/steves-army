@@ -62,6 +62,9 @@ public final class SupportDutyController {
     private static final int MAX_HOLD_TICKS = 100;
     private static final int NO_PROGRESS_ABORT_TICKS = 40;
     private static final long TARGET_FAILURE_COOLDOWN_MS = 30000L;
+    private static final int RESCUE_SMOKE_RETRY_TICKS = 30;
+    private static final int RESCUE_SMOKE_MAX_ATTEMPTS = 4;
+    private static final double RESCUE_SMOKE_RETRY_PROGRESS = 2.0;
 
     private final SupportEntity soldier;
     private SupportTask currentTask = SupportTask.IDLE;
@@ -77,6 +80,10 @@ public final class SupportDutyController {
     private ResupplyConfig currentConfig;
     private boolean rescueSmokePending;
     private int rescueSmokeWaitTicks;
+    private int rescueSmokeAttempts;
+    private long rescueSmokeNextAttemptTick;
+    private double rescueSmokeLastDistance;
+    private boolean rescueSmokeThrown;
     private boolean reviveProne;
     private String debugLastDecision = "not yet evaluated";
     private String debugLastPouch = "none";
@@ -220,7 +227,10 @@ public final class SupportDutyController {
     }
 
     public void debugPouchOutcome(String outcome) { debugLastPouch = outcome; }
-    public void debugRescueSmoke(String outcome) { debugRescueSmoke = outcome; }
+    public void debugRescueSmoke(String outcome) {
+        debugRescueSmoke = outcome;
+        if (outcome.startsWith("thrown;")) rescueSmokeThrown = true;
+    }
 
     /** Remove only a completed fixture's own bookkeeping, without affecting live soldiers. */
     public static void clearSimState(java.util.Set<UUID> actors) {
@@ -246,6 +256,10 @@ public final class SupportDutyController {
         noProgressTicks = 0;
         rescueSmokePending = false;
         rescueSmokeWaitTicks = 0;
+        rescueSmokeAttempts = 0;
+        rescueSmokeNextAttemptTick = 0;
+        rescueSmokeLastDistance = Double.POSITIVE_INFINITY;
+        rescueSmokeThrown = false;
         reviveProne = false;
         debugRescueSmoke = "not needed";
         // Kill any stale cover path before duty movement; a throw-from-cover
@@ -253,10 +267,7 @@ public final class SupportDutyController {
         soldier.getNavigation().stop();
         if (currentTask == SupportTask.REVIVING && currentTarget instanceof ServerPlayer player
             && soldier.getThreatAwareness().hasActiveThreat()) {
-            Vec3 smokePoint = rescueSmokePoint(player);
-            SmokeRequestResult result = soldier.getGrenadeTacticalController().requestRescueSmoke(player, smokePoint);
-            debugLastDecision = result.accepted() ? "rescue smoke preparing" : "rescue smoke skipped: " + result.reason();
-            rescueSmokePending = result.accepted();
+            attemptRescueSmoke(player);
         }
         double startRange = currentTask == SupportTask.REVIVING ? THROW_ARRIVE_DISTANCE : THROW_RANGE;
         if (!rescueSmokePending && soldier.distanceToSqr(currentTarget) > startRange * startRange) {
@@ -282,11 +293,12 @@ public final class SupportDutyController {
             rescueSmokeWaitTicks++;
             if (!soldier.getGrenadeTacticalController().isActive()
                 || rescueSmokeWaitTicks > 40) {
-                rescueSmokePending = false;
                 if (rescueSmokeWaitTicks > 40 && soldier.getGrenadeTacticalController().isSmokeRequestBlocked()) {
                     soldier.getGrenadeTacticalController().cancel();
                 }
+                rescueSmokePending = false;
                 debugLastDecision = "rescue smoke attempt finished; approaching";
+                soldier.setLowCrouching(false);
             } else {
                 soldier.getNavigation().stop();
                 soldier.setLowCrouching(true);
@@ -659,6 +671,17 @@ public final class SupportDutyController {
                 reviveProne = false;
                 soldier.setLowCrouching(false);
             }
+            if (currentTarget instanceof ServerPlayer player && isBleeding(player)
+                && soldier.getThreatAwareness().hasActiveThreat()
+                && !rescueSmokeThrown && rescueSmokeAttempts < RESCUE_SMOKE_MAX_ATTEMPTS
+                && soldier.level().getGameTime() >= rescueSmokeNextAttemptTick
+                && distance <= rescueSmokeLastDistance - RESCUE_SMOKE_RETRY_PROGRESS) {
+                attemptRescueSmoke(player);
+                if (rescueSmokePending) {
+                    soldier.getNavigation().stop();
+                    return DutyResult.RUNNING;
+                }
+            }
             if (soldier.getNavigation().isDone()) noProgressTicks++;
             else noProgressTicks = 0;
             if (noProgressTicks >= NO_PROGRESS_ABORT_TICKS) {
@@ -691,6 +714,16 @@ public final class SupportDutyController {
             return DutyResult.ABORTED;
         }
         return DutyResult.RUNNING;
+    }
+
+    private void attemptRescueSmoke(ServerPlayer player) {
+        rescueSmokeAttempts++;
+        rescueSmokeLastDistance = soldier.distanceTo(player);
+        rescueSmokeNextAttemptTick = soldier.level().getGameTime() + RESCUE_SMOKE_RETRY_TICKS;
+        rescueSmokeWaitTicks = 0;
+        SmokeRequestResult result = soldier.getGrenadeTacticalController().requestRescueSmoke(player, rescueSmokePoint(player));
+        debugLastDecision = result.accepted() ? "rescue smoke preparing" : "rescue smoke skipped: " + result.reason();
+        rescueSmokePending = result.accepted();
     }
 
     private Vec3 rescueSmokePoint(ServerPlayer player) {
