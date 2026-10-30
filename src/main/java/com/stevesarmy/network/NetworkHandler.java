@@ -14,7 +14,7 @@ import java.util.function.Function;
 import java.util.function.Supplier;
 
 public class NetworkHandler {
-    private static final String PROTOCOL_VERSION = "20";
+    private static final String PROTOCOL_VERSION = "21";
     
     public static final SimpleChannel INSTANCE = NetworkRegistry.newSimpleChannel(
         new ResourceLocation(StevesArmyMod.MODID, "main"),

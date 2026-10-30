@@ -3,6 +3,8 @@ package com.stevesarmy.respawn;
 import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.compat.PlayerReviveCompat;
 import com.stevesarmy.entity.SoldierEntity;
+import com.stevesarmy.entity.SupportEntity;
+import com.stevesarmy.entity.ai.SupportCoverGoal;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.phys.AABB;
@@ -51,6 +53,21 @@ public class RespawnTickHandler {
                 && !(s.getCoverTacticalGoal() instanceof com.stevesarmy.entity.ai.SupportCoverGoal goal
                     && "REVIVING".equals(goal.debugDuty().debugTask())
                     && downedPlayer.getUUID().equals(goal.debugDuty().debugTarget())));
+
+        if (tickCounter % 40 == 0) {
+            List<SupportEntity> supports = level.getEntitiesOfClass(SupportEntity.class,
+                downedPlayer.getBoundingBox().inflate(48), SupportEntity::isAlive);
+            StevesArmyMod.LOGGER.info("[RescueEligibility] player={} id={} dimension={} nearbyContributors={} supports={}",
+                downedPlayer.getName().getString(), downedPlayer.getUUID(), level.dimension().location(),
+                nearbySoldiers.stream().map(s -> s.getName().getString() + "/" + s.getUUID()).toList(), supports.size());
+            for (SupportEntity support : supports) {
+                if (support.getCoverTacticalGoal() instanceof SupportCoverGoal goal) {
+                    StevesArmyMod.LOGGER.info("[RescueEligibility] support={} id={} phase={} coverGate={} {}",
+                        support.getName().getString(), support.getUUID(), goal.debugPhase(), goal.debugCoverGate(),
+                        goal.debugDuty().debugRescueEligibility(downedPlayer));
+                }
+            }
+        }
         
         if (nearbySoldiers.isEmpty()) return;
         

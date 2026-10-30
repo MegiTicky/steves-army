@@ -14,7 +14,7 @@ import java.util.function.Supplier;
 
 public final class SupportDebugPacket {
     private static final int MAX_SUPPORTS = 32;
-    private static final int MAX_LINES = 6;
+    private static final int MAX_LINES = 7;
     public record Support(UUID id, Vec3 position, List<String> lines) {}
     private final boolean enabled;
     private final List<Support> supports;

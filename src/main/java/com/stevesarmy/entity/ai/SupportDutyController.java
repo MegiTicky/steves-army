@@ -146,6 +146,25 @@ public final class SupportDutyController {
     public int debugDutyTicks() { return dutyTicks; }
     public int debugHoldTicks() { return holdTicks; }
 
+    /** Read-only explanation for a specific bleeding player, including gates before selection. */
+    public String debugRescueEligibility(ServerPlayer player) {
+        ClaimEntry entry = CLAIMS.get(player.getUUID());
+        boolean claimed = entry != null && GameClock.nowMs() - entry.timestamp() <= CLAIM_TIMEOUT_MS;
+        boolean withinSearch = soldier.getBoundingBox().inflate(TASK_RADIUS).contains(player.position());
+        String owner = claimed ? entry.claimerId().toString() : "none";
+        return "player=" + player.getName().getString() + " playerId=" + player.getUUID()
+            + " distance=" + String.format(java.util.Locale.ROOT, "%.1f", soldier.distanceTo(player))
+            + " withinSearch=" + withinSearch + " friendly=" + soldier.isFriendlyTo(player)
+            + " task=" + currentTask + " taskTarget=" + debugTarget()
+            + " claimOwner=" + owner + " canWork=" + canWork()
+            + " recovered=" + soldier.getCoverBehaviorManager().getSuppressionTracker().isRecovered()
+            + " suppressed=" + soldier.getCoverBehaviorManager().isSuppressed()
+            + " pinned=" + soldier.getCoverBehaviorManager().isPinned()
+            + " activeThreat=" + soldier.getThreatAwareness().hasActiveThreat()
+            + " taskCooldownChecks=" + taskCooldownTicks + " searchCooldownChecks=" + searchCooldownTicks
+            + " smoke=" + debugRescueSmoke;
+    }
+
     /** Snapshot only: never starts a path, changes claims, or consumes cooldowns. */
     public List<String> debugLines(String phase, boolean coverGate) {
         ResupplyConfig config = loadConfig();
@@ -187,6 +206,16 @@ public final class SupportDutyController {
         }
         lines.add(currentTask == SupportTask.REVIVING || !"none".equals(debugRescueSmoke)
             ? "rescue smoke: " + debugRescueSmoke : "pouch: " + debugLastPouch);
+        if (soldier.level() instanceof ServerLevel level) {
+            level.players().stream().filter(p -> p.isAlive() && isBleeding(p)
+                && soldier.getBoundingBox().inflate(TASK_RADIUS).contains(p.position()))
+                .min(Comparator.comparingDouble(soldier::distanceTo))
+                .ifPresent(p -> lines.add("downed " + p.getName().getString()
+                    + " | friendly " + soldier.isFriendlyTo(p)
+                    + " | threat " + soldier.getThreatAwareness().hasActiveThreat()
+                    + " | suppressed " + soldier.getCoverBehaviorManager().isSuppressed()
+                    + " | claim " + (CLAIMS.containsKey(p.getUUID()) ? "present" : "none")));
+        }
         return lines;
     }
 
