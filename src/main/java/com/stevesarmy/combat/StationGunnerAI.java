@@ -1007,7 +1007,7 @@ public final class StationGunnerAI {
             new AABB(center, center).inflate(maxRange),
             entity -> entity != state.soldier && entity != state.station
                 && TargetAcquisition.isValidTarget(state.soldier, entity)
-                && !state.soldier.isFriendlyTo(entity)
+                && state.soldier.isProactiveTarget(entity)
                 && isCombatTarget(entity));
     }
 

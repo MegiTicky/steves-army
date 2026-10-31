@@ -24,6 +24,8 @@ public final class SimRegistry {
 
     public static List<SimScenario> all() {
         return List.of(
+            FofScenarios.relationships(),
+            FofScenarios.pvePolicy(),
             MovementRecoveryScenarios.diagnostic("pit", "goto"),
             MovementRecoveryScenarios.diagnostic("pit", "follow"),
             MovementRecoveryScenarios.diagnostic("pit", "idle"),

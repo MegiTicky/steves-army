@@ -694,6 +694,12 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
 
     @Override
     public void tick() {
+        if (target != null && !soldier.isProactiveTarget(target)) {
+            target = null;
+            soldier.setTarget(null);
+            cancelAllSuppression();
+            resetAim(null);
+        }
         PerformanceMetrics.recordCombatTick(machineGunnerPipeline);
         updateAimPatienceContact();
         if (soldier.isHealing()) return;
@@ -2777,7 +2783,7 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
         net.minecraft.world.entity.Entity threatEntity = serverLevel.getEntity(suppressionTargetUUID);
         if (!(threatEntity instanceof LivingEntity living) || !living.isAlive()
             || !TargetAcquisition.isValidTarget(soldier, living)
-            || soldier.isFriendlyTo(living)
+            || !soldier.isProactiveTarget(living)
             || soldier.distanceToSqr(living) > SUPPRESSION_MAX_RANGE * SUPPRESSION_MAX_RANGE) {
             return Optional.empty();
         }

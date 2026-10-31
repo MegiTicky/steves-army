@@ -94,9 +94,8 @@ public class StevesArmyCommand {
                     "  /stevesarmy squad info <callsign>\n" +
                     "  /stevesarmy squad disband <callsign>\n" +
                     "  /stevesarmy squad order <callsign> <goto|send|attack|threat|suppress|hold|follow> [pos|player]\n" +
-                    "  /stevesarmy fof set player|team|category <key> <friendly|neutral|hostile|default> [for <players>]\n" +
-                    "  /stevesarmy fof clear [for <players>] - wipe FoF overrides\n" +
-                    "  /stevesarmy fof list [for <players>]"
+                    "  /stevesarmy fof set category <category> <friendly|neutral|hostile|default> [for <players>]\n" +
+                    "  /stevesarmy diplomacy - shared relationship and event commands"
                 ), false);
                 return 1;
             })
@@ -197,32 +196,18 @@ public class StevesArmyCommand {
                             .executes(ctx -> squadOrderFollow(ctx, StringArgumentType.getString(ctx, "callsign"), null))
                             .then(Commands.argument("player", EntityArgument.player())
                                 .executes(ctx -> squadOrderFollow(ctx, StringArgumentType.getString(ctx, "callsign"), EntityArgument.getPlayer(ctx, "player"))))))))
+            .then(DiplomacyCommand.create())
             .then(Commands.literal("fof")
                 .executes(ctx -> {
                     ctx.getSource().sendSuccess(() -> Component.literal(
                         "FoF commands (op):\n" +
-                        "  /stevesarmy fof set player <name> <friendly|neutral|hostile|default> [for <players>]\n" +
-                        "  /stevesarmy fof set team <team> <friendly|neutral|hostile|default> [for <players>]\n" +
                         "  /stevesarmy fof set category <monsters|target_dummies> <friendly|neutral|hostile|default> [for <players>]\n" +
-                        "  /stevesarmy fof clear [for <players>] - wipe every override\n" +
                         "  /stevesarmy fof list [for <players>]\n" +
-                        "Example: /stevesarmy fof set team red hostile for @a[team=blue]"
+                        "Shared diplomacy: /stevesarmy diplomacy"
                     ), false);
                     return 1;
                 })
                 .then(Commands.literal("set")
-                    .then(Commands.literal("player")
-                        .then(Commands.argument("name", GameProfileArgument.gameProfile())
-                            .then(fofStanceNode("friendly", FofStance.FRIENDLY, FofTargetType.PLAYER))
-                            .then(fofStanceNode("neutral", FofStance.NEUTRAL, FofTargetType.PLAYER))
-                            .then(fofStanceNode("hostile", FofStance.HOSTILE, FofTargetType.PLAYER))
-                            .then(fofStanceNode("default", null, FofTargetType.PLAYER))))
-                    .then(Commands.literal("team")
-                        .then(Commands.argument("team", StringArgumentType.word())
-                            .then(fofStanceNode("friendly", FofStance.FRIENDLY, FofTargetType.TEAM))
-                            .then(fofStanceNode("neutral", FofStance.NEUTRAL, FofTargetType.TEAM))
-                            .then(fofStanceNode("hostile", FofStance.HOSTILE, FofTargetType.TEAM))
-                            .then(fofStanceNode("default", null, FofTargetType.TEAM))))
                     .then(Commands.literal("category")
                         .then(Commands.argument("category", StringArgumentType.word())
                             .suggests((context, builder) -> SharedSuggestionProvider.suggest(
@@ -231,11 +216,6 @@ public class StevesArmyCommand {
                             .then(fofStanceNode("neutral", FofStance.NEUTRAL, FofTargetType.CATEGORY))
                             .then(fofStanceNode("hostile", FofStance.HOSTILE, FofTargetType.CATEGORY))
                             .then(fofStanceNode("default", null, FofTargetType.CATEGORY)))))
-                .then(Commands.literal("clear")
-                    .executes(ctx -> fofClear(ctx, Collections.singleton(ctx.getSource().getPlayerOrException())))
-                    .then(Commands.literal("for")
-                        .then(Commands.argument("players", EntityArgument.players())
-                            .executes(ctx -> fofClear(ctx, EntityArgument.getPlayers(ctx, "players"))))))
                 .then(Commands.literal("list")
                     .executes(ctx -> fofList(ctx, Collections.singleton(ctx.getSource().getPlayerOrException())))
                     .then(Commands.literal("for")
@@ -335,17 +315,9 @@ public class StevesArmyCommand {
         for (ServerPlayer target : targets) {
             sb.append(target.getName().getString()).append(":\n");
             FofSettings.OwnerFof fof = FofSettings.get(server).peek(target.getUUID());
-            if (fof == null || fof.isEmpty()) {
-                sb.append("  (no overrides — default rules apply)\n");
+            if (fof == null || fof.categoryView().isEmpty()) {
+                sb.append("  (no category overrides; defaults apply)\n");
                 continue;
-            }
-            for (Map.Entry<UUID, FofStance> entry : fof.playerView().entrySet()) {
-                String name = server.getProfileCache().get(entry.getKey())
-                    .map(GameProfile::getName).orElse(entry.getKey().toString());
-                sb.append("  player ").append(name).append(": ").append(entry.getValue().getDisplayName()).append("\n");
-            }
-            for (Map.Entry<String, FofStance> entry : fof.teamView().entrySet()) {
-                sb.append("  team ").append(entry.getKey()).append(": ").append(entry.getValue().getDisplayName()).append("\n");
             }
             for (Map.Entry<FofCategory, FofStance> entry : fof.categoryView().entrySet()) {
                 sb.append("  category ").append(entry.getKey().getSerializedName()).append(": ")

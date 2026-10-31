@@ -114,9 +114,7 @@ public class EnemySoldierEntity extends SoldierEntity {
     }
 
     public boolean isFriendlyTo(LivingEntity other) {
-        if (other == this) return false;
-        if (other instanceof EnemySoldierEntity) return true;
-        return false;
+        return super.isFriendlyTo(other);
     }
 
     @Override

@@ -89,6 +89,7 @@ public class SquadCommandScreen extends Screen {
     private int activeFofDropdownX;
     private int activeFofDropdownY;
     private FofDropdownWidget activeFofDropdownWidget;
+    private int fofSyncTicks;
 
     private enum Tab {
         SQUAD,
@@ -269,6 +270,10 @@ public class SquadCommandScreen extends Screen {
         closeFofDropdown();
         if (tab == Tab.RESUPPLY) {
             draftConfig = ClientSquadData.INSTANCE.getResupplyConfig();
+        }
+        if (tab == Tab.FOF) {
+            fofSyncTicks = 0;
+            NetworkHandler.INSTANCE.sendToServer(SetFofStancePacket.sync());
         }
         rebuildRows();
         rebuildFooterButtons();
@@ -461,6 +466,10 @@ public class SquadCommandScreen extends Screen {
         teamCount = FireTeamScopeState.INSTANCE.getTeamCount();
         if (activeTab != Tab.RESUPPLY && activeTab != Tab.FOF) {
             updateRows();
+        } else if (activeTab == Tab.FOF && ++fofSyncTicks >= 40) {
+            fofSyncTicks = 0;
+            NetworkHandler.INSTANCE.sendToServer(SetFofStancePacket.sync());
+            if (activeFofDropdownRow < 0) rebuildFofRows();
         }
     }
 
@@ -823,25 +832,54 @@ public class SquadCommandScreen extends Screen {
     private void rebuildFofRows() {
         fofRows.clear();
         Minecraft mc = Minecraft.getInstance();
-        fofRows.add(FofRow.header("Players"));
+        Map<String, List<FofRow>> playersByTeam = new HashMap<>();
+        List<FofRow> unteamed = new ArrayList<>();
+        java.util.Set<UUID> listed = new java.util.HashSet<>();
+        for (UUID id : ClientFofState.INSTANCE.knownPlayers()) {
+            if (mc.player != null && id.equals(mc.player.getUUID())) continue;
+            var effective = ClientFofState.INSTANCE.getEffective(id);
+            if (effective == null) continue;
+            FofRow row = FofRow.player(effective.name() + (effective.online() ? "" : " (offline)"), id);
+            if (effective.team() == null) unteamed.add(row);
+            else playersByTeam.computeIfAbsent(effective.team(), ignored -> new ArrayList<>()).add(row);
+            listed.add(id);
+        }
         if (mc.getConnection() != null) {
             UUID selfId = mc.player != null ? mc.player.getUUID() : null;
             List<PlayerInfo> infos = new ArrayList<>(mc.getConnection().getOnlinePlayers());
             infos.sort(Comparator.comparing(info -> info.getProfile().getName(), String.CASE_INSENSITIVE_ORDER));
             for (PlayerInfo info : infos) {
                 if (info.getProfile().getId().equals(selfId)) continue;
-                fofRows.add(FofRow.player(info.getProfile().getName(), info.getProfile().getId()));
+                if (!listed.add(info.getProfile().getId())) continue;
+                var team = mc.level != null
+                    ? mc.level.getScoreboard().getPlayersTeam(info.getProfile().getName()) : null;
+                if (team == null || team.getName().startsWith("steves_army_friendly_")) {
+                    unteamed.add(FofRow.player(info.getProfile().getName(), info.getProfile().getId()));
+                } else {
+                    playersByTeam.computeIfAbsent(team.getName(), ignored -> new ArrayList<>())
+                        .add(FofRow.player(info.getProfile().getName(), info.getProfile().getId()));
+                }
             }
         }
-        fofRows.add(FofRow.header("Teams"));
         if (mc.level != null) {
             List<String> teamNames = new ArrayList<>(mc.level.getScoreboard().getTeamNames());
-            // Internal auto-managed teams are not diplomacy targets.
-            teamNames.removeIf(name -> name.equals("steves_army_enemy") || name.startsWith("steves_army_friendly_"));
+            teamNames.removeIf(name -> (name.equals("steves_army_enemy") || name.startsWith("steves_army_friendly_"))
+                && !playersByTeam.containsKey(name));
             Collections.sort(teamNames);
             for (String teamName : teamNames) {
+                fofRows.add(FofRow.header(teamName));
                 fofRows.add(FofRow.team(teamName));
+                List<FofRow> teamPlayers = playersByTeam.get(teamName);
+                if (teamPlayers != null) {
+                    teamPlayers.sort(Comparator.comparing(row -> row.displayName, String.CASE_INSENSITIVE_ORDER));
+                    fofRows.addAll(teamPlayers);
+                }
             }
+        }
+        if (!unteamed.isEmpty()) {
+            fofRows.add(FofRow.header("No Team"));
+            unteamed.sort(Comparator.comparing(row -> row.displayName, String.CASE_INSENSITIVE_ORDER));
+            fofRows.addAll(unteamed);
         }
         fofRows.add(FofRow.header("Categories"));
         fofRows.add(FofRow.category(FofCategory.MONSTERS));
@@ -850,6 +888,7 @@ public class SquadCommandScreen extends Screen {
     }
 
     private void renderFofList(GuiGraphics graphics, int mouseX, int mouseY) {
+        Minecraft mc = Minecraft.getInstance();
         int contentX = PANEL_LEFT + 4;
         int contentWidth = width - 2 * PANEL_LEFT - 8;
         int listBottom = getListBottom();
@@ -870,12 +909,35 @@ public class SquadCommandScreen extends Screen {
 
             int rowBg = (i % 2 == 0) ? 0x44000000 : 0x22000000;
             graphics.fill(contentX, y, contentX + contentWidth, y + ROW_HEIGHT, rowBg);
-            graphics.drawString(font, Component.literal(row.displayName), contentX + 6, y + 6, 0xFFCCCCCC, false);
-
             int stanceX = contentX + contentWidth - FOF_STANCE_COL_WIDTH;
             row.stanceX = stanceX;
+            String label = row.kind == FofRow.Kind.TEAM ? "Team default" : row.displayName;
+            graphics.drawString(font, Component.literal(font.plainSubstrByWidth(label, Math.max(0, stanceX - contentX - 60))),
+                contentX + 6, y + (row.kind == FofRow.Kind.PLAYER ? 2 : 6), 0xFFCCCCCC, false);
+            if (row.kind == FofRow.Kind.PLAYER) {
+                var effective = ClientFofState.INSTANCE.getEffective(row.playerKey);
+                String status = effective == null ? "Offline" : effective.stance().getDisplayName() + " (" + effective.source() + ")";
+                var pending = ClientFofState.INSTANCE.getPending(row.playerKey);
+                if (pending != null) status = "Requested: " + (pending.desired() == null ? "Default" : pending.desired().getDisplayName())
+                    + (pending.accepted() ? " (waiting)" : "");
+                graphics.drawString(font, Component.literal(font.plainSubstrByWidth(status, Math.max(0, stanceX - contentX - 60))),
+                    contentX + 6, y + 12, 0xFFAAAAAA, false);
+                if (pending != null) {
+                    boolean incoming = mc.player != null && !pending.requester().equals(mc.player.getUUID());
+                    String action = incoming && !pending.accepted() ? "Accept" : "Cancel";
+                    graphics.drawString(font, Component.literal(action), stanceX - 46, y + 6, 0xFFFFFF55, false);
+                }
+                if (mouseX >= contentX && mouseX < stanceX - 46 && mouseY >= y && mouseY < y + ROW_HEIGHT) {
+                    String detail = effective == null ? "Effective relationship unavailable"
+                        : "Effective: " + effective.stance().getDisplayName() + " (" + effective.source() + ")";
+                    if (pending != null) detail += "; request: "
+                        + (pending.desired() == null ? "Default" : pending.desired().getDisplayName())
+                        + (pending.accepted() ? " (accepted, waiting)" : " (awaiting acceptance)");
+                    hoveredActionTooltip = Component.literal(detail);
+                }
+            }
             FofDropdownWidget widget = new FofDropdownWidget(row.currentStance(),
-                FofDropdownWidget.standardOptions(), ignored -> { });
+                row.kind == FofRow.Kind.CATEGORY ? FofDropdownWidget.categoryOptions() : FofDropdownWidget.standardOptions(), ignored -> { });
             widget.render(graphics, font, stanceX, y + 4, FOF_STANCE_COL_WIDTH, ROW_HEIGHT,
                 mouseX - stanceX, mouseY - y - 4);
         }
@@ -884,9 +946,9 @@ public class SquadCommandScreen extends Screen {
         drawScrollbar(graphics, contentX + contentWidth - 3, ROW_START_Y, listBottom, visibleRows);
 
         int footerY = getFooterY();
-        graphics.drawString(font, Component.literal("-- Friend / Foe --  Overrides apply to every soldier you own."),
+        graphics.drawString(font, Component.literal("-- Friend / Foe --  Player settings override team defaults."),
             contentX, footerY, 0xFFAAAAAA, false);
-        graphics.drawString(font, Component.literal("Default keeps the built-in rules. Neutral: hold fire unless attacked. Hostile: engage even if team-allied."),
+        graphics.drawString(font, Component.literal("Hostility is mutual. Ending it requires agreement and 30 seconds without combat."),
             contentX, footerY + 14, 0xFF888888, false);
     }
 
@@ -896,7 +958,8 @@ public class SquadCommandScreen extends Screen {
         activeFofDropdownX = x;
         activeFofDropdownY = y;
         activeFofDropdownWidget = new FofDropdownWidget(row.currentStance(),
-            FofDropdownWidget.standardOptions(), option -> row.sendStance(option.stance()));
+            row.kind == FofRow.Kind.CATEGORY ? FofDropdownWidget.categoryOptions() : FofDropdownWidget.standardOptions(),
+            option -> row.sendStance(option.stance()));
         activeFofDropdownWidget.openDropdown();
     }
 
@@ -1013,8 +1076,20 @@ public class SquadCommandScreen extends Screen {
                     FofRow row = fofRows.get(rowIndex);
                     int rowY = ROW_START_Y + (rowIndex - scrollOffset) * ROW_HEIGHT;
                     int localMouseY = (int) (mouseY - rowY);
+                    if (!row.header && row.kind == FofRow.Kind.PLAYER && localMouseY >= 2 && localMouseY < 20
+                        && mouseX >= row.stanceX - 46 && mouseX < row.stanceX) {
+                        var pending = ClientFofState.INSTANCE.getPending(row.playerKey);
+                        if (pending != null && minecraft != null && minecraft.player != null) {
+                            boolean incoming = !pending.requester().equals(minecraft.player.getUUID());
+                            NetworkHandler.INSTANCE.sendToServer(incoming && !pending.accepted()
+                                ? SetFofStancePacket.accept(row.playerKey, pending.desired()) : SetFofStancePacket.cancel(row.playerKey));
+                            return true;
+                        }
+                    }
                     if (!row.header && mouseX >= row.stanceX && mouseX < row.stanceX + FOF_STANCE_COL_WIDTH
                         && localMouseY >= 4 && localMouseY < 16) {
+                        if (row.kind == FofRow.Kind.TEAM && (minecraft == null || minecraft.player == null
+                            || !minecraft.player.hasPermissions(2))) return true;
                         openFofDropdown(rowIndex, row.stanceX, rowY + 4);
                         return true;
                     }

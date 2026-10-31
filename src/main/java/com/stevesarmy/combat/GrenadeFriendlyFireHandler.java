@@ -1,6 +1,7 @@
 package com.stevesarmy.combat;
 
 import com.stevesarmy.entity.SoldierEntity;
+import com.stevesarmy.StevesArmyConfig;
 import com.stevesarmy.squad.FofStance;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
@@ -42,17 +43,8 @@ public final class GrenadeFriendlyFireHandler {
     }
 
     private static boolean isFriendly(LivingEntity owner, LivingEntity target) {
-        if (owner == target) return true;
-        if (owner instanceof SoldierEntity soldier) {
-            // An explicit HOSTILE mark beats grenade protection (traitor-teammate case).
-            if (soldier.getFofOverride(target) == FofStance.HOSTILE) return false;
-            if (soldier.isFriendlyTo(target)) return true;
-        }
-        if (target instanceof SoldierEntity soldier && soldier.isFriendlyTo(owner)) return true;
-        if (owner.isAlliedTo(target) || target.isAlliedTo(owner)) return true;
-        if (owner instanceof Player ownerPlayer && target instanceof Player targetPlayer) {
-            return ownerPlayer.getTeam() != null && ownerPlayer.getTeam() == targetPlayer.getTeam();
-        }
-        return false;
+        if (owner == target) return false;
+        return !FofCombat.policyAllows(owner, target)
+            || (StevesArmyConfig.getSquadFriendlyFire() && FofCombat.friendly(owner, target));
     }
 }

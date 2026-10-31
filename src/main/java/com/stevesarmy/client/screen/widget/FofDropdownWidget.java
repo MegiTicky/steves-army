@@ -42,6 +42,11 @@ public class FofDropdownWidget implements SquadControlWidget {
             Option.of(FofStance.NEUTRAL), Option.of(FofStance.HOSTILE));
     }
 
+    public static List<Option> categoryOptions() {
+        return List.of(new Option(null, "Server Default"), new Option(FofStance.FRIENDLY, "Off"),
+            new Option(FofStance.HOSTILE, "On"));
+    }
+
     public void setStance(@Nullable FofStance stance) {
         this.currentStance = stance;
     }
@@ -65,7 +70,8 @@ public class FofDropdownWidget implements SquadControlWidget {
         graphics.fill(x, y, x + 1, y + HEIGHT, borderColor);
         graphics.fill(x + WIDTH - 1, y, x + WIDTH, y + HEIGHT, borderColor);
 
-        String label = currentStance != null ? currentStance.getDisplayName() : "Default";
+        String label = options.stream().filter(option -> option.stance() == currentStance)
+            .findFirst().map(Option::label).orElse(currentStance != null ? currentStance.getDisplayName() : "Default");
         graphics.drawString(font, Component.literal(label),
             x + Math.max(2, (WIDTH - font.width(label)) / 2), y + 2, getStanceColor(currentStance), false);
 

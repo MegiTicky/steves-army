@@ -1106,30 +1106,7 @@ public class SoldierEntity extends PathfinderMob implements Container {
 
     @Override
     public boolean canAttack(LivingEntity target) {
-        // An explicit HOSTILE mark beats team/owner alliance (traitor-teammate case).
-        if (target != this && getFofOverride(target) == FofStance.HOSTILE) {
-            return super.canAttack(target);
-        }
-        if (target instanceof SoldierEntity soldier && soldier.getOwnerUUID().equals(this.getOwnerUUID())) {
-            return false;
-        }
-        if (isAlliedByTeam(target)) {
-            return false;
-        }
-        LivingEntity owner = getOwner();
-        if (owner != null && target == owner) {
-            return false;
-        }
-        if (owner != null && target instanceof Player targetPlayer && owner.isAlliedTo(targetPlayer)) {
-            return false;
-        }
-        if (target instanceof SoldierEntity targetSoldier) {
-            LivingEntity targetOwner = targetSoldier.getOwner();
-            if (owner != null && targetOwner != null && owner.isAlliedTo(targetOwner)) {
-                return false;
-            }
-        }
-        return super.canAttack(target);
+        return com.stevesarmy.combat.FofCombat.mayEngage(this, target) && super.canAttack(target);
     }
 
     /** True when the other entity shares the soldier's (or owner's) scoreboard team. */
@@ -1151,12 +1128,16 @@ public class SoldierEntity extends PathfinderMob implements Container {
      */
     @Nullable
     public FofStance getFofOverride(LivingEntity other) {
+        FofCategory category = other instanceof net.minecraft.world.entity.monster.Monster ? FofCategory.MONSTERS
+            : other instanceof TargetEntity ? FofCategory.TARGET_DUMMIES : null;
+        if (category == null) return null;
         if (this.level().isClientSide) return null;
         MinecraftServer server = this.level().getServer();
         if (server == null) return null;
         Optional<UUID> ownerUUID = getOwnerUUID();
         if (ownerUUID.isEmpty()) return null;
-        return FofSettings.resolveStance(server, ownerUUID.get(), other);
+        FofSettings.OwnerFof settings = FofSettings.get(server).peek(ownerUUID.get());
+        return settings == null ? null : settings.resolveCategory(category);
     }
 
     /**
@@ -1165,9 +1146,11 @@ public class SoldierEntity extends PathfinderMob implements Container {
      * follows the default rules.
      */
     public boolean isProactiveTarget(LivingEntity candidate) {
-        if (getFofOverride(candidate) != FofStance.NEUTRAL) return true;
-        return candidate == neutralAttacker
-            && this.tickCount - neutralAttackerTick <= NEUTRAL_RETALIATION_TICKS;
+        FofStance category = getFofOverride(candidate);
+        if (category == FofStance.FRIENDLY) return false;
+        if (category == FofStance.NEUTRAL && (candidate != neutralAttacker
+            || this.tickCount - neutralAttackerTick > NEUTRAL_RETALIATION_TICKS)) return false;
+        return com.stevesarmy.combat.FofCombat.mayEngage(this, candidate);
     }
 
     /** Category targeting gate: an explicit FoF stance replaces the config default. */
@@ -1185,48 +1168,11 @@ public class SoldierEntity extends PathfinderMob implements Container {
 
     public boolean isFriendlyTo(LivingEntity other) {
         if (other == this) return false;
-
-        // Explicit per-owner FoF overrides sit above the default rules below.
-        // FRIENDLY protects even team enemies; HOSTILE engages even team allies;
-        // NEUTRAL falls through as non-friendly (retaliation still works) and
-        // is kept out of proactive targeting by isProactiveTarget.
-        FofStance override = getFofOverride(other);
-        if (override == FofStance.FRIENDLY) return true;
-        if (override == FofStance.HOSTILE) return false;
-
-        if (isAlliedByTeam(other)) return true;
-        
-        LivingEntity owner = getOwner();
-        if (other == owner) return true;
-        
-        Optional<UUID> myOwner = getOwnerUUID();
-        if (myOwner.isPresent()) {
-            if (other instanceof Player otherPlayer) {
-                if (otherPlayer.getUUID().equals(myOwner.get())) return true;
-                if (owner != null && owner.isAlliedTo(otherPlayer)) return true;
-            }
+        if (!(other instanceof Player) && !(other instanceof SoldierEntity)) {
+            FofStance category = getFofOverride(other);
+            if (category == FofStance.FRIENDLY) return true;
         }
-        
-        if (other instanceof SoldierEntity otherSoldier) {
-            Optional<UUID> theirOwner = otherSoldier.getOwnerUUID();
-            if (myOwner.isPresent() && theirOwner.isPresent() 
-                && myOwner.get().equals(theirOwner.get())) return true;
-            if (owner != null) {
-                LivingEntity theirOwnerEntity = otherSoldier.getOwner();
-                if (theirOwnerEntity != null) {
-                    if (owner.isAlliedTo(theirOwnerEntity)) return true;
-                    Team ownerTeam = owner.getTeam();
-                    Team theirTeam = theirOwnerEntity.getTeam();
-                    if (ownerTeam != null && theirTeam != null
-                        && ownerTeam.getName().startsWith("steves_army_friendly_")
-                        && theirTeam.getName().startsWith("steves_army_friendly_")) {
-                        return true;
-                    }
-                }
-            }
-        }
-        
-        return false;
+        return com.stevesarmy.combat.FofCombat.friendly(this, other);
     }
 
     @Override

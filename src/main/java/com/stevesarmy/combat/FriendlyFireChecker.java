@@ -12,11 +12,10 @@ public class FriendlyFireChecker {
 
     private static final float MIN_SPREAD_ANGLE = 5.0f;
     private static final float MAX_SPREAD_ANGLE = 10.0f;
-    private static final double SEARCH_RADIUS = 25.0;
 
     /** Compatibility path for existing non-mobile callers. */
     public static boolean isSafeToShoot(SoldierEntity shooter, Vec3 aimPoint, float accuracy) {
-        List<LivingEntity> friendlies = getNearbyFriendlies(shooter);
+        List<LivingEntity> friendlies = getNearbyFriendlies(shooter, aimPoint);
         if (friendlies.isEmpty()) return true;
         Vec3 origin = shooter.getEyePosition();
         float spreadAngle = calculateSpreadAngle(accuracy);
@@ -47,7 +46,7 @@ public class FriendlyFireChecker {
                                          double yawEnvelope, double pitchEnvelope,
                                          double sampledPitchDeviation, double sampledYawDeviation,
                                          boolean checkSampledDirection, double nativeSpread) {
-        List<LivingEntity> friendlies = getNearbyFriendlies(shooter);
+        List<LivingEntity> friendlies = getNearbyFriendlies(shooter, aimPoint);
         if (friendlies.isEmpty()) return true;
 
         Vec3 origin = shooter.getEyePosition();
@@ -94,14 +93,17 @@ public class FriendlyFireChecker {
         return true;
     }
 
-    private static List<LivingEntity> getNearbyFriendlies(SoldierEntity shooter) {
+    private static List<LivingEntity> getNearbyFriendlies(SoldierEntity shooter, Vec3 aimPoint) {
         List<LivingEntity> friendlies = new ArrayList<>();
         LivingEntity owner = shooter.getOwner();
         if (owner != null && owner.isAlive()) friendlies.add(owner);
 
-        AABB searchBox = shooter.getBoundingBox().inflate(SEARCH_RADIUS);
-        for (SoldierEntity soldier : shooter.level().getEntitiesOfClass(SoldierEntity.class, searchBox)) {
-            if (soldier != shooter && shooter.isFriendlyTo(soldier)) friendlies.add(soldier);
+        Vec3 origin = shooter.getEyePosition();
+        double margin = Math.max(2.0, origin.distanceTo(aimPoint) * 0.25);
+        AABB searchBox = new AABB(origin, aimPoint).inflate(margin);
+        for (LivingEntity entity : shooter.level().getEntitiesOfClass(LivingEntity.class, searchBox)) {
+            if (entity != shooter && entity != owner
+                && (shooter.isFriendlyTo(entity) || !FofCombat.policyAllows(shooter, entity))) friendlies.add(entity);
         }
         return friendlies;
     }

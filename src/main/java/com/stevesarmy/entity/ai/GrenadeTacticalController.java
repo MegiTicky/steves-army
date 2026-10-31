@@ -1458,7 +1458,7 @@ public final class GrenadeTacticalController {
 
     private boolean isFriendly(LivingEntity entity) {
         if (entity == soldier) return true;
-        return soldier.isFriendlyTo(entity) || entity.isAlliedTo(soldier) || soldier.isAlliedTo(entity);
+        return soldier.isFriendlyTo(entity) || !com.stevesarmy.combat.FofCombat.policyAllows(soldier, entity);
     }
 
     private Arc findArc(Vec3 targetPoint, Vec3 landing,

@@ -45,7 +45,11 @@ public class StevesArmyConfig {
 
     /** How a suppressed soldier reacts when returning direct fire. */
     public enum SuppressedFireMode { SPRAY, HOLD }
+    /** Server-wide policy for combat between player-affiliated principals. */
+    public enum CombatPolicy { PVE_ONLY, TEAM_PVP, OPEN_PVP }
     public static final ForgeConfigSpec.BooleanValue SQUAD_FRIENDLY_FIRE;
+    public static final ForgeConfigSpec.EnumValue<CombatPolicy> COMBAT_POLICY;
+    public static final ForgeConfigSpec.BooleanValue ALLOW_PLAYER_DIPLOMACY;
     public static final ForgeConfigSpec.DoubleValue THREAT_SMOOTH_BLEND_FACTOR;
     public static final ForgeConfigSpec.IntValue THREAT_SMOOTH_DECAY_TIME_MS;
     
@@ -451,6 +455,16 @@ public class StevesArmyConfig {
                      "For team-based protection, use: /team modify <team> friendlyfire false",
                      "Default: true (squad protection ON)")
             .define("squadFriendlyFire", true);
+        COMBAT_POLICY = BUILDER
+            .comment("Server combat policy for player-affiliated entities.",
+                     "PVE_ONLY blocks combat between player-affiliated principals, including their soldiers and vehicles.",
+                     "TEAM_PVP allows combat only across hostile team/faction relationships; OPEN_PVP allows hostile player relationships.",
+                     "External Minecraft and other mod damage vetoes remain authoritative.")
+            .defineEnum("combatPolicy", CombatPolicy.OPEN_PVP);
+        ALLOW_PLAYER_DIPLOMACY = BUILDER
+            .comment("Allow players to declare shared player-pair relationships and request peace.",
+                     "Set false for operator-controlled faction or event servers.")
+            .define("allowPlayerDiplomacy", true);
         
         BUILDER.pop();
         
@@ -1646,6 +1660,14 @@ BUILDER.pop();
 
     public static boolean getSquadFriendlyFire() {
         return SQUAD_FRIENDLY_FIRE.get();
+    }
+
+    public static CombatPolicy getCombatPolicy() {
+        return COMBAT_POLICY.get();
+    }
+
+    public static boolean getAllowPlayerDiplomacy() {
+        return ALLOW_PLAYER_DIPLOMACY.get();
     }
     
     public static double getThreatSmoothBlendFactor() {

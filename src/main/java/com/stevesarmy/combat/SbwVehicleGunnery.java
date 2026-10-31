@@ -74,7 +74,7 @@ public final class SbwVehicleGunnery {
     /** Ordinary targeting rules plus a sight check — the gun must actually be able to engage it. */
     private static boolean isValidSpottingTarget(SoldierEntity soldier, LivingEntity target) {
         return target != soldier
-            && !soldier.isFriendlyTo(target)
+            && soldier.isProactiveTarget(target)
             && TargetAcquisition.isValidTarget(soldier, target)
             && TargetAcquisition.hasLineOfSightToPosition(soldier, target.getEyePosition());
     }

@@ -168,7 +168,7 @@ public final class ArmorThreatScanner {
             // transport seat reads as a hostile crewman on his own vehicle.
             List<LivingEntity> occupants = serverLevel.getEntitiesOfClass(LivingEntity.class, searchBox,
                 occ -> occ.isAlive() && occ != soldier
-                    && !soldier.isFriendlyTo(occ) && isVehicleOccupant(occ));
+                    && soldier.isProactiveTarget(occ) && isVehicleOccupant(occ));
             // Friendly-aboard veto, through the same isFriendlyTo identity used
             // for every living-target decision (owner, teams, allies): a ship
             // carrying any of our side's people is never a rocket target, even
@@ -410,7 +410,7 @@ public final class ArmorThreatScanner {
     /** A station is hostile when an enemy player possesses it or an enemy soldier crews it. */
     private static boolean isHostileCamera(ServerLevel level, Entity camera, SoldierEntity observer) {
         for (Entity passenger : camera.getPassengers()) {
-            if (passenger instanceof Player player && !observer.isFriendlyTo(player)) {
+            if (passenger instanceof Player player && observer.isProactiveTarget(player)) {
                 return true;
             }
         }
@@ -419,7 +419,7 @@ public final class ArmorThreatScanner {
             return false;
         }
         Entity crew = level.getEntity(claimant);
-        return crew instanceof SoldierEntity crewSoldier && !observer.isFriendlyTo(crewSoldier);
+        return crew instanceof SoldierEntity crewSoldier && observer.isProactiveTarget(crewSoldier);
     }
 
     /**

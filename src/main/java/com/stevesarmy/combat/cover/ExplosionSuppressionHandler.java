@@ -30,6 +30,10 @@ public class ExplosionSuppressionHandler {
         if (event.getLevel().isClientSide()) return;
 
         Explosion explosion = event.getExplosion();
+        var shooter = explosion.getIndirectSourceEntity();
+        if (shooter == null && com.stevesarmy.combat.GrenadeIntegration.isGrenadeEntity(explosion.getExploder())) {
+            shooter = com.stevesarmy.combat.GrenadeIntegration.getOwner(explosion.getExploder());
+        }
         Vec3 explosionPos = explosion.getPosition();
         float radius = StevesArmyConfig.getExplosionSuppressionRadius();
         AABB suppressionArea = new AABB(explosionPos, explosionPos).inflate(radius + 1.0);
@@ -45,6 +49,8 @@ public class ExplosionSuppressionHandler {
         // The Forge affected-entity list follows each explosion's damage radius,
         // which can be smaller than Steve's Army's independent suppression radius.
         for (SoldierEntity soldier : nearbySoldiers) {
+            if (shooter != null && (com.stevesarmy.combat.FofCombat.friendly(shooter, soldier)
+                || !com.stevesarmy.combat.FofCombat.policyAllows(shooter, soldier))) continue;
             CoverBehaviorManager coverManager = soldier.getCoverBehaviorManager();
             if (coverManager == null) {
                 if (debugLog()) {

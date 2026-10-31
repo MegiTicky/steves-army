@@ -35,7 +35,7 @@ public class FofQuickMarkScreen extends Screen {
         if (target instanceof SoldierEntity soldier) {
             this.stanceKey = soldier.getOwnerUUID().orElse(null);
             this.targetName = target.getName().getString();
-            this.subtitle = "Marks the owner's whole squad";
+            this.subtitle = "Shared relation with the owner and their soldiers";
         } else {
             this.stanceKey = target.getUUID();
             this.targetName = target.getName().getString();
@@ -80,7 +80,9 @@ public class FofQuickMarkScreen extends Screen {
         graphics.drawCenteredString(font, Component.literal("Mark: " + targetName), centerX, top, 0xFFFFFFFF);
         if (stanceKey != null) {
             FofStance current = ClientFofState.INSTANCE.getPlayerStance(stanceKey);
-            String stanceText = current != null ? "Current: " + current.getDisplayName() : "Current: default";
+            ClientFofState.Effective effective = ClientFofState.INSTANCE.getEffective(stanceKey);
+            String stanceText = effective != null ? "Effective: " + effective.stance().getDisplayName() + " (" + effective.source() + ")"
+                : current != null ? "Override: " + current.getDisplayName() : "Override: default";
             graphics.drawCenteredString(font, Component.literal(stanceText), centerX, top + 10,
                 FofDropdownWidget.getStanceColor(current));
         }

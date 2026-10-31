@@ -30,9 +30,7 @@ public class TeamGarrisonEntity extends GarrisonEntity {
 
     @Override
     public boolean isFriendlyTo(LivingEntity other) {
-        if (other == this) return false;
-        return this.getTeam() != null && other.getTeam() != null
-            && this.getTeam().isAlliedTo(other.getTeam());
+        return super.isFriendlyTo(other);
     }
 
     @Override

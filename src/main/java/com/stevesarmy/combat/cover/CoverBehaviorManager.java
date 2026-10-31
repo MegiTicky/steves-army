@@ -473,7 +473,8 @@ public class CoverBehaviorManager {
     public void onNearMiss(net.minecraft.world.phys.Vec3 bulletPath, net.minecraft.world.entity.LivingEntity soldier,
                            float bulletSpeed, @javax.annotation.Nullable net.minecraft.world.entity.LivingEntity shooter,
                            @javax.annotation.Nullable Vec3 firingOrigin) {
-        if (shooter != null && soldier instanceof com.stevesarmy.entity.SoldierEntity s && s.isFriendlyTo(shooter)) {
+        if (shooter != null && (com.stevesarmy.combat.FofCombat.friendly(shooter, soldier)
+            || !com.stevesarmy.combat.FofCombat.policyAllows(shooter, soldier))) {
             return;
         }
         // Travel suppression resistance: a moving soldier is a harder target to
@@ -505,7 +506,8 @@ public class CoverBehaviorManager {
     public void onCbcNearMiss(net.minecraft.world.phys.Vec3 bulletPath, net.minecraft.world.entity.LivingEntity soldier,
                               @javax.annotation.Nullable net.minecraft.world.entity.LivingEntity shooter,
                               @javax.annotation.Nullable Vec3 firingOrigin) {
-        if (shooter != null && soldier instanceof com.stevesarmy.entity.SoldierEntity s && s.isFriendlyTo(shooter)) {
+        if (shooter != null && (com.stevesarmy.combat.FofCombat.friendly(shooter, soldier)
+            || !com.stevesarmy.combat.FofCombat.policyAllows(shooter, soldier))) {
             return;
         }
         suppressionTracker.onCbcNearMiss(soldier);
@@ -513,7 +515,8 @@ public class CoverBehaviorManager {
     }
 
     public void onIncomingFire(net.minecraft.world.entity.LivingEntity shooter) {
-        if (soldier.isFriendlyTo(shooter)) {
+        if (com.stevesarmy.combat.FofCombat.friendly(shooter, soldier)
+            || !com.stevesarmy.combat.FofCombat.policyAllows(shooter, soldier)) {
             return;
         }
         suppressionTracker.onIncomingFire(shooter);
@@ -521,7 +524,8 @@ public class CoverBehaviorManager {
     }
 
     public void onIncomingFire(net.minecraft.world.entity.LivingEntity shooter, float bulletSpeed) {
-        if (soldier.isFriendlyTo(shooter)) {
+        if (com.stevesarmy.combat.FofCombat.friendly(shooter, soldier)
+            || !com.stevesarmy.combat.FofCombat.policyAllows(shooter, soldier)) {
             return;
         }
         suppressionTracker.onIncomingFire(shooter, bulletSpeed);
@@ -533,7 +537,8 @@ public class CoverBehaviorManager {
     }
 
     public void onTakeDamage(@javax.annotation.Nullable net.minecraft.world.entity.LivingEntity attacker) {
-        if (attacker != null && soldier.isFriendlyTo(attacker)) {
+        if (attacker != null && (com.stevesarmy.combat.FofCombat.friendly(attacker, soldier)
+            || !com.stevesarmy.combat.FofCombat.policyAllows(attacker, soldier))) {
             return;
         }
         suppressionTracker.onTakeDamage();

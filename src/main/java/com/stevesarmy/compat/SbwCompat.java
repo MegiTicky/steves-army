@@ -221,7 +221,7 @@ public final class SbwCompat {
         for (Entity passenger : vehicle.getPassengers()) {
             if (passenger instanceof LivingEntity living
                 && passenger.isAlive()
-                && !observer.isFriendlyTo(living)) {
+                && observer.isProactiveTarget(living)) {
                 return true;
             }
         }
