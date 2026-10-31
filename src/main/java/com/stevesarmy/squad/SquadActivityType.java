@@ -28,7 +28,7 @@ public enum SquadActivityType {
             case SEND -> SEND;
             case SUPPRESS_AREA -> SUPPRESS_AREA;
             case THREAT_DIRECTION -> THREAT_DIRECTION;
-            case FOLLOW, LOCATION -> null;
+            default -> null;
         };
     }
 }

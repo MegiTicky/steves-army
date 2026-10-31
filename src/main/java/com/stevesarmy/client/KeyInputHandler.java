@@ -76,6 +76,7 @@ public class KeyInputHandler {
                 } else {
                     next = FireTeam.values()[current.ordinal() + 1];
                 }
+                
                 FireTeamScopeState.INSTANCE.setCurrentScope(next, "cycle key");
                 mc.player.displayClientMessage(Component.literal("[" + next.getShortName() + "]"), true);
             }

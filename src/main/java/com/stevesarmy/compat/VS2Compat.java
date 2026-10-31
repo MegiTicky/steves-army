@@ -797,8 +797,8 @@ public final class VS2Compat {
      * Mounts the soldier directly on a plain world-space vehicle entity (Superb
      * Warfare). The fourth seat primitive beside SeatBlock/contraption/seat-entity
      * mounts: vanilla {@code startRiding} with a pending {@code authorizedMounts}
-     * entry, then the SBW seat placement (gunner seats before the driver seat, so
-     * the wheel stays free for a player). Command-driven and ship-less:
+     * entry, then the SBW seat placement (crew may take the driver seat; ordinary
+     * infantry are restricted to passenger seats). Command-driven and ship-less:
      * {@code transportShipId} and {@code transportSeatPosition} both stay null —
      * that pair is the marker {@link #waitForReseat} uses to release instead of
      * re-seating when the vanilla passenger link is gone. No manual passenger
@@ -807,6 +807,21 @@ public final class VS2Compat {
     public static boolean seatSoldierOnEntity(SoldierEntity soldier, Entity vehicle,
                                               boolean preferGunnerSeat) {
         if (soldier.isPassenger() || vehicle == null || vehicle.isRemoved()) {
+            return false;
+        }
+        int wanted = SbwCompat.firstFreeSeat(vehicle, preferGunnerSeat);
+        if (wanted < 0 || (wanted == 0 && soldier.getRole() != SoldierRole.VEHICLE_CREW)) {
+            return false;
+        }
+        return seatSoldierOnEntityAtSeat(soldier, vehicle, wanted);
+    }
+
+    /** Mounts on a previously reserved SBW seat after the soldier has walked up to the vehicle. */
+    public static boolean seatSoldierOnEntityAtSeat(SoldierEntity soldier, Entity vehicle, int wanted) {
+        if (soldier == null || soldier.isPassenger() || vehicle == null || vehicle.isRemoved()
+            || wanted < 0 || wanted >= SbwCompat.maxPassengers(vehicle)
+            || SbwCompat.passengerInSeat(vehicle, wanted) != null
+            || (wanted == 0 && soldier.getRole() != SoldierRole.VEHICLE_CREW)) {
             return false;
         }
         Vec3 preMountPos = soldier.position();
@@ -837,13 +852,19 @@ public final class VS2Compat {
 
         vehicle.positionRider(soldier);
         int seat = SbwCompat.seatIndexOf(vehicle, soldier);
-        int wanted = SbwCompat.firstFreeSeat(vehicle, preferGunnerSeat);
         if (wanted >= 0 && wanted != seat) {
-            SbwCompat.changeSeat(vehicle, soldier, wanted);
+            if (!SbwCompat.changeSeat(vehicle, soldier, wanted)) {
+                releaseTransport(soldier, false);
+                return false;
+            }
+        }
+        int actualSeat = SbwCompat.seatIndexOf(vehicle, soldier);
+        if (actualSeat != wanted) {
+            releaseTransport(soldier, false);
+            return false;
         }
         StevesArmyMod.LOGGER.info("[VS2] seatSoldierOnEntity: mounted soldier={} vehicle={} vehicleClass={} seat {} -> {}",
-            soldier.getId(), vehicle.getId(), vehicle.getClass().getSimpleName(), seat,
-            SbwCompat.seatIndexOf(vehicle, soldier));
+            soldier.getId(), vehicle.getId(), vehicle.getClass().getSimpleName(), seat, actualSeat);
         return true;
     }
 

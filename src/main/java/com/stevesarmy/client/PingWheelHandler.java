@@ -8,16 +8,22 @@ import com.stevesarmy.transport.TransportOrder;
 import com.stevesarmy.util.RateLimiter;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.projectile.ProjectileUtil;
 import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.block.AbstractGlassBlock;
 import net.minecraft.world.level.block.StainedGlassPaneBlock;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.EntityHitResult;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 import org.lwjgl.glfw.GLFW;
 
 public class PingWheelHandler {
+    public record MouseDelta(double x, double y) {}
+
     private static final RateLimiter rateLimiter = new RateLimiter();
     private static final int HOLD_TIME_MS = 150;
 
@@ -179,10 +185,7 @@ public class PingWheelHandler {
 
         double distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
 
-        StevesArmyMod.LOGGER.info("Mouse delta: ({}, {}) distance: {}", deltaX, deltaY, distance);
-
         if (distance < 30) {
-            StevesArmyMod.LOGGER.info("Center area selected, returning LOCATION");
             return PingType.LOCATION;
         }
 
@@ -197,12 +200,6 @@ public class PingWheelHandler {
         double sectorSize = 360.0 / numTypes;
         int sector = ((int) (adjustedDegrees / sectorSize)) % numTypes;
         PingType selectedType = PingType.values()[sector];
-
-        StevesArmyMod.LOGGER.info("Angle: {} deg, adjusted: {} deg, sector: {}, type: {}",
-            String.format("%.1f", degrees),
-            String.format("%.1f", adjustedDegrees),
-            sector,
-            selectedType);
 
         return selectedType;
     }
@@ -238,6 +235,30 @@ public class PingWheelHandler {
             return hitResult.getLocation();
         }
         return eyePos.add(lookVec.scale(maxDistance));
+    }
+
+    /** The entity under the crosshair, limited by solid blocks along the same ping ray. */
+    static Entity findCrosshairEntity(Minecraft mc) {
+        LocalPlayer player = mc.player;
+        if (player == null) return null;
+
+        double maxDistance = mc.options.renderDistance().get() * 16.0;
+        Vec3 eyePos = player.getEyePosition(1.0f);
+        Vec3 lookVec = player.getViewVector(1.0f);
+        Vec3 endPos = eyePos.add(lookVec.scale(maxDistance));
+        BlockHitResult blockHit = clipPingTarget(player, eyePos, endPos, lookVec);
+        Vec3 entityRayEnd = blockHit.getType() == HitResult.Type.MISS
+            ? endPos : blockHit.getLocation();
+        double entityRayDistanceSqr = eyePos.distanceToSqr(entityRayEnd);
+        if (entityRayDistanceSqr < 1.0e-6) return null;
+
+        AABB searchBox = player.getBoundingBox()
+            .expandTowards(entityRayEnd.subtract(eyePos))
+            .inflate(1.0);
+        EntityHitResult entityHit = ProjectileUtil.getEntityHitResult(
+            player, eyePos, entityRayEnd, searchBox,
+            entity -> !entity.isSpectator() && entity.isPickable(), entityRayDistanceSqr);
+        return entityHit != null ? entityHit.getEntity() : null;
     }
 
     /**
@@ -277,20 +298,14 @@ public class PingWheelHandler {
         return isWheelActive;
     }
 
-    public static double getDeltaX() {
+    /** Reads both cursor coordinates together for compatibility with virtual mouse backends. */
+    public static MouseDelta getMouseDelta() {
         Minecraft mc = Minecraft.getInstance();
         long windowHandle = mc.getWindow().getWindow();
         double[] xpos = new double[1];
-        GLFW.glfwGetCursorPos(windowHandle, xpos, null);
-        return xpos[0] - pressMouseX;
-    }
-
-    public static double getDeltaY() {
-        Minecraft mc = Minecraft.getInstance();
-        long windowHandle = mc.getWindow().getWindow();
         double[] ypos = new double[1];
-        GLFW.glfwGetCursorPos(windowHandle, null, ypos);
-        return ypos[0] - pressMouseY;
+        GLFW.glfwGetCursorPos(windowHandle, xpos, ypos);
+        return new MouseDelta(xpos[0] - pressMouseX, ypos[0] - pressMouseY);
     }
 
     public static PingType getHoveredType() {

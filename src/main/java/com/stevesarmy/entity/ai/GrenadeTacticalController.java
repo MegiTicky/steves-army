@@ -5,6 +5,8 @@ import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.combat.GrenadeIntegration;
 import com.stevesarmy.combat.GunIntegration;
 import com.stevesarmy.combat.TargetAcquisition;
+import com.stevesarmy.compat.SbwCompat;
+import com.stevesarmy.compat.sbw.SbwVehicles;
 import com.stevesarmy.combat.cover.CoverPoint;
 import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.entity.EnemySoldierEntity;
@@ -749,6 +751,15 @@ public final class GrenadeTacticalController {
             return new CandidateResolution(null, "target is exposed and no defensive grenade condition is active");
         }
 
+        SquadThreatIntel.ThreatKnowledge armoredVehicle = selectHostileArmoredVehicleThreat(intel);
+        if (armoredVehicle != null) {
+            Vec3 targetPoint = grenadeTargetPoint(armoredVehicle);
+            return new CandidateResolution(new Candidate(null, armoredVehicle.threatEntityId,
+                targetPoint, preferredLanding(targetPoint, true), true,
+                TargetSource.THREAT_INTEL, armoredVehicle, 4),
+                "hostile occupied vehicle hull using squad intel");
+        }
+
         SquadThreatIntel.ThreatKnowledge threat = selectPositionThreat(intel);
         if (threat == null) return new CandidateResolution(null, positionThreatReason(intel));
         boolean suppressionResponse = isSuppressionResponse(intel, threat.threatEntityId);
@@ -761,6 +772,35 @@ public final class GrenadeTacticalController {
             source == TargetSource.SUPPRESSION_INTEL
                 ? "suppression response using threat intel position"
                 : "position-only throw using threat intel");
+    }
+
+    @Nullable
+    private SquadThreatIntel.ThreatKnowledge selectHostileArmoredVehicleThreat(
+        @Nullable SquadThreatIntel intel) {
+        if (intel == null || !(soldier.level() instanceof ServerLevel serverLevel)
+            || !SbwCompat.isEnabled()) return null;
+
+        long now = soldier.level().getGameTime();
+        double minRange = StevesArmyConfig.getGrenadeMinRange();
+        double maxRange = currentEffectiveMaxRange();
+        SquadThreatIntel.ThreatKnowledge best = null;
+        double bestDistance = Double.MAX_VALUE;
+        for (SquadThreatIntel.ThreatKnowledge threat : intel.getHardTargetThreats(now)) {
+            long age = now - threat.lastSeenTime;
+            if (!threat.isAlive || threat.lastKnownPosition == null || age < 0 || age > 120
+                || threat.accuracy < StevesArmyConfig.getGrenadeMinThreatAccuracy()) continue;
+
+            Entity vehicle = serverLevel.getEntity(threat.threatEntityId);
+            if (!SbwCompat.isOperational(vehicle) || SbwVehicles.isDrone(vehicle)
+                || !SbwCompat.hasHostileOccupant(soldier, vehicle)
+                || SbwCompat.hasFriendlyOccupant(soldier, vehicle)) continue;
+
+            double distance = soldier.position().distanceTo(grenadeTargetPoint(threat));
+            if (distance < minRange || distance > maxRange || distance >= bestDistance) continue;
+            best = threat;
+            bestDistance = distance;
+        }
+        return best;
     }
 
     private String hiddenThreatReason(@Nullable SquadThreatIntel intel, UUID threatId) {

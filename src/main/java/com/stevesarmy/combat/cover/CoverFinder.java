@@ -94,7 +94,10 @@ public class CoverFinder {
     private int candidatesScored;
     private final Map<SearchKey, List<CoverPoint>> discoveredCoverCache = new HashMap<>();
 
-    private record SearchKey(BlockPos center, int radius, java.util.UUID threatId) {}
+    private record SearchKey(BlockPos center, int radius, java.util.UUID threatId, long vehicleTick) {}
+    private List<net.minecraft.world.entity.Entity> scopedVehicleCover;
+    private net.minecraft.world.phys.AABB scopedVehicleBounds;
+    private long scopedVehicleTick = Long.MIN_VALUE;
     
     public CoverFinder(Level level) {
         this.level = level;
@@ -129,8 +132,11 @@ public class CoverFinder {
     }
     
     public List<CoverPoint> findCoverPoints(BlockPos center, int radius, LivingEntity threat) {
+        if (com.stevesarmy.compat.sbw.SbwCompat.hasVehicles()
+            && scopedVehicleTick != level.getGameTime()) discoveredCoverCache.clear();
         SearchKey searchKey = new SearchKey(center.immutable(), radius,
-            threat == null ? null : threat.getUUID());
+            threat == null ? null : threat.getUUID(),
+            com.stevesarmy.compat.sbw.SbwCompat.hasVehicles() ? level.getGameTime() : 0L);
         List<CoverPoint> cached = discoveredCoverCache.get(searchKey);
         if (cached != null) {
             PerformanceMetrics.recordCoverDiscoveryCacheHit();
@@ -141,6 +147,14 @@ public class CoverFinder {
         List<CoverPoint> coverPoints = new ArrayList<>();
         int searchRadius = Math.min(radius, MAX_SEARCH_RADIUS);
         int maxDistSq = searchRadius * searchRadius;
+        if (com.stevesarmy.compat.sbw.SbwCompat.hasVehicles()) {
+            scopedVehicleTick = level.getGameTime();
+            scopedVehicleBounds = new net.minecraft.world.phys.AABB(center).inflate(searchRadius + 3.0);
+            scopedVehicleCover = level.getEntitiesOfClass(net.minecraft.world.entity.Entity.class,
+                scopedVehicleBounds,
+                e -> com.stevesarmy.compat.sbw.SbwCompat.isVehicle(e)
+                    && !com.stevesarmy.compat.sbw.SbwVehicles.isDrone(e) && !e.isRemoved());
+        }
 
         // Search closest blocks first to guarantee we find the best nearby cover before hitting the 50 limit
         for (BlockPos offset : SEARCH_OFFSETS) {
@@ -1139,6 +1153,14 @@ public class CoverFinder {
         if (com.stevesarmy.util.HazardBlockHelper.boundingBoxOverlapsHazard(level, soldierBb)) {
             return false;
         }
+        // A block-air position may still be inside a vehicle's moving hitbox.
+        Vec3 bodyBottom = new Vec3(pos.getX() + 0.5, pos.getY() + 0.1, pos.getZ() + 0.5);
+        Vec3 bodyTop = bodyBottom.add(0.0, 1.6, 0.0);
+        for (var vehicle : vehiclesForCover(pos)) {
+            if (vehicle.getBoundingBox().intersects(soldierBb)
+                && Double.isFinite(com.stevesarmy.compat.sbw.SbwVehicleOcclusion.hitDistance(
+                    vehicle, bodyBottom, bodyTop))) return false;
+        }
         
         boolean hasOpenEyeLevel = false;
         for (Direction dir : Direction.Plane.HORIZONTAL) {
@@ -1196,7 +1218,37 @@ public class CoverFinder {
             }
         }
         
+        if (totalHeight < MIN_EFFECTIVE_COVER_HEIGHT) {
+            totalHeight = Math.max(totalHeight, vehicleCoverHeight(soldierPos, direction));
+        }
         return totalHeight;
+    }
+
+    private List<net.minecraft.world.entity.Entity> vehiclesForCover(BlockPos pos) {
+        if (!com.stevesarmy.compat.sbw.SbwCompat.hasVehicles()) return List.of();
+        if (scopedVehicleCover != null && scopedVehicleTick == level.getGameTime()
+            && scopedVehicleBounds != null && scopedVehicleBounds.contains(pos.getCenter())) return scopedVehicleCover;
+        return level.getEntitiesOfClass(net.minecraft.world.entity.Entity.class,
+            new net.minecraft.world.phys.AABB(pos).inflate(3.0),
+            e -> com.stevesarmy.compat.sbw.SbwCompat.isVehicle(e)
+                && !com.stevesarmy.compat.sbw.SbwVehicles.isDrone(e) && !e.isRemoved());
+    }
+
+    /** Sample the actual vehicle OBB at waist and eye height, close to this position. */
+    private float vehicleCoverHeight(BlockPos pos, Direction direction) {
+        Vec3 waist = new Vec3(pos.getX() + 0.5, pos.getY() + 0.85, pos.getZ() + 0.5);
+        Vec3 eye = waist.add(0.0, 0.7, 0.0);
+        Vec3 step = new Vec3(direction.getStepX() * 2.0, 0.0, direction.getStepZ() * 2.0);
+        for (var vehicle : vehiclesForCover(pos)) {
+            if (!vehicle.getBoundingBox().inflate(2.1).contains(waist)) continue;
+            boolean waistBlocked = Double.isFinite(com.stevesarmy.compat.sbw.SbwVehicleOcclusion.hitDistance(
+                vehicle, waist, waist.add(step)));
+            if (!waistBlocked) continue;
+            boolean eyeBlocked = Double.isFinite(com.stevesarmy.compat.sbw.SbwVehicleOcclusion.hitDistance(
+                vehicle, eye, eye.add(step)));
+            return eyeBlocked ? 1.7f : 1.1f;
+        }
+        return 0.0f;
     }
     
     private boolean isBlockValidCover(BlockState state, BlockPos pos) {

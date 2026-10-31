@@ -40,9 +40,7 @@ public class MouseHandlerWheelMixin {
         if (WheelInteractionController.isClickMode() && button == GLFW.GLFW_MOUSE_BUTTON_LEFT) {
             WheelInteractionController.confirmClick();
         }
-        if (WheelInteractionController.isClickMode() && button == GLFW.GLFW_MOUSE_BUTTON_RIGHT) {
-            WheelCycleController.onRightClick();
-        }
+        WheelCycleController.onMouseButtonPressed(button);
         ci.cancel();
     }
 }

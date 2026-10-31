@@ -22,11 +22,12 @@ import java.util.UUID;
  * ({@code ArmorThreatScanner}), and crew mounting
  * ({@code VS2Compat.seatSoldierOnEntity} + {@code CrewAssignment}).
  *
- * <p>Gunnery needs no API here: SBW already mirrors a Mob passenger's attack
- * target into its turret/weapon-station AI and fires natively, so a mounted
- * soldier only has to keep a live {@code setTarget} (see
- * {@code combat.SbwVehicleGunnery}). Driving is deliberately unsupported —
- * SBW vehicles move only on client input packets, which a mob cannot send.</p>
+ * <p>Gunnery needs no API here: SBW already mirrors a dedicated vehicle
+ * crew member's attack target into its turret/weapon-station AI and fires
+ * natively (see {@code combat.SbwVehicleGunnery}). Server-side driving is
+ * handled separately by {@code vehicle.VehicleDriver}, which sends native
+ * SBW inputs; only dedicated vehicle crew can drive, while ordinary infantry
+ * ride in passenger seats and leave on a player dismount order.</p>
  */
 public final class SbwCompat {
     private static final String VEHICLE_ENTITY_CLASS =
@@ -184,10 +185,18 @@ public final class SbwCompat {
         }
     }
 
+    /** First free passenger seat, never including driver seat 0. */
+    public static int firstFreePassengerSeat(Entity vehicle) {
+        int capacity = maxPassengers(vehicle);
+        for (int index = 1; index < capacity; index++) {
+            if (passengerInSeat(vehicle, index) == null) return index;
+        }
+        return -1;
+    }
+
     /**
-     * First free seat index, searching gunner seats (1..n) before the driver
-     * seat when {@code preferGunnerSeat} — the AI cannot drive, so seat 0 is
-     * kept for a player who wants to take the wheel. -1 when the vehicle is full.
+     * First free seat index. With {@code preferGunnerSeat}, passenger seats are
+     * searched before driver seat 0; otherwise the driver seat is preferred.
      */
     public static int firstFreeSeat(Entity vehicle, boolean preferGunnerSeat) {
         int capacity = maxPassengers(vehicle);
@@ -202,11 +211,8 @@ public final class SbwCompat {
             }
             return -1;
         }
-        for (int index = 1; index < capacity; index++) {
-            if (passengerInSeat(vehicle, index) == null) {
-                return index;
-            }
-        }
+        int passengerSeat = firstFreePassengerSeat(vehicle);
+        if (passengerSeat >= 0) return passengerSeat;
         return passengerInSeat(vehicle, 0) == null ? 0 : -1;
     }
 

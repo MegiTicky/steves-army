@@ -1229,9 +1229,9 @@ BUILDER.pop();
 
         SBW_COMPAT_ENABLED = BUILDER
             .comment("Enable Superb Warfare compatibility when the superbwarfare mod is installed.",
-                     "AT soldiers treat enemy-crewed SBW vehicles as hard targets, and vehicle",
-                     "crew can board and man them via wheel/crew stick/egg (gunnery only -",
-                     "SBW vehicles are client-input driven, so AI cannot drive them).",
+                     "AT soldiers treat hostile-crewed SBW vehicles as hard targets, vehicle",
+                     "crew can drive and man them via the crew mount order, and infantry use",
+                     "passenger seats as taxi riders.",
                      "Default: true.")
             .define("enabled", true);
 

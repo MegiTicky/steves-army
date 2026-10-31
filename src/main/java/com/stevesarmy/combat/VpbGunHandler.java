@@ -50,6 +50,7 @@ public class VpbGunHandler implements GunIntegration.GunHandler {
 
     private static final Map<String, BallisticProfile> BALLISTIC_CACHE = new ConcurrentHashMap<>();
 
+    private static volatile boolean resolutionAttempted = false;
     private static volatile boolean resolved = false;
     private static Class<?> GUN_ITEM_CLASS;
     private static Class<?> FIRE_MODE_INSTANCE_CLASS;
@@ -109,7 +110,7 @@ public class VpbGunHandler implements GunIntegration.GunHandler {
     private static Method SOUND_DESCRIPTOR_VOLUME;
 
     public static boolean isVpbGun(ItemStack stack) {
-        if (stack == null || stack.isEmpty()) return false;
+        if (stack == null || stack.isEmpty() || !GunIntegration.isVpbLoaded()) return false;
         if (!ensureResolved()) return false;
         try {
             return GUN_ITEM_CLASS.isInstance(stack.getItem());
@@ -119,7 +120,9 @@ public class VpbGunHandler implements GunIntegration.GunHandler {
     }
 
     private static synchronized boolean ensureResolved() {
-        if (resolved) return true;
+        if (!GunIntegration.isVpbLoaded()) return false;
+        if (resolutionAttempted) return resolved;
+        resolutionAttempted = true;
         try {
             GUN_ITEM_CLASS = Class.forName("com.vicmatskiv.pointblank.item.GunItem");
             FIRE_MODE_INSTANCE_CLASS = Class.forName("com.vicmatskiv.pointblank.item.FireModeInstance");
@@ -181,7 +184,7 @@ public class VpbGunHandler implements GunIntegration.GunHandler {
 
             resolved = true;
             return true;
-        } catch (Exception e) {
+        } catch (Exception | LinkageError e) {
             StevesArmyMod.LOGGER.warn("[VPB] Failed to resolve reflection targets: {}", e.toString());
             return false;
         }

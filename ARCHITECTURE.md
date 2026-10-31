@@ -3,7 +3,7 @@
 > **Mod ID:** `steves_army`  
 > **Minecraft:** 1.20.1 Forge (Parchment mappings)  
 > **Entrypoint:** `StevesArmyMod.java`  
-> **Dependency:** TaCZ (optional, via reflection)
+> **Optional gun dependencies:** TaCZ (reflection), Point Blank, and Superb Warfare (SBW)
 
 ---
 
@@ -919,8 +919,10 @@ and measured displacement are distinct quantities.
 ```mermaid
 flowchart TD
     GI["GunIntegration - static facade"] --> IF[GunHandler interface]
-    IF --> FALLBACK["FallbackGunHandler - TaCZ not loaded"]
+    IF --> FALLBACK["FallbackGunHandler - unsupported weapon"]
     IF --> REFLECT["ReflectionGunHandler - TaCZ loaded via reflection"]
+    IF --> SBW["SbwGunHandler - SBW GunData API"]
+    IF --> VPB["VpbGunHandler - Point Blank"]
     
     FALLBACK --> MELEE["Melee only: hasGun=false range=3.0"]
     REFLECT --> TACZ[com.tacz.guns.api]
@@ -930,6 +932,9 @@ flowchart TD
     REFLECT --> TIMELESS["TimelessAPI - getCommonGunIndex -> GunData - magazineSize, bolt, recoil, rpm, inaccuracy"]
     REFLECT --> SIGNATURE["TaCZ silence cache -> GunshotSignature"]
 ```
+
+`handlerFor(ItemStack)` selects the provider for each weapon stack, including SBW
+guns, so SBW firearms are supported alongside TaCZ and Point Blank.
 
 ### Gun Operations (ReflectionGunHandler)
 

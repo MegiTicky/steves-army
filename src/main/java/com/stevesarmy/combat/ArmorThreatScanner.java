@@ -3,6 +3,7 @@ package com.stevesarmy.combat;
 import com.stevesarmy.StevesArmyConfig;
 import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.compat.SbwCompat;
+import com.stevesarmy.compat.sbw.SbwVehicles;
 import com.stevesarmy.compat.TallyhoCompat;
 import com.stevesarmy.compat.VS2Compat;
 import com.stevesarmy.debug.DiagnosticLogManager;
@@ -244,9 +245,11 @@ public final class ArmorThreatScanner {
                     continue;
                 }
                 if (!SbwCompat.hasHostileOccupant(soldier, vehicle)) {
+                    soldier.getThreatAwareness().clearArmoredVehicleThreat(vehicle.getUUID());
                     continue;
                 }
                 if (SbwCompat.hasFriendlyOccupant(soldier, vehicle)) {
+                    soldier.getThreatAwareness().clearArmoredVehicleThreat(vehicle.getUUID());
                     if (DiagnosticLogManager.isCoverLoggingEnabled()) {
                         StevesArmyMod.LOGGER.info(
                             "[ArmorDoctrine] Soldier {} SBW veto: vehicle {} carries friendly personnel",
@@ -268,6 +271,14 @@ public final class ArmorThreatScanner {
                 intel.reportHardTarget(soldier.getUUID(), contactId,
                     BlockPos.containing(hullCenter), hullCenter, velocity, corners,
                     0.8f, serverLevel, vehicleClass);
+
+                boolean buttonedUp = SbwVehicles.hasButtonedUpCrewWithoutVisibleGunner(soldier, vehicle);
+                if (buttonedUp && !hasNearbyShootableHostile(soldier, vehicle, serverLevel)) {
+                    soldier.getThreatAwareness().onArmoredVehicleObserved(
+                        vehicle.getUUID(), BlockPos.containing(hullCenter));
+                } else {
+                    soldier.getThreatAwareness().clearArmoredVehicleThreat(vehicle.getUUID());
+                }
 
                 double distSqr = soldier.distanceToSqr(hullCenter);
                 if (nearest == null || distSqr < soldier.distanceToSqr(nearest.aimPoint())) {
@@ -293,6 +304,23 @@ public final class ArmorThreatScanner {
             new Vec3(box.minX, box.maxY, box.maxZ),
             new Vec3(box.maxX, box.maxY, box.maxZ),
         };
+    }
+
+    /** Infantry may stay engaged with a tank while a nearby hostile person is still shootable. */
+    private static boolean hasNearbyShootableHostile(SoldierEntity soldier, Entity vehicle,
+                                                       ServerLevel level) {
+        double range = StevesArmyConfig.getBasicDetectionDistance();
+        double rangeSqr = range * range;
+        AABB area = soldier.getBoundingBox().inflate(range);
+        List<LivingEntity> candidates = level.getEntitiesOfClass(LivingEntity.class, area,
+            target -> target != soldier && target.isAlive() && target.getVehicle() != vehicle
+                && TargetAcquisition.isValidTarget(soldier, target)
+                && !soldier.isFriendlyTo(target) && soldier.isProactiveTarget(target)
+                && soldier.distanceToSqr(target) <= rangeSqr);
+        for (LivingEntity target : candidates) {
+            if (TargetAcquisition.hasLineOfSight(soldier, target)) return true;
+        }
+        return false;
     }
 
     /**
@@ -532,25 +560,26 @@ public final class ArmorThreatScanner {
      */
     @Nullable
     public static Vec3 findFiringSolution(SoldierEntity soldier, ArmorContact armor) {
-        if (TargetAcquisition.hasNearLineOfSightToPosition(soldier, armor.aimPoint(), LOS_TOLERANCE)) {
-            rememberFiringSolution(soldier, armor.aimPoint());
-            return armor.aimPoint();
-        }
-        // Plain-entity vehicle (Superb Warfare): hull samples are points inside
-        // the entity's own hitbox, so sight is plain block/smoke — the ship clip
-        // below never sees the vehicle and there is no surface to pull back from.
+        // SBW hulls now block visibility, so aim at their near surface rather
+        // than requiring a clear ray to a point inside the target's own armor.
         if (soldier.level() instanceof ServerLevel serverLevel) {
             Entity vehicle = serverLevel.getEntity(armor.threatId());
             if (SbwCompat.isOperational(vehicle)) {
                 for (Vec3 candidate : hullSamples(armor)) {
-                    if (TargetAcquisition.hasLineOfSightToPosition(soldier, candidate)) {
-                        rememberFiringSolution(soldier, candidate);
-                        return candidate;
+                    Vec3 surface = com.stevesarmy.compat.sbw.SbwVehicleOcclusion.visibleSurface(
+                        soldier.level(), soldier.getEyePosition(), candidate, vehicle, soldier);
+                    if (surface != null) {
+                        rememberFiringSolution(soldier, surface);
+                        return surface;
                     }
                 }
                 forgetFiringSolution(soldier);
                 return null;
             }
+        }
+        if (TargetAcquisition.hasNearLineOfSightToPosition(soldier, armor.aimPoint(), LOS_TOLERANCE)) {
+            rememberFiringSolution(soldier, armor.aimPoint());
+            return armor.aimPoint();
         }
         Vec3 eye = soldier.getEyePosition();
         AABB region = hullRegion(armor);

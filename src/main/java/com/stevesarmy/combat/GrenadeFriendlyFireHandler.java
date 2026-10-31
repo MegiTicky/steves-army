@@ -11,7 +11,7 @@ import net.minecraftforge.event.level.ExplosionEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
 
-/** Hard server-side friendly-fire protection for native LesRaisins explosions. */
+/** Hard server-side friendly-fire protection for native LesRaisins and Superb Warfare explosions. */
 @Mod.EventBusSubscriber(modid = "steves_army")
 public final class GrenadeFriendlyFireHandler {
     private GrenadeFriendlyFireHandler() {}

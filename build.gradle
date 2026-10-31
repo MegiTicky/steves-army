@@ -150,7 +150,7 @@ dependencies {
     // resolve against mojmap userdev classes. Integration is reflection-guarded at
     // runtime (GunIntegration/YsmCompat); real gun behavior is tested on the
     // deployed instances, which install these mods properly.
-    compileOnly fileTree(dir: 'libs', include: ['pointblank*.jar', 'tacz*.jar', 'ysm*.jar'])
+    compileOnly fileTree(dir: 'libs', include: ['pointblank*.jar', 'tacz*.jar', 'ysm*.jar', 'superbwarfare*.jar'])
     annotationProcessor 'org.spongepowered:mixin:0.8.5:processor'
 }
 

@@ -3609,6 +3609,22 @@ private void tickRepositioning() {
             return;
         }
 
+        if (currentCover != null && soldier.getThreatAwareness().hasActiveArmoredVehicleThreat()
+            && !com.stevesarmy.combat.ArmorRoleManager.isArmorHunter(soldier)) {
+            PeekController peek = getPeekController();
+            if (peek.isExposed() || peek.isMovingToPeek()) {
+                peek.forceReturnToCover(soldier, currentCover, getPositionController());
+                peek.tick(soldier, currentCover, getPositionController());
+            } else if (peek.isReturning()) {
+                peek.tick(soldier, currentCover, getPositionController());
+            } else {
+                peek.enterHiding(soldier);
+            }
+            soldier.setLowCrouching(true);
+            maintainCoverAnchorIfHiding(currentCover);
+            return;
+        }
+
         if (currentCover != null && currentCover.getType() == CoverType.HALF
             && soldier.isLowCrouching() && !getCoverManager().isSuppressed()
             && !healingPosturePending && !soldier.isPeekDisabled()) {

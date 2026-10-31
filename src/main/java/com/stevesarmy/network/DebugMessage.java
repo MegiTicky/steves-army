@@ -37,6 +37,7 @@ public class DebugMessage {
             player.sendSystemMessage(Component.literal("Soldiers nearby: " + soldiers.size()));
             player.sendSystemMessage(Component.literal("TaCZ loaded: " + GunIntegration.isTaczLoaded()).withStyle(ChatFormatting.AQUA));
             player.sendSystemMessage(Component.literal("Vic's Point Blank loaded: " + GunIntegration.isVpbLoaded()).withStyle(ChatFormatting.AQUA));
+            player.sendSystemMessage(Component.literal("Superb Warfare loaded: " + GunIntegration.isSbwLoaded()).withStyle(ChatFormatting.AQUA));
 
             for (SoldierEntity soldier : soldiers) {
                 String mode = soldier.getSquadMode().name();

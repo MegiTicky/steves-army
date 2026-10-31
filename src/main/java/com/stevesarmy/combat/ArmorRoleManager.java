@@ -19,11 +19,10 @@ import java.util.UUID;
 /**
  * Per-squad anti-armor capability assessment for the vehicle doctrine.
  *
- * Hunter designation is ROLE-based: only {@code SoldierRole.ANTI_TANK}
- * soldiers are candidates, and only while an AT gun (a gun ID matching a
- * configured pattern, like {@code tacz:rpg7} matching "rpg") is somewhere in
- * their inventory — an AT soldier without a launcher acts as a rifleman, and
- * a rifleman who picks up a rocket launcher does not become a hunter. Hunters
+ * Hunter designation follows the loadout: combat soldiers carrying an AT gun
+ * (a configured gun ID such as {@code tacz:rpg7}, or a known launcher type)
+ * are candidates. Garrison and vehicle-crew roles remain outside ground armor
+ * engagements. Hunters
  * also raise the launcher for a heavy-fire suppression ping, shelling the
  * cover blocks around the pinged position. The config override can force
  * either branch for testing.
@@ -84,7 +83,9 @@ public final class ArmorRoleManager {
                 if (!(serverLevel.getEntity(memberId) instanceof SoldierEntity member) || !member.isAlive()) {
                     continue;
                 }
-                if (member.getRole() == SoldierRole.ANTI_TANK && carriesAtGun(member)) {
+                if (member.getRole() != SoldierRole.GARRISON
+                    && member.getRole() != SoldierRole.VEHICLE_CREW
+                    && carriesAtGun(member)) {
                     hunters.add(memberId);
                 }
             }
@@ -102,8 +103,9 @@ public final class ArmorRoleManager {
 
     /**
      * True when any persistent slot (sidearm, main hand, general) carries an
-     * anti-armor gun. Role decides who hunts; this decides whether the hunter
-     * can actually fight vehicles right now (launcher stashed = rifleman duty).
+     * anti-armor gun. Carrying the launcher makes an ordinary combat soldier
+     * eligible to fight vehicles even when it was assigned through the
+     * inventory menu rather than picked up in-world.
      */
     private static boolean carriesAtGun(SoldierEntity soldier) {
         com.stevesarmy.inventory.SoldierInventory inv = soldier.getSoldierInventory();
@@ -123,9 +125,12 @@ public final class ArmorRoleManager {
         return isAtGunStack(soldier.getMainHandItem());
     }
 
-    /** True when this stack's gun ID matches the configured anti-armor patterns. */
+    /** True when this stack is a configured AT gun or a recognized launcher. */
     public static boolean isAtGunStack(net.minecraft.world.item.ItemStack stack) {
-        return matchesAnyPattern(stack, StevesArmyConfig.getArmorAtGunPatterns());
+        if (matchesAnyPattern(stack, StevesArmyConfig.getArmorAtGunPatterns())) {
+            return true;
+        }
+        return GunIntegration.isGun(stack) && AntiVehicleTargeting.isLauncher(stack);
     }
 
     /** True when this stack's gun ID matches the configured sidearm-pistol patterns. */

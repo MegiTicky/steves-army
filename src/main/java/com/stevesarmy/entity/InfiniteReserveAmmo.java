@@ -2,21 +2,29 @@ package com.stevesarmy.entity;
 
 import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.combat.GunIntegration;
+import com.stevesarmy.compat.sbw.SbwCompat;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.world.item.ItemStack;
 
 import java.lang.reflect.Method;
 
-/** Shared TaCZ reflection used to give a soldier a virtual infinite reserve. */
+/** Shared reflection & provider logic used to give a soldier a virtual infinite reserve. */
 public final class InfiniteReserveAmmo {
     private static final int INFINITE_RESERVE_AMMO = 1_000_000;
 
     private InfiniteReserveAmmo() {}
 
     public static boolean hasInfiniteReserveAmmo(SoldierEntity soldier) {
+        ItemStack gunStack = soldier.getMainHandItem();
+        if (gunStack.isEmpty()) return false;
+
+        if (GunIntegration.isSbwLoaded() && SbwCompat.isGun(gunStack)) {
+            com.atsuishio.superbwarfare.data.gun.GunData data = com.atsuishio.superbwarfare.data.gun.GunData.from(gunStack);
+            return data.virtualAmmo.get() >= 500_000;
+        }
+
         if (!GunIntegration.isTaczLoaded()) return false;
         try {
-            ItemStack gunStack = soldier.getMainHandItem();
             if (!GunIntegration.isGun(gunStack)) return false;
 
             Class<?> iGunClass = Class.forName("com.tacz.guns.api.item.IGun");
@@ -33,14 +41,18 @@ public final class InfiniteReserveAmmo {
         }
     }
 
-    /**
-     * Restores virtual reserve before TaCZ validates a reload. This intentionally does
-     * not touch the current magazine or chamber, so each reload remains a normal TaCZ reload.
-     */
     public static boolean ensureInfiniteReserveAmmo(SoldierEntity soldier) {
+        ItemStack gunStack = soldier.getMainHandItem();
+        if (gunStack.isEmpty()) return false;
+
+        if (GunIntegration.isSbwLoaded() && SbwCompat.isGun(gunStack)) {
+            com.atsuishio.superbwarfare.data.gun.GunData data = com.atsuishio.superbwarfare.data.gun.GunData.from(gunStack);
+            data.virtualAmmo.set(INFINITE_RESERVE_AMMO);
+            return true;
+        }
+
         if (!GunIntegration.isTaczLoaded()) return false;
         try {
-            ItemStack gunStack = soldier.getMainHandItem();
             if (!GunIntegration.isGun(gunStack)) return false;
 
             Class<?> iGunClass = Class.forName("com.tacz.guns.api.item.IGun");

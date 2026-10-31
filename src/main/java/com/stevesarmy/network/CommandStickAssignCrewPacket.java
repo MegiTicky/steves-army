@@ -3,6 +3,8 @@ package com.stevesarmy.network;
 import com.stevesarmy.StevesArmyMod;
 import com.stevesarmy.compat.SbwCompat;
 import com.stevesarmy.compat.VS2Compat;
+import com.stevesarmy.compat.sbw.SbwVehicles;
+import com.stevesarmy.entity.EnemySoldierEntity;
 import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.entity.SoldierRole;
 import com.stevesarmy.item.CreativeCommandStickItem;
@@ -23,8 +25,10 @@ import java.util.List;
 import java.util.function.Supplier;
 
 /**
- * Crew assign stick: assign the client-selected crew to free seats on the ship under
- * the clicked block. The server re-validates the held item and every crew id, resolves
+ * Crew assign stick: assign the client-selected soldiers to free seats on the
+ * clicked vehicle or ship. The dedicated crew stick is restricted to owned crew;
+ * the creative command stick can assign any selected soldier, including enemies.
+ * The server re-validates the held item and every soldier id, resolves
  * the ship from the anchor (crosshair ship first, else the ship near the player), and
  * seats crew through the shared infantry MOUNT machinery ({@link CrewAssignment}) —
  * the soldier flow: ship + anchor position, never a specific seat entity.
@@ -99,7 +103,9 @@ public class CommandStickAssignCrewPacket {
             // drop as "no ship at anchor" below).
             if (msg.vehicleEntityId > 0) {
                 Entity vehicle = level.getEntity(msg.vehicleEntityId);
-                if (vehicle == null || !SbwCompat.isOperational(vehicle)) {
+                if (vehicle == null || !SbwCompat.isOperational(vehicle)
+                    || SbwVehicles.isDrone(vehicle)
+                    || sender.distanceToSqr(vehicle) > 100.0) {
                     sender.displayClientMessage(
                         Component.translatable("transport.steves_army.feedback.no_vehicle"), true);
                     return;
@@ -111,12 +117,17 @@ public class CommandStickAssignCrewPacket {
                         msg.crewIds.size());
                     return;
                 }
-                int seated = CrewAssignment.mountCrewOnVehicle(level, vehicle, vehicleCrew);
-                StevesArmyMod.LOGGER.info("[CrewStick] vehicle assign: vehicle={} type={} crew={}/{} seated={}",
+                int boarding = CrewAssignment.mountCrewOnVehicle(level, vehicle, vehicleCrew);
+                StevesArmyMod.LOGGER.info("[CrewStick] vehicle assign: vehicle={} type={} soldiers={}/{} selected={} requestsAccepted={}",
                     vehicle.getId(), SbwCompat.getVehicleTypeName(vehicle),
-                    vehicleCrew.size(), msg.crewIds.size(), seated);
+                    vehicleCrew.size(), msg.crewIds.size(),
+                    vehicleCrew.stream().map(soldier -> soldier.getId() + ":"
+                        + soldier.getName().getString() + "[enemy="
+                        + (soldier instanceof EnemySoldierEntity) + ",owned="
+                        + soldier.isOwnedBy(sender) + "]").toList(),
+                    boarding);
                 sender.displayClientMessage(
-                    Component.translatable("transport.steves_army.feedback.crew_assigned", seated, vehicleCrew.size()), true);
+                    Component.translatable("transport.steves_army.feedback.crew_assigned", boarding, vehicleCrew.size()), true);
                 return;
             }
             // Ship resolution in /vs get-ship order: the vanilla clip's hit block is
@@ -156,14 +167,14 @@ public class CommandStickAssignCrewPacket {
         ctx.get().setPacketHandled(true);
     }
 
-    /** Re-validates the client's crew ids: role, ownership, and de-duplication. */
+    /** Re-validates client ids: normal crew tools require crew roles; creative may board any soldier. */
     private static List<SoldierEntity> resolvePermittedCrew(ServerLevel level, List<Integer> crewIds,
                                                             ServerPlayer sender, boolean creativeCrewTool) {
         List<SoldierEntity> crew = new ArrayList<>();
         for (int id : crewIds) {
             Entity entity = level.getEntity(id);
             if (entity instanceof SoldierEntity soldier
-                && soldier.getRole() == SoldierRole.VEHICLE_CREW
+                && (creativeCrewTool || soldier.getRole() == SoldierRole.VEHICLE_CREW)
                 && (creativeCrewTool || soldier.isOwnedBy(sender))
                 && !crew.contains(soldier)) {
                 crew.add(soldier);

@@ -15,6 +15,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.network.NetworkEvent;
 
@@ -30,18 +31,24 @@ public class PingMessage {
     private final double z;
     private final int dimension;
     private final FireTeam scope;
+    private final int targetEntityId;
 
     public PingMessage(PingType type, Vec3 position, int dimension) {
-        this(type, position, dimension, FireTeam.ALL);
+        this(type, position, dimension, FireTeam.ALL, -1);
     }
 
     public PingMessage(PingType type, Vec3 position, int dimension, FireTeam scope) {
+        this(type, position, dimension, scope, -1);
+    }
+
+    public PingMessage(PingType type, Vec3 position, int dimension, FireTeam scope, int targetEntityId) {
         this.type = type;
         this.x = position.x;
         this.y = position.y;
         this.z = position.z;
         this.dimension = dimension;
         this.scope = scope;
+        this.targetEntityId = targetEntityId;
     }
 
     public PingMessage(FriendlyByteBuf buf) {
@@ -51,6 +58,7 @@ public class PingMessage {
         this.z = buf.readDouble();
         this.dimension = buf.readInt();
         this.scope = buf.readEnum(FireTeam.class);
+        this.targetEntityId = buf.readInt();
     }
 
     public static void encode(PingMessage msg, FriendlyByteBuf buf) {
@@ -60,12 +68,14 @@ public class PingMessage {
         buf.writeDouble(msg.z);
         buf.writeInt(msg.dimension);
         buf.writeEnum(msg.scope);
+        buf.writeInt(msg.targetEntityId);
     }
 
     public PingType getType() { return type; }
     public Vec3 getPosition() { return new Vec3(x, y, z); }
     public int getDimension() { return dimension; }
     public FireTeam getScope() { return scope; }
+    public int getTargetEntityId() { return targetEntityId; }
 
     public static void handle(PingMessage msg, Supplier<NetworkEvent.Context> ctx) {
         ctx.get().enqueueWork(() -> {
@@ -162,8 +172,14 @@ public class PingMessage {
                 }
             }
 
+            net.minecraft.world.entity.Entity targetEntity = msg.getTargetEntityId() != -1 ? level.getEntity(msg.getTargetEntityId()) : null;
+
             for (SoldierEntity soldier : owned) {
                 soldier.receivePing(type, position);
+                if (type == PingType.ATTACK && targetEntity instanceof LivingEntity living) {
+                    soldier.setTarget(living);
+                    soldier.getThreatAwareness().onEntityDetected(living, soldier.position());
+                }
             }
 
             SquadActivityManager.applyCommand(

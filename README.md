@@ -89,7 +89,7 @@ When you die, you automatically respawn as your nearest living squadmate.
 
 ### Gun Compatibility
 
-Steve's Army supports TaCZ (Timeless and Classic Guns) and Point Blank (Vic's Point Blank) firearms. Soldiers use supported weapons with aiming, recoil, magazine management, and manual bolting, while consuming ammunition from their own inventories. Superb Warfare vehicles are also supported as hard targets for anti-tank soldiers.
+Steve's Army supports TaCZ (Timeless and Classic Guns), Point Blank (Vic's Point Blank), and Superb Warfare (SBW) firearms. Soldiers use supported weapons with aiming, recoil, magazine management, and manual bolting, while consuming ammunition from their own inventories. Superb Warfare vehicles are also supported as hard targets for anti-tank soldiers. Dedicated vehicle crew can drive SBW vehicles and operate their weapon stations; ordinary infantry ride as passengers.
 
 ### Ping Wheel System
 
@@ -104,6 +104,12 @@ Coordinate your squad with eight ping types:
 - **LOCATION**: Mark a point of interest.
 
 Pings appear as diamond markers with distances and labels. They are shared with players on your scoreboard team.
+
+### SBW vehicle controls
+
+Vehicle crew stay out of regular squad pings. Hold the Ping Wheel key (`MMB` by default), then cycle between **Orders** and the existing **Vehicle** page with the configured mouse button (`RMB` by default). On the Vehicle page, mounting and dismounting actions are on the left; driving orders are on the right. **GO_TO** lines up with **GO_TO** on the Orders page, and **ATTACK** is next to it. Driving orders go only to vehicle crew in the selected fireteam who occupy an SBW driver's seat. Aim at terrain for GO_TO or at a target for ATTACK. FOLLOW keeps the vehicle near its owner; HOLD brakes at its current position.
+
+Use the Fire Team Wheel (`P` by default) to select the crew's A/B/C/D group. You can assign existing crew to a group from the `[team:duty]` badge in the Crew tab, or choose a group before spawning/converting crew. This lets you control vehicle groups without sending infantry orders to crew. **Mount** and **Dismount** apply to ordinary soldiers. **Mount Crew** and **Dismount Crew** apply to vehicle crew in the selected group.
 
 ## Dependencies
 

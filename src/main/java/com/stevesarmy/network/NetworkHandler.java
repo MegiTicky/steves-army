@@ -14,7 +14,7 @@ import java.util.function.Function;
 import java.util.function.Supplier;
 
 public class NetworkHandler {
-    private static final String PROTOCOL_VERSION = "19";
+    private static final String PROTOCOL_VERSION = "21";
     
     public static final SimpleChannel INSTANCE = NetworkRegistry.newSimpleChannel(
         new ResourceLocation(StevesArmyMod.MODID, "main"),
@@ -200,6 +200,11 @@ public class NetworkHandler {
             MovementSpeedDebugPacket::encode,
             MovementSpeedDebugPacket::new,
             MovementSpeedDebugPacket::handle,
+            java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_CLIENT));
+        INSTANCE.registerMessage(id++, VehicleTurretRotationPacket.class,
+            VehicleTurretRotationPacket::encode,
+            VehicleTurretRotationPacket::decode,
+            VehicleTurretRotationPacket::handle,
             java.util.Optional.of(net.minecraftforge.network.NetworkDirection.PLAY_TO_CLIENT));
     }
 

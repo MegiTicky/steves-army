@@ -1,13 +1,13 @@
 package com.stevesarmy.entity;
 
 import com.stevesarmy.StevesArmyMod;
-import com.stevesarmy.compat.VS2Compat;
+import com.stevesarmy.vehicle.VehicleMountPolicy;
 import net.minecraft.world.entity.Entity;
 import net.minecraftforge.event.entity.EntityMountEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
 
-/** Prevents unsolicited mounts while allowing Steve's Army's explicit Create seat assignment. */
+/** Prevents unsolicited mounts while allowing Steve's Army's explicit vehicle seat assignment. */
 @Mod.EventBusSubscriber(modid = StevesArmyMod.MODID)
 public final class SoldierMountHandler {
 
@@ -20,18 +20,14 @@ public final class SoldierMountHandler {
             return;
         }
         Entity vehicle = event.getEntityBeingMounted();
-        boolean authorized = VS2Compat.isAuthorizedMount(soldier, vehicle);
+        boolean authorized = VehicleMountPolicy.isAuthorized(soldier, vehicle);
         String vehicleClass = vehicle == null ? "null" : vehicle.getClass().getName();
         String side = soldier.level().isClientSide ? "CLIENT" : "SERVER";
         if (authorized) {
             StevesArmyMod.LOGGER.info("[MountEvent] {} ALLOWED soldier={} vehicle={} vehicleClass={}",
                 side, soldier.getId(), vehicle == null ? -1 : vehicle.getId(), vehicleClass);
-            // Seating ends any crawl; the crawl pose is broken for VS2-mounted passengers.
             soldier.setLowCrouching(false);
         } else {
-            // Cancellations are the common case for crew and untargeted soldiers: VS
-            // ships and Create seats routinely try to re-seat a soldier that walks or
-            // teleports past them. Debug (not info) so the log isn't flooded.
             StevesArmyMod.LOGGER.debug("[MountEvent] {} CANCELED soldier={} vehicle={} vehicleClass={}",
                 side, soldier.getId(), vehicle == null ? -1 : vehicle.getId(), vehicleClass);
             event.setCanceled(true);

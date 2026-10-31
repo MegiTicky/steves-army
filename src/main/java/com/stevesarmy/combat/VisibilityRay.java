@@ -114,7 +114,8 @@ public final class VisibilityRay {
     }
 
     public static Result traceContactOnly(Level level, Vec3 from, Vec3 to, LivingEntity observer) {
-        if (StevesArmyConfig.isPerceptionFrameEnabled()) {
+        if (StevesArmyConfig.isPerceptionFrameEnabled()
+            && !com.stevesarmy.compat.sbw.SbwCompat.hasVehicles()) {
             Set<BlockPos> empty = Set.of();
             Result cached = SameTickPerceptionFrame.getVisibility(level,
                 observer == null ? 0 : observer.getId(), from, to,
@@ -140,7 +141,8 @@ public final class VisibilityRay {
     private static Result trace(Level level, Vec3 from, Vec3 to, LivingEntity observer,
                                 SmokePolicy smokePolicy, Set<BlockPos> ignoredBlocks) {
         Set<BlockPos> immutableIgnored = Set.copyOf(ignoredBlocks);
-        if (StevesArmyConfig.isPerceptionFrameEnabled()) {
+        if (StevesArmyConfig.isPerceptionFrameEnabled()
+            && !com.stevesarmy.compat.sbw.SbwCompat.hasVehicles()) {
             Result cached = SameTickPerceptionFrame.getVisibility(level,
                 observer == null ? 0 : observer.getId(), from, to, smokePolicy, immutableIgnored);
             if (cached != null) {
@@ -159,6 +161,8 @@ public final class VisibilityRay {
         }
 
         int cacheTicks = StevesArmyConfig.getPositionVisibilityCacheTicks();
+        // A vehicle may move between otherwise identical endpoint samples.
+        if (com.stevesarmy.compat.sbw.SbwCompat.hasVehicles()) cacheTicks = Math.min(cacheTicks, 1);
         if (cacheTicks <= 0) {
             PerformanceMetrics.recordVisibilityRay();
             return traceUncached(level, from, to, observer, smokePolicy,
@@ -224,6 +228,9 @@ public final class VisibilityRay {
             shipObstruction = VS2Compat.getShipAwareBlockHitDistance(level, from, to, observer, false);
         }
 
+        double vehicleObstruction = com.stevesarmy.compat.sbw.SbwVehicleOcclusion.nearest(
+            level, from, to, observer);
+        shipObstruction = Math.min(shipObstruction, vehicleObstruction);
         if (firingLane && shipObstruction < Double.POSITIVE_INFINITY) {
             return new Result(false, 0.0, shipObstruction);
         }
@@ -315,6 +322,9 @@ public final class VisibilityRay {
         nearestObstruction = Math.min(nearestObstruction, shipObstruction);
 
         if (contactOnly) {
+            if (Double.isFinite(nearestObstruction)) {
+                return new Result(false, 0.0, nearestObstruction);
+            }
             if (smokePolicy == SmokePolicy.BLOCK) {
                 long smokeStart = System.nanoTime();
                 double smokeEntry = findSmokeIntersection(level, from, to);

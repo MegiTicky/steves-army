@@ -16,7 +16,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
 
-/** Renders held items from YSM hand locators and delegates TaCZ gun transforms. */
+/** Renders held items from YSM hand locators and delegates TaCZ / SBW gun transforms and attachments. */
 @OnlyIn(Dist.CLIENT)
 public class SoldierItemInHandLayer extends GeoLayerRenderer<SoldierModelCapability> {
     private final ItemInHandRenderer itemRenderer;
@@ -59,8 +59,15 @@ public class SoldierItemInHandLayer extends GeoLayerRenderer<SoldierModelCapabil
         poseStack.popPose();
 
         // TaCZ renders its model-specific gun locators after the normal hand items.
-        TacCompat.applyItemTransform(offhandItem, model, entity, poseStack, packedLight, partialTick);
-        SWarfareCompat.applyGunTransform(offhandItem, model, entity, poseStack, packedLight, partialTick);
+        // Apply TaCZ & SBW attachment models/locators and transforms to both hands
+        if (!mainHandItem.isEmpty()) {
+            TacCompat.applyItemTransform(mainHandItem, model, entity, poseStack, packedLight, partialTick);
+            SWarfareCompat.applyGunTransform(mainHandItem, model, entity, poseStack, packedLight, partialTick);
+        }
+        if (!offhandItem.isEmpty()) {
+            TacCompat.applyItemTransform(offhandItem, model, entity, poseStack, packedLight, partialTick);
+            SWarfareCompat.applyGunTransform(offhandItem, model, entity, poseStack, packedLight, partialTick);
+        }
     }
 
     private void resetBufferSource(MultiBufferSource bufferSource, ItemStack item) {

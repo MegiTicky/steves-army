@@ -96,12 +96,18 @@ public class FriendlyFireChecker {
 
     private static List<LivingEntity> getNearbyFriendlies(SoldierEntity shooter) {
         List<LivingEntity> friendlies = new ArrayList<>();
+        net.minecraft.world.entity.Entity mount = shooter.getVehicle();
         LivingEntity owner = shooter.getOwner();
-        if (owner != null && owner.isAlive()) friendlies.add(owner);
+        if (owner != null && owner.isAlive() && (mount == null || owner.getVehicle() != mount)) {
+            friendlies.add(owner);
+        }
 
         AABB searchBox = shooter.getBoundingBox().inflate(SEARCH_RADIUS);
         for (SoldierEntity soldier : shooter.level().getEntitiesOfClass(SoldierEntity.class, searchBox)) {
-            if (soldier != shooter && shooter.isFriendlyTo(soldier)) friendlies.add(soldier);
+            if (soldier != shooter && shooter.isFriendlyTo(soldier)
+                && (mount == null || soldier.getVehicle() != mount)) {
+                friendlies.add(soldier);
+            }
         }
         return friendlies;
     }

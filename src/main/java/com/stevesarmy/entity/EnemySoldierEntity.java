@@ -45,6 +45,7 @@ public class EnemySoldierEntity extends SoldierEntity {
     protected void registerGoals() {
         this.goalSelector.addGoal(0, new FloatGoal(this));
         this.goalSelector.addGoal(0, new com.stevesarmy.entity.ai.SoldierHoleRescueGoal(this));
+        this.goalSelector.addGoal(1, new com.stevesarmy.entity.ai.DroneEvasionGoal(this));
         this.goalSelector.addGoal(1, new OpenDoorGoal(this, true));
         this.goalSelector.addGoal(2, initializeCoverTacticalGoal());
         this.goalSelector.addGoal(2, initializeCombatGoal());

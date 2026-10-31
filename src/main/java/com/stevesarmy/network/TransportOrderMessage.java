@@ -1,18 +1,29 @@
 package com.stevesarmy.network;
 
-import com.stevesarmy.compat.SbwCompat;
-import com.stevesarmy.compat.VS2Compat;
-import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.StevesArmyMod;
+import com.stevesarmy.compat.VS2Compat;
+import com.stevesarmy.compat.sbw.SbwCompat;
+import com.stevesarmy.compat.sbw.SbwVehicles;
+import com.stevesarmy.combat.StationGunnerAI;
+import com.stevesarmy.entity.SoldierEntity;
+import com.stevesarmy.entity.SoldierRole;
+import com.stevesarmy.ping.PingType;
 import com.stevesarmy.squad.FireTeam;
+import com.stevesarmy.squad.FireTeamAssignment;
 import com.stevesarmy.squad.SquadTargeting;
 import com.stevesarmy.transport.CrewAssignment;
 import com.stevesarmy.transport.TransportOrder;
+import com.stevesarmy.vehicle.VehicleDriver;
+import com.stevesarmy.vehicle.VehicleDriverRegistry;
+import com.stevesarmy.vehicle.VehicleBoardingManager;
+import com.stevesarmy.vehicle.VehicleWreckHandler;
+import net.minecraft.core.BlockPos;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.EntityHitResult;
 import net.minecraft.world.phys.HitResult;
@@ -22,7 +33,7 @@ import net.minecraftforge.network.NetworkEvent;
 import java.util.List;
 import java.util.function.Supplier;
 
-/** Vehicle wheel order: seat the scoped soldiers on a vehicle, or release them from theirs. */
+/** Vehicle wheel orders for scoped transport, crew, and SBW driver actions. */
 public class TransportOrderMessage {
     private final TransportOrder order;
     private final double x;
@@ -66,45 +77,46 @@ public class TransportOrderMessage {
             ServerLevel level = sender.serverLevel();
 
             switch (msg.getOrder()) {
-                // Crew are excluded from SquadTargeting, so only resolve scoped
-                // soldiers for the infantry orders.
                 case MOUNT -> handleMount(sender, level,
                     SquadTargeting.resolveOrderedSoldiers(level, sender, msg.getScope()), msg.getAimPosition());
                 case DISMOUNT -> handleDismount(sender,
                     SquadTargeting.resolveOrderedSoldiers(level, sender, msg.getScope()));
-                case MOUNT_CREW -> handleMountCrew(sender, level, msg.getAimPosition());
+                case MOUNT_CREW -> handleMountCrew(sender, level, msg.getAimPosition(), msg.getScope());
+                case DISMOUNT_CREW -> handleDismountCrew(sender, level, msg.getScope());
+                case DRIVE_GO_TO -> handleCrewDrivers(sender, level, msg.getScope(), PingType.GO_TO, msg.getAimPosition());
+                case DRIVE_ATTACK -> handleCrewDrivers(sender, level, msg.getScope(), PingType.ATTACK, msg.getAimPosition());
+                case DRIVE_FOLLOW -> handleCrewDrivers(sender, level, msg.getScope(), PingType.FOLLOW, msg.getAimPosition());
+                case DRIVE_HOLD -> handleCrewDrivers(sender, level, msg.getScope(), PingType.HOLD, msg.getAimPosition());
             }
         });
         ctx.get().setPacketHandled(true);
     }
 
-    /**
-     * Boards station-less vehicle crew onto the aimed ship. Deliberately does not use
-     * {@link SquadTargeting}: crew are excluded from player orders, and this action
-     * never pulls crew that are actively manning a station.
-     */
-    private static void handleMountCrew(ServerPlayer sender, ServerLevel level, Vec3 aimPosition) {
-        if (!VS2Compat.isEnabled() && !SbwCompat.isEnabled()) {
+    private static void handleMountCrew(ServerPlayer sender, ServerLevel level, Vec3 aimPosition,
+                                        FireTeam scope) {
+        if (!VS2Compat.isEnabled() && !com.stevesarmy.compat.SbwCompat.isEnabled()) {
             sender.displayClientMessage(Component.translatable("transport.steves_army.feedback.vs2_unavailable"), true);
             return;
         }
-        // Plain-entity vehicle under the crosshair (Superb Warfare): the pick
-        // returns an ENTITY hit where ships return a BLOCK hit. Board it directly.
-        Entity aimedVehicle = resolveAimedVehicle(sender);
-        if (aimedVehicle != null) {
-            List<SoldierEntity> crew = CrewAssignment.stationlessCrewNear(level, sender, aimPosition, 64);
+
+        // Dedicated vehicle crew board separately from the ordinary infantry taxi order.
+        Entity aimedVehicle = resolveVehicleForMount(sender, level, aimPosition);
+        if (aimedVehicle != null && com.stevesarmy.compat.SbwCompat.isOperational(aimedVehicle)) {
+            List<SoldierEntity> crew = crewInScope(
+                level, sender, CrewAssignment.stationlessCrewNear(level, sender, aimPosition, 64), scope);
             if (crew.isEmpty()) {
                 sender.displayClientMessage(Component.translatable("transport.steves_army.feedback.no_crew"), true);
                 return;
             }
-            int seated = CrewAssignment.mountCrewOnVehicle(level, aimedVehicle, crew);
-            StevesArmyMod.LOGGER.info("[Transport] MOUNT_CREW by {}: vehicle={} type={} crew={} seated={}",
+            int boarding = CrewAssignment.mountCrewOnVehicle(level, aimedVehicle, crew);
+            StevesArmyMod.LOGGER.info("[Transport] MOUNT_CREW by {}: vehicle={} type={} crew={} boarding={}",
                 sender.getName().getString(), aimedVehicle.getId(),
-                SbwCompat.getVehicleTypeName(aimedVehicle), crew.size(), seated);
+                com.stevesarmy.compat.SbwCompat.getVehicleTypeName(aimedVehicle), crew.size(), boarding);
             sender.displayClientMessage(
-                Component.translatable("transport.steves_army.feedback.seated", seated, crew.size()), true);
+                Component.translatable("transport.steves_army.feedback.boarding", boarding, crew.size()), true);
             return;
         }
+
         Vec3 searchCenter = aimPosition;
         Object ship = resolveAimedShip(sender, level, aimPosition);
         if (ship == null) {
@@ -115,16 +127,119 @@ public class TransportOrderMessage {
             sender.displayClientMessage(Component.translatable("transport.steves_army.feedback.no_vehicle"), true);
             return;
         }
-        List<SoldierEntity> crew = com.stevesarmy.transport.CrewAssignment.stationlessCrewNear(level, sender, searchCenter, 64);
+
+        List<SoldierEntity> crew = crewInScope(
+            level, sender, CrewAssignment.stationlessCrewNear(level, sender, searchCenter, 64), scope);
         if (crew.isEmpty()) {
             sender.displayClientMessage(Component.translatable("transport.steves_army.feedback.no_crew"), true);
             return;
         }
-        int seated = com.stevesarmy.transport.CrewAssignment.autoAssignNear(sender, level, ship, searchCenter);
+
+        int seated = CrewAssignment.mountCrewOnShip(level, ship, searchCenter, crew);
         StevesArmyMod.LOGGER.info("[Transport] MOUNT_CREW by {}: crew={} seated={}",
             sender.getName().getString(), crew.size(), seated);
+
         sender.displayClientMessage(
             Component.translatable("transport.steves_army.feedback.seated", seated, crew.size()), true);
+    }
+
+    private static List<SoldierEntity> crewInScope(ServerLevel level, ServerPlayer sender,
+                                                   List<SoldierEntity> crew, FireTeam scope) {
+        if (scope == FireTeam.ALL) {
+            return crew;
+        }
+        List<java.util.UUID> teamIds = FireTeamAssignment.get(level, sender.getUUID()).getSoldiersInTeam(scope);
+        return crew.stream().filter(soldier -> teamIds.contains(soldier.getUUID())).toList();
+    }
+
+    /** Vehicle-wheel dismount for crew; ordinary Dismount deliberately targets infantry only. */
+    private static void handleDismountCrew(ServerPlayer sender, ServerLevel level, FireTeam scope) {
+        List<SoldierEntity> crew = SquadTargeting.resolveOrderedVehicleCrew(level, sender, scope);
+        int dismounted = 0;
+        for (SoldierEntity soldier : crew) {
+            VehicleBoardingManager.cancel(soldier);
+            boolean hadDuty = StationGunnerAI.soldierHasStation(soldier);
+            StationGunnerAI.deactivateForSoldier(soldier);
+            boolean wasMounted = false;
+            Entity vehicle = soldier.getVehicle();
+            if (SbwCompat.isVehicle(vehicle)) {
+                VehicleWreckHandler.dismount(soldier);
+                wasMounted = true;
+            } else if (VS2Compat.releaseTransport(soldier)) {
+                wasMounted = true;
+            }
+            if (hadDuty || wasMounted) {
+                dismounted++;
+            }
+        }
+
+        if (dismounted == 0) {
+            sender.displayClientMessage(Component.translatable("transport.steves_army.feedback.no_crew_mounted"), true);
+        } else {
+            sender.displayClientMessage(
+                Component.translatable("transport.steves_army.feedback.crew_dismounted_count", dismounted), true);
+        }
+    }
+
+    /**
+     * Sends vehicle-page orders only to crew currently occupying the SBW driver
+     * seat. The ordinary ping handler continues to exclude all vehicle crew.
+     */
+    private static void handleCrewDrivers(ServerPlayer sender, ServerLevel level, FireTeam scope,
+                                          PingType order, Vec3 aimPosition) {
+        if (!SbwCompat.hasVehicles()) {
+            sender.displayClientMessage(
+                Component.translatable("transport.steves_army.feedback.vehicle_control_requires_sbw"), true);
+            return;
+        }
+
+        List<SoldierEntity> crew = SquadTargeting.resolveOrderedVehicleCrew(level, sender, scope);
+        java.util.Set<java.util.UUID> commandedVehicles = new java.util.HashSet<>();
+        for (SoldierEntity soldier : crew) {
+            Entity vehicle = soldier.getVehicle();
+            if (!SbwCompat.isVehicle(vehicle) || !com.stevesarmy.compat.SbwCompat.isOperational(vehicle)
+                || !SbwVehicles.isDriver(vehicle, soldier)
+                || !commandedVehicles.add(vehicle.getUUID())) {
+                continue;
+            }
+            VehicleDriverRegistry.onBoarded(soldier, vehicle);
+            VehicleDriver driver = VehicleDriverRegistry.get(vehicle);
+            if (driver != null) {
+                driver.clearAttack();
+            }
+            soldier.clearAttackTarget();
+            if (order == PingType.ATTACK) {
+                soldier.clearPingMoveTarget();
+            }
+            soldier.receivePing(order, aimPosition);
+        }
+
+        if (commandedVehicles.isEmpty()) {
+            sender.displayClientMessage(
+                Component.translatable("transport.steves_army.feedback.no_vehicle_driver_in_scope"), true);
+        } else {
+            if (order != PingType.FOLLOW && order != PingType.HOLD) {
+                broadcastVehicleCommandMarker(sender, level, scope, order, aimPosition);
+            }
+            sender.displayClientMessage(Component.translatable(
+                "transport.steves_army.feedback.vehicle_orders_issued", commandedVehicles.size()), true);
+        }
+    }
+
+    private static void broadcastVehicleCommandMarker(ServerPlayer sender, ServerLevel level,
+                                                       FireTeam scope, PingType order, Vec3 position) {
+        int teamColor = 0xFFFFFFFF;
+        if (sender.getTeam() != null) {
+            Integer color = sender.getTeam().getColor().getColor();
+            if (color != null) teamColor = (255 << 24) | color;
+        }
+        List<ServerPlayer> recipients = level.getServer().getPlayerList().getPlayers().stream()
+            .filter(player -> sender.getTeam() == null || player.getTeam() == sender.getTeam())
+            .toList();
+        PingBroadcastMessage marker = new PingBroadcastMessage(order, position,
+            sender.level().dimension().location().hashCode(), sender.getUUID(),
+            sender.getGameProfile().getName(), teamColor, scope.ordinal());
+        for (ServerPlayer recipient : recipients) NetworkHandler.sendTo(recipient, marker);
     }
 
     private static void handleDismount(ServerPlayer sender, List<SoldierEntity> soldiers) {
@@ -132,8 +247,21 @@ public class TransportOrderMessage {
             sender.displayClientMessage(Component.translatable("transport.steves_army.feedback.no_soldiers"), true);
             return;
         }
+        List<SoldierEntity> infantry = soldiers.stream()
+            .filter(soldier -> soldier.getRole() != SoldierRole.VEHICLE_CREW)
+            .toList();
+        if (infantry.isEmpty()) {
+            sender.displayClientMessage(Component.translatable("transport.steves_army.feedback.none_mounted"), true);
+            return;
+        }
+
         int dismounted = 0;
-        for (SoldierEntity soldier : soldiers) {
+        if (SbwCompat.isLoaded() && com.stevesarmy.compat.SbwCompat.isEnabled()) {
+            dismounted += VehicleWreckHandler.dismountAll(infantry);
+        }
+
+        for (SoldierEntity soldier : infantry) {
+            VehicleBoardingManager.cancel(soldier);
             // releaseTransport exits at the hatch: the handle linked to the soldier's
             // seat first, then the nearest handle on their ship (no link required).
             if (VS2Compat.releaseTransport(soldier)) {
@@ -141,7 +269,8 @@ public class TransportOrderMessage {
             }
         }
         StevesArmyMod.LOGGER.info("[Transport] DISMOUNT by {}: resolved={} dismounted={}",
-            sender.getName().getString(), soldiers.size(), dismounted);
+            sender.getName().getString(), infantry.size(), dismounted);
+
         if (dismounted == 0) {
             sender.displayClientMessage(Component.translatable("transport.steves_army.feedback.none_mounted"), true);
         } else {
@@ -159,15 +288,42 @@ public class TransportOrderMessage {
      * keep going through {@link #resolveAimedShip}.
      */
     private static Entity resolveAimedVehicle(ServerPlayer sender) {
-        if (!SbwCompat.isEnabled()) {
+        if (!SbwCompat.isLoaded() || !com.stevesarmy.compat.SbwCompat.isEnabled()) {
             return null;
         }
         HitResult clip = sender.pick(GET_SHIP_PICK_DISTANCE, 1.0F, false);
         if (clip.getType() == HitResult.Type.ENTITY && clip instanceof EntityHitResult entityHit
-            && SbwCompat.isOperational(entityHit.getEntity())) {
+            && SbwCompat.isVehicle(entityHit.getEntity()) && !SbwVehicles.isWrecked(entityHit.getEntity())) {
             return entityHit.getEntity();
         }
         return null;
+    }
+
+    /** Uses the same direct-hit, view-ray, and nearby-aim fallbacks for infantry and crew mounting. */
+    private static Entity resolveVehicleForMount(ServerPlayer sender, ServerLevel level, Vec3 aimPosition) {
+        if (!SbwCompat.hasVehicles()) {
+            return null;
+        }
+
+        Entity vehicle = resolveAimedVehicle(sender);
+        if (vehicle != null) {
+            return vehicle;
+        }
+
+        Vec3 eye = sender.getEyePosition();
+        Vec3 look = sender.getViewVector(1.0f);
+        Vec3 end = eye.add(look.scale(64.0));
+        AABB rayBox = sender.getBoundingBox().expandTowards(look.scale(64.0)).inflate(4.0);
+        List<Entity> vehicles = level.getEntitiesOfClass(Entity.class, rayBox, SbwCompat::isVehicle);
+        for (Entity candidate : vehicles) {
+            if (candidate.getBoundingBox().inflate(1.5).clip(eye, end).isPresent()) {
+                return candidate;
+            }
+        }
+
+        List<Entity> nearAim = level.getEntitiesOfClass(Entity.class,
+            new AABB(aimPosition, aimPosition).inflate(8.0), SbwCompat::isVehicle);
+        return nearAim.isEmpty() ? null : nearAim.get(0);
     }
 
     /**
@@ -192,19 +348,37 @@ public class TransportOrderMessage {
 
     private static void handleMount(ServerPlayer sender, ServerLevel level,
                                     List<SoldierEntity> soldiers, Vec3 aimPosition) {
-        if (!VS2Compat.isEnabled()) {
-            sender.displayClientMessage(Component.translatable("transport.steves_army.feedback.vs2_unavailable"), true);
-            return;
-        }
         if (soldiers.isEmpty()) {
             sender.displayClientMessage(Component.translatable("transport.steves_army.feedback.no_soldiers"), true);
             return;
         }
         List<SoldierEntity> eligible = soldiers.stream()
-            .filter(s -> !s.isPassenger())
+            .filter(s -> !s.isPassenger() && s.getRole() != SoldierRole.VEHICLE_CREW)
             .toList();
         if (eligible.isEmpty()) {
             sender.displayClientMessage(Component.translatable("transport.steves_army.feedback.all_mounted"), true);
+            return;
+        }
+
+        Entity targetedVehicle = resolveVehicleForMount(sender, level, aimPosition);
+        if (targetedVehicle != null && !SbwVehicles.isWrecked(targetedVehicle)) {
+            int boarding = 0;
+            for (SoldierEntity soldier : eligible) {
+                if (VehicleBoardingManager.requestBoard(soldier, targetedVehicle)) {
+                    boarding++;
+                }
+            }
+            StevesArmyMod.LOGGER.info("[Transport] MOUNT by {}: eligible={} boarding={} (via SBW)", sender.getName().getString(), eligible.size(), boarding);
+            if (boarding == 0) {
+                sender.displayClientMessage(Component.translatable("transport.steves_army.feedback.no_free_seats"), true);
+            } else {
+                sender.displayClientMessage(Component.translatable("transport.steves_army.feedback.boarding", boarding, eligible.size()), true);
+            }
+            return;
+        }
+
+        if (!VS2Compat.isEnabled()) {
+            sender.displayClientMessage(Component.translatable("transport.steves_army.feedback.vs2_unavailable"), true);
             return;
         }
 
@@ -231,6 +405,7 @@ public class TransportOrderMessage {
 
         StevesArmyMod.LOGGER.info("[Transport] MOUNT by {}: eligible={} seated={}",
             sender.getName().getString(), eligible.size(), seated);
+
         if (seated == 0) {
             sender.displayClientMessage(Component.translatable("transport.steves_army.feedback.no_free_seats"), true);
         } else {

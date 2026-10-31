@@ -8,7 +8,9 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.LivingEntity;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -69,4 +71,42 @@ public final class SquadTargeting {
 
         return result;
     }
+
+    /** Resolves owned vehicle crew separately for vehicle-wheel orders. */
+    public static List<SoldierEntity> resolveOrderedVehicleCrew(ServerLevel level, ServerPlayer sender,
+                                                                 FireTeam scope) {
+        SquadManager manager = SquadManager.get(level);
+        Map<UUID, SoldierEntity> crewById = new LinkedHashMap<>();
+        SquadData squad = manager.getSquadByLeader(sender.getUUID()).orElse(null);
+        if (squad != null) {
+            for (LivingEntity member : manager.getSquadMembers(level, squad.getSquadId(), null)) {
+                if (member instanceof SoldierEntity soldier && isOwnedVehicleCrew(soldier, sender)) {
+                    crewById.putIfAbsent(soldier.getUUID(), soldier);
+                }
+            }
+        }
+
+        // Include nearby owned crew that have not been attached to the squad yet.
+        for (SoldierEntity soldier : level.getEntitiesOfClass(
+            SoldierEntity.class, sender.getBoundingBox().inflate(100.0),
+            candidate -> isOwnedVehicleCrew(candidate, sender))) {
+            crewById.putIfAbsent(soldier.getUUID(), soldier);
+        }
+
+        if (scope == FireTeam.ALL) {
+            return new ArrayList<>(crewById.values());
+        }
+        List<UUID> teamIds = FireTeamAssignment.get(level, sender.getUUID()).getSoldiersInTeam(scope);
+        return crewById.values().stream()
+            .filter(soldier -> teamIds.contains(soldier.getUUID()))
+            .collect(Collectors.toList());
+    }
+
+    private static boolean isOwnedVehicleCrew(SoldierEntity soldier, ServerPlayer sender) {
+        return soldier.isAlive()
+            && soldier.getRole() == SoldierRole.VEHICLE_CREW
+            && soldier.getFireTeam() != FireTeam.GARRISON
+            && soldier.isOwnedBy(sender);
+    }
+
 }

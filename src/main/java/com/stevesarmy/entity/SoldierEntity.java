@@ -11,6 +11,7 @@ import com.stevesarmy.combat.CoverStateDebugManager;
 import com.stevesarmy.combat.DetectionSystem;
 import com.stevesarmy.combat.GrenadeIntegration;
 import com.stevesarmy.combat.GunIntegration;
+import com.stevesarmy.combat.MountedSoldierGunnery;
 import com.stevesarmy.combat.SbwVehicleGunnery;
 import com.stevesarmy.combat.ThreatAwareness;
 import com.stevesarmy.combat.cover.CoverBehaviorManager;
@@ -583,11 +584,16 @@ public class SoldierEntity extends PathfinderMob implements Container {
         this.entityData.define(THREAT_DIR_Y, 0f);
         this.entityData.define(THREAT_DIR_Z, 0f);
         this.entityData.define(DEBUG_CQB_PATH, "");
+
         this.entityData.define(FIRE_DISCIPLINE, FireDiscipline.STANDARD.ordinal());
+
         this.entityData.define(FIRE_TEAM, FireTeam.ALPHA.ordinal());
+
         this.entityData.define(YSM_MODEL_ID, "");
         this.entityData.define(YSM_TEXTURE_ID, "");
+
         this.entityData.define(SKIN, "");
+
         this.entityData.define(RECALL_TICKS, 0);
         this.entityData.define(MG_DEBUG_POSITION, BlockPos.ZERO);
         this.entityData.define(MG_DEBUG_CENTER, BlockPos.ZERO);
@@ -606,6 +612,8 @@ public class SoldierEntity extends PathfinderMob implements Container {
         
         this.goalSelector.addGoal(0, new SoldierHoleRescueGoal(this));
         this.goalSelector.addGoal(0, new FloatGoal(this));
+        this.goalSelector.addGoal(1, new com.stevesarmy.entity.ai.DroneEvasionGoal(this));
+        this.goalSelector.addGoal(1, new com.stevesarmy.entity.ai.VehicleBoardingGoal(this));
         this.goalSelector.addGoal(1, new OpenDoorGoal(this, true));
         this.goalSelector.addGoal(1, new SoldierMoveToPingGoal(this));
         initializeCoverTacticalGoal();
@@ -644,7 +652,8 @@ public class SoldierEntity extends PathfinderMob implements Container {
 
     /** True when this role should never peek from cover. Override for roles like support. */
     public boolean isPeekDisabled() {
-        return false;
+        return threatAwareness.hasActiveArmoredVehicleThreat()
+            && !com.stevesarmy.combat.ArmorRoleManager.isArmorHunter(this);
     }
 
     /** True while the vehicle crew goal holds a station (hull MG / periscope). */
@@ -1083,7 +1092,7 @@ public class SoldierEntity extends PathfinderMob implements Container {
 
     @Override
     protected boolean canRide(Entity vehicle) {
-        return VS2Compat.isAuthorizedMount(this, vehicle);
+        return VS2Compat.isAuthorizedMount(this, vehicle) || com.stevesarmy.compat.sbw.SbwCompat.isVehicle(vehicle);
     }
 
     @Override
@@ -1519,6 +1528,7 @@ public class SoldierEntity extends PathfinderMob implements Container {
         }
         
         if (!this.level().isClientSide) {
+            GunIntegration.tick(this);
             syncCqbDebugPath();
             threatAwareness.tick();
             holdMovementForReload();
@@ -1534,6 +1544,20 @@ public class SoldierEntity extends PathfinderMob implements Container {
             tickAnimationWeaponReady();
             traceRotationSnapshot();
             tracePeekSnapshot();
+        }
+
+        // Swimming is also our prone pose. Keep the synchronized posture clear
+        // while riding an SBW vehicle so old combat/cover plans cannot make a
+        // seated soldier lie across the vehicle model.
+        if (isMountedInSbwVehicle()) {
+            firingProne = false;
+            if (entityData.get(LOW_CROUCHING)) {
+                entityData.set(LOW_CROUCHING, false);
+            }
+            if (getPose() == Pose.SWIMMING) {
+                setPose(Pose.STANDING);
+                refreshDimensions();
+            }
         }
 
         // Enforce the server-synced posture every tick to fight vanilla pose overrides.
@@ -1624,6 +1648,21 @@ public class SoldierEntity extends PathfinderMob implements Container {
     }
 
     @Override
+    public void setPose(Pose pose) {
+        if (pose == Pose.SWIMMING && isMountedInSbwVehicle()) {
+            super.setPose(Pose.STANDING);
+            refreshDimensions();
+            return;
+        }
+        super.setPose(pose);
+    }
+
+    private boolean isMountedInSbwVehicle() {
+        return isPassenger()
+            && com.stevesarmy.compat.sbw.SbwCompat.isVehicle(getVehicle());
+    }
+
+    @Override
     public void knockback(double strength, double x, double z) {
         Vec3 before = getDeltaMovement();
         super.knockback(strength, x, z);
@@ -1666,11 +1705,31 @@ public class SoldierEntity extends PathfinderMob implements Container {
         }
 
         long gameTime = level().getGameTime();
+        if (com.stevesarmy.compat.sbw.SbwCompat.hasVehicles()) {
+            com.stevesarmy.compat.sbw.SbwCompat.tickVehicle(this);
+            if (!isPassenger()) {
+                // Keep tank cover awareness active even while no infantry target
+                // is visible and SoldierCombatGoal would otherwise be asleep.
+                com.stevesarmy.combat.ArmorThreatScanner.maybeScan(this);
+            }
+        }
+        Entity sbwVehicle = getVehicle();
+        if (com.stevesarmy.compat.sbw.SbwCompat.hasVehicles()
+            && com.stevesarmy.compat.sbw.SbwCompat.isVehicle(sbwVehicle)
+            && !com.stevesarmy.compat.sbw.SbwVehicles.isDrone(sbwVehicle)) {
+            // SBW passengers are real taxi riders: keep them seated and freeze
+            // movement AI. Dedicated crew spots for the vehicle weapons; other
+            // passengers can fire their handheld gun from seats that allow it.
+            // Head and body rotation of seated soldiers has a single owner.
+            com.stevesarmy.vehicle.VehicleCrewPose.ensureTracked(this);
+            if (getRole() == SoldierRole.VEHICLE_CREW) {
+                SbwVehicleGunnery.tickMounted(this);
+            } else {
+                MountedSoldierGunnery.tickMounted(this);
+            }
+            return;
+        }
         if (VS2Compat.prepareSoldierAi(this)) {
-            // Frozen-AI gunnery: while mounted on a Superb Warfare vehicle the
-            // soldier's only duty is spotting — SBW fires the vehicle weapons at
-            // whatever the riding Mob targets.
-            SbwVehicleGunnery.tickMounted(this);
             if (shouldTickGrenadeController(gameTime)) {
                 grenadeTacticalController.tick(getTarget(), getGrenadeSquadIntel());
             }
@@ -1770,6 +1829,7 @@ public class SoldierEntity extends PathfinderMob implements Container {
             if (reason.shouldDestroy()) TeamManager.removeFromTeam(this);
             com.stevesarmy.combat.cover.CoverReservationManager.releaseAll(this);
             com.stevesarmy.combat.VpbEntityState.remove(this.getUUID());
+            com.stevesarmy.compat.sbw.SbwEntityState.remove(this.getUUID());
             if (this.level() instanceof ServerLevel serverLevel) {
                 com.stevesarmy.squad.SquadManager.get(serverLevel).removeMemberFromSquad(this.getUUID());
                 OwnedSoldierRegistry.get(serverLevel.getServer()).remove(this.getUUID());
@@ -2548,6 +2608,13 @@ public BlockPos getPingMoveTarget() {
             lowCrouch = false;
         }
 
+        // A seated SBW passenger cannot enter the swimming/prone pose. Keep
+        // the combat ownership bit in sync so it does not reassert the pose.
+        if (lowCrouch && isMountedInSbwVehicle()) {
+            lowCrouch = false;
+            firingProne = false;
+        }
+
         if (!lowCrouch) {
             // Any explicit stand request (cover exit, movement, or combat) ends
             // the firing-prone ownership before the shared pose is cleared.
@@ -2632,7 +2699,9 @@ public BlockPos getPingMoveTarget() {
     }
 
     private void updateCrawlFacing() {
-        if (!isCrawlMoving()) {
+        // A seated soldier is carried by its vehicle; writing body/head yaw here snapped
+        // the neck for the tick or two before the low-crouch flag is cleared on mounting.
+        if (!isCrawlMoving() || isMountedInSbwVehicle()) {
             return;
         }
 
@@ -2643,6 +2712,7 @@ public BlockPos getPingMoveTarget() {
         float bodyYaw = approachAngle(this.yBodyRot, movementYaw, CRAWL_TURN_RATE_DEGREES);
         this.setYRot(bodyYaw);
         this.setYBodyRot(bodyYaw);
+        this.setYHeadRot(bodyYaw);
         traceRotationWrite("crawl-facing", previousYaw, previousBodyYaw, previousHeadYaw,
             "movement=" + formatVec(getDeltaMovement()) + ", targetYaw=" + formatAngle(movementYaw));
     }

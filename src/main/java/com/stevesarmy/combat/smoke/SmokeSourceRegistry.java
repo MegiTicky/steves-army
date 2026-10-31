@@ -29,6 +29,7 @@ public final class SmokeSourceRegistry {
     static {
         SOURCES.add(new CbcSmokeSource());
         SOURCES.add(new LrtacticalSmokeSource());
+        SOURCES.add(new SbwSmokeSource());
     }
 
     /** Returns all registered smoke sources (unmodifiable view). */
@@ -134,6 +135,8 @@ public final class SmokeSourceRegistry {
                 cbc.reset();
             } else if (source instanceof LrtacticalSmokeSource lr) {
                 lr.reset();
+            } else if (source instanceof SbwSmokeSource sbw) {
+                sbw.reset();
             }
         }
         synchronized (ACTIVE_SMOKE_COUNTS) {

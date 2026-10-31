@@ -508,7 +508,9 @@ public class SquadCommandScreen extends Screen {
             if (activeTab == Tab.GARRISON) {
                 drawFireTeamBadge(graphics, x, y, row.fireTeam);
             } else if (activeTab == Tab.VEHICLE_CREW) {
-                drawDutyBadge(graphics, x, y, row.dutyType);
+                if (activeTeamDropdownRow != i) {
+                    drawDutyBadge(graphics, x, y, row.fireTeam, row.dutyType);
+                }
             } else {
                 FireTeamDropdownWidget teamButton = new FireTeamDropdownWidget(row.fireTeam, getActiveTeams(), ignored -> { });
                 teamButton.render(graphics, font, x, y + 4, COL_FT_WIDTH, ROW_HEIGHT, mouseX - x, mouseY - y - 4);
@@ -570,8 +572,10 @@ public class SquadCommandScreen extends Screen {
         int footerY = getFooterY();
         if (activeTab == Tab.VEHICLE_CREW) {
             graphics.drawString(font, Component.literal("-- Vehicle Crew --  Crew: " + rows.size()), contentX, footerY, 0xFFAAAAAA, false);
-            graphics.drawString(font, Component.literal("Select crew with the Crew Assign Stick, then sneak-use a seat to assign them."),
+            graphics.drawString(font, Component.literal("Click [team:duty] to assign the crew's A/B/C/D control group."),
                 contentX, footerY + 14, 0xFF888888, false);
+            graphics.drawString(font, Component.literal("Crew Assign Stick boards crew; the vehicle wheel controls scoped SBW drivers."),
+                contentX, footerY + 27, 0xFF888888, false);
             super.render(graphics, mouseX, mouseY, partialTick);
             renderDropdowns(graphics, mouseX, mouseY);
             return;
@@ -727,17 +731,18 @@ public class SquadCommandScreen extends Screen {
     }
 
     /** Crew duty readout in the fire-team column: MG gunner, periscope observer, or off duty. */
-    private void drawDutyBadge(GuiGraphics graphics, int x, int y, int dutyType) {
-        String badge = switch (dutyType) {
-            case 1 -> "[MG]";
-            case 2 -> "[OPTIC]";
-            default -> "[-]";
+    private void drawDutyBadge(GuiGraphics graphics, int x, int y, FireTeam fireTeam, int dutyType) {
+        String duty = switch (dutyType) {
+            case 1 -> "MG";
+            case 2 -> "OP";
+            default -> "--";
         };
         int color = switch (dutyType) {
             case 1 -> 0xFF55FF55;
             case 2 -> 0xFF40E0FF;
             default -> 0xFF777777;
         };
+        String badge = "[" + fireTeam.getShortName() + ":" + duty + "]";
         graphics.drawString(font, Component.literal(badge), x, y + 6, color, false);
     }
 
@@ -1037,7 +1042,7 @@ public class SquadCommandScreen extends Screen {
                     return true;
                 }
 
-                if (activeTab == Tab.SQUAD
+                if ((activeTab == Tab.SQUAD || activeTab == Tab.VEHICLE_CREW)
                     && mouseX >= row.fireTeamColumnX && mouseX < row.fireTeamColumnX + COL_FT_WIDTH
                     && localMouseY >= 4 && localMouseY < 16) {
                     openFireTeamDropdown(rowIndex, row.fireTeamColumnX, rowY + 4);

@@ -1,15 +1,15 @@
 package com.stevesarmy.client;
 
+import com.stevesarmy.StevesArmyMod;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.network.chat.Component;
 import org.lwjgl.glfw.GLFW;
 
 /**
- * Multi-page state for the command wheel. The middle-mouse ping session has two pages:
- * the ping orders wheel (default) and the vehicle wheel. Pressing the configured cycle mouse
- * button (right-click by default) while the wheel is open flips between them; releasing the
- * wheel key fires the hovered action of the current page.
+ * Two-page state for the command wheel. The middle-mouse ping session cycles between
+ * ping orders and vehicle actions. Hold mode uses the configured cycle button; click mode
+ * uses right-click. Releasing the wheel confirms the current page.
  */
 public final class WheelCycleController {
     public enum Page {
@@ -30,7 +30,6 @@ public final class WheelCycleController {
         }
     }
 
-    private static boolean wasCycleButtonDown = false;
     private static Page page = Page.PING_ORDERS;
 
     private WheelCycleController() {}
@@ -45,35 +44,26 @@ public final class WheelCycleController {
     /** Called when the ping wheel session opens; the default page is the ping orders wheel. */
     public static void onSessionActivated() {
         page = Page.PING_ORDERS;
-        int button = WheelInteractionController.isClickMode() ? GLFW.GLFW_MOUSE_BUTTON_RIGHT
-            : StevesArmyClientConfig.VEHICLE_WHEEL_CYCLE_BUTTON.get().glfwButton;
-        wasCycleButtonDown = GLFW.glfwGetMouseButton(Minecraft.getInstance().getWindow().getWindow(), button) == GLFW.GLFW_PRESS;
     }
 
     public static void tick() {
-        Minecraft mc = Minecraft.getInstance();
-        int cycleButton = WheelInteractionController.isClickMode() ? GLFW.GLFW_MOUSE_BUTTON_RIGHT
-            : StevesArmyClientConfig.VEHICLE_WHEEL_CYCLE_BUTTON.get().glfwButton;
-        boolean cycleButtonDown = GLFW.glfwGetMouseButton(mc.getWindow().getWindow(), cycleButton) == GLFW.GLFW_PRESS;
-        boolean pressed = cycleButtonDown && !wasCycleButtonDown;
-        wasCycleButtonDown = cycleButtonDown;
-
         if (!PingWheelHandler.isWheelActive()) {
             page = Page.PING_ORDERS;
-            return;
-        }
-        if (!StevesArmyClientConfig.ENABLE_VEHICLE_WHEEL.get()) {
-            return;
-        }
-        if (pressed && !WheelInteractionController.isClickMode()) {
-            page = page == Page.PING_ORDERS ? Page.VEHICLE : Page.PING_ORDERS;
         }
     }
 
-    public static void onRightClick() {
-        if (PingWheelHandler.isWheelActive() && StevesArmyClientConfig.ENABLE_VEHICLE_WHEEL.get()) {
-            page = page == Page.PING_ORDERS ? Page.VEHICLE : Page.PING_ORDERS;
-        }
+    /** Cycle from the mouse callback, avoiding native button polling on virtual mouse backends. */
+    public static void onMouseButtonPressed(int button) {
+        if (!PingWheelHandler.isWheelActive() || !StevesArmyClientConfig.ENABLE_VEHICLE_WHEEL.get()) return;
+        int cycleButton = WheelInteractionController.isClickMode() ? GLFW.GLFW_MOUSE_BUTTON_RIGHT
+            : StevesArmyClientConfig.VEHICLE_WHEEL_CYCLE_BUTTON.get().glfwButton;
+        if (button == cycleButton) cyclePage();
+    }
+
+    private static void cyclePage() {
+        Page previousPage = page;
+        page = page == Page.PING_ORDERS ? Page.VEHICLE : Page.PING_ORDERS;
+        StevesArmyMod.LOGGER.info("Wheel page switched: {} -> {}", previousPage, page);
     }
 
     public static boolean isVehiclePage() {

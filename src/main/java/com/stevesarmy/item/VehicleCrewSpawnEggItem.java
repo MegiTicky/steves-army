@@ -21,6 +21,8 @@ import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.context.UseOnContext;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.levelgen.Heightmap;
+import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.EntityHitResult;
 import net.minecraft.world.phys.HitResult;
@@ -131,7 +133,8 @@ public class VehicleCrewSpawnEggItem extends ForgeSpawnEggItem {
     public static void spawnCrewOnVehicle(ServerLevel level, Entity vehicle,
                                           Player player, ItemStack eggStack) {
         CompoundTag entityTag = eggEntityTag(eggStack);
-        VehicleCrewEntity crew = createCrew(level, vehicle.position(), player, entityTag);
+        Vec3 spawnPosition = vehicleWalkUpSpawn(vehicle, player);
+        VehicleCrewEntity crew = createCrew(level, spawnPosition, player, entityTag);
         if (crew == null) {
             return;
         }
@@ -139,18 +142,41 @@ public class VehicleCrewSpawnEggItem extends ForgeSpawnEggItem {
         if (!result.success()) {
             return;
         }
-        int seated = CrewAssignment.mountCrewOnVehicle(level, vehicle, List.of(crew));
-        if (seated == 0) {
-            // Left standing at the vehicle: the unmounted crew goal walks it to a station.
-            StevesArmyMod.LOGGER.warn("[Crew] spawned crew={} could not mount vehicle={}",
+        int boarding = CrewAssignment.mountCrewOnVehicle(level, vehicle, List.of(crew));
+        if (boarding == 0) {
+            StevesArmyMod.LOGGER.warn("[Crew] spawned crew={} could not reserve a seat on vehicle={}",
                 crew.getId(), vehicle.getId());
         }
         if (!player.isCreative()) {
             eggStack.shrink(1);
         }
-        player.displayClientMessage(Component.translatable(seated > 0
-            ? "transport.steves_army.feedback.crew_deployed"
+        player.displayClientMessage(Component.translatable(boarding > 0
+            ? "transport.steves_army.feedback.crew_boarding"
             : "transport.steves_army.feedback.crew_standing"), true);
+    }
+
+    private static Vec3 vehicleWalkUpSpawn(Entity vehicle, Player player) {
+        AABB bounds = vehicle.getBoundingBox();
+        double centerX = (bounds.minX + bounds.maxX) * 0.5;
+        double centerZ = (bounds.minZ + bounds.maxZ) * 0.5;
+        double dx = player.getX() - centerX;
+        double dz = player.getZ() - centerZ;
+        if (dx * dx + dz * dz < 0.01) {
+            Vec3 behind = vehicle.getForward().scale(-1.0);
+            dx = behind.x;
+            dz = behind.z;
+            if (dx * dx + dz * dz < 0.01) dx = 1.0;
+        }
+        double edgeScale = 1.0 / Math.max(Math.abs(dx), Math.abs(dz));
+        double xExtent = bounds.getXsize() * 0.5 + 3.0;
+        double zExtent = bounds.getZsize() * 0.5 + 3.0;
+        double x = centerX + dx * edgeScale * xExtent;
+        double z = centerZ + dz * edgeScale * zExtent;
+        int surfaceY = vehicle.level().getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES,
+            BlockPos.containing(x, vehicle.getY(), z).getX(),
+            BlockPos.containing(x, vehicle.getY(), z).getZ());
+        double y = Math.abs(surfaceY - vehicle.getY()) <= 4.0 ? surfaceY : player.getY();
+        return new Vec3(x, y, z);
     }
 
     /** EntityTag carried by the egg stack, or null. */

@@ -2,11 +2,16 @@ package com.stevesarmy.transport;
 
 import java.util.Locale;
 
-/** Vehicle wheel actions: seat soldiers on a vehicle, release them from one, or board vehicle crew. */
+/** Actions on the vehicle page of the ping wheel. */
 public enum TransportOrder {
     MOUNT,
     DISMOUNT,
-    MOUNT_CREW;
+    MOUNT_CREW,
+    DISMOUNT_CREW,
+    DRIVE_GO_TO,
+    DRIVE_ATTACK,
+    DRIVE_FOLLOW,
+    DRIVE_HOLD;
 
     public String getTranslationKey() {
         return "transport.steves_army." + name().toLowerCase(Locale.ROOT);

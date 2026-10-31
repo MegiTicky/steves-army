@@ -66,6 +66,7 @@ public class ExposureCalculator {
         TickExposureCache cache = getExposureCache(level);
         long key = ((long) observer.getId() << 32) | (target.getId() & 0xFFFFFFFFL);
         int cacheTicks = StevesArmyConfig.getExposureCacheTicks();
+        if (com.stevesarmy.compat.sbw.SbwCompat.hasVehicles()) cacheTicks = Math.min(cacheTicks, 1);
         long currentTick = level.getGameTime();
         Vec3 observerEye = DetectionViewpoint.getEyePosition(observer);
         Vec3 targetPosition = target.position();
@@ -202,6 +203,7 @@ public class ExposureCalculator {
         }
 
         int cacheTicks = StevesArmyConfig.getAimPointCacheTicks();
+        if (com.stevesarmy.compat.sbw.SbwCompat.hasVehicles()) cacheTicks = Math.min(cacheTicks, 1);
         Vec3 observerEye = DetectionViewpoint.getEyePosition(observer);
         Vec3 targetPosition = target.position();
         net.minecraft.world.entity.Pose targetPose = target.getPose();
@@ -296,11 +298,15 @@ public class ExposureCalculator {
         TargetPoint[] targetPoints = getTargetPointsWithPriority(target);
 
         TargetPoint bestVisible = null;
+        boolean exposedRider = com.stevesarmy.compat.sbw.SbwVehicles.isExposedRider(target);
 
         for (TargetPoint point : targetPoints) {
             VisibilityRay.Result visibility = getVisibility(level, observerEye, point.position, observer, skipBlock);
             if (visibility.hasContact()) {
-                if (bestVisible == null || point.type.priority > bestVisible.type.priority) {
+                if (bestVisible == null
+                    || exposedRider && point.type == AimPointType.HEAD && bestVisible.type != AimPointType.HEAD
+                    || (!exposedRider || bestVisible.type != AimPointType.HEAD)
+                        && point.type.priority > bestVisible.type.priority) {
                     bestVisible = point;
                 }
             }
@@ -399,7 +405,8 @@ public class ExposureCalculator {
         float height = target.getBbHeight();
         float width = target.getBbWidth();
 
-        double headY = basePos.y + height * 0.85;
+        double headY = basePos.y + height *
+            (com.stevesarmy.compat.sbw.SbwVehicles.isExposedRider(target) ? 0.92 : 0.85);
         double upperTorsoY = basePos.y + height * 0.65;
         double lowerTorsoY = basePos.y + height * 0.35;
         double feetY = basePos.y + height * 0.1;

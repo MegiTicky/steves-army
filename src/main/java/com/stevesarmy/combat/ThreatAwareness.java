@@ -21,6 +21,7 @@ public class ThreatAwareness {
     public enum ThreatSource {
         PING_DIRECTION,
         ENEMY_PING,
+        ARMORED_VEHICLE,
         ENTITY_DETECTED,
         PERIPHERAL,
         DEAD_ENTITY
@@ -37,8 +38,14 @@ public class ThreatAwareness {
         @Nullable Vec3 lastObservedAim;
 
         ThreatEntry(ThreatSource source, @Nullable LivingEntity entity, BlockPos position, float weight) {
+            this(source, entity, position, weight, null);
+        }
+
+        ThreatEntry(ThreatSource source, @Nullable LivingEntity entity, BlockPos position,
+                    float weight, @Nullable UUID syntheticId) {
             this.source = source;
-            this.entityId = entity != null ? entity.getUUID() : UUID.randomUUID();
+            this.entityId = entity != null ? entity.getUUID()
+                : syntheticId != null ? syntheticId : UUID.randomUUID();
             this.entity = entity;
             this.position = position;
             this.weight = weight;
@@ -48,6 +55,8 @@ public class ThreatAwareness {
 
     private static final float PING_DIRECTION_INITIAL_WEIGHT = 15.0f;
     private static final float ENEMY_PING_INITIAL_WEIGHT = 10.0f;
+    private static final float ARMORED_VEHICLE_INITIAL_WEIGHT = 12.0f;
+    private static final long ARMORED_VEHICLE_MEMORY_MS = 1800L;
     private static final float ENTITY_DETECTED_INITIAL_WEIGHT = 3.0f;
     private static final float PERIPHERAL_INITIAL_WEIGHT = 1.0f;
     
@@ -88,6 +97,35 @@ public class ThreatAwareness {
         if (CoverTacticalGoal.isDebugLoggingEnabled()) {
             StevesArmyMod.LOGGER.info("[ThreatAwareness] Enemy ping added: pos={}, weight={}", pos, ENEMY_PING_INITIAL_WEIGHT);
         }
+    }
+
+    /** Refreshes the cover threat for a hostile buttoned-up vehicle. */
+    public void onArmoredVehicleObserved(UUID vehicleId, BlockPos pos) {
+        ThreatEntry entry = null;
+        for (ThreatEntry threat : threats) {
+            if (threat.source == ThreatSource.ARMORED_VEHICLE
+                && threat.entityId.equals(vehicleId)) {
+                entry = threat;
+                break;
+            }
+        }
+        if (entry == null) {
+            entry = new ThreatEntry(ThreatSource.ARMORED_VEHICLE, null, pos,
+                ARMORED_VEHICLE_INITIAL_WEIGHT, vehicleId);
+            threats.add(entry);
+        } else {
+            entry.position = pos;
+            entry.weight = ARMORED_VEHICLE_INITIAL_WEIGHT;
+            entry.lastObservedTime = GameClock.nowMs();
+        }
+        updateSmoothDirection(Vec3.atCenterOf(pos));
+    }
+
+    /** Remove the cover threat when this vehicle exposes a shootable occupant or ceases to be hostile. */
+    public void clearArmoredVehicleThreat(UUID vehicleId) {
+        if (vehicleId == null) return;
+        threats.removeIf(threat -> threat.source == ThreatSource.ARMORED_VEHICLE
+            && threat.entityId.equals(vehicleId));
     }
 
     public void onEntityDetected(LivingEntity entity, Vec3 soldierPos) {
@@ -198,6 +236,12 @@ public class ThreatAwareness {
         while (it.hasNext()) {
             ThreatEntry entry = it.next();
 
+            if (entry.source == ThreatSource.ARMORED_VEHICLE
+                && GameClock.nowMs() - entry.lastObservedTime > ARMORED_VEHICLE_MEMORY_MS) {
+                it.remove();
+                continue;
+            }
+
             if (entry.entity != null && entry.entity.isAlive()) {
                 entry.position = entry.entity.blockPosition();
             } else if (entry.entity != null) {
@@ -266,6 +310,18 @@ public class ThreatAwareness {
 
     public boolean hasActiveThreat() {
         return !threats.isEmpty();
+    }
+
+    /** True while a recently observed hostile tank is still a live cover threat. */
+    public boolean hasActiveArmoredVehicleThreat() {
+        long now = GameClock.nowMs();
+        for (ThreatEntry threat : threats) {
+            if (threat.source == ThreatSource.ARMORED_VEHICLE
+                && now - threat.lastObservedTime <= ARMORED_VEHICLE_MEMORY_MS) {
+                return true;
+            }
+        }
+        return false;
     }
 
     public int getActiveThreatCount() {

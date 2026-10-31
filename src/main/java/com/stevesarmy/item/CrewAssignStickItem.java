@@ -8,10 +8,14 @@ import com.stevesarmy.network.NetworkHandler;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.InteractionResultHolder;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.context.UseOnContext;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.ClipContext;
+import net.minecraft.world.entity.projectile.ProjectileUtil;
+import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.EntityHitResult;
 import net.minecraft.world.phys.HitResult;
@@ -66,21 +70,25 @@ public class CrewAssignStickItem extends CommandStickItem {
     }
 
     /**
-     * Client-side: ship under the crosshair? Sends the assignment packet anchored at
-     * the aimed block and consumes the click. Returns false when nothing is in reach
-     * so the base reposition runs.
-     */
-    /**
      * Sends an assignment request for the selected vehicle crew. The dedicated Crew
      * Assign Stick requires ownership; Creative Command Stick callers pass false.
-     * An ENTITY pick on an operational Superb Warfare vehicle rides along as the
-     * vehicle id — ships go through the block anchor as before.
+     * SBW vehicles use an entity ray; VS2 ships keep the aimed block anchor.
      */
     public static boolean tryAssign(Player player, boolean requireOwnership) {
+        return tryAssign(player, requireOwnership, false);
+    }
+
+    /** Creative Command Stick may board any selected soldier, including hostile infantry. */
+    public static boolean tryAssign(Player player, boolean requireOwnership, boolean includeNonCrew) {
+        EntityHitResult entityHit = findAimedVehicle(player);
         BlockHitResult hit = findAimHit(player);
-        Vec3 anchor = hit == null ? null : hit.getLocation();
-        List<Integer> selected = selectedVehicleCrewIds(player, requireOwnership);
-        int vehicleEntityId = aimedVehicleId(player);
+        int vehicleEntityId = entityHit == null ? 0 : entityHit.getEntity().getId();
+        Vec3 anchor = vehicleEntityId > 0
+            ? entityHit.getEntity().position()
+            : hit == null ? null : hit.getLocation();
+        List<Integer> selected = includeNonCrew
+            ? selectedSoldierIds(player, requireOwnership)
+            : selectedVehicleCrewIds(player, requireOwnership);
         StevesArmyMod.LOGGER.info("[CrewStick] assign click: anchor={} block={} vehicle={} selected={}",
             anchor == null ? "none" : formatVec3(anchor),
             hit == null ? "none" : hit.getBlockPos(), vehicleEntityId, selected.size());
@@ -93,8 +101,7 @@ public class CrewAssignStickItem extends CommandStickItem {
             return true;
         }
         if (vehicleEntityId > 0) {
-            // Anchor on the vehicle itself; the server mounts on the entity id.
-            anchor = player.level().getEntity(vehicleEntityId).position();
+            return sendVehicleAssignment(player, entityHit.getEntity(), selected);
         }
         NetworkHandler.INSTANCE.sendToServer(
             new CommandStickAssignCrewPacket(anchor,
@@ -103,17 +110,71 @@ public class CrewAssignStickItem extends CommandStickItem {
         return true;
     }
 
-    /** Operational Superb Warfare vehicle under the crosshair's entity id, or 0. */
-    private static int aimedVehicleId(Player player) {
-        if (!com.stevesarmy.compat.SbwCompat.isEnabled()) {
-            return 0;
+    /** Direct entity-interaction path; do not throw away Forge's actual target and raycast again. */
+    public static boolean tryAssignVehicle(Player player, Entity vehicle, boolean requireOwnership,
+                                           boolean includeNonCrew) {
+        if (!isAssignableVehicle(vehicle)) return false;
+        List<Integer> selected = includeNonCrew
+            ? selectedSoldierIds(player, requireOwnership)
+            : selectedVehicleCrewIds(player, requireOwnership);
+        if (selected.isEmpty()) {
+            player.displayClientMessage(
+                net.minecraft.network.chat.Component.literal("No crew selected"), true);
+            return true;
         }
-        HitResult hit = player.pick(SEAT_REACH, 1.0F, false);
-        if (hit.getType() == HitResult.Type.ENTITY && hit instanceof EntityHitResult entityHit
-            && com.stevesarmy.compat.SbwCompat.isOperational(entityHit.getEntity())) {
-            return entityHit.getEntity().getId();
+        return sendVehicleAssignment(player, vehicle, selected);
+    }
+
+    /** Uses the clipped view ray to select an SBW vehicle, even when vanilla pick misses it. */
+    public static boolean tryAssignAimedVehicle(Player player, boolean requireOwnership,
+                                                boolean includeNonCrew) {
+        EntityHitResult hit = findAimedVehicle(player);
+        return hit != null && tryAssignVehicle(player, hit.getEntity(), requireOwnership, includeNonCrew);
+    }
+
+    private static boolean sendVehicleAssignment(Player player, Entity vehicle, List<Integer> selected) {
+        if (!isAssignableVehicle(vehicle)) return false;
+        Vec3 anchor = vehicle.position();
+        NetworkHandler.INSTANCE.sendToServer(new CommandStickAssignCrewPacket(
+            anchor, vehicle.blockPosition(), vehicle.getId(), selected));
+        return true;
+    }
+
+    /** Selected soldiers permitted by the invoking tool; role filtering is applied by callers as needed. */
+    public static List<Integer> selectedSoldierIds(Player player, boolean requireOwnership) {
+        List<Integer> soldierIds = new ArrayList<>();
+        for (int id : CommandStickSelection.getSelectedIds()) {
+            if (player.level().getEntity(id) instanceof SoldierEntity soldier
+                && (!requireOwnership || soldier.isOwnedBy(player))) {
+                soldierIds.add(id);
+            }
         }
-        return 0;
+        return soldierIds;
+    }
+
+    /** Operational Superb Warfare vehicle under the view ray, or {@code null}. */
+    @Nullable
+    private static EntityHitResult findAimedVehicle(Player player) {
+        if (!com.stevesarmy.compat.SbwCompat.isEnabled()) return null;
+        Vec3 eye = player.getEyePosition(1.0F);
+        Vec3 view = player.getViewVector(1.0F);
+        Vec3 end = eye.add(view.scale(SEAT_REACH));
+        BlockHitResult block = player.level().clip(new ClipContext(
+            eye, end, ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, player));
+        Vec3 clippedEnd = block.getType() == HitResult.Type.MISS ? end : block.getLocation();
+        double maxDistanceSqr = eye.distanceToSqr(clippedEnd);
+        if (maxDistanceSqr < 1.0e-6) return null;
+
+        AABB searchBox = player.getBoundingBox()
+            .expandTowards(clippedEnd.subtract(eye)).inflate(1.0);
+        return ProjectileUtil.getEntityHitResult(player, eye, clippedEnd, searchBox,
+            entity -> entity.isPickable() && !entity.isSpectator() && isAssignableVehicle(entity),
+            maxDistanceSqr);
+    }
+
+    private static boolean isAssignableVehicle(Entity entity) {
+        return com.stevesarmy.compat.SbwCompat.isOperational(entity)
+            && !com.stevesarmy.compat.sbw.SbwVehicles.isDrone(entity);
     }
 
     /** Selected vehicle crew that the caller is permitted to target on the client. */

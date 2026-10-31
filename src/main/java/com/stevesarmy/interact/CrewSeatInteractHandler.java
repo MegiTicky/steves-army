@@ -64,6 +64,17 @@ public final class CrewSeatInteractHandler {
             event.setCancellationResult(InteractionResult.SUCCESS);
             return;
         }
+        if (SbwCompat.isOperational(target)
+            && !com.stevesarmy.compat.sbw.SbwVehicles.isDrone(target)
+            && mainHand.getItem() instanceof CreativeCommandStickItem
+            && player.isShiftKeyDown()) {
+            if (event.getLevel().isClientSide && player.getAbilities().instabuild) {
+                CrewAssignStickItem.tryAssignVehicle(player, target, false, true);
+            }
+            event.setCanceled(true);
+            event.setCancellationResult(InteractionResult.SUCCESS);
+            return;
+        }
         if (!VS2Compat.isCreateSeatEntity(target)) {
             return;
         }

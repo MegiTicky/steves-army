@@ -7,6 +7,10 @@ All notable changes to Steve's Army will be documented in this file.
 ### Soldier Swap
 - Swapping bodies carries health with it: take the soldier's current health and leave your own behind. Swapping back no longer provides a free heal.
 
+### Superb Warfare Support
+- SBW firearms use a dedicated gun handler. Dedicated vehicle crew can drive compatible SBW vehicles from the Vehicle page, while ordinary infantry ride in passenger seats.
+- Drivers maintain space from friendly vehicles, stop close to GO_TO pings, and brake for friendly soldiers and vehicles. Anti-tank soldiers can target hostile-crewed vehicles.
+
 ### Machine Gunner Overhaul
 - Machine gunners retain their existing support-role cover and movement safeguards while providing sustained ATTACK suppression.
 - Suppression bursts rotate across every known enemy position, with multiple gunners interleaving their fire instead of stacking on one target.
@@ -103,9 +107,8 @@ All notable changes to Steve's Army will be documented in this file.
   pistol in the sidearm slot), check their inventory, and equip a gun from the
   backpack when the main hand is empty.
 - **Superb Warfare compat** (optional, `superbwarfare.enabled`): anti-tank soldiers
-  treat enemy-crewed Superb Warfare vehicles as hard targets, and vehicle crew can
-  board and man their guns (gunnery only — SBW vehicles are client-input driven, so
-  AI cannot drive them).
+  treat hostile-crewed vehicles as hard targets, dedicated crew can drive and man
+  SBW vehicles, and infantry use them as passenger transports.
 
 ### Changed
 

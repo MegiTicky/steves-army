@@ -123,14 +123,21 @@ public class SoldierModel<T extends SoldierEntity> extends HumanoidModel<T> {
         weaponReady = motion.ready;
         float crawl = entity.getSwimAmount(partial);
         boolean gun = GunIntegration.isGun(entity.getMainHandItem());
+        float trackingYawLimit = entity.isPassenger() ? 75.0F : 30.0F;
+        // The renderer hands us (headYaw - bodyYaw) unwrapped for non-living mounts such as
+        // SBW hulls. Near +-180 that is off by 360, which the clamp below turns into a
+        // one-frame neck snap to the limit. Wrap before applying the seat's exact pose.
+        yaw = Mth.wrapDegrees(yaw);
+        float viewYaw = yaw;
+        float viewPitch = pitch;
         if (entity.deathTime > 0) {
             apply((entity.getId() & 1) == 0 ? SoldierAnimations.UNIT_DEATH : SoldierAnimations.UNIT_DEATH_BACK,
                 (entity.deathTime + partial) / 20, 1);
         } else {
             apply(SoldierAnimations.UNIT_IDLE, age / 20, 1 - motion.walk);
             applyLocomotion(swing, speed, motion.walk * (1 - crawl));
-            head.yRot += Mth.clamp(yaw, -30, 30) * Mth.DEG_TO_RAD;
-            head.xRot += Mth.clamp(pitch, -25, 45) * Mth.DEG_TO_RAD;
+            head.yRot += Mth.clamp(viewYaw, -trackingYawLimit, trackingYawLimit) * Mth.DEG_TO_RAD;
+            head.xRot += Mth.clamp(viewPitch, -25, 45) * Mth.DEG_TO_RAD;
             if (gun) {
                 String id = entity.getMainHandItem().getTag() == null ? "" : entity.getMainHandItem().getTag().getString("GunId");
                 if (!id.equals(motion.gunId)) { motion.gunId = id; motion.gunType = weaponType(entity); }
@@ -142,7 +149,7 @@ public class SoldierModel<T extends SoldierEntity> extends HumanoidModel<T> {
                 rightArm.yRot = leftArm.yRot = rightArm.zRot = leftArm.zRot = 0;
             }
             applyReviewedPosture(motion.crouch * (1 - crawl), motion.coverAim,
-                motion.ready, swing, speed, gun, yaw, pitch);
+                motion.ready, swing, speed, gun, viewYaw, viewPitch, trackingYawLimit);
             applyLocomotion(swing, speed, motion.walk * (1 - crawl) * (1 - motion.crouch));
             applyCrawl(crawl, swing, speed, pitch, gun);
             reviewedWeaponWeight = 1 - crawl;
@@ -211,18 +218,19 @@ public class SoldierModel<T extends SoldierEntity> extends HumanoidModel<T> {
     }
 
     private void applyCrouch(float amount, float swing, float speed) {
-        applyReviewedPosture(amount, 0, weaponReady, swing, speed, true, 0, 0);
+        applyReviewedPosture(amount, 0, weaponReady, swing, speed, true, 0, 0, 30.0F);
     }
 
     private void applyReviewedPosture(float amount, float cover, float ready,
-                                      float swing, float speed, boolean gun, float yaw, float pitch) {
+                                      float swing, float speed, boolean gun, float yaw, float pitch,
+                                      float yawLimit) {
         amount = Mth.clamp(amount, 0, 1);
         cover = Mth.clamp(cover, 0, 1);
         var crouchPose = ReviewedSoldierPoses.blend(ReviewedSoldierPoses.get("crouch"), ReviewedSoldierPoses.get("cover"), cover);
         var standingPose = ReviewedSoldierPoses.blend(ReviewedSoldierPoses.get("standing_lowered"), ReviewedSoldierPoses.get("standing_ready"), ready);
         Map<String, ModelPart> parts = Map.of("head", head, "body", body, "right_arm", rightArm, "left_arm", leftArm,
             "right_leg", rightLeg, "left_leg", leftLeg, "right_leg_shin", rightShin, "left_leg_shin", leftShin);
-        Quaternionf tracking = new Quaternionf().rotationY(Mth.clamp(yaw, -30, 30) * Mth.DEG_TO_RAD * .65F)
+        Quaternionf tracking = new Quaternionf().rotationY(Mth.clamp(yaw, -yawLimit, yawLimit) * Mth.DEG_TO_RAD * .65F)
             .rotateX(Mth.clamp(pitch, -25, 45) * Mth.DEG_TO_RAD * .85F);
         for (var entry : parts.entrySet()) {
             String name = entry.getKey(); ModelPart part = entry.getValue();
@@ -238,7 +246,7 @@ public class SoldierModel<T extends SoldierEntity> extends HumanoidModel<T> {
             } else {
                 if (name.equals("head") || name.endsWith("_arm")) {
                     Quaternionf look = name.equals("head")
-                        ? new Quaternionf().rotationY(Mth.clamp(yaw, -30, 30) * Mth.DEG_TO_RAD)
+                        ? new Quaternionf().rotationY(Mth.clamp(yaw, -yawLimit, yawLimit) * Mth.DEG_TO_RAD)
                             .rotateX(Mth.clamp(pitch, -25, 45) * Mth.DEG_TO_RAD) : tracking;
                     target = new ReviewedSoldierPoses.Part(target.position(), new Quaternionf(look).mul(target.rotation()), target.centre());
                 }
