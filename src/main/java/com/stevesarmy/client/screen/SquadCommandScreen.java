@@ -327,6 +327,10 @@ public class SquadCommandScreen extends Screen {
         addRenderableWidget(Button.builder(Component.literal("Suppress"), button ->
             sendSquadWideConfig(SetSoldierConfigPacket.ConfigType.FIRE_DISCIPLINE, FireDiscipline.SUPPRESSIVE.ordinal()))
             .bounds(x, btnY, btnWidth, btnHeight).build());
+        x += btnWidth + 4;
+        addRenderableWidget(Button.builder(Component.literal("Hold Fire"), button ->
+            sendSquadWideConfig(SetSoldierConfigPacket.ConfigType.FIRE_DISCIPLINE, FireDiscipline.HOLD_FIRE.ordinal()))
+            .bounds(x, btnY, btnWidth + 12, btnHeight).build());
 
         x = contentX + font.width("Discipline:") + 4;
         int roleApplyX = x + 3 * (btnWidth + 4) + 10;
@@ -797,6 +801,7 @@ public class SquadCommandScreen extends Screen {
             case STANDARD -> "STD";
             case CONSERVE -> "CON";
             case SUPPRESSIVE -> "SUP";
+            case HOLD_FIRE -> "HOLD";
         };
         graphics.drawString(font, Component.literal(discLabel), x, y + 6, 0xFF777777, false);
         return x + COL_DISC_WIDTH;
@@ -868,7 +873,6 @@ public class SquadCommandScreen extends Screen {
             Collections.sort(teamNames);
             for (String teamName : teamNames) {
                 fofRows.add(FofRow.header(teamName));
-                fofRows.add(FofRow.team(teamName));
                 List<FofRow> teamPlayers = playersByTeam.get(teamName);
                 if (teamPlayers != null) {
                     teamPlayers.sort(Comparator.comparing(row -> row.displayName, String.CASE_INSENSITIVE_ORDER));
@@ -912,16 +916,26 @@ public class SquadCommandScreen extends Screen {
             int stanceX = contentX + contentWidth - FOF_STANCE_COL_WIDTH;
             row.stanceX = stanceX;
             String label = row.kind == FofRow.Kind.TEAM ? "Team default" : row.displayName;
-            graphics.drawString(font, Component.literal(font.plainSubstrByWidth(label, Math.max(0, stanceX - contentX - 60))),
-                contentX + 6, y + (row.kind == FofRow.Kind.PLAYER ? 2 : 6), 0xFFCCCCCC, false);
             if (row.kind == FofRow.Kind.PLAYER) {
                 var effective = ClientFofState.INSTANCE.getEffective(row.playerKey);
-                String status = effective == null ? "Offline" : effective.stance().getDisplayName() + " (" + effective.source() + ")";
+                if (effective != null && (effective.source().equals("team-pair") || effective.source().startsWith("event:"))) {
+                    label = "[LOCK] " + label;
+                }
+            }
+            int rowIndent = row.kind == FofRow.Kind.PLAYER ? 20 : 8;
+            graphics.drawString(font, Component.literal(font.plainSubstrByWidth(label, Math.max(0, stanceX - contentX - rowIndent - 60))),
+                contentX + rowIndent, y + (row.kind == FofRow.Kind.PLAYER ? 2 : 6), 0xFFCCCCCC, false);
+            if (row.kind == FofRow.Kind.PLAYER) {
+                var effective = ClientFofState.INSTANCE.getEffective(row.playerKey);
+                FofStance override = ClientFofState.INSTANCE.getPlayerStance(row.playerKey);
+                String status = override == null
+                    ? (effective == null ? "Effective: unavailable" : "Effective: " + effective.stance().getDisplayName() + " (" + effective.source() + ")")
+                    : "Override: " + override.getDisplayName();
                 var pending = ClientFofState.INSTANCE.getPending(row.playerKey);
                 if (pending != null) status = "Requested: " + (pending.desired() == null ? "Default" : pending.desired().getDisplayName())
                     + (pending.accepted() ? " (waiting)" : "");
                 graphics.drawString(font, Component.literal(font.plainSubstrByWidth(status, Math.max(0, stanceX - contentX - 60))),
-                    contentX + 6, y + 12, 0xFFAAAAAA, false);
+                    contentX + rowIndent, y + 12, 0xFFAAAAAA, false);
                 if (pending != null) {
                     boolean incoming = mc.player != null && !pending.requester().equals(mc.player.getUUID());
                     String action = incoming && !pending.accepted() ? "Accept" : "Cancel";
@@ -948,7 +962,7 @@ public class SquadCommandScreen extends Screen {
         int footerY = getFooterY();
         graphics.drawString(font, Component.literal("-- Friend / Foe --  Player settings override team defaults."),
             contentX, footerY, 0xFFAAAAAA, false);
-        graphics.drawString(font, Component.literal("Hostility is mutual. Ending it requires agreement and 30 seconds without combat."),
+        graphics.drawString(font, Component.literal("Hostility is mutual. Ending it takes both players' confirmation and applies immediately."),
             contentX, footerY + 14, 0xFF888888, false);
     }
 

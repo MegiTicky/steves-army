@@ -250,6 +250,10 @@ public class SoldierEntity extends PathfinderMob implements Container {
     @Nullable
     private LivingEntity neutralAttacker;
     private int neutralAttackerTick = Integer.MIN_VALUE;
+    /** Last hostile entity that hit us, used for Hold Fire self-defense. */
+    @Nullable
+    private LivingEntity holdFireAttacker;
+    private int holdFireAttackerTick = Integer.MIN_VALUE;
     /** True when combat, rather than cover movement, owns the low-prone posture. */
     private boolean firingProne = false;
     /** Armed only by a low-crouch exit; prevents unrelated peek transitions from rising. */
@@ -1146,6 +1150,11 @@ public class SoldierEntity extends PathfinderMob implements Container {
      * follows the default rules.
      */
     public boolean isProactiveTarget(LivingEntity candidate) {
+        if (getFireDiscipline() == FireDiscipline.HOLD_FIRE) {
+            return candidate == holdFireAttacker
+                && this.tickCount - holdFireAttackerTick <= NEUTRAL_RETALIATION_TICKS
+                && com.stevesarmy.combat.FofCombat.mayEngage(this, candidate);
+        }
         FofStance category = getFofOverride(candidate);
         if (category == FofStance.FRIENDLY) return false;
         if (category == FofStance.NEUTRAL && (candidate != neutralAttacker
@@ -1823,6 +1832,11 @@ public class SoldierEntity extends PathfinderMob implements Container {
                 && getFofOverride(neutralCandidate) == FofStance.NEUTRAL) {
                 this.neutralAttacker = neutralCandidate;
                 this.neutralAttackerTick = this.tickCount;
+            }
+            if (source.getEntity() instanceof LivingEntity hostileAttacker && hostileAttacker != this
+                && !isFriendlyTo(hostileAttacker)) {
+                this.holdFireAttacker = hostileAttacker;
+                this.holdFireAttackerTick = this.tickCount;
             }
             if (coverBehaviorManager != null) {
                 CoverBehaviorManager.CoverState preState = coverBehaviorManager.getState();

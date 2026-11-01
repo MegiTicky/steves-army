@@ -129,16 +129,14 @@ public class SetFofStancePacket {
                 String message = switch (result) {
                     case APPLIED -> "FoF relationship updated.";
                     case PENDING -> "FoF peace request sent; the other player must accept.";
-                    case LOCKED -> msg.action == Action.ACCEPT
-                        ? "FoF request accepted; waiting for 30 seconds without combat."
-                        : "FoF request saved; agreement and 30 seconds without combat are required.";
                     case INVALID -> "FoF action rejected; refresh the screen or check server diplomacy permissions.";
+                    case LOCKED -> "FoF action locked by a server-managed team relation or active event.";
                 };
                 player.sendSystemMessage(net.minecraft.network.chat.Component.literal(message));
                 if (other != null && result != FofRelations.ChangeResult.INVALID) {
                     String notice = msg.action == Action.ACCEPT && result == FofRelations.ChangeResult.LOCKED
-                        ? " accepted your FoF request; it will take effect after combat ends."
-                        : result == FofRelations.ChangeResult.PENDING || result == FofRelations.ChangeResult.LOCKED
+                        ? " accepted your FoF request; it is active now."
+                        : result == FofRelations.ChangeResult.PENDING
                             ? " requests an FoF change. Open the FoF tab to review it."
                         : msg.stance == FofStance.HOSTILE && msg.action == Action.SET
                             ? " declared mutual hostility with you and your soldiers."

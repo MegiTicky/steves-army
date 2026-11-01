@@ -18,7 +18,7 @@ public final class FofScenarios {
     private FofScenarios() {}
 
     public static SimScenario relationships() {
-        boolean[] checks = new boolean[11];
+        boolean[] checks = new boolean[12];
         return SimScenario.builder("fof_relationships")
             .description("Symmetric player precedence, event snapshots, peace lock, directional retaliation and save/load.")
             .duration(20).terrain(t -> t.floorOnly())
@@ -41,19 +41,24 @@ public final class FofScenarios {
                 data.forcePlayerRelation(a, b, FofStance.HOSTILE);
                 data.recordHostileAction(a, b, 200);
                 checks[5] = data.mayRetaliate(b, a, 201) && !data.mayRetaliate(a, b, 201);
-                checks[6] = data.requestPlayerChange(a, b, FofStance.FRIENDLY, 201) == FofRelations.ChangeResult.LOCKED;
-                checks[7] = data.acceptPlayerChange(b, a, 202) == FofRelations.ChangeResult.LOCKED
-                    && data.resolve(a, "red", b, "blue", 202).stance() == FofStance.HOSTILE;
+                checks[6] = data.requestPlayerChange(a, b, FofStance.FRIENDLY, 201) == FofRelations.ChangeResult.PENDING;
+                checks[7] = data.acceptPlayerChange(b, a, 202) == FofRelations.ChangeResult.APPLIED
+                    && data.resolve(a, "red", b, "blue", 202).stance() == FofStance.FRIENDLY;
                 checks[8] = data.resolve(a, "red", b, "blue", 801).stance() == FofStance.FRIENDLY;
                 checks[9] = !data.mayRetaliate(b, a, 801);
                 checks[10] = data.resolve(a, "red", a, "red", 801).stance() == FofStance.FRIENDLY;
+                data.forcePlayerRelation(a, b, null);
+                data.setTeamRelation("red", "blue", FofStance.HOSTILE);
+                checks[11] = data.requestPlayerChange(a, b, FofStance.FRIENDLY, "red", "blue", 802)
+                    == FofRelations.ChangeResult.LOCKED;
             })
             .assertThat("player hostility overrides friendly team symmetrically", v -> checks[0])
             .assertThat("event starts and applies to snapshot players and garrisons", v -> checks[1] && checks[2])
             .assertThat("event persists and expiry restores underlying diplomacy", v -> checks[3] && checks[4])
             .assertThat("neutral retaliation is directional and expires", v -> checks[5] && checks[9])
-            .assertThat("peace waits for acceptance and combat cooldown", v -> checks[6] && checks[7] && checks[8])
+            .assertThat("peace applies immediately after both players accept", v -> checks[6] && checks[7] && checks[8])
             .assertThat("owner identity remains friendly", v -> checks[10])
+            .assertThat("command-managed team relations lock player overrides", v -> checks[11])
             .build();
     }
 

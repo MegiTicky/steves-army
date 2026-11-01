@@ -92,11 +92,15 @@ public final class FofRelations extends net.minecraft.world.level.saveddata.Save
                                              long tick) {
         if (requester == null || other == null || requester.equals(other)) return ChangeResult.INVALID;
         String key = playerKey(requester, other);
-        FofStance current = resolve(requester, requesterTeam, other, otherTeam, tick).stance();
+        Resolution resolution = resolve(requester, requesterTeam, other, otherTeam, tick);
+        if (resolution.source().equals("team-pair") || resolution.source().startsWith("event:")) {
+            return ChangeResult.LOCKED;
+        }
+        FofStance current = resolution.stance();
         if (current == FofStance.HOSTILE && desired != FofStance.HOSTILE) {
             pending.put(key, new PendingChange(requester, other, desired, false));
             setDirty();
-            return isCombatQuiet(key, tick) ? ChangeResult.PENDING : ChangeResult.LOCKED;
+            return ChangeResult.PENDING;
         }
         if (desired == null) players.remove(key); else players.put(key, desired);
         pending.remove(key);
@@ -113,7 +117,7 @@ public final class FofRelations extends net.minecraft.world.level.saveddata.Save
         if (change == null || !change.other().equals(accepter) || !change.requester().equals(requester)) {
             return ChangeResult.INVALID;
         }
-        if (!isCombatQuiet(key, tick) || eventFor(accepter, requester) != null) {
+        if (eventFor(accepter, requester) != null) {
             pending.put(key, change.accepted());
             setDirty();
             return ChangeResult.LOCKED;
@@ -345,16 +349,15 @@ public final class FofRelations extends net.minecraft.world.level.saveddata.Save
         changed |= retaliation.values().removeIf(last -> tick - last > COMBAT_LOCK_TICKS);
         for (var entry : new ArrayList<>(pending.entrySet())) {
             PendingChange change = entry.getValue();
-            if (change.acceptedByOther() && isCombatQuiet(entry.getKey(), tick)
-                && eventFor(change.requester(), change.other()) == null) applyPending(entry.getKey(), change);
+            if (change.acceptedByOther() && eventFor(change.requester(), change.other()) == null)
+                applyPending(entry.getKey(), change);
         }
         if (changed) setDirty();
     }
 
     private void applyApprovedIfReady(UUID a, UUID b, long tick) {
         String key = playerKey(a, b); PendingChange change = pending.get(key);
-        if (change != null && change.acceptedByOther() && isCombatQuiet(key, tick)
-            && eventFor(a, b) == null) applyPending(key, change);
+        if (change != null && change.acceptedByOther() && eventFor(a, b) == null) applyPending(key, change);
     }
 
     private void applyPending(String key, PendingChange change) {

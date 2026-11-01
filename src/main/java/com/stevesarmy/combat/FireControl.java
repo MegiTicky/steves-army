@@ -96,6 +96,8 @@ public final class FireControl {
         float scale = switch (discipline) {
             case CONSERVE -> 0.70f;
             case SUPPRESSIVE -> 0.40f;
+            case HOLD_FIRE -> 0.0f;
+            case STANDARD -> 1.0f;
             default -> 0.55f;
         };
         return Math.max(0.08f, startThreshold * scale);

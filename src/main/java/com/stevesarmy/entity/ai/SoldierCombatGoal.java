@@ -4050,6 +4050,7 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
         return switch (soldier.getFireDiscipline()) {
             case CONSERVE -> 1.4f;
             case SUPPRESSIVE -> 0.7f;
+            case HOLD_FIRE -> Float.POSITIVE_INFINITY;
             default -> 1.0f;
         };
     }

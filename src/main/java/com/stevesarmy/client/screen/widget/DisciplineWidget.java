@@ -39,13 +39,14 @@ public class DisciplineWidget implements SquadControlWidget {
             case STANDARD -> "STD";
             case CONSERVE -> "CON";
             case SUPPRESSIVE -> "SUP";
+            case HOLD_FIRE -> "HOLD";
         };
         graphics.drawString(font, Component.literal("[" + label + "▼]"), x + 2, y + 2, textColor, false);
 
         if (dropdownOpen) {
             int dy = y + HEIGHT;
             for (FireDiscipline d : FireDiscipline.values()) {
-                String itemLabel = switch (d) { case STANDARD -> "STD"; case CONSERVE -> "CON"; case SUPPRESSIVE -> "SUP"; };
+                String itemLabel = switch (d) { case STANDARD -> "STD"; case CONSERVE -> "CON"; case SUPPRESSIVE -> "SUP"; case HOLD_FIRE -> "HOLD"; };
                 boolean hovered = mouseX >= 0 && mouseX <= WIDTH && mouseY >= dy - y && mouseY <= dy - y + HEIGHT;
                 graphics.fill(x, dy, x + WIDTH, dy + HEIGHT, hovered ? 0xFF444444 : 0xFF222222);
                 graphics.drawString(font, Component.literal(itemLabel), x + 2, dy + 2, textColor, false);
