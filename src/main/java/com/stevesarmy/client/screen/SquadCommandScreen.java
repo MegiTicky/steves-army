@@ -314,6 +314,7 @@ public class SquadCommandScreen extends Screen {
         int btnY = footerY + 14;
         int btnHeight = VANILLA_BUTTON_HEIGHT;
         int btnWidth = 60;
+        int holdFireWidth = btnWidth + 12;
         int x = contentX + font.width("Discipline:") + 4;
 
         addRenderableWidget(Button.builder(Component.literal("Standard"), button ->
@@ -330,10 +331,10 @@ public class SquadCommandScreen extends Screen {
         x += btnWidth + 4;
         addRenderableWidget(Button.builder(Component.literal("Hold Fire"), button ->
             sendSquadWideConfig(SetSoldierConfigPacket.ConfigType.FIRE_DISCIPLINE, FireDiscipline.HOLD_FIRE.ordinal()))
-            .bounds(x, btnY, btnWidth + 12, btnHeight).build());
+            .bounds(x, btnY, holdFireWidth, btnHeight).build());
 
         x = contentX + font.width("Discipline:") + 4;
-        int roleApplyX = x + 3 * (btnWidth + 4) + 10;
+        int roleApplyX = x + 3 * (btnWidth + 4) + holdFireWidth + 10;
         int applyWidth = 80;
         Button applyRoleButton = Button.builder(Component.literal("Apply Role"), button -> {
             SoldierRole role = SoldierRole.values()[bulkRoleOrdinal % SoldierRole.values().length];
