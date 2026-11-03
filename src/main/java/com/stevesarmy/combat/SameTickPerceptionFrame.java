@@ -63,7 +63,7 @@ public final class SameTickPerceptionFrame {
                                                        VisibilityRay.SmokePolicy smokePolicy,
                                                        Set<net.minecraft.core.BlockPos> ignoredBlocks) {
         Frame frame = getFrame(level, level.getGameTime());
-        VisibilityKey key = quantizedKey(observerId, from, to, smokePolicy, ignoredBlocks);
+        VisibilityKey key = visibilityKey(observerId, from, to, smokePolicy, ignoredBlocks);
         return frame.visibilityResults.get(key);
     }
 
@@ -72,21 +72,18 @@ public final class SameTickPerceptionFrame {
                                      Set<net.minecraft.core.BlockPos> ignoredBlocks,
                                      VisibilityRay.Result result) {
         Frame frame = getFrame(level, level.getGameTime());
-        VisibilityKey key = quantizedKey(observerId, from, to, smokePolicy, ignoredBlocks);
+        VisibilityKey key = visibilityKey(observerId, from, to, smokePolicy, ignoredBlocks);
         if (frame.visibilityResults.size() >= MAX_VISIBILITY_RESULTS) {
             frame.visibilityResults.clear();
         }
         frame.visibilityResults.put(key, result);
     }
 
-    /** Quantizes Vec3 coordinates to half-block resolution for cache key stability. */
-    private static VisibilityKey quantizedKey(int observerId, Vec3 from, Vec3 to,
-                                               VisibilityRay.SmokePolicy smokePolicy,
-                                               Set<net.minecraft.core.BlockPos> ignoredBlocks) {
-        return new VisibilityKey(observerId,
-            (int) Math.floor(from.x * 2), (int) Math.floor(from.y * 2), (int) Math.floor(from.z * 2),
-            (int) Math.floor(to.x * 2), (int) Math.floor(to.y * 2), (int) Math.floor(to.z * 2),
-            smokePolicy, Set.copyOf(ignoredBlocks));
+    /** Visibility near a block edge can change within half a block. Keep ray endpoints exact. */
+    private static VisibilityKey visibilityKey(int observerId, Vec3 from, Vec3 to,
+                                                VisibilityRay.SmokePolicy smokePolicy,
+                                                Set<net.minecraft.core.BlockPos> ignoredBlocks) {
+        return new VisibilityKey(observerId, from, to, smokePolicy, Set.copyOf(ignoredBlocks));
     }
 
     public static void invalidate(Level level) {
@@ -112,9 +109,7 @@ public final class SameTickPerceptionFrame {
 
     private record CellKey(int x, int y, int z, int radius) {}
 
-    private record VisibilityKey(int observerId,
-                                 int fromX, int fromY, int fromZ,
-                                 int toX, int toY, int toZ,
+    private record VisibilityKey(int observerId, Vec3 from, Vec3 to,
                                  VisibilityRay.SmokePolicy smokePolicy,
                                  Set<net.minecraft.core.BlockPos> ignoredBlocks) {}
 

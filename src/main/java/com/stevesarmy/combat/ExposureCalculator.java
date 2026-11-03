@@ -315,6 +315,26 @@ public class ExposureCalculator {
         return new AimPointResult(target.getEyePosition(), AimPointType.FALLBACK, false, false, 1.0);
     }
 
+    /** Recheck alternate body points when a cached selection fails the final firing ray. */
+    public static AimPointResult getBestFreshFiringAimPoint(LivingEntity observer, LivingEntity target) {
+        Vec3 observerEye = observer.getEyePosition();
+        TargetPoint bestVisible = null;
+        double bestConcealment = 1.0;
+        for (TargetPoint point : getTargetPointsWithPriority(target)) {
+            VisibilityRay.Result visibility = VisibilityRay.traceFresh(
+                observer.level(), observerEye, point.position, observer);
+            if (visibility.hasContact()
+                && (bestVisible == null || point.type.priority > bestVisible.type.priority)) {
+                bestVisible = point;
+                bestConcealment = visibility.concealment();
+            }
+        }
+        if (bestVisible == null) {
+            return new AimPointResult(target.getEyePosition(), AimPointType.FALLBACK, false, false, 1.0);
+        }
+        return new AimPointResult(bestVisible.position, bestVisible.type, true, true, bestConcealment);
+    }
+
     /**
      * Station-gunner aim-point selection. When the target is fully exposed this is
      * the same priority pick as {@link #getBestAimPoint} (upper torso — biggest

@@ -59,6 +59,7 @@ public final class SimRegistry {
             DirectionalCoverScenarios.protectedCoverControl(),
             LoneBlockMultiSoldierScenario.create(),
             NoCoverProneScenarios.pressuredOpenGroundFallsProne(),
+            ProneHeadFireScenario.create(),
             NoCoverProneScenarios.unpressuredOpenGroundStaysUpright(),
             NoCoverProneScenarios.clusteredSquad(2),
             NoCoverProneScenarios.clusteredSquad(8),

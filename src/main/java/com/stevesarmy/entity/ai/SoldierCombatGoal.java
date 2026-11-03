@@ -1777,6 +1777,9 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
             ? new ExposureCalculator.AimPointResult(vehicleSolution,
                 ExposureCalculator.AimPointType.FALLBACK, true, true, 0.0)
             : getOrComputeAimPoint();
+        if (!vehicleCombat && aimPoint != null && !aimPoint.canShoot()) {
+            aimPoint = ExposureCalculator.getBestFreshFiringAimPoint(soldier, target);
+        }
         if (aimPoint == null) {
             if (isDamageDebugLogging()) {
                 StevesArmyMod.LOGGER.info("[DAMAGE_DEBUG] tickGunCombat: aimPoint is null, can't shoot");
@@ -2026,9 +2029,17 @@ public class SoldierCombatGoal extends Goal implements CombatGoalController {
         } else {
             if (!VisibilityRay.traceFresh(soldier.level(), soldier.getEyePosition(), aimPoint.position, soldier)
                 .hasContact()) {
-                noteEngagementGate(EngagementGateReason.BULLET_PATH_BLOCKED);
-                resetDirectFireBurst();
-                return;
+                aimPoint = ExposureCalculator.getBestFreshFiringAimPoint(soldier, target);
+                if (!aimPoint.canShoot()) {
+                    noteEngagementGate(EngagementGateReason.BULLET_PATH_BLOCKED);
+                    resetDirectFireBurst();
+                    return;
+                }
+                if (!prepareToFire(aimPoint.position, true)) {
+                    noteEngagementGate(EngagementGateReason.PREPARE_FAILED);
+                    resetDirectFireBurst();
+                    return;
+                }
             }
         }
         
