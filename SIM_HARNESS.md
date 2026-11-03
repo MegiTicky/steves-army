@@ -73,6 +73,16 @@ autorun log line `SIM COMPLETE` is the CI-style grep anchor; per-scenario
 
 ### Fast ticks
 
+`attack_personal_pin_recovery` guards ATTACK resumption after an individual pins
+at an occupied dock while fireteam pressure stays below HEAVY. It requires a
+physical dock, natural suppression recovery, retention through the eight-second
+quiet window, then at least 2.5 blocks of forward movement on the original order
+with the enemy still alive. Run alongside `suppressed_relocation_safe_route`,
+`attack_absolute_pin_hold`, and `attack_pinned_displacement_hold` to preserve
+active-fire protection. Also run the recovery case with `-Psim.fastticks=false`.
+This is individual recovery coverage: simulation anchors are not players in the
+server player list, so it does not exercise natural fireteam HEAVY decay.
+
 By default, autorun suites are **unthrottled**: `SimManager.onFastTickClock`
 pins `MinecraftServer.nextTickTime` (the vanilla 50 ms/tick pacing anchor)
 ~100 ms into the past every tick, so the server ticks at CPU speed instead of

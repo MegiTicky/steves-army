@@ -45,6 +45,7 @@ public final class SimRegistry {
             PlayerSuppressionScenarios.respawnedPlayer(),
             ThreatIntelLifecycleScenario.create(),
             suppressedFollowEscape(),
+            AttackRecoveryScenarios.personalPinRecovery(),
             holdEnclosedPocket(),
             persistentPingRelocation(),
             mgAnchorFreshness(),

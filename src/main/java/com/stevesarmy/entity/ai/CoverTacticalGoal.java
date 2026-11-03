@@ -1760,6 +1760,10 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
             blockedExcuse = "pinned";
         } else if (FireTeamSuppressionTracker.isHeavilySuppressed(soldier)) {
             blockedExcuse = "suppressed";
+        } else if (soldier.hasValidAttackTarget() && dockAdvanceLaunchHeld()) {
+            blockedExcuse = !canLeaveCoverNow() ? "attack:personal-recovery"
+                : dockAdvanceQuietHoldActive() ? "attack:quiet-window"
+                : "attack:previous-pin";
         } else if (!eng.isMovingSupported()) {
             blockedExcuse = "contact-plan:" + eng.getMovementBlockReason();
         } else if (state == CoverBehaviorManager.CoverState.SEEKING_COVER
@@ -1891,13 +1895,9 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
         } else {
             // Absolute-pin latch (suppressedRelocationSafeRoute): remember the
             // dock where the soldier was absolutely pinned (>= PINNED_THRESHOLD).
-            // While the fight that pinned him is still live, the autonomous
-            // ATTACK advance from this dock stays held at the dock — the fire
-            // going quiet is an artifact of him hiding (enemies stop firing at
-            // what they cannot see), not the fight being over, so a "recovered"
-            // window must not re-seed a corridor walk the enemy line catches
-            // the moment he steps out. The latch goes inert when the dock
-            // changes or the threat context is gone (see dockAdvanceLaunchHeld).
+            // Hold the next ATTACK launch through recovery and sustained quiet.
+            // The attack objective itself must not keep this memory latched:
+            // it remains active precisely because the soldier still must advance.
             absolutePinDockPos = coverPosition;
             if (continuousSuppressionStartTime == 0L) {
                 continuousSuppressionStartTime = GameClock.nowMs();
@@ -2066,14 +2066,11 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
     /**
      * Pinned-advance hold at the dock ({@code suppressedRelocationSafeRoute},
      * repurposed from the round-1 "absolute-pin freeze"): the soldier was
-     * absolutely pinned at THIS dock and the fight that pinned him is still
-     * live (active threat intel or a live attack target), so the autonomous
-     * ATTACK advance must not LAUNCH from it — stepping out is what re-drew
-     * the fire that pinned him. This is docked-soldier launch protection
-     * only; it never freezes a soldier in the open (that role belongs to the
-     * suppressed open-ground escape policy, which always moves him to the
-     * best available cover). Releases when the threat context is gone
-     * (enemies dead or disengaged) or the dock changes.
+     * absolutely pinned at THIS dock, so wait for personal recovery, sustained
+     * quiet and fireteam recovery before allowing another launch. A live enemy
+     * or unfinished attack objective must not make this hold permanent. Normal
+     * peek, dwell and movement checks still decide whether to advance afterward.
+     * This protection only applies at the dock, never to open-ground escape.
      */
     private boolean dockAdvancePinnedHoldActive() {
         if (!StevesArmyConfig.isSuppressedRelocationSafeRoute()
@@ -2087,9 +2084,8 @@ public class CoverTacticalGoal extends Goal implements CoverGoalController {
         if (absolutePinDockPos == null || !absolutePinDockPos.equals(currentCover.getPosition())) {
             return false;
         }
-        if (!getThreats().hasActiveThreat() && !soldier.hasValidAttackTarget()) {
-            // The fight that pinned him is over: the latch goes inert and the
-            // advance works exactly as before the gate existed.
+        if (canLeaveCoverNow() && !dockAdvanceQuietHoldActive()
+            && !FireTeamSuppressionTracker.shouldPauseAttack(soldier)) {
             absolutePinDockPos = null;
             return false;
         }
@@ -7323,11 +7319,8 @@ Vec3 threatDirection = getThreats().getPrimaryDirection(soldier.position());
                 // soldier does not launch a corridor advance out of his dock
                 // while (a) fire has been live inside the sustained-quiet
                 // window, or (b) he was absolutely pinned at this dock and the
-                // fight that pinned him is still live — the momentary recovery
-                // gap while hidden (the t250-style relaunch at sup=0.00 that
-                // the next burst caught mid-crossing) is not a safe launch
-                // window. Hold the dock; the advance resumes once the fight is
-                // genuinely over.
+                // recovery/quiet checks have not yet passed. A live attack
+                // objective alone must never prevent the next bound.
                 if (dockAdvanceLaunchHeld()) {
                     break;
                 }
