@@ -4,20 +4,29 @@ All notable changes to Steve's Army will be documented in this file.
 
 ## [0.6.1] - Release preparation
 
-### Squad Diplomacy and Fire Control
-- Added shared friend-or-foe diplomacy, with controls for managing relations between players and their squads.
-- Added a hold-fire discipline and refined the friend-or-foe controls in the squad screen.
+### Animation
+- Fixed the unarmed crouching pose and transitions.
+- Fixed soldier size and arm texture clipping.
 
-### Equipment and Appearance
-- Added optional Curios integration so soldiers can carry and render compatible accessories.
-- Added separate configuration for friendly and enemy soldier death drops, including limits for guns and ammunition.
-- Refined unarmed crouching poses and transitions, skin sleeves, armor alignment and soldier rendering.
+### Compatibility
+- Added optional **Curios API** support, allowing soldiers to wear compatible accessories.
+- Fixed a startup crash on Forge 47.3.
 
-### Support and Combat Fixes
-- Improved support soldiers' resupply and revival duties. Supply delivery no longer depends on the visual pouch reaching its recipient, and other soldiers no longer intercept targeted deliveries.
-- Support soldiers can attempt to use smoke when rescuing a downed player and retry while approaching when needed.
-- Fixed prone soldiers failing to fire at a visible head above cover, and ATTACK advances failing to resume after recovery from suppression.
-- Added support-duty diagnostics and simulator scenarios for support, diplomacy and combat recovery.
+### Combat
+- Fixed ATTACK orders stalling after soldiers recover from being pinned.
+- Fixed prone soldiers failing to fire at a visible head above cover.
+- Added a **Hold Fire** discipline.
+
+### Support
+- Fixed support soldiers' resupply and revival duties, including targeted supplies being intercepted.
+- Support soldiers can attempt to use smoke when rescuing a downed player and retry as they approach.
+
+### Configuration
+- Added separate death-drop options for friendly and enemy soldiers.
+- Added a limit on guns and matching ammo dropped loose when a soldier dies.
+
+### Friend-or-Foe Identification
+- Reworked friend-or-foe relations with shared diplomacy and updated squad controls.
 
 ## [0.6.0] - Release preparation
 
