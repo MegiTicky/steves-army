@@ -1,6 +1,7 @@
 package com.stevesarmy.respawn;
 
 import com.stevesarmy.StevesArmyMod;
+import com.stevesarmy.StevesArmyConfig;
 import com.stevesarmy.compat.VS2Compat;
 import com.stevesarmy.entity.SoldierEntity;
 import com.stevesarmy.squad.SquadData;
@@ -50,6 +51,10 @@ public class RespawnCameraController {
     public static void tick() {
         activeTransitions.entrySet().removeIf(entry -> {
             CameraState state = entry.getValue();
+            if (!StevesArmyConfig.RESPAWN_AS_SOLDIER_ENABLED.get()) {
+                PlayerDeathHandler.clearPendingRespawn(state.playerId, state.soldierId);
+                return true;
+            }
             state.tickCount++;
             
             if (state.tickCount >= TRANSITION_TICKS) {

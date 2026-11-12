@@ -186,6 +186,7 @@ public class StevesArmyConfig {
     public static final ForgeConfigSpec.EnumValue<DeathInventoryDropMode> ENEMY_SOLDIER_REMAINING_INVENTORY_DROPS;
     public enum DeathInventoryDropMode { POUCH, LOOSE, NONE }
     public static final ForgeConfigSpec.BooleanValue SWAP_SYNCS_HEALTH;
+    public static final ForgeConfigSpec.BooleanValue RESPAWN_AS_SOLDIER_ENABLED;
     public static final ForgeConfigSpec.EnumValue<ArmorDoctrineOverride> ARMOR_DOCTRINE_OVERRIDE;
     public static final ForgeConfigSpec.BooleanValue OCCUPANCY_VEHICLE_DETECTION;
     public static final ForgeConfigSpec.BooleanValue SBW_COMPAT_ENABLED;
@@ -1260,6 +1261,10 @@ BUILDER.pop();
         ENEMY_SOLDIER_DROP_CURIOS = BUILDER
             .comment("Allow enemy Curios accessories to follow their Curios drop rules. Default: true.")
             .define("enemySoldierDropCurios", true);
+
+        RESPAWN_AS_SOLDIER_ENABLED = BUILDER
+            .comment("Allow players to respawn as a living squad soldier after death. Default: true.")
+            .define("respawnAsSoldierEnabled", true);
 
         SWAP_SYNCS_HEALTH = BUILDER
             .comment("Player-soldier body swap carries health with the body: swapping into",

@@ -51,6 +51,7 @@ public class VpbGunHandler implements GunIntegration.GunHandler {
     private static final Map<String, BallisticProfile> BALLISTIC_CACHE = new ConcurrentHashMap<>();
 
     private static volatile boolean resolved = false;
+    private static boolean resolutionAttempted = false;
     private static Class<?> GUN_ITEM_CLASS;
     private static Class<?> FIRE_MODE_INSTANCE_CLASS;
     private static Class<?> AMMO_ITEM_CLASS;
@@ -110,6 +111,7 @@ public class VpbGunHandler implements GunIntegration.GunHandler {
 
     public static boolean isVpbGun(ItemStack stack) {
         if (stack == null || stack.isEmpty()) return false;
+        if (!GunIntegration.isVpbLoaded()) return false;
         if (!ensureResolved()) return false;
         try {
             return GUN_ITEM_CLASS.isInstance(stack.getItem());
@@ -119,7 +121,8 @@ public class VpbGunHandler implements GunIntegration.GunHandler {
     }
 
     private static synchronized boolean ensureResolved() {
-        if (resolved) return true;
+        if (resolutionAttempted) return resolved;
+        resolutionAttempted = true;
         try {
             GUN_ITEM_CLASS = Class.forName("com.vicmatskiv.pointblank.item.GunItem");
             FIRE_MODE_INSTANCE_CLASS = Class.forName("com.vicmatskiv.pointblank.item.FireModeInstance");

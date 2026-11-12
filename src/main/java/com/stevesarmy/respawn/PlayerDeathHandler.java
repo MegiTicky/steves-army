@@ -1,6 +1,7 @@
 package com.stevesarmy.respawn;
 
 import com.stevesarmy.StevesArmyMod;
+import com.stevesarmy.StevesArmyConfig;
 import com.stevesarmy.compat.PlayerReviveCompat;
 import com.stevesarmy.compat.VS2Compat;
 import com.stevesarmy.entity.SoldierEntity;
@@ -92,6 +93,10 @@ public class PlayerDeathHandler {
     }
     
     private static void initiateSoldierRespawn(ServerPlayer player) {
+        if (!StevesArmyConfig.RESPAWN_AS_SOLDIER_ENABLED.get()) {
+            cancelPendingRespawn(player.getUUID());
+            return;
+        }
         ServerLevel level = player.serverLevel();
         SquadManager squadManager = SquadManager.get(level);
         
@@ -149,7 +154,7 @@ public class PlayerDeathHandler {
         // still stop any old transition from moving the newly respawned player.
         RespawnCameraController.cancelTransition(player.getUUID());
         RespawnData data = pendingRespawns.remove(player.getUUID());
-        if (data == null) {
+        if (data == null || !StevesArmyConfig.RESPAWN_AS_SOLDIER_ENABLED.get()) {
             return;
         }
         
@@ -231,6 +236,11 @@ public class PlayerDeathHandler {
         pendingRespawns.computeIfPresent(playerId, (id, data) ->
             data.soldierId.equals(expectedSoldierId) ? null : data
         );
+    }
+
+    public static void cancelPendingRespawn(UUID playerId) {
+        pendingRespawns.remove(playerId);
+        RespawnCameraController.cancelTransition(playerId);
     }
 
     /** True when the soldier is the target of an in-flight respawn possession.
