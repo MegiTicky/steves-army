@@ -14,22 +14,22 @@ import org.spongepowered.asm.service.MixinService;
 public class OptionalMixinPlugin implements IMixinConfigPlugin {
     @Override public void onLoad(String mixinPackage) { }
     @Override public String getRefMapperConfig() { return null; }
-    @Override public boolean shouldApplyMixin(String targetClassName, String mixinClassName) {
-        if (!mixinClassName.endsWith("GunDisplayInstanceMixin")) return true;
+    private boolean hasLegacyTaczSounds() {
         try {
-            return MixinService.getService().getBytecodeProvider().getClassNode(targetClassName).methods.stream()
+            return MixinService.getService().getBytecodeProvider().getClassNode("com.tacz.guns.client.resource.GunDisplayInstance").methods.stream()
                 .anyMatch(method -> method.name.equals("getSounds")
                     && method.desc.equals("(Ljava/lang/String;)Lnet/minecraft/resources/ResourceLocation;"));
         } catch (Throwable ignored) {
             return false;
         }
     }
+    @Override public boolean shouldApplyMixin(String targetClassName, String mixinClassName) { return true; }
     @Override public void acceptTargets(Set<String> myTargets, Set<String> otherTargets) { }
     @Override public List<String> getMixins() {
         if (FMLEnvironment.dist != Dist.CLIENT) return List.of();
         List<String> mixins = new ArrayList<>();
         if (FMLLoader.getLoadingModList().getModFileById("pointblank") != null) mixins.add("GunItemRendererMixin");
-        if (FMLLoader.getLoadingModList().getModFileById("tacz") != null) mixins.add("GunDisplayInstanceMixin");
+        if (FMLLoader.getLoadingModList().getModFileById("tacz") != null && hasLegacyTaczSounds()) mixins.add("GunDisplayInstanceMixin");
         return mixins;
     }
     @Override public void preApply(String targetClassName, ClassNode targetClass, String mixinClassName, IMixinInfo mixinInfo) { }
