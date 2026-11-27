@@ -2,6 +2,12 @@
 
 All notable changes to Steve's Army will be documented in this file.
 
+## [0.6.2]
+
+- Added compatibility with TaCZ 1.2.0, including a fix for a crash when drawing a gun.
+- Added a server config option to disable respawning as a soldier. It remains enabled by default.
+- Fixed repeated Point Blank warnings when Point Blank is not installed.
+
 ## [0.6.1] - Release preparation
 
 ### Animation

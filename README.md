@@ -116,7 +116,7 @@ Pings appear as diamond markers with distances and labels. They are shared with 
 
 | Mod | Supported range | Tested version |
 | --- | --- | --- |
-| TaCZ (Timeless and Classic Guns) | 1.1.0 or newer | 1.1.8 |
+| TaCZ (Timeless and Classic Guns) | 1.1.0 or newer | 1.1.8, 1.2.0 |
 | Point Blank (Vic's Point Blank) | 1.7.0 or newer | — |
 | Valkyrien Skies 2 | 2.3.0-beta.5 or newer | 2.3.0-beta.5 |
 | PlayerRevive | 2.0 or newer | 2.0.31 |
